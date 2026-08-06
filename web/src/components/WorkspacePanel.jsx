@@ -33,7 +33,6 @@ function DiffViewerFallback() {
 const PINNED_TABS = [
   { key: 'files', label: 'Files', icon: Files },
   { key: 'changes', label: 'Changes', icon: GitBranch },
-  { key: 'pullrequests', label: 'Pull Requests', icon: GitPullRequest },
 ];
 
 const ADDABLE_TABS = [
@@ -69,7 +68,7 @@ function readExtraTabs() {
 
 function readMainTab(extraTabs) {
   const stored = migrateTabKey(sessionStorage.getItem('xe_main_tab') || 'files');
-  if (stored === 'files' || stored === 'changes' || stored === 'pullrequests') return stored;
+  if (stored === 'files' || stored === 'changes') return stored;
   if (extraTabs.includes(stored)) return stored;
   return 'files';
 }
