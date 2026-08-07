@@ -800,6 +800,17 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
             >
               Changes ({mrFiles.length})
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('changes')}
+              className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${
+                activeTab === 'changes'
+                  ? 'border-[#202124] text-[#202124]'
+                  : 'border-transparent text-[#5F6368] hover:text-[#202124]'
+              }`}
+            >
+              Changes ({mrFiles.length})
+            </button>
           </div>
 
           {activeTab === 'changes' ? (
