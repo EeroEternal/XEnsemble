@@ -388,6 +388,19 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
     }
   }, [projectId, mergeRequestId, showToast]);
 
+  const fetchMrFiles = useCallback(async () => {
+    if (!projectId || !mergeRequestId || mrFiles.length > 0) return;
+    setMrFilesLoading(true);
+    try {
+      const res = await gitApi.listMrFiles(projectId, mergeRequestId);
+      setMrFiles(res.files || []);
+    } catch (err) {
+      showToast('error', err.message);
+    } finally {
+      setMrFilesLoading(false);
+    }
+  }, [projectId, mergeRequestId, mrFiles.length, showToast]);
+
   useEffect(() => {
     setLocalMR(mergeRequest);
   }, [mergeRequest]);
@@ -783,6 +796,17 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
                 activeTab === 'changes'
                   ? 'border-[#202124] text-[#202124]'
                   : 'border-transparent text-[#5F6368] hover:text-[#202124] hover:bg-[#F4F5F6] rounded-t-md'
+              }`}
+            >
+              Changes ({mrFiles.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('changes')}
+              className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${
+                activeTab === 'changes'
+                  ? 'border-[#202124] text-[#202124]'
+                  : 'border-transparent text-[#5F6368] hover:text-[#202124]'
               }`}
             >
               Changes ({mrFiles.length})
