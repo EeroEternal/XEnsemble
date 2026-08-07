@@ -46,13 +46,10 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
 
   const label = provider === 'gitlab' ? 'Merge Requests' : 'Pull Requests';
 
-  const fetchMRs = useCallback(async (opts = {}) => {
+  const fetchMRs = useCallback(async () => {
     if (!projectId) return;
     setLoading(true);
     try {
-      if (!opts.skipSync) {
-        await gitApi.syncAllMergeRequests(projectId).catch(() => {});
-      }
       const data = await gitApi.listMergeRequests(projectId);
       const rows = data.merge_requests || data.pull_requests || data;
       setMergeRequests(Array.isArray(rows) ? rows : []);
