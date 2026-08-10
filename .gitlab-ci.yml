@@ -54,8 +54,11 @@ deploy:
     # 手动从 web UI 触发 pipeline (main) 时也跑
     - if: $CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH == "main"
   before_script:
+    - command -v ssh-agent >/dev/null 2>&1 || apk add --no-cache openssh-client
     - eval $(ssh-agent -s)
-    - ssh-add "$DEPLOY_SSH_KEY"
+    - cat "$DEPLOY_SSH_KEY" | tr -d ' \n\r\t' | base64 -d > /tmp/deploy_ssh_key
+    - chmod 600 /tmp/deploy_ssh_key
+    - ssh-add /tmp/deploy_ssh_key
     - mkdir -p ~/.ssh && chmod 700 ~/.ssh
     - ssh-keyscan -p ${DEPLOY_PORT:-22} $DEPLOY_HOST >> ~/.ssh/known_hosts
   script:
