@@ -81,6 +81,8 @@ fi
 
 # ---------------------------------------------------------------------------
 # 3. Provision local PostgreSQL role/database (single-node intranet).
+#    If DATABASE_URL is provided externally, use its credentials instead of
+#    generating random ones; otherwise auto-provision with random password.
 # ---------------------------------------------------------------------------
 if command -v psql >/dev/null 2>&1; then
   echo "==> [inner] Ensure local PostgreSQL database"
@@ -88,19 +90,51 @@ if command -v psql >/dev/null 2>&1; then
   if [ ! -f "$ENV_FILE" ]; then
     cp "$APP_ROOT/deploy/xensemble.env.example" "$ENV_FILE"
   fi
-  if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='xensemble'" 2>/dev/null | grep -q 1; then
-    DB_PASSWORD=$(openssl rand -hex 16)
-    sudo -u postgres psql -c "CREATE ROLE xensemble LOGIN PASSWORD '${DB_PASSWORD}'"
-    echo "DATABASE_URL=postgres://xensemble:${DB_PASSWORD}@127.0.0.1:5432/xensemble" >> "$ENV_FILE"
+
+  if [ -n "${DATABASE_URL:-}" ]; then
+    # Parse DATABASE_URL: postgres://user:password@host:port/database
+    DB_URL_USER="$(printf '%s' "$DATABASE_URL" | sed -nE 's|^postgres://([^:]+):.*|\1|p')"
+    DB_URL_PASS="$(printf '%s' "$DATABASE_URL" | sed -nE 's|^postgres://[^:]+:([^@]+)@.*|\1|p')"
+    DB_URL_HOST="$(printf '%s' "$DATABASE_URL" | sed -nE 's|.*@([^:]+):.*|\1|p')"
+    DB_URL_PORT="$(printf '%s' "$DATABASE_URL" | sed -nE 's|.*:([0-9]+)/.*|\1|p')"
+    DB_URL_NAME="$(printf '%s' "$DATABASE_URL" | sed -nE 's|.*/([^?]+).*|\1|p')"
+    echo "    (using external DATABASE_URL: user=${DB_URL_USER} db=${DB_URL_NAME} host=${DB_URL_HOST}:${DB_URL_PORT})"
+
+    # Create or update role with the provided password
+    if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_URL_USER}'" 2>/dev/null | grep -q 1; then
+      sudo -u postgres psql -c "CREATE ROLE ${DB_URL_USER} LOGIN PASSWORD '${DB_URL_PASS}'"
+    else
+      sudo -u postgres psql -c "ALTER ROLE ${DB_URL_USER} WITH PASSWORD '${DB_URL_PASS}'"
+    fi
+
+    # Create database if missing
+    if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_URL_NAME}'" 2>/dev/null | grep -q 1; then
+      sudo -u postgres createdb -O "${DB_URL_USER}" "${DB_URL_NAME}"
+    fi
+
+    # Write DATABASE_URL to env file (replace if exists)
+    grep -v '^DATABASE_URL=' "$ENV_FILE" > "$ENV_FILE.tmp" 2>/dev/null || true
+    mv "$ENV_FILE.tmp" "$ENV_FILE" 2>/dev/null || true
+    echo "DATABASE_URL=${DATABASE_URL}" >> "$ENV_FILE"
   else
-    echo "    (role xensemble exists; keeping existing password)"
+    # No external DATABASE_URL: auto-provision with random password
+    if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='xensemble'" 2>/dev/null | grep -q 1; then
+      DB_PASSWORD=$(openssl rand -hex 16)
+      sudo -u postgres psql -c "CREATE ROLE xensemble LOGIN PASSWORD '${DB_PASSWORD}'"
+      echo "DATABASE_URL=postgres://xensemble:${DB_PASSWORD}@127.0.0.1:5432/xensemble" >> "$ENV_FILE"
+    else
+      echo "    (role xensemble exists; keeping existing password)"
+    fi
+    if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='xensemble'" 2>/dev/null | grep -q 1; then
+      sudo -u postgres createdb -O xensemble xensemble
+    fi
   fi
-  if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='xensemble'" 2>/dev/null | grep -q 1; then
-    sudo -u postgres createdb -O xensemble xensemble
-  fi
+
+  # DATABASE_SSL: use external value if provided, else default false
+  DB_SSL_VALUE="${DATABASE_SSL:-false}"
   grep -v '^DATABASE_SSL=' "$ENV_FILE" > "$ENV_FILE.tmp" 2>/dev/null || true
   mv "$ENV_FILE.tmp" "$ENV_FILE" 2>/dev/null || true
-  echo "DATABASE_SSL=false" >> "$ENV_FILE"
+  echo "DATABASE_SSL=${DB_SSL_VALUE}" >> "$ENV_FILE"
 fi
 
 # ---------------------------------------------------------------------------
