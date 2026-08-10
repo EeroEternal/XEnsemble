@@ -1,0 +1,55 @@
+# syntax=docker/dockerfile:1.7
+
+FROM debian:bookworm-slim
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Use TUNA mirror for apt (Debian + security) to speed up downloads in CN.
+RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' \
+        /etc/apt/sources.list.d/debian.sources 2>/dev/null \
+    || sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' \
+        /etc/apt/sources.list 2>/dev/null \
+    || true
+
+# Common dev tools needed by every agent shell: git (HTTPS) + openssh-client
+# (git over SSH), less (pager for git log/man), vim-tiny (editor), make/unzip/file
+# (build & archive helpers). gh is installed in a dedicated layer below.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        curl \
+        git \
+        less \
+        openssh-client \
+        vim-tiny \
+        make \
+        unzip \
+        file \
+        xz-utils \
+    && update-alternatives --install /usr/bin/vim vim /usr/bin/vim.tiny 10 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node 22 (glibc) for npm-based agent CLIs (kimi-code requires >=22.19).
+# Download prebuilt binary from npmmirror (CN mirror of nodejs.org) instead of
+# NodeSource apt repo to avoid slow international downloads.
+ARG NODE_VERSION=22.17.0
+RUN curl -fsSL "https://npmmirror.com/mirrors/node/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+    | tar -xJf - -C /usr/local --strip-components=1 \
+    && rm -rf /usr/include/node
+
+# GitHub CLI (gh) - download .deb via ghfast.top proxy (cli.github.com is slow from CN).
+ARG GH_VERSION=2.97.0
+RUN ARCH="$(dpkg --print-architecture)" \
+    && curl -fsSL --max-time 120 \
+        "https://ghfast.top/https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.deb" \
+        -o /tmp/gh.deb \
+    && dpkg -i /tmp/gh.deb \
+    && rm /tmp/gh.deb
+
+ENV PATH="/usr/local/bin:/usr/bin:/bin:${PATH}" \
+    HOME="/root" \
+    npm_config_prefix=/usr
+
+WORKDIR /workspace
+RUN mkdir -p /workspace

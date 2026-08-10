@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+# Intranet / CN-network deployment for XEnsemble — single file carrying ALL
+# environment-specific adaptations. The repo's deploy scripts stay pristine
+# (upstream), so this file can be dropped on public deployments.
+#
+# Handles (openEuler / RHEL-like single-node intranet):
+#   - run as root with a fixed repo path
+#   - SELinux -> Permissive
+#   - TUNA mirrors for rustup/cargo
+#   - provision a local PostgreSQL role/database
+#   - nginx on :8088 (port 80 busy), HTTP-only, conf.d layout
+#   - systemd service for root + this repo path
+#
+# Usage: sudo bash deploy/inner_install.sh [APP_ROOT]
+# APP_ROOT defaults to the repo root (git clone location).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+APP_ROOT="${1:-$ROOT}"
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "ERROR: run as root: sudo bash $0 $APP_ROOT" >&2
+  exit 1
+fi
+
+echo "==> [inner] App root: $APP_ROOT"
+
+# ---------------------------------------------------------------------------
+# 1. SELinux: Enforcing blocks systemd from reading user_home_t files (env
+#    file, working dir, node under ~/.nvm). Switch to Permissive and persist.
+# ---------------------------------------------------------------------------
+if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" = "Enforcing" ]; then
+  echo "==> [inner] SELinux Enforcing -> Permissive"
+  setenforce 0
+  sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config 2>/dev/null || true
+fi
+
+# ---------------------------------------------------------------------------
+# 2. TUNA mirrors for rustup + cargo (sh.rustup.rs / crates.io unreachable).
+# ---------------------------------------------------------------------------
+export NVM_DIR="$HOME/.nvm"
+# shellcheck disable=SC1091
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
+# Source cargo env first: rustup installs to ~/.cargo/bin which is NOT in PATH
+# for non-interactive shells.
+# shellcheck disable=SC1091
+[ -s "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "==> [inner] Install rustup/cargo via TUNA mirror"
+  RUSTUP_INIT="$(mktemp -t rustup-init.XXXXXX)"
+  curl -fsSL \
+    https://mirrors.tuna.tsinghua.edu.cn/rustup/rustup/dist/x86_64-unknown-linux-gnu/rustup-init \
+    -o "$RUSTUP_INIT"
+  RUSTUP_DIST_SERVER=https://mirrors.tuna.tsinghua.edu.cn/rustup \
+    "$RUSTUP_INIT" -y
+  rm -f "$RUSTUP_INIT"
+  # shellcheck disable=SC1091
+  source "$HOME/.cargo/env"
+fi
+
+CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+mkdir -p "$CARGO_HOME"
+if [ -f "$CARGO_HOME/config.toml" ] && grep -q "tuna" "$CARGO_HOME/config.toml" 2>/dev/null; then
+  echo "==> [inner] cargo TUNA mirror already configured"
+else
+  echo "==> [inner] Configure cargo TUNA mirror ($CARGO_HOME/config.toml)"
+  cat >> "$CARGO_HOME/config.toml" <<'TOML'
+
+[source.crates-io]
+replace-with = "tuna"
+
+[source.tuna]
+registry = "sparse+https://mirrors.tuna.tsinghua.edu.cn/crates.io-index/"
+
+[registries.tuna]
+index = "sparse+https://mirrors.tuna.tsinghua.edu.cn/crates.io-index/"
+TOML
+fi
+
+# ---------------------------------------------------------------------------
+# 3. Provision local PostgreSQL role/database (single-node intranet).
+# ---------------------------------------------------------------------------
+if command -v psql >/dev/null 2>&1; then
+  echo "==> [inner] Ensure local PostgreSQL database"
+  ENV_FILE="$APP_ROOT/deploy/xensemble.env"
+  if [ ! -f "$ENV_FILE" ]; then
+    cp "$APP_ROOT/deploy/xensemble.env.example" "$ENV_FILE"
+  fi
+  if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='xensemble'" 2>/dev/null | grep -q 1; then
+    DB_PASSWORD=$(openssl rand -hex 16)
+    sudo -u postgres psql -c "CREATE ROLE xensemble LOGIN PASSWORD '${DB_PASSWORD}'"
+    echo "DATABASE_URL=postgres://xensemble:${DB_PASSWORD}@127.0.0.1:5432/xensemble" >> "$ENV_FILE"
+  else
+    echo "    (role xensemble exists; keeping existing password)"
+  fi
+  if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='xensemble'" 2>/dev/null | grep -q 1; then
+    sudo -u postgres createdb -O xensemble xensemble
+  fi
+  grep -v '^DATABASE_SSL=' "$ENV_FILE" > "$ENV_FILE.tmp" 2>/dev/null || true
+  mv "$ENV_FILE.tmp" "$ENV_FILE" 2>/dev/null || true
+  echo "DATABASE_SSL=false" >> "$ENV_FILE"
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Run the upstream installer (build + migrate). Its systemd/nginx section
+#    targets the upstream machine (xinference user / xensemble.dev HTTPS), so
+#    failures there are tolerated — this script re-installs both below.
+# ---------------------------------------------------------------------------
+echo "==> [inner] Running upstream install.sh (systemd/nginx section may fail here)"
+set +e
+bash "$APP_ROOT/deploy/install.sh"
+INSTALL_RC=$?
+set -e
+echo "==> [inner] upstream install.sh finished rc=$INSTALL_RC (ignored)"
+
+# ---------------------------------------------------------------------------
+# 5. Overwrite systemd unit for THIS intranet host (root + this path).
+# ---------------------------------------------------------------------------
+NODE_BIN="$(nvm which current)"
+NODE_DIR="$(dirname "$NODE_BIN")"
+cat > /etc/systemd/system/xensemble.service <<EOF
+[Unit]
+Description=XEnsemble control plane
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=$APP_ROOT/server
+EnvironmentFile=$APP_ROOT/deploy/xensemble.env
+Environment=PATH=$NODE_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=$NODE_BIN src/server.js
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=30
+Delegate=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# ---------------------------------------------------------------------------
+# 6. Overwrite nginx config: HTTP-only on :8088, conf.d layout. Remove any
+#    upstream sites-available/enabled leftovers to avoid duplicate servers.
+# ---------------------------------------------------------------------------
+sed -e "s|__HTTP_PORT__|8088|g" > /etc/nginx/conf.d/xensemble.conf <<'CONF'
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+upstream xensemble_backend {
+    server 127.0.0.1:3888;
+    keepalive 32;
+}
+
+server {
+    listen __HTTP_PORT__;
+    listen [::]:__HTTP_PORT__;
+    server_name localhost 127.0.0.1 _;
+
+    client_max_body_size 100m;
+
+    location / {
+        proxy_pass http://xensemble_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+        proxy_buffering off;
+    }
+}
+CONF
+rm -f /etc/nginx/sites-enabled/xensemble.conf /etc/nginx/sites-available/xensemble.conf
+
+sudo nginx -t
+sudo systemctl daemon-reload
+sudo systemctl enable xensemble nginx
+sudo systemctl restart xensemble
+sudo systemctl reload nginx 2>/dev/null || sudo systemctl start nginx
+
+echo "==> [inner] Done. Backend: curl -sI http://127.0.0.1:3888/api/v1/llm/health"
+echo "==>        Via nginx: curl -sI http://127.0.0.1:8088/"
+echo "==> [inner] Optional intranet extras:"
+echo "     - openEuler 5.10 KVM AMX workaround (sandbox guest crash):"
+echo "         bash $APP_ROOT/deploy/seccomp/install-seccomp.sh"
+echo "     - git proxy for github.com (fetch/clone timed out on CN networks):"
+echo "         git config --global http.https://github.com.proxy socks5h://127.0.0.1:1234"
