@@ -183,18 +183,28 @@ seccomp-trace-daemon (systemd 服务)
 
 ```c
 /* 移除 */
-- leaf 0x0e ~ 0x1f（含 AMX 0x1d、新拓扑 0x1f、空 leaf）
-- leaf 0x07 idx=1（新特性 subleaf）
-- leaf 0x0b idx=1,2（扩展拓扑）
-- leaf 0x0d idx=0x9, 0x11（XSAVE supervisor 状态）
+- leaf 0x1e ~ 0x1f（含 AMX 0x1d、新拓扑 0x1f、空 leaf；保留 0x0e~0x1d 及 hypervisor/kvm-clock 0x40000000）
+- leaf 0x07 idx=1（AMX 特性 subleaf）
+- leaf 0x0d idx=0x9, 0x11（XSAVE supervisor 状态：CET/AMX）
+
+/* 保留（之前误删，已修复） */
+- leaf 0x40000000~0x400000FF（Hypervisor/kvm-clock，VM 时钟同步必需）
+- leaf 0x0b（扩展拓扑，多核 VM 需要）
+- leaf 0x0a（PMU，性能计数器）
 
 /* 调整 */
-- 0x00 eax → 0x0d（max leaf）
-- 0x0d idx=0 eax → 0xe7（清除 AMX bit17、bit9）
-- 0x07 eax → 0（无 subleaf）
-- 0x0a → 全 0（无 PMU）
-- 0x01、0x80000006、0x80000008 → 与 Debian 一致
+- 0x00 eax -> 0x0d（max leaf）
+- 0x0d idx=0 eax -> 0xe7（清除 AMX bit17、bit9）
+- 0x07 eax -> 0（无 subleaf）
+- 0x01、0x80000006、0x80000008 -> 与 Debian 一致
 ```
+
+> **2026-08-11 修复**：原版 `should_remove` 用 `fn > 0x0d && fn < 0x80000000` 一次性删除了
+> 0x0D 到 0x80000000 之间所有 leaf，包括 Hypervisor/kvm-clock leaf（0x40000000）。
+> 导致 VM 内核无法通过 kvm-clock 同步宿主机时间，CLOCK_REALTIME 停在 1999-11-30，
+> agent CLI 访问 HTTPS API 时报 `SSL certificate is not yet valid`。
+> 同时误删了 leaf 0x0b（CPU 拓扑，影响多核 VM）和 0x0a（PMU）。
+> 修复：收窄为 `fn >= 0x1e`，显式保留 `0x40000000~0x400000FF`，移除非 AMX 相关的 0x0b/0x0a 规则。
 
 ### 4.4 部署文件
 
@@ -464,9 +474,13 @@ static void init(void) {
 static int should_remove(struct kvm_cpuid_entry2 *e) {
     unsigned int fn = e->function;
     unsigned int idx = e->index;
-    if (fn > 0x0d && fn < 0x80000000) return 1;
+    /* Preserve hypervisor/kvm-clock leaves so the guest can sync time via kvm-clock */
+    if (fn >= 0x40000000 && fn < 0x40000100) return 0;
+    /* Remove AMX detection leaves (Sapphire Rapids+: 0x1E and above, below 0x80000000) */
+    if (fn >= 0x1e && fn < 0x80000000) return 1;
+    /* Remove AMX feature bits in leaf 7 sub-leaf 1 */
     if (fn == 0x07 && idx == 1) return 1;
-    if (fn == 0x0b && (idx == 1 || idx == 2)) return 1;
+    /* Remove AMX XSAVE state (0x11=TILECFG/TILEDATA, 0x09=PT) */
     if (fn == 0x0d && (idx == 0x9 || idx == 0x11)) return 1;
     return 0;
 }
@@ -474,17 +488,20 @@ static int should_remove(struct kvm_cpuid_entry2 *e) {
 static void adjust_entry(struct kvm_cpuid_entry2 *e) {
     unsigned int fn = e->function;
     unsigned int idx = e->index;
+    /* Limit max standard leaf to 0x0D (consistent with should_remove) */
     if (fn == 0x00) e->eax = 0x0000000d;
+    /* Fake CPU model as Skylake-SP (non-AMX processor) */
     if (fn == 0x01) { e->eax = 0x00050657; e->ebx = 0x03040800; }
+    /* Remove AMX bits from leaf 7 sub-leaf 0, keep AVX2/BMI2/etc */
     if (fn == 0x07 && idx == 0) {
         e->eax = 0x00000000; e->ebx = 0xd19f2ffb; e->ecx = 0x00000804; e->edx = 0xac000400;
     }
-    if (fn == 0x0a) { e->eax = 0; e->ebx = 0; e->ecx = 0; e->edx = 0; }
+    /* Remove AMX XSAVE state from leaf 0x0D */
     if (fn == 0x0d && idx == 0) {
         e->eax = 0x000000e7; e->ebx = 0x00000a80; e->ecx = 0x00000a80;
     }
     if (fn == 0x0d && idx == 1) { e->eax = 0x0000000f; e->ebx = 0x00000980; }
-    if (fn == 0x0b && idx == 0) { e->eax = 0; e->ebx = 0; e->ecx = 0; e->edx = 0x00000003; }
+    /* Match faked CPU model: L2 cache and address bits */
     if (fn == 0x80000006) e->ecx = 0x01006040;
     if (fn == 0x80000008) { e->eax = 0x0000302e; e->ebx = 0x0100d000; }
 }

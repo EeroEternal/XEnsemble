@@ -32,9 +32,13 @@
 static int should_remove(struct kvm_cpuid_entry2 *e) {
     unsigned int fn = e->function;
     unsigned int idx = e->index;
-    if (fn > 0x0d && fn < 0x80000000) return 1;
+    /* Preserve hypervisor/kvm-clock leaves so the guest can sync time via kvm-clock */
+    if (fn >= 0x40000000 && fn < 0x40000100) return 0;
+    /* Remove AMX detection leaves (Sapphire Rapids+: 0x1E and above, below 0x80000000) */
+    if (fn >= 0x1e && fn < 0x80000000) return 1;
+    /* Remove AMX feature bits in leaf 7 sub-leaf 1 */
     if (fn == 0x07 && idx == 1) return 1;
-    if (fn == 0x0b && (idx == 1 || idx == 2)) return 1;
+    /* Remove AMX XSAVE state (0x11=TILECFG/TILEDATA, 0x09=PT) */
     if (fn == 0x0d && (idx == 0x9 || idx == 0x11)) return 1;
     return 0;
 }
@@ -42,17 +46,20 @@ static int should_remove(struct kvm_cpuid_entry2 *e) {
 static void adjust_entry(struct kvm_cpuid_entry2 *e) {
     unsigned int fn = e->function;
     unsigned int idx = e->index;
+    /* Limit max standard leaf to 0x0D (consistent with should_remove) */
     if (fn == 0x00) e->eax = 0x0000000d;
+    /* Fake CPU model as Skylake-SP (non-AMX processor) */
     if (fn == 0x01) { e->eax = 0x00050657; e->ebx = 0x03040800; }
+    /* Remove AMX bits from leaf 7 sub-leaf 0, keep AVX2/BMI2/etc */
     if (fn == 0x07 && idx == 0) {
         e->eax = 0x00000000; e->ebx = 0xd19f2ffb; e->ecx = 0x00000804; e->edx = 0xac000400;
     }
-    if (fn == 0x0a) { e->eax = 0; e->ebx = 0; e->ecx = 0; e->edx = 0; }
+    /* Remove AMX XSAVE state from leaf 0x0D */
     if (fn == 0x0d && idx == 0) {
         e->eax = 0x000000e7; e->ebx = 0x00000a80; e->ecx = 0x00000a80;
     }
     if (fn == 0x0d && idx == 1) { e->eax = 0x0000000f; e->ebx = 0x00000980; }
-    if (fn == 0x0b && idx == 0) { e->eax = 0; e->ebx = 0; e->ecx = 0; e->edx = 0x00000003; }
+    /* Match faked CPU model: L2 cache and address bits */
     if (fn == 0x80000006) e->ecx = 0x01006040;
     if (fn == 0x80000008) { e->eax = 0x0000302e; e->ebx = 0x0100d000; }
 }

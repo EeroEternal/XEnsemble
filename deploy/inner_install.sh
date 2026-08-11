@@ -216,6 +216,20 @@ server {
 CONF
 rm -f /etc/nginx/sites-enabled/xensemble.conf /etc/nginx/sites-available/xensemble.conf
 
+# ---------------------------------------------------------------------------
+# 7. Auto-set CONTROL_PLANE_PUBLIC_URL to this server's primary IP + nginx port.
+#    The default from xensemble.env.example is https://xensemble.dev (upstream),
+#    which is unreachable from intranet/VM sandboxes. Override with the host's
+#    primary IP so LLM gateway routing works inside sandbox VMs.
+# ---------------------------------------------------------------------------
+HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+if [ -n "$HOST_IP" ]; then
+  grep -v '^CONTROL_PLANE_PUBLIC_URL=' "$ENV_FILE" > "$ENV_FILE.tmp" 2>/dev/null || true
+  mv "$ENV_FILE.tmp" "$ENV_FILE" 2>/dev/null || true
+  echo "CONTROL_PLANE_PUBLIC_URL=http://${HOST_IP}:8088" >> "$ENV_FILE"
+  echo "==> [inner] CONTROL_PLANE_PUBLIC_URL set to http://${HOST_IP}:8088"
+fi
+
 sudo nginx -t
 sudo systemctl daemon-reload
 sudo systemctl enable xensemble nginx
