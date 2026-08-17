@@ -5,6 +5,7 @@ FROM ${BASE_IMAGE}
 
 ARG AGENT_ID=unknown
 ARG AGENT_INSTALL="echo \"no AGENT_INSTALL provided for ${AGENT_ID}\""
+ARG AGENT_VERIFY=""
 
 # Copy optional patch scripts (only used by agents that reference them in AGENT_INSTALL).
 COPY patch-zai-autosave.cjs /tmp/patch-zai-autosave.cjs
@@ -41,5 +42,7 @@ RUN bash -lc "${AGENT_INSTALL}" \
     && echo '{"autoupdate":false}' > /root/.config/opencode/opencode.json \
     && echo '{"general":{"enableAutoUpdate":false}}' > /root/.qwen/settings.json \
     && true
+
+RUN if [ -n "${AGENT_VERIFY}" ]; then bash -lc "${AGENT_VERIFY}"; fi
 
 WORKDIR /workspace

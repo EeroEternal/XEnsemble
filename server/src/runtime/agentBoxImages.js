@@ -33,7 +33,7 @@ const AGENT_BOX_IMAGE_CATALOG = {
         install: 'npm install -g opencode-ai@latest && rm -rf "$(npm root -g)/opencode-ai/node_modules/opencode-linux-x64-baseline"',
     },
     // prebuilt standalone binary — no Node.js version requirement
-    'cline': { tag: 'cline', buildable: true },
+    'cline': { tag: 'cline', buildable: true, verify: 'cline --version' },
     // no engines field — skip
     'codebuddy': { tag: 'codebuddy', buildable: true },
     // engines: >=18.0.0
@@ -168,6 +168,7 @@ function listBuildableAgentImages() {
                 tag: catalog.tag || agentId,
                 image: resolveAgentBoxImageDefault(agentId),
                 install: getAgentBoxInstallCommand(agentId),
+                verify: catalog.verify || null,
             };
         });
 }

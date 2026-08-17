@@ -6,6 +6,23 @@ REGISTRY="${XENSEMBLE_AGENT_IMAGE_REGISTRY:-xensemble}"
 TAG="${XENSEMBLE_AGENT_IMAGE_TAG:-latest}"
 BASE_IMAGE="${XENSEMBLE_BOX_BASE_IMAGE:-${REGISTRY}/box-base:bookworm}"
 PUSH="${PUSH_IMAGES:-0}"
+BOXLITE_DB="${BOXLITE_DB:-$HOME/.boxlite/db/boxlite.db}"
+
+# blink-server (BoxLite) caches image tag -> manifest digest in its SQLite
+# image_index table and does NOT re-resolve a tag when the registry content
+# changes. After a rebuilt image is pushed under the same tag (e.g. :latest),
+# the stale cache entry makes blink-server keep booting sessions from the OLD
+# image. Best-effort: if the boxlite db is present on this host, drop the stale
+# row so the next session re-pulls the new image. No-op on build-only hosts.
+invalidate_blink_cache() {
+  local image_ref="$1"
+  if [[ -z "${image_ref}" ]] || ! command -v sqlite3 >/dev/null 2>&1 || [[ ! -f "${BOXLITE_DB}" ]]; then
+    return 0
+  fi
+  sqlite3 "${BOXLITE_DB}" \
+    "DELETE FROM image_index WHERE reference='${image_ref}';" 2>/dev/null && \
+    echo "  invalidated blink-server image_index cache for ${image_ref}" || true
+}
 
 echo "Building base image: ${BASE_IMAGE}"
 docker build \
@@ -18,35 +35,43 @@ docker build \
 # causes agents to build on a stale base (the registry still holds the old tag).
 if [[ "${PUSH}" == "1" ]]; then
   docker push "${BASE_IMAGE}"
+  invalidate_blink_cache "${BASE_IMAGE}"
 fi
 
 build_agent() {
   local agent_id="$1"
   local install_cmd="$2"
+  local verify_cmd="$3"
   local image="${REGISTRY}/agent-${agent_id}:${TAG}"
 
   echo "Building agent image: ${image}"
-  docker build \
-    --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
-    --build-arg "AGENT_ID=${agent_id}" \
-    --build-arg "AGENT_INSTALL=${install_cmd}" \
+  local build_args=(
+    --build-arg "BASE_IMAGE=${BASE_IMAGE}"
+    --build-arg "AGENT_ID=${agent_id}"
+    --build-arg "AGENT_INSTALL=${install_cmd}"
+  )
+  if [[ -n "${verify_cmd}" ]]; then
+    build_args+=(--build-arg "AGENT_VERIFY=${verify_cmd}")
+  fi
+  docker build "${build_args[@]}" \
     -t "${image}" \
     -f "${ROOT_DIR}/boxlite/images/agent/Dockerfile" \
     "${ROOT_DIR}/boxlite/images/agent"
 
   if [[ "${PUSH}" == "1" ]]; then
     docker push "${image}"
+    invalidate_blink_cache "${image}"
   fi
 }
 
-while IFS=$'\t' read -r agent_id install_cmd; do
+while IFS=$'\t' read -r agent_id install_cmd verify_cmd; do
   [[ -z "${agent_id}" ]] && continue
-  build_agent "${agent_id}" "${install_cmd}"
+  build_agent "${agent_id}" "${install_cmd}" "${verify_cmd}"
 done < <(
   node - <<'NODE'
 const { listBuildableAgentImages } = require('./server/src/runtime/agentBoxImages');
 for (const entry of listBuildableAgentImages()) {
-  process.stdout.write(`${entry.agentId}\t${entry.install}\n`);
+  process.stdout.write(`${entry.agentId}\t${entry.install}\t${entry.verify || ''}\n`);
 }
 NODE
 )

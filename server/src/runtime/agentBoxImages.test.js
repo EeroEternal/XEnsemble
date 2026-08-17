@@ -59,6 +59,17 @@ test('listBuildableAgentImages includes npm-backed agents and unsupported ones',
     assert.match(resolveAgentBoxImageDefault('claude-code'), /agent-claude-code/);
 });
 
+test('listBuildableAgentImages exposes cline verify to catch missing platform binary', () => {
+    const entries = listBuildableAgentImages();
+    const cline = entries.find((entry) => entry.agentId === 'cline');
+    assert.ok(cline, 'cline must be buildable');
+    assert.equal(cline.verify, 'cline --version');
+    // agents without an explicit verify must surface null (not undefined)
+    // so the build script can treat empty string uniformly.
+    const claude = entries.find((entry) => entry.agentId === 'claude-code');
+    assert.equal(claude.verify, null);
+});
+
 test('resolveBoxImage resolves hermes and amp to their agent images', async () => {
     assert.match(await resolveBoxImage({ agentId: 'hermes' }), /agent-hermes/);
     assert.match(await resolveBoxImage({ agentId: 'amp' }), /agent-amp/);
