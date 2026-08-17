@@ -439,14 +439,6 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
                   />
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={handleFetchUrl}
-                disabled={urlFetching || !urlInput.trim()}
-                className="text-xs font-medium text-[#1967D2] hover:text-[#174EA6] disabled:opacity-50"
-              >
-                {urlFetching ? 'Fetching…' : 'Fetch repository'}
-              </button>
               {urlError && (
                 <div className="flex items-center gap-1.5 text-xs text-red-600">
                   <AlertCircle className="h-3 w-3 shrink-0" />
@@ -604,7 +596,22 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
           ) : 'Connect'}
         </Button>
       )}
-      {connection && (
+      {connection && mode === 'url' && !selectedRepo && (
+        <Button
+          type="button"
+          size="sm"
+          disabled={urlFetching || !urlInput.trim()}
+          onClick={handleFetchUrl}
+        >
+          {urlFetching ? (
+            <>
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              Fetching…
+            </>
+          ) : 'Fetch repository'}
+        </Button>
+      )}
+      {connection && (selectedRepo || mode === 'browse') && (
         <Button
           type="button"
           size="sm"
