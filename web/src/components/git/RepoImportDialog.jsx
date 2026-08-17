@@ -17,6 +17,7 @@ import * as gitApi from '../../lib/gitApi';
 import * as githubApi from '../../lib/githubApi';
 import {
   consoleDialogLgClass,
+  consoleButtonFocusClass,
   textPlaceholder,
   textPrimary,
   textSecondary,
@@ -358,26 +359,51 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
           {oauthAlertMessage && (
             <GitOAuthAlert message={oauthAlertMessage} provider={provider} />
           )}
-          <p className={textSecondary}>
-            {oauthNotConfigured
-              ? `An administrator must configure ${providerLabel} OAuth before you can connect.`
-              : `Connect your ${providerLabel} account to import repositories.`}
-          </p>
-          <GitConnectButton
-            provider={provider}
-            connection={connection}
-            loading={connectionLoading}
-            onConnect={connect}
-            onDisconnect={disconnect}
-            disabled={oauthNotConfigured}
-            disabledReason={oauthNotConfigured ? formatGitOAuthError(`${provider} OAuth is not configured`, provider) : null}
-          />
-          <div className="flex items-center gap-2 py-1">
-            <div className="h-px flex-1 bg-[#E8EAED]" />
-            <span className="text-xs text-[#9AA0A6]">or use a personal access token</span>
-            <div className="h-px flex-1 bg-[#E8EAED]" />
-          </div>
-          {patSection}
+          {patSectionOpen ? (
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => { setPatSectionOpen(false); setPatError(null); }}
+                className={`text-xs font-medium text-[#5F6368] hover:text-[#202124] ${consoleButtonFocusClass}`}
+              >
+                ← Back
+              </button>
+              {patSection}
+            </div>
+          ) : (
+            <>
+              <p className={textSecondary}>
+                {oauthNotConfigured
+                  ? `An administrator must configure ${providerLabel} OAuth before you can connect.`
+                  : `Connect your ${providerLabel} account to import repositories.`}
+              </p>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={connect}
+                  disabled={connectionLoading || oauthNotConfigured}
+                  className={`flex-1 flex flex-col items-center gap-1.5 px-4 py-3 rounded-lg border-2 transition-colors ${consoleButtonFocusClass} ${
+                    oauthNotConfigured
+                      ? 'border-[#E8EAED] bg-[#F4F5F6] text-[#9AA0A6] cursor-not-allowed'
+                      : 'border-[#E8EAED] hover:border-[#202124] hover:bg-[#FAFBFC]'
+                  }`}
+                >
+                  <GitBranch className="h-5 w-5" />
+                  <span className="text-sm font-medium">Connect {providerLabel}</span>
+                  <span className="text-[11px] text-[#9AA0A6]">via OAuth</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPatSectionOpen(true)}
+                  className={`flex-1 flex flex-col items-center gap-1.5 px-4 py-3 rounded-lg border-2 border-[#E8EAED] hover:border-[#202124] hover:bg-[#FAFBFC] transition-colors ${consoleButtonFocusClass}`}
+                >
+                  <Link2 className="h-5 w-5" />
+                  <span className="text-sm font-medium">Personal Access Token</span>
+                  <span className="text-[11px] text-[#9AA0A6]">via PAT</span>
+                </button>
+              </div>
+            </>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
@@ -399,17 +425,6 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
               Disconnect
             </button>
           </div>
-
-          <button
-            type="button"
-            onClick={() => setPatSectionOpen((v) => !v)}
-            className="text-xs font-medium text-[#1967D2] hover:text-[#174EA6]"
-          >
-            {patSectionOpen
-              ? 'Hide token input'
-              : 'Use a personal access token instead'}
-          </button>
-          {patSectionOpen && patSection}
 
           <div className="flex items-center gap-1.5">
             <button
