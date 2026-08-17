@@ -26,7 +26,10 @@ export function useWorkspaces(user) {
   const [agents, setAgents] = useState(() => readBootstrapConsoleState(null).agents);
   const [projects, setProjects] = useState(() => readBootstrapConsoleState(null).projects);
   const [sessions, setSessions] = useState(() => readBootstrapConsoleState(null).sessions);
-  const [activeSession, setActiveSession] = useState(() => readBootstrapConsoleState(null).activeSession);
+  // Don't restore activeSession from localStorage cache — it may reference a
+  // session that no longer exists, causing 404 cascades on initial render.
+  // Let the sessions-fetch effect (below) validate and restore it instead.
+  const [activeSession, setActiveSession] = useState(null);
 
   const hasPendingRef = useRef(false);
   const [hasPending, setHasPending] = useState(false);
