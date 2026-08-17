@@ -1427,7 +1427,7 @@ export default React.forwardRef(function Sessions({
                       key={gitProvider}
                       open={true}
                       forceProvider={gitProvider}
-                      onClose={() => { setGitImportMode(false); setGitProvider(''); setImportedProject(null); }}
+                      onClose={() => { setGitImportMode(false); setGitProvider(''); }}
                       onImported={(projectId) => {
                         fetchWorkspaces();
                         const ws = projects.find((p) => p.id === projectId);
