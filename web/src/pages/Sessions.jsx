@@ -1461,7 +1461,7 @@ export default React.forwardRef(function Sessions({
                 {(!gitImportMode || importedProject) && (
                   <button
                     type="button"
-                    disabled={isLoading || projectCreating || (launchModalMode !== 'workspace' && !selectedAgentId) || (!importedProject && launchModalMode === 'session' && !createNewWorkspaceInline && !launchWorkspaceId) || (createNewWorkspaceInline && !newProjectName.trim())}
+                    disabled={isLoading || projectCreating || (launchModalMode !== 'workspace' && !selectedAgentId) || (!importedProject && launchModalMode !== 'workspace' && !createNewWorkspaceInline && !launchWorkspaceId) || (createNewWorkspaceInline && !newProjectName.trim())}
                     onClick={handleLaunchFromModal}
                     className={`${buttonClass('primary', 'sm')} ${consoleButtonFocusClass}`}
                   >
