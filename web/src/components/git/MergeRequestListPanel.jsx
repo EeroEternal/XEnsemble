@@ -168,9 +168,9 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
           <button
             type="button"
             onClick={onCreatePR}
-            className={buttonClass('primary', 'sm')}
+            className={`${buttonClass('primary', 'sm')} h-7 px-3 text-xs ${consoleButtonFocusClass}`}
           >
-            <GitPullRequest className="h-3.5 w-3.5 mr-1.5 inline" />
+            <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
             New Pull Request
           </button>
         )}

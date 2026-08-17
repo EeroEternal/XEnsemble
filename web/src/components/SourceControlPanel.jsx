@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   GitBranch, GitCommit, GitPullRequest, RefreshCw, PanelLeftClose, ArrowUp, ArrowDown,
   Plus, Minus, Loader2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, FileText,
-  Upload, Download, AlertTriangle, RotateCcw,
+  Upload, Download, AlertTriangle, RotateCcw, User,
 } from 'lucide-react';
 import {
   consoleButtonFocusClass,
@@ -53,6 +53,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [showAuthorDialog, setShowAuthorDialog] = useState(false);
+  const [showCommitDialog, setShowCommitDialog] = useState(false);
   const [createPROpen, setCreatePROpen] = useState(false);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [actionMenuRect, setActionMenuRect] = useState(null);
@@ -64,6 +65,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   const [showFileList, setShowFileList] = useState(false);
   const [resolvedPaths, setResolvedPaths] = useState(new Set());
   const authorNameRef = useRef(null);
+  const commitMsgRef = useRef(null);
   const actionMenuBtnRef = useRef(null);
 
   useEffect(() => {
@@ -84,6 +86,12 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       authorNameRef.current.focus();
     }
   }, [showAuthorDialog]);
+
+  useEffect(() => {
+    if (showCommitDialog && commitMsgRef.current) {
+      commitMsgRef.current.focus();
+    }
+  }, [showCommitDialog]);
 
   useEffect(() => {
     if (!actionMenuOpen) {
@@ -231,6 +239,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       const author = authorName && authorEmail ? { name: authorName, email: authorEmail } : undefined;
       await gitChanges?.commit(commitMessage.trim(), author);
       setCommitMessage('');
+      setShowCommitDialog(false);
       showToast('success', 'Committed.');
     } catch (err) {
       if (err.code === 'AUTHOR_REQUIRED' || (err.message && err.message.includes('author'))) {
@@ -268,6 +277,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       const author = { name: authorName.trim(), email: authorEmail.trim() };
       await gitChanges?.commit(commitMessage.trim(), author);
       setCommitMessage('');
+      setShowCommitDialog(false);
     } catch (_) {
     } finally {
       setCommitting(false);
@@ -463,6 +473,20 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           )}
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
+          <button
+            type="button"
+            onClick={handlePull}
+            disabled={pulling || gitChanges?.operation === 'pull'}
+            title={gitChanges?.behind > 0 ? `Pull ${gitChanges.behind} incoming change(s)` : 'Pull latest changes'}
+            aria-label="Pull latest changes"
+            className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`}
+          >
+            {pulling || gitChanges?.operation === 'pull' ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
+          </button>
           {gitHasChanges && (
             <button
               title={allExpanded ? 'Collapse all' : 'Expand all'}
@@ -622,30 +646,16 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 {gitChanges?.ahead > 0 ? ` · ↑${gitChanges.ahead}` : ''}
               </span>
               <div className="flex items-stretch shrink-0">
-                {gitHasChanges ? (
-                  <button
-                    type="button"
-                    onClick={handleCommit}
-                    disabled={!commitMessage.trim() || (gitStagedFiles.length === 0 && gitUnstagedFiles.length === 0) || committing || gitChanges?.operation === 'commit'}
-                    className={`${buttonClass('primary', 'sm')} h-7 rounded-r-none px-3 text-xs ${consoleButtonFocusClass}`}
-                  >
-                    {committing || gitChanges?.operation === 'commit' ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : gitStagedFiles.length === 0 && gitUnstagedFiles.length > 0 ? 'Stage All & Commit' : 'Commit'}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handlePull}
-                    disabled={pulling || gitChanges?.operation === 'pull'}
-                    title="Pull latest changes"
-                    className={`${buttonClass('primary', 'sm')} h-7 rounded-r-none px-3 text-xs ${consoleButtonFocusClass}`}
-                  >
-                    {pulling || gitChanges?.operation === 'pull' ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : 'Pull'}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setShowCommitDialog(true)}
+                  disabled={(gitStagedFiles.length === 0 && gitUnstagedFiles.length === 0) || committing || gitChanges?.operation === 'commit'}
+                  className={`${buttonClass('primary', 'sm')} h-7 rounded-r-none px-3 text-xs ${consoleButtonFocusClass}`}
+                >
+                  {committing || gitChanges?.operation === 'commit' ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : 'Commit'}
+                </button>
                 <button
                   ref={actionMenuBtnRef}
                   type="button"
@@ -657,21 +667,6 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 </button>
               </div>
             </div>
-            {gitStagedFiles.length + gitUnstagedFiles.length > 0 && (
-              <textarea
-                placeholder="Commit message"
-                value={commitMessage}
-                onChange={(e) => setCommitMessage(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                    e.preventDefault();
-                    handleCommit();
-                  }
-                }}
-                rows={2}
-                className={`${consoleInputClass} text-xs resize-none`}
-              />
-            )}
           </div>
         </div>
       </div>
@@ -686,26 +681,12 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           <button
             type="button"
             role="menuitem"
-            disabled={!commitMessage.trim() || gitStagedFiles.length === 0 || committing}
-            onClick={() => { setActionMenuOpen(false); handleCommit(); }}
+            disabled={gitStagedFiles.length === 0 && gitUnstagedFiles.length === 0 || committing}
+            onClick={() => { setActionMenuOpen(false); setShowCommitDialog(true); }}
             className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
           >
             <GitCommit className="h-3.5 w-3.5" />
             Commit
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={pulling || gitChanges?.operation === 'pull'}
-            onClick={handlePull}
-            className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
-          >
-            {pulling || gitChanges?.operation === 'pull' ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Download className="h-3.5 w-3.5" />
-            )}
-            Pull{gitChanges?.behind > 0 ? ` (${gitChanges.behind})` : ''}
           </button>
           {!isLocalGit && (
             <button
@@ -760,6 +741,63 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
         onClose={() => setCreatePROpen(false)}
         onCreated={() => { setCreatePROpen(false); gitChanges?.fetchStatus?.({ silent: true }); showToast('success', 'Pull request created.'); }}
       />
+
+      {/* Commit dialog */}
+      {showCommitDialog && (
+        <ConsoleDialogShell onClose={() => setShowCommitDialog(false)} panelClassName={consoleDialogSmClass}>
+          <div className="px-5 pt-5 pb-2">
+            <h3 className="text-sm font-semibold text-zinc-900">Commit changes</h3>
+          </div>
+          <div className="px-5 pb-5 flex flex-col gap-3">
+            <textarea
+              ref={commitMsgRef}
+              placeholder="Commit message"
+              value={commitMessage}
+              onChange={(e) => setCommitMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  e.preventDefault();
+                  handleCommit();
+                }
+              }}
+              rows={3}
+              className={`${consoleInputClass} text-xs resize-none`}
+            />
+            <div className="flex items-center gap-1.5">
+              <User className="h-3 w-3 text-zinc-400 shrink-0" />
+              <span className="text-xs text-zinc-500 truncate">
+                {authorName && authorEmail
+                  ? `${authorName} <${authorEmail}>`
+                  : 'No author identity set'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowAuthorDialog(true)}
+                className={`text-xs text-black hover:text-zinc-800 shrink-0 ${consoleButtonFocusClass}`}
+              >
+                {authorName ? 'Edit' : 'Set'}
+              </button>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 px-5 py-3 border-t border-zinc-200">
+            <button
+              type="button"
+              onClick={() => setShowCommitDialog(false)}
+              className={buttonClass('secondary', 'sm')}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleCommit}
+              disabled={!commitMessage.trim() || committing}
+              className={buttonClass('primary', 'sm')}
+            >
+              {committing ? 'Committing…' : 'Commit'}
+            </button>
+          </div>
+        </ConsoleDialogShell>
+      )}
 
       {/* Author dialog */}
       {showAuthorDialog && (
