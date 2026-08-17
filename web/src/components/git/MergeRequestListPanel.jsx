@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Loader2, RefreshCw, Search } from 'lucide-react';
+import { ExternalLink, GitPullRequest, Loader2, RefreshCw, Search } from 'lucide-react';
 import { openExternal } from '../../lib/githubApi';
 import * as gitApi from '../../lib/gitApi';
+import { buttonClass } from '../../lib/buttonStyles';
 import {
   consoleTableShellClass,
   consoleTableHeadRowClass,
@@ -36,7 +37,7 @@ function formatDate(ts) {
   return isNaN(date.getTime()) ? '-' : date.toLocaleDateString();
 }
 
-export default function MergeRequestListPanel({ projectId, provider, onSelectMR, refreshTrigger }) {
+export default function MergeRequestListPanel({ projectId, provider, onSelectMR, refreshTrigger, onCreatePR }) {
   const { showToast } = useToast();
   const [mergeRequests, setMergeRequests] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -108,21 +109,6 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between border-b border-zinc-300 px-3 py-2 shrink-0 bg-white">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-          {label}
-        </h3>
-        <button
-          type="button"
-          onClick={fetchMRs}
-          disabled={loading}
-          title={`Refresh ${label.toLowerCase()}`}
-          aria-label={`Refresh ${label.toLowerCase()}`}
-          className={consoleIconButtonClass}
-        >
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-        </button>
-      </div>
       <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 shrink-0 bg-white">
         <div className="flex items-center gap-1">
           {FILTER_OPTIONS.map((opt) => (
@@ -150,6 +136,26 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
             className={`w-full pl-7 pr-2 py-1 text-xs ${consoleInputClass}`}
           />
         </div>
+        <button
+          type="button"
+          onClick={fetchMRs}
+          disabled={loading}
+          title={`Refresh ${label.toLowerCase()}`}
+          aria-label={`Refresh ${label.toLowerCase()}`}
+          className={consoleIconButtonClass}
+        >
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+        </button>
+        {onCreatePR && (
+          <button
+            type="button"
+            onClick={onCreatePR}
+            className={buttonClass('primary', 'sm')}
+          >
+            <GitPullRequest className="h-3.5 w-3.5 mr-1 inline" />
+            New Pull Request
+          </button>
+        )}
       </div>
       <div className="min-h-0 flex-1 overflow-auto bg-zinc-100 p-3">
         {loading ? (
