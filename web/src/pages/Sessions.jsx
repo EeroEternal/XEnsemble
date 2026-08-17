@@ -1372,7 +1372,7 @@ export default React.forwardRef(function Sessions({
                           />
                         )}
                         {customImageId && customImages.length === 0 && (
-                          <p className="text-xs text-[#9AA0A6] py-2">No custom images found. Build one in the Images page first.</p>
+                          <div className="flex items-center gap-2 py-2"><p className="text-xs text-[#9AA0A6]">No custom images found.</p><button type="button" onClick={() => navigate('/custom-images')} className={`text-xs text-[#5B8DB8] hover:text-[#4A7298] underline ${consoleButtonFocusClass}`}>Build one now</button></div>
                         )}
                         </div>
                         {selectedAgent && (selectedAgent.llm_auth_mode === 'byok' || !selectedAgent.llm_auth_mode) && (
