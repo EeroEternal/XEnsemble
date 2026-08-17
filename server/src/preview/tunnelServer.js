@@ -1,0 +1,153 @@
+const { WebSocketServer } = require('ws');
+const net = require('net');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const { getRuntime } = require('../runtime/registry');
+const previewRegistry = require('../runtime/localPreviewRegistry');
+const { resolveControlPlanePublicUrlSync } = require('../llm/publicUrl');
+
+const TUNNEL_CLIENT_SCRIPT = fs.readFileSync(path.join(__dirname, 'tunnelClient.js'), 'utf8');
+
+const tunnels = new Map();
+
+function getFreePort() {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer();
+        server.unref();
+        server.on('error', reject);
+        server.listen(0, '127.0.0.1', () => {
+            const { port } = server.address();
+            server.close((err) => (err ? reject(err) : resolve(port)));
+        });
+    });
+}
+
+function getHostIp() {
+    const publicUrl = process.env.CONTROL_PLANE_PUBLIC_URL?.trim();
+    if (publicUrl) {
+        try { return new URL(publicUrl).hostname; } catch { /* ignore */ }
+    }
+    return '127.0.0.1';
+}
+
+async function waitForVmPort(runtimeRef, workspacePath, vmPort, timeoutMs = 60000) {
+    const runtime = getRuntime();
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        try {
+            const r = await runtime.exec.exec(
+                'sh', ['-c', `curl -sf -o /dev/null http://127.0.0.1:${vmPort}/ || exit 1`], {},
+                { runtimeRef, cwd: workspacePath },
+            );
+            if (r.exitCode === 0) return true;
+        } catch { /* not ready */ }
+        await new Promise((r) => setTimeout(r, 1000));
+    }
+    return false;
+}
+
+async function createTunnel({ deploymentId, workspacePath, runtimeRef, vmPort, projectId }) {
+    const runtime = getRuntime();
+    const browserPort = await getFreePort();
+    const wsPort = await getFreePort();
+    const hostIp = getHostIp();
+
+    await runtime.fs.fsWrite(workspacePath, '.agents/tunnelClient.js', TUNNEL_CLIENT_SCRIPT, { runtimeRef });
+
+    let vmSocket = null;
+    const pendingBrowsers = new Map();
+
+    const wsServer = new WebSocketServer({ host: '0.0.0.0', port: wsPort });
+    wsServer.on('connection', (socket) => {
+        vmSocket = socket;
+        socket.on('message', (raw) => {
+            let msg;
+            try { msg = JSON.parse(raw.toString()); } catch { return; }
+            const { id, t, d } = msg;
+            const browserSocket = pendingBrowsers.get(id);
+            if (!browserSocket) return;
+            if (t === 'data') browserSocket.write(Buffer.from(d, 'base64'));
+            else if (t === 'close') { browserSocket.end(); pendingBrowsers.delete(id); }
+        });
+        socket.on('close', () => {
+            vmSocket = null;
+            pendingBrowsers.forEach((s) => s.destroy());
+            pendingBrowsers.clear();
+        });
+    });
+
+    const browserServer = net.createServer((browserSocket) => {
+        if (!vmSocket || vmSocket.readyState !== 1) {
+            browserSocket.end('HTTP/1.1 503 Service Unavailable\r\n\r\nTunnel not ready');
+            return;
+        }
+        const id = crypto.randomUUID();
+        pendingBrowsers.set(id, browserSocket);
+        vmSocket.send(JSON.stringify({ id, t: 'open' }));
+        browserSocket.on('data', (data) => {
+            if (vmSocket && vmSocket.readyState === 1) {
+                vmSocket.send(JSON.stringify({ id, t: 'data', d: data.toString('base64') }));
+            }
+        });
+        browserSocket.on('close', () => {
+            pendingBrowsers.delete(id);
+            if (vmSocket && vmSocket.readyState === 1) vmSocket.send(JSON.stringify({ id, t: 'close' }));
+        });
+        browserSocket.on('error', () => { pendingBrowsers.delete(id); });
+    });
+    browserServer.listen(browserPort, '127.0.0.1');
+
+    const child = await runtime.exec.spawn(
+        'node',
+        ['.agents/tunnelClient.js', hostIp, String(wsPort), String(vmPort)],
+        { TERM: 'xterm-256color' },
+        { name: 'tunnel-client', cwd: workspacePath, runtimeRef },
+    );
+
+    await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Tunnel client connection timeout')), 15000);
+        const check = () => {
+            if (vmSocket) { clearTimeout(timer); resolve(); }
+            else setTimeout(check, 200);
+        };
+        check();
+    });
+
+    const ready = await waitForVmPort(runtimeRef, workspacePath, vmPort);
+    if (!ready) throw new Error(`Preview service did not start on port ${vmPort}`);
+
+    const publicUrl = `${resolveControlPlanePublicUrlSync()}/preview/${deploymentId}/`;
+    previewRegistry.set(deploymentId, {
+        port: browserPort,
+        workspacePath,
+        startedAt: Date.now(),
+    }, { persist: false });
+
+    tunnels.set(deploymentId, { browserServer, wsServer, child, browserPort, projectId });
+
+    return {
+        browserPort,
+        publicUrl,
+        internalRef: `127.0.0.1:${browserPort}`,
+        stop: () => stopTunnel(deploymentId),
+    };
+}
+
+function stopTunnel(deploymentId) {
+    const tunnel = tunnels.get(deploymentId);
+    if (!tunnel) return;
+    try { tunnel.child?.kill?.(); } catch { /* ignore */ }
+    try { tunnel.browserServer?.close(); } catch { /* ignore */ }
+    try { tunnel.wsServer?.close(); } catch { /* ignore */ }
+    previewRegistry.remove(deploymentId);
+    tunnels.delete(deploymentId);
+}
+
+function stopByProjectId(projectId) {
+    for (const [deploymentId, tunnel] of [...tunnels.entries()]) {
+        if (tunnel.projectId === projectId) stopTunnel(deploymentId);
+    }
+}
+
+module.exports = { createTunnel, stopTunnel, stopByProjectId };

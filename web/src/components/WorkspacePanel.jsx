@@ -1,9 +1,9 @@
-import { useState, useCallback, useEffect, useRef, useMemo, memo, lazy, Suspense } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo, memo, lazy, Suspense, forwardRef, useImperativeHandle } from 'react';
 import { createPortal } from 'react-dom';
 import {
   FileText, Files, FolderPlus, Plus, PanelLeftClose, PanelLeft, Loader2,
   Terminal, Globe, Monitor, GitBranch, GitPullRequest, X, ArrowLeft,
-  Trash2, Pencil, ClipboardCopy, FilePlus,
+  Trash2, Pencil, ClipboardCopy, FilePlus, Rocket,
 } from 'lucide-react';
 import WorkspaceFileTree from './WorkspaceFileTree';
 import CodeEditor from './CodeEditorLazy';
@@ -40,6 +40,7 @@ const ADDABLE_TABS = [
   { key: 'terminal', label: 'Terminal', icon: Terminal },
   { key: 'preview', label: 'Preview', icon: Monitor },
   { key: 'browser', label: 'Browser', icon: Globe },
+  { key: 'deploy', label: 'Deploy', icon: Rocket },
 ];
 
 const ADDABLE_KEYS = new Set(ADDABLE_TABS.map((t) => t.key));
@@ -73,7 +74,7 @@ function readMainTab(extraTabs) {
   return 'files';
 }
 
-const WorkspacePanel = memo(function WorkspacePanel({
+const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   projectId,
   tabs,
   activePath,
@@ -101,7 +102,8 @@ const WorkspacePanel = memo(function WorkspacePanel({
   onDeleteDir,
   onRenameFile,
   onCopyPath,
-}) {
+  deployContent,
+}, ref) {
   const [showNewFile, setShowNewFile] = useState(false);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newName, setNewName] = useState('');
@@ -374,6 +376,9 @@ const WorkspacePanel = memo(function WorkspacePanel({
     setMainTab((current) => (current === key ? 'files' : current));
   }, []);
 
+  // 暴露给父组件：程序化创建/切换/关闭 tab（一键部署用于创建 Terminal/Preview/Deploy tab）
+  useImperativeHandle(ref, () => ({ addTab, selectMainTab, setMainTab, closeExtraTab }), [addTab, selectMainTab, closeExtraTab]);
+
   const activeTab = tabs.find((t) => t.path === activePath);
   const activePathRef = useRef(activePath);
   activePathRef.current = activePath;
@@ -404,6 +409,7 @@ const WorkspacePanel = memo(function WorkspacePanel({
   const addableRemaining = ADDABLE_TABS.filter((t) => {
     if (extraTabs.includes(t.key)) return false;
     if (t.key === 'pullrequests') return isExternalGit;
+    if (t.key === 'deploy') return false;
     return true;
   });
 
@@ -669,7 +675,14 @@ const WorkspacePanel = memo(function WorkspacePanel({
           </div>
         )}
 
-        {mainTab === 'terminal' && (
+        <div className={mainTab === 'terminal' ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : 'hidden'}>
+          <div className="px-3 py-1 text-[10px] text-zinc-500 bg-zinc-50 border-b border-zinc-200 shrink-0 flex items-center gap-2 flex-wrap">
+            <span>💡 选中文本自动复制</span>
+                <span className="text-zinc-300">|</span>
+                <span>粘贴 <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">Ctrl+Shift+V</kbd> 或 <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">Ctrl+V</kbd>（终端内）</span>
+                <span className="text-zinc-300">|</span>
+                <span>右键 → Copy/Paste</span>
+          </div>
           <div className="flex-1 min-h-0 overflow-hidden">
             {shellContent || (
               <div className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-400 h-full">
@@ -678,7 +691,11 @@ const WorkspacePanel = memo(function WorkspacePanel({
               </div>
             )}
           </div>
-        )}
+        </div>
+
+        <div className={mainTab === 'deploy' ? 'flex-1 min-h-0 overflow-hidden' : 'hidden'}>
+          {deployContent || null}
+        </div>
 
         {mainTab === 'preview' && (
           <div className="flex-1 min-h-0 overflow-hidden">
@@ -805,6 +822,6 @@ const WorkspacePanel = memo(function WorkspacePanel({
       )}
     </div>
   );
-});
+}));
 
 export default WorkspacePanel;

@@ -19,7 +19,7 @@ class BoxLiteFsAdapter extends FsAdapter {
         const name = opts.runtimeRef;
         if (!name) return [];
         const rel = safeRel(relativePath);
-        const cwd = rootDir || '/workspace';
+        const cwd = '/workspace';
         const depth = opts.depth || 'recursive';
         const maxdepth = depth === 'single' ? 1 : 6;
         const limit = 1000;
@@ -62,7 +62,7 @@ class BoxLiteFsAdapter extends FsAdapter {
         const name = opts.runtimeRef;
         if (!name) throw new RuntimeError('runtimeRef required', 400);
         const rel = safeRel(relativePath);
-        const cwd = rootDir || '/workspace';
+        const cwd = '/workspace';
         const encoding = opts.encoding || 'utf8';
         try {
             const target = rel.startsWith('/') ? rel : (cwd.replace(/\/$/, '') + '/' + rel);
@@ -79,7 +79,7 @@ class BoxLiteFsAdapter extends FsAdapter {
         const name = opts.runtimeRef;
         if (!name) throw new RuntimeError('runtimeRef required', 400);
         const target = this.boxTarget(rootDir, relativePath);
-        const cwd = rootDir || '/workspace';
+        const cwd = '/workspace';
         try {
             const r = await this.client.execForResult(name, 'stat', ['-c', '%F %s %Y', target], {}, cwd);
             if (r.exitCode !== 0) throw new RuntimeError('File not found', 404);
@@ -104,7 +104,7 @@ class BoxLiteFsAdapter extends FsAdapter {
 
     boxTarget(rootDir, relativePath) {
         const rel = safeRel(relativePath);
-        const cwd = rootDir || '/workspace';
+        const cwd = '/workspace';
         if (rel.startsWith('/')) {
             return rel;
         }
@@ -117,7 +117,7 @@ class BoxLiteFsAdapter extends FsAdapter {
             return false;
         }
         const target = this.boxTarget(rootDir, relativePath);
-        const cwd = rootDir || '/workspace';
+        const cwd = '/workspace';
         try {
             const r = await this.client.execForResult(name, 'test', ['-e', target], {}, cwd);
             return r.exitCode === 0;
@@ -132,7 +132,7 @@ class BoxLiteFsAdapter extends FsAdapter {
             throw new RuntimeError('runtimeRef required', 400);
         }
         const target = this.boxTarget(rootDir, relativePath);
-        const cwd = rootDir || '/workspace';
+        const cwd = '/workspace';
         const r = await this.client.execForResult(name, 'mkdir', ['-p', target], {}, cwd);
         if (r.exitCode !== 0) {
             throw new RuntimeError('mkdir failed', 500);
@@ -146,7 +146,7 @@ class BoxLiteFsAdapter extends FsAdapter {
         if (raw.includes('..')) throw new RuntimeError('Invalid path', 400);
         const isAbsolute = raw.startsWith('/');
         const rel = isAbsolute ? raw : safeRel(raw);
-        const cwd = rootDir || '/workspace';
+        const cwd = '/workspace';
         const target = isAbsolute ? rel : (cwd.replace(/\/$/, '') + '/' + rel);
         const parentDir = target.replace(/\/[^/]+$/, '');
         // Merge mkdir -p and base64 -d into a single VM exec to save one HTTP+WS round-trip.
@@ -164,7 +164,7 @@ class BoxLiteFsAdapter extends FsAdapter {
         const name = opts.runtimeRef;
         if (!name) throw new RuntimeError('runtimeRef required', 400);
         const rel = safeRel(relativePath);
-        const cwd = rootDir || '/workspace';
+        const cwd = '/workspace';
         const target = rel.startsWith('/') ? rel : (cwd.replace(/\/$/, '') + '/' + rel);
         const testR = await this.client.execForResult(name, 'test', ['-d', target], {}, cwd);
         if (testR.exitCode === 0) throw new RuntimeError('Cannot delete directory via file endpoint', 400);
@@ -177,7 +177,7 @@ class BoxLiteFsAdapter extends FsAdapter {
         if (!name) throw new RuntimeError('runtimeRef required', 400);
         const from = safeRel(fromRel);
         const to = safeRel(toRel);
-        const cwd = rootDir || '/workspace';
+        const cwd = '/workspace';
         const fromTarget = from.startsWith('/') ? from : (cwd.replace(/\/$/, '') + '/' + from);
         const toTarget = to.startsWith('/') ? to : (cwd.replace(/\/$/, '') + '/' + to);
         const existR = await this.client.execForResult(name, 'test', ['-e', toTarget], {}, cwd);
@@ -193,7 +193,7 @@ class BoxLiteFsAdapter extends FsAdapter {
         const name = opts.runtimeRef;
         if (!name) throw new RuntimeError('runtimeRef required', 400);
         const rel = safeRel(relativePath);
-        const cwd = rootDir || '/workspace';
+        const cwd = '/workspace';
         const target = rel.startsWith('/') ? rel : (cwd.replace(/\/$/, '') + '/' + rel);
         // 安全约束：用 args 数组传参，不走 sh -c 字符串拼接（命令注入风险）。
         await this.client.execForResult(name, 'rm', ['-r', target], {}, cwd);

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useRef, forwardRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -57,7 +57,7 @@ function getArrowSequence(key, applicationCursorKeys) {
   }
 }
 
-export default function WorkspaceShell({ projectId }) {
+const WorkspaceShell = forwardRef(function WorkspaceShell({ projectId, onOutput }, ref) {
   const { preset } = useTerminalTheme();
   const xtermTheme = preset?.xterm || FALLBACK_XTERM_THEME;
 
@@ -65,10 +65,50 @@ export default function WorkspaceShell({ projectId }) {
   const wsRef = useRef(null);
   const connectedRef = useRef(false);
   const themeRef = useRef(xtermTheme);
+  const termRef = useRef(null);
 
   useEffect(() => {
     themeRef.current = xtermTheme;
   }, [xtermTheme]);
+
+  // 用 ref 存 onOutput，避免回调变化导致 WS 重连
+  const onOutputRef = useRef(onOutput);
+  useEffect(() => { onOutputRef.current = onOutput; }, [onOutput]);
+
+  // 暴露给父组件：向 shell 注入命令（用于一键部署执行）
+  const sendInput = useCallback((data) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'input', data }));
+      return true;
+    }
+    return false;
+  }, []);
+
+  useImperativeHandle(ref, () => ({ sendInput, isReady: () => connectedRef.current }), [sendInput]);
+
+  // 拦截 Ctrl+V（无 Shift）直接粘贴到 xterm，免去 Ctrl+Shift+V 的记忆负担
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key !== 'v' && e.key !== 'V') return;
+      if (!e.ctrlKey && !e.metaKey) return;
+      if (e.shiftKey || e.altKey) return;
+      const t = termRef.current;
+      if (!t) return;
+      const host = hostRef.current;
+      const active = document.activeElement;
+      // 仅在终端容器有焦点（或其内部）时拦截，避免影响页面其他输入框
+      if (host && (active === host || host.contains(active))) {
+        e.preventDefault();
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          navigator.clipboard.readText().then((text) => {
+            if (text) t.paste(text);
+          }).catch(() => {});
+        }
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -77,7 +117,7 @@ export default function WorkspaceShell({ projectId }) {
     const terminal = new Terminal({
       cols: 120,
       rows: 32,
-      scrollback: 10000,
+      scrollback: 2000,
       convertEol: true,
       fontFamily: 'Menlo, Monaco, Consolas, "Liberation Mono", monospace',
       fontSize: 13,
@@ -87,6 +127,7 @@ export default function WorkspaceShell({ projectId }) {
       drawBoldTextInBrightColors: true,
       theme: themeRef.current,
     });
+    termRef.current = terminal;
 
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -240,7 +281,8 @@ export default function WorkspaceShell({ projectId }) {
               return;
             }
             if (msg.type === 'output') {
-              const viewport = hostRef.current?.querySelector('.xterm-viewport');
+                if (onOutputRef.current) onOutputRef.current(msg.data);
+                const viewport = hostRef.current?.querySelector('.xterm-viewport');
               const atBottom = !viewport || viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 5;
               terminal.write(msg.data, () => {
                 if (atBottom && !disposed) terminal.scrollToBottom();
@@ -318,6 +360,7 @@ export default function WorkspaceShell({ projectId }) {
         wsRef.current = null;
       }
       connectedRef.current = false;
+      termRef.current = null;
       terminal.dispose();
     };
   }, [projectId]);
@@ -329,4 +372,6 @@ export default function WorkspaceShell({ projectId }) {
       </div>
     </div>
   );
-}
+});
+
+export default WorkspaceShell;

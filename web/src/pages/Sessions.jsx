@@ -17,6 +17,7 @@ import { useTerminalTheme } from '../hooks/useTerminalTheme.jsx';
 import { useEditorTabs } from '../hooks/useEditorTabs';
 import { useGitChanges } from '../hooks/useGitChanges';
 import { usePreview, PreviewControlGroup } from '../components/PreviewPanel';
+import DeployPanel from '../components/DeployPanel';
 import {
   TerminalSquare,
   Play,
@@ -163,6 +164,114 @@ export default React.forwardRef(function Sessions({
   const changesTabActiveRef = useRef(false);
   const gitChanges = useGitChanges(activeSession?.projectId || null, changesTabActiveRef);
   const preview = usePreview(activeSession?.projectId, Boolean(activeSession?.projectId));
+  const { showToast } = useToast();
+  const panelRef = useRef(null);
+  const shellRef = useRef(null);
+  // 每次点小火箭自增，用于强制 DeployPanel remount（重新分析），而不是复用上次内容
+  const [deployVersion, setDeployVersion] = useState(0);
+  // 部署执行中注册的 output handler（哨兵检测），非部署时为 null
+  const deployOutputHandlerRef = useRef(null);
+
+  // WorkspaceShell output 回调：部署执行时检测哨兵标记判断命令完成
+  const handleShellOutput = useCallback((data) => {
+    deployOutputHandlerRef.current?.(data);
+  }, []);
+
+  // 向 Terminal 注入命令并等待哨兵标记返回退出码
+  const sendCommandAndWaitSentinel = useCallback((step) => new Promise((resolve) => {
+    let buffer = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; deployOutputHandlerRef.current = null; resolve(-1); }
+    }, 180000);
+    deployOutputHandlerRef.current = (data) => {
+      buffer += data;
+      const match = buffer.match(/__XENS_STEP_DONE__:(\w+):(-?\d+)/);
+      if (match && !settled) {
+        settled = true;
+        clearTimeout(timer);
+        deployOutputHandlerRef.current = null;
+        resolve(parseInt(match[2], 10));
+      }
+    };
+    const sentinel = `; printf '\\n__XENS_STEP_DONE__:${step.id}:%s\\n' "$?"`;
+    shellRef.current?.sendInput(`${step.command}${sentinel}\n`);
+  }), []);
+
+  // 执行部署：先写配置文件，再从 startIndex 开始执行 steps（prepare 走终端，serve 启动服务 + 隧道）
+  // 失败时返回 { failedIndex, stepResults }，不 throw，让 DeployPanel 决定重试/继续
+  const executeDeploy = useCallback(async ({ steps, configFiles, startIndex = 0 } = {}) => {
+    const projectId = activeSession?.projectId;
+    if (!projectId) return { failedIndex: -1, stepResults: [] };
+    const safeSteps = steps || [];
+    const safeConfigs = configFiles || [];
+    const stepResults = safeSteps.map((s) => ({ id: s.id, name: s.name, status: 'pending' }));
+
+    // 1. 写配置文件（用户填写的 .env/config 等）到 VM（仅在从头开始时写）
+    if (startIndex === 0) {
+      for (const cf of safeConfigs) {
+        const res = await apiFetch(
+          `/api/v1/workspace/file?project_id=${encodeURIComponent(projectId)}&path=${encodeURIComponent(cf.path)}`,
+          { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: cf.template }) },
+        );
+        if (!res.ok) {
+          showToast('error', `Failed to write config: ${cf.path}`);
+          return { failedIndex: -1, stepResults, error: `Failed to write config: ${cf.path}` };
+        }
+      }
+    }
+    const vmPort = 5173;
+    for (let i = startIndex; i < safeSteps.length; i++) {
+      const step = safeSteps[i];
+      stepResults[i].status = 'running';
+      try {
+        if (step.kind === 'serve') {
+          shellRef.current?.sendInput(`export PORT=${vmPort}; ${step.command}\n`);
+          const res = await apiFetch(`/api/v1/projects/${encodeURIComponent(projectId)}/tunnel-preview`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ port: vmPort }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Tunnel preview failed');
+        } else {
+          const exitCode = await sendCommandAndWaitSentinel(step);
+          if (exitCode !== 0) throw new Error(`Step "${step.name}" failed (exit ${exitCode})`);
+        }
+        stepResults[i].status = 'success';
+      } catch (err) {
+        stepResults[i].status = 'failed';
+        stepResults[i].error = err.message || String(err);
+        return { failedIndex: i, stepResults, error: err.message };
+      }
+    }
+    panelRef.current?.addTab('preview');
+    showToast('success', 'Deployment complete');
+    preview.loadDeployments();
+    return { failedIndex: -1, stepResults, success: true };
+  }, [activeSession?.projectId, sendCommandAndWaitSentinel, showToast, preview]);
+
+  // DeployDialog 确认后：DeployPanel 保持打开供手动参照 -> 创建 Terminal tab -> 等 shell 就绪 -> 执行部署
+  // 支持 startIndex（重试该步/从该步继续时由 DeployPanel 传入）
+  const handleDeployConfirm = useCallback(async ({ steps, configFiles, startIndex = 0 } = {}) => {
+    panelRef.current?.addTab('terminal');
+    const ready = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), 15000);
+      const check = () => {
+        if (shellRef.current?.isReady()) { clearTimeout(timer); resolve(true); }
+        else setTimeout(check, 200);
+      };
+      check();
+    });
+    if (!ready) {
+      showToast('error', 'Terminal not ready');
+      return { failedIndex: -1, error: 'Terminal not ready' };
+    }
+    // executeDeploy 失败时返回 { failedIndex } 而非 throw，DeployPanel 据此显示重试/继续
+    const result = await executeDeploy({ steps, configFiles, startIndex });
+    if (result?.failedIndex >= 0) {
+      showToast('error', result.error || `Step failed at index ${result.failedIndex}`);
+    }
+    return result;
+  }, [executeDeploy, showToast]);
   const [gitDiffView, setGitDiffView] = useState(null);
 
   const [configEnvVars, setConfigEnvVars] = useState([{ key: '', value: '' }]);
@@ -171,7 +280,6 @@ export default React.forwardRef(function Sessions({
   const [configSaving, setConfigSaving] = useState(false);
   const [configLoading, setConfigLoading] = useState(false);
   const [configError, setConfigError] = useState(null);
-  const { showToast } = useToast();
   const { themeId, preset } = useTerminalTheme();
   // eslint-disable-next-line no-unused-vars
   const [_deletingSessionId, setDeletingSessionId] = useState(null);
@@ -1481,7 +1589,7 @@ export default React.forwardRef(function Sessions({
                   {activeSession.projectId ? (
                     <>
                       <div className="mx-0.5 h-5 w-px bg-[#E8EAED]" />
-                      <PreviewControlGroup {...preview} />
+                      <PreviewControlGroup {...preview} onAnalyze={() => { panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); }} />
                     </>
                   ) : null}
                 </>
@@ -1552,6 +1660,7 @@ export default React.forwardRef(function Sessions({
                 />
                 <div className="flex min-h-0 shrink-0 flex-col border-l border-[#E8EAED] bg-white" style={{ width: panelWidth }}>
                   <WorkspacePanel
+                    ref={panelRef}
                     projectId={activeSession.projectId}
                     tabs={editorTabs.tabs}
                     activePath={editorTabs.activePath}
@@ -1572,8 +1681,17 @@ export default React.forwardRef(function Sessions({
                     onCloseGitDiff={handleCloseGitDiff}
                     provider={activeProject?.repoProvider}
                     sessionLive={sessionAlive}
-                    shellContent={shellMounted && <WorkspaceShell projectId={activeSession.projectId} />}
+                    shellContent={shellMounted && <WorkspaceShell ref={shellRef} projectId={activeSession.projectId} onOutput={handleShellOutput} />}
                     onShellMount={() => setShellMounted(true)}
+                    deployContent={activeSession?.projectId ? (
+                      <DeployPanel
+                        key={`${activeSession.projectId}-${deployVersion}`}
+                        projectId={activeSession.projectId}
+                        onConfirm={handleDeployConfirm}
+                        onCancel={() => panelRef.current?.closeExtraTab('deploy')}
+                        onEnd={() => panelRef.current?.closeExtraTab('deploy')}
+                      />
+                    ) : null}
                     refreshTrigger={editorTabs.treeRefreshTrigger}
                     onDeleteFile={handleDeleteFile}
                     onDeleteDir={handleDeleteDir}

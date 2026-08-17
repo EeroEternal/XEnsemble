@@ -109,7 +109,12 @@ async function ensureProjectRuntime(project, opts = {}) {
                 eq(schema.runtimes.projectId, project.id),
             ));
         const runtimeRow = rows[0];
-        const workspacePath = runtimeRow?.endpoint || project.serverPath;
+        // Prefer project.serverPath: it is corrected to the guest workspace path
+        // (e.g. /workspace) during provisioning, whereas runtimes.endpoint retains
+        // the stale HOST path written at runtime creation. Using the host path as
+        // the spawn working_dir makes the sandbox chdir fail (blink 500
+        // "failed to spawn command in sandbox").
+        const workspacePath = project.serverPath || runtimeRow?.endpoint;
         if (runtimeRow?.status === 'ready' && runtimeRow.runtimeRef && workspacePath) {
             const result = {
                 runtime: runtimeRow,
@@ -196,32 +201,37 @@ async function ensureProjectRuntime(project, opts = {}) {
         const workspacePath = provision.workspacePath;
         const now = Date.now();
         const nextSpecs = { ...storedSpecs };
+        if (isBoxLite && provision.hostWorkspacePath) {
+            nextSpecs.host_workspace_path = provision.hostWorkspacePath;
+        }
         if (isBoxLite && (provision.image || image)) {
             nextSpecs.image = provision.image || image;
         }
+
         if (isBoxLite && provision.mountKey) {
+            nextSpecs.mount_key = provision.mountKey;
             nextSpecs.workspace_mount = provision.mountKey;
         }
         const specsJson = Object.keys(nextSpecs).length > 0 ? JSON.stringify(nextSpecs) : runtimeRow.specs;
 
         if (
-            runtimeRow.endpoint !== workspacePath
-            || runtimeRow.runtimeRef !== provision.runtimeRef
+            runtimeRow.runtimeRef !== provision.runtimeRef
             || runtimeRow.specs !== specsJson
+            || runtimeRow.endpoint !== provision.workspacePath
         ) {
             await db.update(schema.runtimes).set({
                 runtimeRef: provision.runtimeRef,
-                endpoint: workspacePath,
                 specs: specsJson,
                 status: 'ready',
+                endpoint: provision.workspacePath,
                 updatedAt: now,
             }).where(eq(schema.runtimes.id, runtimeRow.id));
             runtimeRow = {
                 ...runtimeRow,
                 runtimeRef: provision.runtimeRef,
-                endpoint: workspacePath,
                 specs: specsJson,
                 status: 'ready',
+                endpoint: provision.workspacePath,
             };
         }
 
@@ -236,9 +246,16 @@ async function ensureProjectRuntime(project, opts = {}) {
         }
 
         const attach = await rt.provider.attach(provision.runtimeRef);
+        const hostWorkspacePath = attach?.hostWorkspacePath || (() => {
+            try {
+                const specs = JSON.parse(runtimeRow.specs || '{}');
+                return specs.host_workspace_path || null;
+            } catch { return null; }
+        })();
         return {
             runtime: runtimeRow,
             workspacePath,
+            hostWorkspacePath,
             recoverable: Boolean(attach?.recoverable),
         };
     });

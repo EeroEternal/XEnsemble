@@ -33,6 +33,7 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
     constructor() {
         super();
         this.client = new BoxLiteClient();
+        this._hostWorkspacePaths = new Map();
     }
 
     workspacePath() {
@@ -166,7 +167,10 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
                 read_only: workspaceVolume.read_only,
             }],
             network: resolveBoxliteSessionNetwork(opts.network),
-            ...(opts.resources ? { resources: opts.resources } : {}),
+            resources: {
+                disk_size_gb: Number(process.env.BOXLITE_DISK_SIZE_GB || 20),
+                ...(opts.resources || {}),
+            },
         };
         const openSession = async () => {
             const TRANSIENT_RE = /mkdir.*memory|memory dir|resource busy|temporarily|try again/i;
@@ -279,11 +283,11 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
                 // snapshot may not exist yet or first provision; continue
             }
         }
-        return { runtimeRef: name, workspacePath: guestWorkspacePath, image, mountKey };
+        return { runtimeRef: name, workspacePath: guestWorkspacePath, image, mountKey, hostWorkspacePath };
     }
 
     async attach(runtimeRef) {
-        return { runtimeRef, recoverable: false };
+        return { runtimeRef, recoverable: false, hostWorkspacePath: this._hostWorkspacePaths.get(runtimeRef) || null };
     }
 
     supportsHibernate() {
