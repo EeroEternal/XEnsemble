@@ -5,10 +5,16 @@ import {
   Plus, Minus, Loader2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, FileText,
   Upload, Download, AlertTriangle, RotateCcw,
 } from 'lucide-react';
-import { consoleButtonFocusClass, consoleInputClass } from '../lib/consoleTheme';
-import { consoleDropdownPanelClass, consoleMenuDropdownZClass } from '../lib/consoleTokens';
+import {
+  consoleButtonFocusClass,
+  consoleInputClass,
+  consoleDropdownPanelClass,
+  consoleMenuDropdownZClass,
+  consoleDialogSmClass,
+} from '../lib/consoleTokens';
 import { buttonClass } from '../lib/buttonStyles';
 import { ConsoleDialogShell } from './ConsoleDialog';
+import { confirm } from './ConfirmDialog';
 import CreatePRDialog from './git/CreatePRDialog';
 import { ConflictFileItem } from './git/ConflictResolutionPanel';
 import { DiffText } from './git/DiffText';
@@ -25,11 +31,11 @@ const GIT_STATUS_LABELS = {
 };
 
 const GIT_STATUS_COLORS = {
-  'M ': 'text-[#C06C5D]', ' M': 'text-[#C06C5D]', 'MM': 'text-[#C06C5D]',
-  'A ': 'text-[#4A7C59]', 'AM': 'text-[#4A7C59]',
-  'D ': 'text-[#C06C5D]',
-  '??': 'text-[#4A7C59]',
-  'R ': 'text-[#5B8DB8]',
+  'M ': 'text-red-600', ' M': 'text-red-600', 'MM': 'text-red-600',
+  'A ': 'text-emerald-600', 'AM': 'text-emerald-600',
+  'D ': 'text-red-600',
+  '??': 'text-emerald-600',
+  'R ': 'text-black',
 };
 
 const GIT_STATUS_DESC = {
@@ -168,38 +174,48 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   }, [gitChanges, expandedFiles, projectId]);
 
   const [discarding, setDiscarding] = useState(false);
-  const [discardConfirm, setDiscardConfirm] = useState(null);
 
   const handleDiscardFile = useCallback(async (path) => {
-    setDiscardConfirm({ type: 'single', path });
-  }, []);
-
-  const handleDiscardAll = useCallback(async () => {
-    const allPaths = [...gitStagedFiles, ...gitUnstagedFiles].map((f) => f.path).filter(Boolean);
-    if (allPaths.length === 0) return;
-    setDiscardConfirm({ type: 'all', paths: allPaths });
-  }, [gitStagedFiles, gitUnstagedFiles]);
-
-  const handleConfirmDiscard = useCallback(async () => {
-    if (!discardConfirm) return;
-    const { type, paths, path } = discardConfirm;
-    const targetPaths = type === 'all' ? paths : [path];
-    setDiscardConfirm(null);
+    const ok = await confirm({
+      title: 'Discard Changes',
+      message: `Discard changes to ${path}? This cannot be undone.`,
+      confirmLabel: 'Discard',
+      variant: 'danger',
+    });
+    if (!ok) return;
     setDiscarding(true);
     try {
-      if (type === 'single') {
-        setFileDiffs((prev) => { const next = { ...prev }; delete next[path]; return next; });
-      } else {
-        setFileDiffs({});
-      }
-      await gitChanges?.discard(targetPaths);
-      showToast('success', type === 'all' ? 'All changes discarded.' : 'Changes discarded.');
+      setFileDiffs((prev) => { const next = { ...prev }; delete next[path]; return next; });
+      await gitChanges?.discard([path]);
+      showToast('success', 'Changes discarded.');
     } catch (err) {
       showToast('error', err.message || 'Discard failed');
     } finally {
       setDiscarding(false);
     }
-  }, [discardConfirm, gitChanges, showToast]);
+  }, [gitChanges, showToast]);
+
+  const handleDiscardAll = useCallback(async () => {
+    const allPaths = [...gitStagedFiles, ...gitUnstagedFiles].map((f) => f.path).filter(Boolean);
+    if (allPaths.length === 0) return;
+    const ok = await confirm({
+      title: 'Discard All Changes',
+      message: `Discard all ${allPaths.length} change(s)? This cannot be undone.`,
+      confirmLabel: 'Discard All',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    setDiscarding(true);
+    try {
+      setFileDiffs({});
+      await gitChanges?.discard(allPaths);
+      showToast('success', 'All changes discarded.');
+    } catch (err) {
+      showToast('error', err.message || 'Discard failed');
+    } finally {
+      setDiscarding(false);
+    }
+  }, [gitStagedFiles, gitUnstagedFiles, gitChanges, showToast]);
 
   const handleCommit = useCallback(async () => {
     if (!commitMessage.trim()) return;
@@ -215,6 +231,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       const author = authorName && authorEmail ? { name: authorName, email: authorEmail } : undefined;
       await gitChanges?.commit(commitMessage.trim(), author);
       setCommitMessage('');
+      showToast('success', 'Committed.');
     } catch (err) {
       if (err.code === 'AUTHOR_REQUIRED' || (err.message && err.message.includes('author'))) {
         setShowAuthorDialog(true);
@@ -358,7 +375,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
 
     return (
       <div key={f.path}>
-        <div className="flex items-center group hover:bg-[#E8EAED]">
+        <div className="flex items-center group hover:bg-zinc-200">
           <button
             onClick={() => toggleFileExpand(f.path)}
             className="shrink-0 p-0.5 text-zinc-400 hover:text-zinc-600"
@@ -372,17 +389,17 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             <span className={`w-4 text-center font-mono text-[11px] font-semibold ${colorCls} shrink-0`}>
               {label}
             </span>
-            <span className="truncate text-[#202124] text-xs">{fileName}</span>
+            <span className="truncate text-zinc-900 text-xs">{fileName}</span>
             {dirPath && (
-              <span className="truncate text-[#9AA0A6] text-[10px]">{dirPath}</span>
+              <span className="truncate text-zinc-400 text-[10px]">{dirPath}</span>
             )}
-            <span className="ml-auto text-[#9AA0A6] text-[10px] shrink-0">{desc}</span>
+            <span className="ml-auto text-zinc-400 text-[10px] shrink-0">{desc}</span>
           </button>
           {stageAction && (
             <button
               onClick={() => stageAction(f.path)}
               title={stageAction === handleStageFile ? 'Stage' : 'Unstage'}
-              className={`shrink-0 p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#DADCE0] transition-opacity ${consoleButtonFocusClass}`}
+              className={`shrink-0 p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-300 transition-opacity ${consoleButtonFocusClass}`}
             >
               {stageAction === handleStageFile ? (
                 <Plus className="h-3 w-3" />
@@ -394,13 +411,13 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           <button
             onClick={() => handleDiscardFile(f.path)}
             title="Discard changes"
-            className={`shrink-0 p-1 rounded text-zinc-400 hover:text-[#C06C5D] hover:bg-[#DADCE0] transition-opacity ${consoleButtonFocusClass}`}
+            className={`shrink-0 p-1 rounded text-zinc-400 hover:text-red-600 hover:bg-zinc-300 transition-opacity ${consoleButtonFocusClass}`}
           >
             <RotateCcw className="h-3 w-3" />
           </button>
         </div>
         {isExpanded && (
-          <div className="border-t border-[#E8EAED] bg-[#FAFAFA]">
+          <div className="border-t border-zinc-200 bg-zinc-50">
             {isLoading ? (
               <div className="flex items-center justify-center py-4 text-zinc-400">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -430,17 +447,17 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
 
   return (
     <div className="flex flex-col h-full min-h-0 w-full relative">
-      <div className="flex items-center justify-between gap-2 border-b border-[#E8EAED] px-3 py-1.5 shrink-0">
+      <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-1.5 shrink-0">
         <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-zinc-500">
           <GitBranch className="h-3 w-3 shrink-0" />
           <span className="font-mono truncate">{branch || '—'}</span>
           {gitChanges?.ahead > 0 && (
-            <span className="flex items-center gap-0.5 text-[#4A7C59] shrink-0">
+            <span className="flex items-center gap-0.5 text-emerald-600 shrink-0">
               <ArrowUp className="h-2.5 w-2.5" />{gitChanges.ahead}
             </span>
           )}
           {gitChanges?.behind > 0 && (
-            <span className="flex items-center gap-0.5 text-[#C06C5D] shrink-0">
+            <span className="flex items-center gap-0.5 text-red-600 shrink-0">
               <ArrowDown className="h-2.5 w-2.5" />{gitChanges.behind}
             </span>
           )}
@@ -450,7 +467,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             <button
               title={allExpanded ? 'Collapse all' : 'Expand all'}
               onClick={toggleExpandAll}
-              className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED] ${consoleButtonFocusClass}`}
+              className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
             >
               {allExpanded ? <ChevronsDownUp className="h-3.5 w-3.5" /> : <ChevronsUpDown className="h-3.5 w-3.5" />}
             </button>
@@ -459,7 +476,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             <button
               title="File list"
               onClick={() => setShowFileList((v) => !v)}
-              className={`p-1 rounded ${showFileList ? 'text-[#202124] bg-[#E8EAED]' : 'text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED]'} ${consoleButtonFocusClass}`}
+              className={`p-1 rounded ${showFileList ? 'text-zinc-900 bg-zinc-200' : 'text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200'} ${consoleButtonFocusClass}`}
             >
               <FileText className="h-3.5 w-3.5" />
             </button>
@@ -467,7 +484,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           <button
             title="Refresh"
             onClick={() => gitChanges?.fetchStatus()}
-            className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED] ${consoleButtonFocusClass}`}
+            className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
           >
             <RefreshCw className="h-3 w-3" />
           </button>
@@ -475,7 +492,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             <button
               title="Collapse sidebar"
               onClick={onCollapse}
-              className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED] ${consoleButtonFocusClass}`}
+              className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
             >
               <PanelLeftClose className="h-3.5 w-3.5" />
             </button>
@@ -486,8 +503,8 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
         <div className="flex flex-col h-full min-h-0 relative">
           {showFileList && (
-            <div className="absolute right-2 top-1 z-20 w-56 max-h-64 overflow-y-auto console-scroll-hidden bg-white border border-[#E8EAED] rounded-lg shadow-lg">
-              <div className="px-3 py-2 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider border-b border-[#E8EAED] sticky top-0 bg-white">
+            <div className="absolute right-2 top-1 z-20 w-56 max-h-64 overflow-y-auto console-scroll-hidden bg-white border border-zinc-200 rounded-lg shadow-lg">
+              <div className="px-3 py-2 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 sticky top-0 bg-white">
                 Files ({gitStagedFiles.length + gitUnstagedFiles.length})
               </div>
               <div className="py-1">
@@ -501,7 +518,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                     <button
                       key={'list-' + f.path}
                       onClick={() => { toggleFileExpand(f.path); setShowFileList(false); onJumpToFile?.(f.path); }}
-                      className={`w-full text-left px-3 py-1 text-xs truncate hover:bg-[#F4F5F6] ${consoleButtonFocusClass}`}
+                      className={`w-full text-left px-3 py-1 text-xs truncate hover:bg-zinc-100 ${consoleButtonFocusClass}`}
                     >
                       <span className={`font-mono text-[9px] mr-1.5 ${GIT_STATUS_COLORS[f.status] || 'text-zinc-400'}`}>
                         {label}
@@ -520,7 +537,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                     <button
                       key={'list-' + f.path}
                       onClick={() => { toggleFileExpand(f.path); setShowFileList(false); onJumpToFile?.(f.path); }}
-                      className={`w-full text-left px-3 py-1 text-xs truncate hover:bg-[#F4F5F6] ${consoleButtonFocusClass}`}
+                      className={`w-full text-left px-3 py-1 text-xs truncate hover:bg-zinc-100 ${consoleButtonFocusClass}`}
                     >
                       <span className={`font-mono text-[9px] mr-1.5 ${GIT_STATUS_COLORS[f.status] || 'text-zinc-400'}`}>
                         {label}
@@ -534,8 +551,8 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           )}
           <div className="flex-1 min-h-0 overflow-y-auto console-scroll-hidden">
             {conflictFiles.length > 0 && (
-              <div className="border-b border-[#E8EAED]">
-                <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-[#E8EAED] bg-amber-50">
+              <div className="border-b border-zinc-200">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-zinc-200 bg-amber-50">
                   <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" />
                   <span className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider">
                     Conflicts ({conflictFiles.length})
@@ -562,7 +579,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               <div className="flex flex-col">
                 {gitStagedFiles.length > 0 && (
                   <>
-                    <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#E8EAED]">
+                    <div className="flex items-center justify-between px-3 py-1.5 border-b border-zinc-200">
                       <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
                         Staged ({gitStagedFiles.length})
                       </span>
@@ -579,7 +596,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 )}
                 {gitUnstagedFiles.length > 0 && (
                   <>
-                    <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#E8EAED]">
+                    <div className="flex items-center justify-between px-3 py-1.5 border-b border-zinc-200">
                       <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
                         Changes ({gitUnstagedFiles.length})
                       </span>
@@ -598,9 +615,9 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             )}
           </div>
 
-          <div className="flex flex-col gap-1.5 px-3 py-2 border-t border-[#E8EAED] shrink-0">
+          <div className="flex flex-col gap-1.5 px-3 py-2 border-t border-zinc-200 shrink-0">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] text-[#5F6368]">
+              <span className="text-[11px] text-zinc-500">
                 {changeCount > 0 ? `${changeCount} change${changeCount === 1 ? '' : 's'}` : 'No changes'}
                 {gitChanges?.ahead > 0 ? ` · ↑${gitChanges.ahead}` : ''}
               </span>
@@ -638,7 +655,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                   }
                 }}
                 rows={2}
-                className="w-full text-xs px-2 py-1 rounded border border-[#DADCE0] bg-white resize-none focus:outline-none focus:border-[#5B8DB8]"
+                className={`${consoleInputClass} text-xs resize-none`}
               />
             )}
           </div>
@@ -713,7 +730,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               role="menuitem"
               disabled={discarding}
               onClick={() => { setActionMenuOpen(false); handleDiscardAll(); }}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-[#C06C5D] hover:bg-red-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-red-600 hover:bg-red-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
             >
               {discarding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
               Discard All
@@ -734,9 +751,9 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
 
       {/* Author dialog */}
       {showAuthorDialog && (
-        <ConsoleDialogShell onClose={() => setShowAuthorDialog(false)} panelClassName="w-80">
+        <ConsoleDialogShell onClose={() => setShowAuthorDialog(false)} panelClassName={consoleDialogSmClass}>
           <div className="px-5 pt-5 pb-2">
-            <h3 className="text-sm font-semibold text-[#202124]">Set Git author info</h3>
+            <h3 className="text-sm font-semibold text-zinc-900">Set Git author info</h3>
           </div>
           <div className="px-5 pb-5 flex flex-col gap-3">
             <input
@@ -755,7 +772,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               className={`w-full ${consoleInputClass} text-xs`}
             />
           </div>
-          <div className="flex justify-end gap-2 px-5 py-3 border-t border-[#E8EAED]">
+          <div className="flex justify-end gap-2 px-5 py-3 border-t border-zinc-200">
             <button
               onClick={() => setShowAuthorDialog(false)}
               className={buttonClass('secondary', 'sm')}
@@ -771,42 +788,6 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             </button>
           </div>
         </ConsoleDialogShell>
-      )}
-
-      {discardConfirm && (
-        <div className="absolute inset-0 z-[90] flex items-center justify-center bg-black/30 p-4">
-          <div className="w-72 rounded-lg border border-zinc-200 bg-white shadow-lg">
-            <div className="px-4 pt-4 pb-2">
-              <h3 className="text-sm font-semibold text-zinc-900">
-                {discardConfirm.type === 'all' ? 'Discard All Changes' : 'Discard Changes'}
-              </h3>
-            </div>
-            <div className="px-4 pb-4">
-              <p className="text-sm text-zinc-600 leading-relaxed">
-                {discardConfirm.type === 'all'
-                  ? `Discard all ${discardConfirm.paths.length} change(s)? This cannot be undone.`
-                  : `Discard changes to ${discardConfirm.path}? This cannot be undone.`}
-              </p>
-            </div>
-            <div className="flex justify-end gap-2 px-4 py-3 border-t border-zinc-200">
-              <button
-                type="button"
-                onClick={() => setDiscardConfirm(null)}
-                className={buttonClass('secondary', 'sm')}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmDiscard}
-                disabled={discarding}
-                className={`${buttonClass('danger', 'sm')} ${consoleButtonFocusClass}`}
-              >
-                {discarding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : (discardConfirm.type === 'all' ? 'Discard All' : 'Discard')}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

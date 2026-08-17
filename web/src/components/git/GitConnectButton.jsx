@@ -9,7 +9,7 @@ import {
   textSecondary,
   transitionBase,
   consoleIconButtonClass,
-} from '../../lib/consoleTheme';
+} from '../../lib/consoleTokens';
 import { getProviderLabel } from '../../lib/gitLabels';
 
 export default function GitConnectButton({
@@ -47,7 +47,7 @@ export default function GitConnectButton({
           <p className={`text-xs ${textSecondary}`}>
             Connected to {label}
             {connection.connection_type === 'pat' && (
-              <span className="ml-1 rounded bg-[#F4F5F6] px-1 py-0.5 text-[10px] uppercase tracking-wide text-[#9AA0A6]">
+              <span className="ml-1 rounded bg-zinc-100 px-1 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
                 via PAT
               </span>
             )}
@@ -78,7 +78,7 @@ export default function GitConnectButton({
       disabled={loading || disabled}
       title={disabled ? (disabledReason || 'OAuth not configured') : undefined}
       className={cn(
-        `inline-flex h-9 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium ${bgInverse} ${textInverse} hover:bg-[#3C4043] disabled:opacity-50 ${transitionBase}`,
+        `inline-flex h-9 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium ${bgInverse} ${textInverse} hover:bg-zinc-700 disabled:opacity-50 ${transitionBase}`,
         className,
       )}
     >

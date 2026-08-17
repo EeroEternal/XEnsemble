@@ -53,7 +53,7 @@ import {
   consoleButtonFocusClass,
   consoleMenuDropdownZClass,
   consoleDropdownPanelClass,
-} from '../lib/consoleTheme.js';
+} from '../lib/consoleTokens';
 
 const SIDEBAR_COLLAPSED_KEY = 'xensemble.sidebar.collapsed';
 
@@ -169,7 +169,7 @@ function SidebarAccountMenu({ user, onOpenSettings, onLogout, adminLinkClass, co
   const close = () => setOpen(false);
 
   const menuItemClass =
-    `flex w-full items-center gap-2 px-3 py-2 text-xs text-[#5F6368] hover:bg-[#F4F5F6] hover:text-[#202124] ${transitionBase}`;
+    `flex w-full items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 ${transitionBase}`;
 
   const menu = open && menuRect ? (
     <div
@@ -184,7 +184,7 @@ function SidebarAccountMenu({ user, onOpenSettings, onLogout, adminLinkClass, co
       className={`${consoleMenuDropdownZClass} ${consoleDropdownPanelClass} py-1 shadow-md`}
     >
       {user?.email && (
-        <p className="px-3 py-2 text-[11px] text-[#9AA0A6] truncate border-b border-[#E8EAED]">
+        <p className="px-3 py-2 text-[11px] text-zinc-400 truncate border-b border-zinc-200">
           {user.email}
         </p>
       )}
@@ -206,7 +206,7 @@ function SidebarAccountMenu({ user, onOpenSettings, onLogout, adminLinkClass, co
             <Globe className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
             Gateway
           </NavLink>
-          <div className="my-1 border-t border-[#E8EAED]" />
+          <div className="my-1 border-t border-zinc-200" />
         </>
       )}
       {onOpenSettings && (
@@ -247,25 +247,25 @@ function SidebarAccountMenu({ user, onOpenSettings, onLogout, adminLinkClass, co
         aria-haspopup="menu"
         aria-label={isAdmin ? 'Admin menu' : 'Account menu'}
         title={isAdmin ? 'Admin' : (user?.username || 'User')}
-        className={`flex w-full items-center rounded-lg text-left ${transitionBase} hover:bg-[#FAFBFC] ${
-          open ? 'bg-[#FAFBFC]' : ''
+        className={`flex w-full items-center rounded-lg text-left ${transitionBase} hover:bg-zinc-50 ${
+          open ? 'bg-zinc-50' : ''
         } ${collapsed ? `justify-center p-2 ${consoleButtonFocusClass}` : 'gap-2 px-2 py-2'}`}
       >
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#FDECEA] text-[#C06C5D] text-xs font-semibold">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-600 text-xs font-semibold">
           {(user?.username || 'U').charAt(0).toUpperCase()}
         </div>
         {!collapsed && (
           <>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[13px] font-medium text-[#202124]">
+              <p className="truncate text-[13px] font-medium text-zinc-900">
                 {isAdmin ? 'Admin' : (user?.username || 'User')}
               </p>
               {isAdmin && (
-                <p className="truncate text-[10px] text-[#9AA0A6]">{user?.username || 'User'}</p>
+                <p className="truncate text-[10px] text-zinc-400">{user?.username || 'User'}</p>
               )}
             </div>
             <ChevronDown
-              className={`h-4 w-4 shrink-0 text-[#9AA0A6] transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+              className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
               strokeWidth={2}
             />
           </>
@@ -542,7 +542,7 @@ export default function AppSidebar({
           className="flex flex-1 min-w-0 items-center gap-2 text-left"
           title={imageName ? `${label} · ${imageName}` : label}
         >
-          <span className={`flex-1 truncate text-[13px] ${isActive ? 'font-medium text-[#202124]' : 'text-[#3C4043]'}`}>
+          <span className={`flex-1 truncate text-[13px] ${isActive ? 'font-medium text-zinc-900' : 'text-zinc-700'}`}>
             {label}
           </span>
           {imageName && (
@@ -552,10 +552,10 @@ export default function AppSidebar({
             </span>
           )}
           {isPending && (
-            <Loader2 className="w-3 h-3 shrink-0 animate-spin text-[#E8B339]" />
+            <Loader2 className="w-3 h-3 shrink-0 animate-spin text-amber-500" />
           )}
           {isFailed && (
-            <span className="w-1.5 h-1.5 rounded-full bg-[#C06C5D] shrink-0" />
+            <span className="w-1.5 h-1.5 rounded-full bg-red-600 shrink-0" />
           )}
           {timestamp && (
             <span className={`shrink-0 text-[11px] ${textPlaceholder}`}>{timestamp}</span>
@@ -572,7 +572,7 @@ export default function AppSidebar({
                 handleResumeSession(s, ws);
               }}
               disabled={Boolean(resumingSessionId)}
-              className={`p-1 rounded-md ${textPlaceholder} ${hoverTextPrimary} hover:bg-[#E8EAED] disabled:opacity-50 disabled:cursor-not-allowed`}
+              className={`p-1 rounded-md ${textPlaceholder} ${hoverTextPrimary} hover:bg-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed`}
             >
               {isResuming ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
             </button>
@@ -581,7 +581,7 @@ export default function AppSidebar({
             type="button"
             title="Archive"
             onClick={(e) => handleArchiveSession(e, s.id)}
-            className={`p-1 rounded-md ${textPlaceholder} ${hoverTextPrimary} hover:bg-[#E8EAED]`}
+            className={`p-1 rounded-md ${textPlaceholder} ${hoverTextPrimary} hover:bg-zinc-200`}
           >
             <Archive className="w-3 h-3" />
           </button>
@@ -647,27 +647,27 @@ export default function AppSidebar({
   const adminLinkClass = ({ isActive }) =>
     `flex w-full items-center gap-2 px-3 py-2 text-xs font-medium transition-colors ${
       isActive
-        ? 'bg-[#F4F5F6] text-[#202124]'
-        : 'text-[#5F6368] hover:bg-[#F4F5F6] hover:text-[#202124]'
+        ? 'bg-zinc-100 text-zinc-900'
+        : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'
     }`;
 
   const sidebarNavItemClass =
-    `flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-[#3C4043] ${hoverBgTertiary} ${transitionBase}`;
+    `flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-zinc-700 ${hoverBgTertiary} ${transitionBase}`;
 
   if (collapsed) {
     return (
       <aside
-        className={`h-full w-14 ${bgSecondary} border-r border-[#E8EAED] flex flex-col flex-shrink-0 select-none`}
+        className={`h-full w-14 ${bgSecondary} border-r border-zinc-200 flex flex-col flex-shrink-0 select-none`}
         data-testid="app-sidebar-collapsed"
       >
-        <div className="shrink-0 flex flex-col items-center gap-1 px-1.5 pt-3 pb-2 border-b border-[#E8EAED]">
+        <div className="shrink-0 flex flex-col items-center gap-1 px-1.5 pt-3 pb-2 border-b border-zinc-200">
           <BrandMark className="h-8 w-8" iconClassName="h-4 w-4" />
           <button
             type="button"
             title="Expand sidebar"
             aria-label="Expand sidebar"
             onClick={() => setSidebarCollapsed(false)}
-            className={`mt-1 p-2 rounded-lg ${textPlaceholder} hover:text-[#202124] ${hoverBgTertiary} ${transitionBase} ${consoleButtonFocusClass}`}
+            className={`mt-1 p-2 rounded-lg ${textPlaceholder} hover:text-zinc-900 ${hoverBgTertiary} ${transitionBase} ${consoleButtonFocusClass}`}
           >
             <PanelLeft className="w-4 h-4" strokeWidth={1.75} />
           </button>
@@ -677,13 +677,13 @@ export default function AppSidebar({
             onClick={onNewAgent}
             title="New Agent"
             aria-label="New Agent"
-            className={`p-2 rounded-lg text-[#3C4043] hover:text-[#202124] ${hoverBgTertiary} ${transitionBase} disabled:opacity-40 ${consoleButtonFocusClass}`}
+            className={`p-2 rounded-lg text-zinc-700 hover:text-zinc-900 ${hoverBgTertiary} ${transitionBase} disabled:opacity-40 ${consoleButtonFocusClass}`}
           >
             <PenSquare className="w-4 h-4" strokeWidth={1.75} />
           </button>
         </div>
         <div className="flex-1 min-h-0" />
-        <div className="shrink-0 border-t border-[#E8EAED] px-1.5 py-2">
+        <div className="shrink-0 border-t border-zinc-200 px-1.5 py-2">
           <SidebarAccountMenu
             user={user}
             onOpenSettings={onOpenSettings}
@@ -697,17 +697,17 @@ export default function AppSidebar({
   }
 
   return (
-    <aside className={`h-full w-[272px] ${bgSecondary} border-r border-[#E8EAED] flex flex-col flex-shrink-0 select-none`}>
-      <div className="shrink-0 px-3 pt-3 pb-2 border-b border-[#E8EAED]">
+    <aside className={`h-full w-[272px] ${bgSecondary} border-r border-zinc-200 flex flex-col flex-shrink-0 select-none`}>
+      <div className="shrink-0 px-3 pt-3 pb-2 border-b border-zinc-200">
         <div className="flex items-center gap-2 px-0.5 mb-2">
           <BrandMark className="h-7 w-7" iconClassName="h-3.5 w-3.5" />
-          <span className="min-w-0 flex-1 truncate text-sm font-bold text-[#202124]">XEnsemble</span>
+          <span className="min-w-0 flex-1 truncate text-sm font-bold text-zinc-900">XEnsemble</span>
           <button
             type="button"
             title="Collapse sidebar"
             aria-label="Collapse sidebar"
             onClick={() => setSidebarCollapsed(true)}
-            className={`p-1.5 rounded-md ${textPlaceholder} hover:text-[#202124] ${hoverBgTertiary} ${transitionBase} ${consoleButtonFocusClass}`}
+            className={`p-1.5 rounded-md ${textPlaceholder} hover:text-zinc-900 ${hoverBgTertiary} ${transitionBase} ${consoleButtonFocusClass}`}
           >
             <PanelLeftClose className="w-4 h-4" strokeWidth={1.75} />
           </button>
@@ -723,13 +723,13 @@ export default function AppSidebar({
             New Agent
           </button>
           <label className={`${sidebarNavItemClass} cursor-text`}>
-            <Search className="w-4 h-4 shrink-0 text-[#9AA0A6]" strokeWidth={1.75} />
+            <Search className="w-4 h-4 shrink-0 text-zinc-400" strokeWidth={1.75} />
             <input
               type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search"
-              className="min-w-0 flex-1 bg-transparent text-[13px] text-[#3C4043] placeholder:text-[#9AA0A6] outline-none"
+              className="min-w-0 flex-1 bg-transparent text-[13px] text-zinc-700 placeholder:text-zinc-400 outline-none"
             />
           </label>
         </div>
@@ -738,14 +738,14 @@ export default function AppSidebar({
       <div className="flex-1 min-h-0 overflow-auto px-2 py-3">
         <div className="flex flex-col gap-0.5">
           <div className="flex items-center justify-between px-1.5 mb-1">
-            <h3 className="text-xs font-medium text-[#9AA0A6]">Workspaces</h3>
+            <h3 className="text-xs font-medium text-zinc-400">Workspaces</h3>
             <div className="flex items-center gap-0.5">
               <button
                 type="button"
                 title="Import from Git"
                 disabled={!onImportFromGit}
                 onClick={onImportFromGit}
-                className={`p-1 rounded-md ${textPlaceholder} hover:text-[#202124] ${hoverBgTertiary} ${transitionBase} disabled:opacity-40`}
+                className={`p-1 rounded-md ${textPlaceholder} hover:text-zinc-900 ${hoverBgTertiary} ${transitionBase} disabled:opacity-40`}
               >
                 <GitBranch className="w-3.5 h-3.5" strokeWidth={1.75} />
               </button>
@@ -755,8 +755,8 @@ export default function AppSidebar({
                 onClick={() => setActiveOnlyFilter((v) => !v)}
                 className={`p-1 rounded-md ${transitionBase} ${
                   activeOnlyFilter
-                    ? `text-[#202124] ${bgCanvas}`
-                    : `${textPlaceholder} hover:text-[#202124] ${hoverBgTertiary}`
+                    ? `text-zinc-900 ${bgCanvas}`
+                    : `${textPlaceholder} hover:text-zinc-900 ${hoverBgTertiary}`
                 }`}
               >
                 <ListFilter className="w-3.5 h-3.5" strokeWidth={1.75} />
@@ -766,7 +766,7 @@ export default function AppSidebar({
                 title="New workspace"
                 disabled={!onCreateWorkspace}
                 onClick={onCreateWorkspace}
-                className={`p-1 rounded-md ${textPlaceholder} hover:text-[#202124] ${hoverBgTertiary} ${transitionBase} disabled:opacity-40`}
+                className={`p-1 rounded-md ${textPlaceholder} hover:text-zinc-900 ${hoverBgTertiary} ${transitionBase} disabled:opacity-40`}
               >
                 <FolderPlus className="w-3.5 h-3.5" strokeWidth={1.75} />
               </button>
@@ -796,7 +796,7 @@ export default function AppSidebar({
               const isCloning = isWorkspaceClonePending(ws);
               return (
                 <div key={ws.id} className="rounded-lg">
-                  <div className={`group flex items-center gap-0.5 rounded-lg hover:bg-[#FAFBFC] ${expanded ? 'bg-[#FAFBFC]' : ''}`}>
+                  <div className={`group flex items-center gap-0.5 rounded-lg hover:bg-zinc-50 ${expanded ? 'bg-zinc-50' : ''}`}>
                     <button
                       type="button"
                       onClick={() => toggleWorkspaceExpanded(ws.id)}
@@ -823,7 +823,7 @@ export default function AppSidebar({
                           }}
                           onBlur={() => handleConfirmRename(ws.id)}
                           disabled={renameLoading}
-                          className={`flex-1 min-w-0 bg-transparent text-[13px] ${textPrimary} outline-none border-b border-[#9AA0A6] py-1 mr-1`}
+                          className={`flex-1 min-w-0 bg-transparent text-[13px] ${textPrimary} outline-none border-b border-zinc-400 py-1 mr-1`}
                         />
                         {renameLoading && (
                           <Loader2 className={`w-3.5 h-3.5 shrink-0 animate-spin ${textPlaceholder}`} />
@@ -857,7 +857,7 @@ export default function AppSidebar({
                             type="button"
                             title="Rename workspace"
                             onClick={(e) => handleStartRename(e, ws)}
-                            className={`p-1.5 rounded-lg ${textPlaceholder} ${hoverTextPrimary} hover:bg-[#E8EAED] opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity ${transitionBase}`}
+                            className={`p-1.5 rounded-lg ${textPlaceholder} ${hoverTextPrimary} hover:bg-zinc-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity ${transitionBase}`}
                           >
                             <PenSquare className="w-3.5 h-3.5" />
                           </button>
@@ -867,7 +867,7 @@ export default function AppSidebar({
                             type="button"
                             title={wsPinned ? 'Unpin workspace' : 'Pin workspace'}
                             onClick={(e) => handlePinWorkspace(e, ws.id)}
-                            className={`p-1.5 rounded-lg ${textPlaceholder} ${hoverTextPrimary} hover:bg-[#E8EAED] transition-opacity ${
+                            className={`p-1.5 rounded-lg ${textPlaceholder} ${hoverTextPrimary} hover:bg-zinc-200 transition-opacity ${
                               wsPinned ? `opacity-100 ${textSecondary}` : 'opacity-0 group-hover:opacity-100 focus:opacity-100'
                             }`}
                           >
@@ -897,7 +897,7 @@ export default function AppSidebar({
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-[#E8EAED] px-2 py-2">
+      <div className="shrink-0 border-t border-zinc-200 px-2 py-2">
         <SidebarAccountMenu
           user={user}
           onOpenSettings={onOpenSettings}

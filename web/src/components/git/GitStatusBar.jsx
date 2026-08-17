@@ -22,7 +22,7 @@ import {
   bgCanvas,
   textPrimary,
   textPlaceholder,
-} from '../../lib/consoleTheme';
+} from '../../lib/consoleTokens';
 import { apiFetch } from '../../lib/api';
 import { buttonClass } from '../../lib/buttonStyles';
 
@@ -183,17 +183,17 @@ export default function GitStatusBar({ projectId, project, git }) {
 
   return (
     <>
-      <div className={cn('flex h-10 shrink-0 items-center justify-between border-t border-[#E8EAED] bg-[#FAFBFC] px-4', borderHairline)}>
+      <div className={cn('flex h-10 shrink-0 items-center justify-between border-t border-zinc-200 bg-zinc-50 px-4', borderHairline)}>
         <div className="flex min-w-0 items-center gap-3 text-xs">
-          <div className="flex items-center gap-1.5 text-[#202124]">
-            <GitBranch className="h-3.5 w-3.5 shrink-0 text-[#9AA0A6]" />
+          <div className="flex items-center gap-1.5 text-zinc-900">
+            <GitBranch className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
             <button
               ref={branchBtnRef}
               type="button"
               onClick={openBranchMenu}
               disabled={operation === 'switch'}
               title="Switch branch"
-              className={`flex items-center gap-1 max-w-[12rem] truncate font-mono font-medium hover:text-[#5F6368] transition-colors ${consoleButtonFocusClass}`}
+              className={`flex items-center gap-1 max-w-[12rem] truncate font-mono font-medium hover:text-zinc-500 transition-colors ${consoleButtonFocusClass}`}
             >
               {operation === 'switch' ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -204,7 +204,7 @@ export default function GitStatusBar({ projectId, project, git }) {
             </button>
           </div>
           {(status?.ahead > 0 || status?.behind > 0) && (
-            <div className="flex items-center gap-2 text-[#5F6368]">
+            <div className="flex items-center gap-2 text-zinc-500">
               {status?.ahead > 0 && (
                 <span className="flex items-center gap-0.5" title={`${status.ahead} commit(s) ahead`}>
                   <ArrowUp className="h-3 w-3" />
@@ -219,7 +219,7 @@ export default function GitStatusBar({ projectId, project, git }) {
               )}
             </div>
           )}
-          <div className="flex items-center gap-2 text-[#5F6368]">
+          <div className="flex items-center gap-2 text-zinc-500">
             {status?.dirty ? (
               <>
                 {status?.unstaged && <span>modified</span>}
@@ -227,7 +227,7 @@ export default function GitStatusBar({ projectId, project, git }) {
                 {status?.untracked && <span>untracked</span>}
               </>
             ) : (
-              <span className="text-[#4A7C59]">clean</span>
+              <span className="text-emerald-600">clean</span>
             )}
           </div>
         </div>
@@ -329,8 +329,8 @@ export default function GitStatusBar({ projectId, project, git }) {
               }}
             />
             <div className="flex items-center gap-1.5">
-              <User className="h-3 w-3 text-[#9AA0A6] shrink-0" />
-              <span className="text-xs text-[#5F6368] truncate">
+              <User className="h-3 w-3 text-zinc-400 shrink-0" />
+              <span className="text-xs text-zinc-500 truncate">
                 {authorName && authorEmail
                   ? `${authorName} <${authorEmail}>`
                   : 'No author identity set'}
@@ -338,7 +338,7 @@ export default function GitStatusBar({ projectId, project, git }) {
               <button
                 type="button"
                 onClick={() => setShowAuthorDialog(true)}
-                className={`text-xs text-[#5B8DB8] hover:text-[#4A7298] shrink-0 ${consoleButtonFocusClass}`}
+                className={`text-xs text-black hover:text-zinc-800 shrink-0 ${consoleButtonFocusClass}`}
               >
                 {authorName ? 'Edit' : 'Set'}
               </button>
@@ -368,7 +368,7 @@ export default function GitStatusBar({ projectId, project, git }) {
       {showAuthorDialog && (
         <ConsoleDialogShell onClose={() => setShowAuthorDialog(false)} panelClassName="w-80">
           <div className="px-5 pt-5 pb-2">
-            <h3 className="text-sm font-semibold text-[#202124]">Set Git author info</h3>
+            <h3 className="text-sm font-semibold text-zinc-900">Set Git author info</h3>
           </div>
           <div className="px-5 pb-5 flex flex-col gap-3">
             <input
@@ -387,7 +387,7 @@ export default function GitStatusBar({ projectId, project, git }) {
               className={`w-full ${consoleInputClass} text-xs`}
             />
           </div>
-          <div className="flex justify-end gap-2 px-5 py-3 border-t border-[#E8EAED]">
+          <div className="flex justify-end gap-2 px-5 py-3 border-t border-zinc-200">
             <button
               onClick={() => setShowAuthorDialog(false)}
               className={buttonClass('secondary', 'sm')}
@@ -422,16 +422,16 @@ export default function GitStatusBar({ projectId, project, git }) {
         >
           {branchesLoading ? (
             <div className="flex items-center justify-center py-4">
-              <Loader2 className="h-4 w-4 animate-spin text-[#9AA0A6]" />
+              <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />
             </div>
           ) : branches.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-[#9AA0A6]">
+            <div className="px-3 py-2 text-xs text-zinc-400">
               {branchesError || 'No branches'}
               {branchesError && (
                 <button
                   type="button"
                   onClick={openBranchMenu}
-                  className={`ml-2 text-[#5B8DB8] hover:text-[#4A7298] ${consoleButtonFocusClass}`}
+                  className={`ml-2 text-black hover:text-zinc-800 ${consoleButtonFocusClass}`}
                 >
                   Retry
                 </button>
@@ -446,7 +446,7 @@ export default function GitStatusBar({ projectId, project, git }) {
                   type="button"
                   onClick={() => handleSwitchBranch(b.name)}
                   className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors ${
-                    isCurrent ? 'bg-[#F4F5F6] text-[#202124] font-medium' : 'text-[#5F6368] hover:bg-[#F4F5F6]'
+                    isCurrent ? 'bg-zinc-100 text-zinc-900 font-medium' : 'text-zinc-500 hover:bg-zinc-100'
                   } ${consoleButtonFocusClass}`}
                 >
                   <span className="w-3.5 shrink-0 flex items-center justify-center">
@@ -473,7 +473,7 @@ export default function GitStatusBar({ projectId, project, git }) {
                 onClick={handleCreateBranch}
                 disabled={!newBranchName.trim() || operation === 'switch'}
                 title="Create branch"
-                className={`shrink-0 p-1 rounded text-[#5F6368] hover:text-[#202124] hover:bg-[#E8EAED] disabled:opacity-40 disabled:cursor-default ${consoleButtonFocusClass}`}
+                className={`shrink-0 p-1 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-default ${consoleButtonFocusClass}`}
               >
                 {operation === 'switch' ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

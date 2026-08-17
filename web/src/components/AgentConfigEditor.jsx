@@ -5,7 +5,7 @@ import {
   textPrimary,
   textPlaceholder,
   transitionBase,
-} from '../lib/consoleTheme';
+} from '../lib/consoleTokens';
 import { isSecretPasswordField } from '../lib/secretLabels';
 
 /**
@@ -137,7 +137,7 @@ export default function AgentConfigEditor({
               <button
                 type="button"
                 onClick={() => handleRemoveEnv(idx)}
-                className={`flex-shrink-0 mt-1.5 ${textPlaceholder} hover:text-[#C06C5D] ${transitionBase}`}
+                className={`flex-shrink-0 mt-1.5 ${textPlaceholder} hover:text-red-600 ${transitionBase}`}
                 title="Remove"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

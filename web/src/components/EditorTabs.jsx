@@ -1,7 +1,7 @@
 import { useState, memo } from 'react';
 import { X } from 'lucide-react';
 import { ConsoleDialogShell } from './ConsoleDialog';
-import { consoleButtonFocusClass } from '@/lib/consoleTheme';
+import { consoleButtonFocusClass } from '@/lib/consoleTokens';
 import { buttonClass } from '@/lib/buttonStyles';
 
 const EditorTabs = memo(function EditorTabs({ tabs, activePath, onSelectTab, onCloseTab, onSaveTab }) {
@@ -42,7 +42,7 @@ const EditorTabs = memo(function EditorTabs({ tabs, activePath, onSelectTab, onC
 
   return (
     <>
-      <div className="flex items-center border-b border-[#E8EAED] bg-[#FAFBFC] overflow-x-auto" data-testid="tab-list">
+      <div className="flex items-center border-b border-zinc-200 bg-zinc-50 overflow-x-auto" data-testid="tab-list">
         {tabs.map((tab) => {
           const dirty = tab.content !== tab.originalContent;
           const isActive = tab.path === activePath;
@@ -53,18 +53,18 @@ const EditorTabs = memo(function EditorTabs({ tabs, activePath, onSelectTab, onC
               data-testid="tab"
               data-dirty={dirty ? 'true' : 'false'}
               data-active={isActive ? 'true' : 'false'}
-              className={`group flex items-center gap-1.5 shrink-0 px-3 py-2 text-sm cursor-pointer border-r border-[#E8EAED] transition-colors duration-150 ${
+              className={`group flex items-center gap-1.5 shrink-0 px-3 py-2 text-sm cursor-pointer border-r border-zinc-200 transition-colors duration-150 ${
                 isActive
-                  ? 'bg-white text-[#202124] border-b-2 border-b-[#5B8DB8] -mb-px'
-                  : 'text-[#5F6368] hover:bg-[#F4F5F6]'
+                  ? 'bg-white text-zinc-900 border-b-2 border-b-black -mb-px'
+                  : 'text-zinc-500 hover:bg-zinc-100'
               }`}
               onClick={() => onSelectTab?.(tab.path)}
             >
               <span className="truncate max-w-[160px]">{displayName}</span>
-              {dirty && <span className="text-[#C06C5D] text-xs leading-none">&#x2022;</span>}
+              {dirty && <span className="text-red-600 text-xs leading-none">&#x2022;</span>}
               <button
                 aria-label={`Close ${tab.path}`}
-                className={`ml-0.5 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-[#E8EAED] transition-opacity ${consoleButtonFocusClass}`}
+                className={`ml-0.5 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-zinc-200 transition-opacity ${consoleButtonFocusClass}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   handleClose(tab.path);

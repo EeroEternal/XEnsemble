@@ -11,7 +11,7 @@ import {
   textPlaceholder,
   borderHairline,
   bgCanvas,
-} from '../../lib/consoleTheme';
+} from '../../lib/consoleTokens';
 
 const STRATEGY_OPTIONS = [
   { value: 'ours', label: 'Keep ours' },
@@ -73,46 +73,46 @@ export function ConflictFileItem({ file, projectId, onResolved }) {
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
-        className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm ${bgCanvas} hover:bg-[#F4F5F6] transition-colors`}
+        className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm ${bgCanvas} hover:bg-zinc-100 transition-colors`}
       >
         {expanded ? (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[#5F6368]" />
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
         ) : (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[#5F6368]" />
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
         )}
         <FileWarning className="h-3.5 w-3.5 shrink-0 text-amber-500" />
         <span className="font-mono text-xs truncate">{file.path}</span>
       </button>
 
       {expanded && (
-        <div className="border-t border-[#E8EAED]">
+        <div className="border-t border-zinc-200">
           {loading ? (
-            <div className="flex items-center justify-center gap-2 p-4 text-xs text-[#5F6368]">
+            <div className="flex items-center justify-center gap-2 p-4 text-xs text-zinc-500">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               Loading file contents…
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 divide-x divide-[#E8EAED] max-h-64 overflow-auto">
+              <div className="grid grid-cols-2 divide-x divide-zinc-200 max-h-64 overflow-auto">
                 <div>
-                  <div className="sticky top-0 bg-[#F4F5F6] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[#5F6368] border-b border-[#E8EAED]">
+                  <div className="sticky top-0 bg-zinc-100 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 border-b border-zinc-200">
                     Ours (current branch)
                   </div>
-                  <pre className="p-2 text-xs font-mono whitespace-pre-wrap text-[#202124] overflow-auto">
+                  <pre className="p-2 text-xs font-mono whitespace-pre-wrap text-zinc-900 overflow-auto">
                     {oursContent || '(empty)'}
                   </pre>
                 </div>
                 <div>
-                  <div className="sticky top-0 bg-[#F4F5F6] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[#5F6368] border-b border-[#E8EAED]">
+                  <div className="sticky top-0 bg-zinc-100 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 border-b border-zinc-200">
                     Theirs (incoming)
                   </div>
-                  <pre className="p-2 text-xs font-mono whitespace-pre-wrap text-[#202124] overflow-auto">
+                  <pre className="p-2 text-xs font-mono whitespace-pre-wrap text-zinc-900 overflow-auto">
                     {theirsContent || '(empty)'}
                   </pre>
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 px-3 py-2 border-t border-[#E8EAED] bg-[#FAFBFC]">
+              <div className="flex items-center gap-3 px-3 py-2 border-t border-zinc-200 bg-zinc-50">
                 <SelectMenu
                   value={strategy}
                   onChange={setStrategy}
@@ -201,7 +201,7 @@ export default function ConflictResolutionPanel({ projectId, targetBranch }) {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex items-center justify-between border-b border-[#E8EAED] px-4 py-2.5 shrink-0">
+      <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-2.5 shrink-0">
         <div className="flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 text-amber-500" />
           <h3 className={`text-sm font-semibold ${textPrimary}`}>Conflict Resolution</h3>
@@ -247,7 +247,7 @@ export default function ConflictResolutionPanel({ projectId, targetBranch }) {
       </div>
 
       {checkResult && (
-        <div className={`px-4 py-2 border-b border-[#E8EAED] text-xs ${bgCanvas}`}>
+        <div className={`px-4 py-2 border-b border-zinc-200 text-xs ${bgCanvas}`}>
           <div className="flex items-center gap-3">
             <span className={checkResult.canMerge ? 'text-green-700' : 'text-amber-700'}>
               {checkResult.canMerge ? '✓ Clean merge possible' : `✗ ${checkResult.conflictFiles?.length || 0} conflict(s)`}
@@ -272,7 +272,7 @@ export default function ConflictResolutionPanel({ projectId, targetBranch }) {
 
       <div className="flex-1 min-h-0 overflow-auto p-4 space-y-2">
         {loading ? (
-          <div className="flex items-center justify-center gap-2 py-8 text-sm text-[#5F6368]">
+          <div className="flex items-center justify-center gap-2 py-8 text-sm text-zinc-500">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading conflicts…
           </div>

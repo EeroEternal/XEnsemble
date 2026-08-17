@@ -95,7 +95,7 @@ export default function GitProvidersSettingsPanel() {
     return (
       <div className="space-y-4">
         <h3 className={consoleSectionLabelClass}>Git Providers</h3>
-        <p className="text-sm text-[#5F6368]">
+        <p className="text-sm text-zinc-500">
           Ask an administrator to configure Git provider OAuth settings.
         </p>
       </div>
@@ -113,7 +113,7 @@ export default function GitProvidersSettingsPanel() {
   }
 
   if (!settings) {
-    return <p className="text-sm text-[#5F6368]">Loading…</p>;
+    return <p className="text-sm text-zinc-500">Loading…</p>;
   }
 
   const provider = PROVIDERS.find((p) => p.id === activeProvider);
@@ -123,12 +123,12 @@ export default function GitProvidersSettingsPanel() {
       <div className="flex-1 min-h-0 space-y-4">
         <div>
           <h3 className={consoleSectionLabelClass}>Git Providers</h3>
-          <p className="text-xs text-[#5F6368] mt-1">
+          <p className="text-xs text-zinc-500 mt-1">
             Configure OAuth for GitHub, GitLab, and Gitea. Users import repos from the sidebar.
           </p>
         </div>
 
-        <div className="flex gap-1 border-b border-[#E8EAED] pb-0">
+        <div className="flex gap-1 border-b border-zinc-200 pb-0">
           {PROVIDERS.map((p) => {
             const isConfigured = Boolean(settings[providerKey(p.id, 'CLIENT_ID')]);
             return (
@@ -138,13 +138,13 @@ export default function GitProvidersSettingsPanel() {
                 onClick={() => setActiveProvider(p.id)}
                 className={`px-3 py-1.5 text-xs font-medium rounded-t-md transition-colors border-b-2 -mb-px ${
                   activeProvider === p.id
-                    ? 'border-[#202124] text-[#202124] bg-white'
-                    : 'border-transparent text-[#5F6368] hover:text-[#202124]'
+                    ? 'border-zinc-900 text-zinc-900 bg-white'
+                    : 'border-transparent text-zinc-500 hover:text-zinc-900'
                 }`}
               >
                 {p.label}
                 {isConfigured && (
-                  <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[#4A7C59]" />
+                  <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-emerald-600" />
                 )}
               </button>
             );

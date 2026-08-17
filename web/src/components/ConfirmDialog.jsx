@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { ConsoleDialogShell } from './ConsoleDialog';
 import { buttonClass } from '../lib/buttonStyles';
-import { consoleButtonFocusClass, textPrimary, textSecondary } from '../lib/consoleTheme';
+import { consoleButtonFocusClass, textPrimary, textSecondary } from '../lib/consoleTokens';
 
 let openConfirmFn = null;
 
@@ -62,7 +62,7 @@ export default function ConfirmDialog() {
       <div className="px-5 pb-5">
         <p className={`text-sm ${textSecondary} leading-relaxed whitespace-pre-wrap`}>{state.message}</p>
       </div>
-      <div className="flex justify-end gap-2 px-5 py-3 border-t border-[#E8EAED]">
+      <div className="flex justify-end gap-2 px-5 py-3 border-t border-zinc-200">
         <button
           onClick={handleCancel}
           className={`${buttonClass('secondary', 'sm')} ${consoleButtonFocusClass}`}

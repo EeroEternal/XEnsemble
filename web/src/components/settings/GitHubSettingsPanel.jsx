@@ -107,7 +107,7 @@ export default function GitHubSettingsPanel() {
     }
 
     if (!settings) {
-      return <p className="text-sm text-[#5F6368]">Loading…</p>;
+      return <p className="text-sm text-zinc-500">Loading…</p>;
     }
 
     return (
@@ -115,7 +115,7 @@ export default function GitHubSettingsPanel() {
         <div className="flex-1 min-h-0 space-y-4">
           <div>
             <h3 className={consoleSectionLabelClass}>GitHub OAuth App</h3>
-            <p className="text-xs text-[#5F6368] mt-1">
+            <p className="text-xs text-zinc-500 mt-1">
               Configure the GitHub OAuth App used for repository import and pull requests.
             </p>
           </div>
@@ -179,12 +179,12 @@ export default function GitHubSettingsPanel() {
     <div className="space-y-6">
       <div>
         <h3 className={consoleSectionLabelClass}>Git Accounts</h3>
-        <p className="text-xs text-[#5F6368] mt-1">
+        <p className="text-xs text-zinc-500 mt-1">
           Connect Git providers to import repositories as workspaces.
         </p>
       </div>
 
-      <div className="flex gap-1 border-b border-[#E8EAED] pb-0">
+      <div className="flex gap-1 border-b border-zinc-200 pb-0">
         {USER_PROVIDERS.map((id) => (
           <button
             key={id}
@@ -192,8 +192,8 @@ export default function GitHubSettingsPanel() {
             onClick={() => setActiveProvider(id)}
             className={`px-3 py-1.5 text-xs font-medium rounded-t-md transition-colors border-b-2 -mb-px ${
               activeProvider === id
-                ? 'border-[#202124] text-[#202124] bg-white'
-                : 'border-transparent text-[#5F6368] hover:text-[#202124]'
+                ? 'border-zinc-900 text-zinc-900 bg-white'
+                : 'border-transparent text-zinc-500 hover:text-zinc-900'
             }`}
           >
             {getProviderLabel(id)}

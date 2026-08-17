@@ -8,10 +8,10 @@ import {
   textSecondary,
   textPlaceholder,
   borderHairline,
-} from '../../lib/consoleTheme';
+} from '../../lib/consoleTokens';
 
 function shaToColor(sha) {
-  if (!sha) return '#F4F5F6';
+  if (!sha) return '#f4f4f5';
   let hash = 0;
   for (let i = 0; i < sha.length; i++) {
     hash = sha.charCodeAt(i) + ((hash << 5) - hash);
@@ -31,20 +31,20 @@ function BlameLine({ entry, prevSha, showGutter }) {
   const bg = shaToColor(entry.sha);
 
   return (
-    <div className="flex text-xs font-mono leading-5 hover:bg-[#F4F5F6] transition-colors">
+    <div className="flex text-xs font-mono leading-5 hover:bg-zinc-100 transition-colors">
       <div
-        className="w-40 shrink-0 flex items-center gap-2 px-2 border-r border-[#E8EAED] overflow-hidden"
+        className="w-40 shrink-0 flex items-center gap-2 px-2 border-r border-zinc-200 overflow-hidden"
         style={{ backgroundColor: isNewBlock ? bg : 'transparent' }}
       >
         {isNewBlock ? (
           <>
-            <span className="w-14 truncate text-[10px] text-[#5F6368]" title={entry.sha}>
+            <span className="w-14 truncate text-[10px] text-zinc-500" title={entry.sha}>
               {entry.sha?.slice(0, 7)}
             </span>
-            <span className="flex-1 truncate text-[10px] text-[#202124]" title={entry.author}>
+            <span className="flex-1 truncate text-[10px] text-zinc-900" title={entry.author}>
               {entry.author}
             </span>
-            <span className="text-[10px] text-[#9AA0A6] shrink-0">
+            <span className="text-[10px] text-zinc-400 shrink-0">
               {formatDate(entry.date)}
             </span>
           </>
@@ -53,11 +53,11 @@ function BlameLine({ entry, prevSha, showGutter }) {
         )}
       </div>
 
-      <div className="w-10 shrink-0 text-right pr-2 text-[#9AA0A6] select-none border-r border-[#E8EAED]">
+      <div className="w-10 shrink-0 text-right pr-2 text-zinc-400 select-none border-r border-zinc-200">
         {entry.lineNumber}
       </div>
 
-      <div className="flex-1 min-w-0 px-3 whitespace-pre overflow-x-auto text-[#202124]">
+      <div className="flex-1 min-w-0 px-3 whitespace-pre overflow-x-auto text-zinc-900">
         {entry.content}
       </div>
     </div>
@@ -126,12 +126,12 @@ export default function GitBlamePanel({ projectId }) {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex items-center justify-between border-b border-[#E8EAED] px-4 py-2.5 shrink-0">
+      <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-2.5 shrink-0">
         <div className="flex items-center gap-2">
-          <Eye className="h-4 w-4 text-[#5F6368]" />
+          <Eye className="h-4 w-4 text-zinc-500" />
           <h3 className={`text-sm font-semibold ${textPrimary}`}>Blame</h3>
           {selectedFile && (
-            <span className="font-mono text-[10px] text-[#5F6368] bg-[#F4F5F6] rounded px-1.5 py-0.5 max-w-[16rem] truncate">
+            <span className="font-mono text-[10px] text-zinc-500 bg-zinc-100 rounded px-1.5 py-0.5 max-w-[16rem] truncate">
               {selectedFile}
             </span>
           )}
@@ -162,30 +162,30 @@ export default function GitBlamePanel({ projectId }) {
       </div>
 
       {showFilePicker && (
-        <div className="border-b border-[#E8EAED] shrink-0">
+        <div className="border-b border-zinc-200 shrink-0">
           <div className="px-3 py-2">
             <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[#9AA0A6]" />
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-zinc-400" />
               <input
                 type="text"
                 placeholder="搜索文件..."
                 value={fileSearch}
                 onChange={(e) => setFileSearch(e.target.value)}
                 autoFocus={showFilePicker}
-                className="w-full pl-7 pr-2 py-1 text-xs rounded border border-[#DADCE0] bg-white focus:outline-none focus:border-[#5B8DB8]"
+                className="w-full pl-7 pr-2 py-1 text-xs rounded border border-zinc-300 bg-white focus:outline-none focus:border-black"
               />
             </div>
           </div>
           <div className="max-h-48 overflow-y-auto">
             {loadingFiles ? (
-              <div className="flex items-center justify-center gap-2 py-4 text-sm text-[#5F6368]">
+              <div className="flex items-center justify-center gap-2 py-4 text-sm text-zinc-500">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 加载文件列表…
               </div>
             ) : Object.keys(groupedFiles).sort().map((dir) => (
               <div key={dir}>
                 {dir !== '(root)' && (
-                  <div className="px-3 py-1 text-[10px] font-semibold text-[#5F6368] uppercase tracking-wider bg-[#FAFAFA]">
+                  <div className="px-3 py-1 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider bg-zinc-50">
                     {dir}
                   </div>
                 )}
@@ -197,8 +197,8 @@ export default function GitBlamePanel({ projectId }) {
                       setShowFilePicker(false);
                       setFileSearch('');
                     }}
-                    className={`w-full text-left px-6 py-1 text-xs truncate hover:bg-[#F4F5F6] transition-colors ${
-                      selectedFile === f ? 'text-[#202124] bg-[#E8EAED]' : 'text-[#202124]'
+                    className={`w-full text-left px-6 py-1 text-xs truncate hover:bg-zinc-100 transition-colors ${
+                      selectedFile === f ? 'text-zinc-900 bg-zinc-200' : 'text-zinc-900'
                     }`}
                   >
                     <span className="font-mono">{dir === '(root)' ? f : f.slice(dir.length + 1)}</span>
@@ -223,13 +223,13 @@ export default function GitBlamePanel({ projectId }) {
             </button>
           </div>
         ) : loading ? (
-          <div className="flex items-center justify-center gap-2 py-8 text-sm text-[#5F6368]">
+          <div className="flex items-center justify-center gap-2 py-8 text-sm text-zinc-500">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading blame…
           </div>
         ) : blameData.length === 0 ? (
           <div className="text-center py-8">
-            <Eye className="mx-auto h-8 w-8 text-[#9AA0A6] mb-2" />
+            <Eye className="mx-auto h-8 w-8 text-zinc-400 mb-2" />
             <p className={`text-sm ${textSecondary}`}>No blame data available.</p>
           </div>
         ) : (

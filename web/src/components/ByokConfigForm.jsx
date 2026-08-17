@@ -10,7 +10,7 @@ import {
   textSecondary,
   borderHairline,
   bgCanvas,
-} from '../lib/consoleTheme';
+} from '../lib/consoleTokens';
 
 export default function ByokConfigForm({ agentId, loading, onSave }) {
   const [fields, setFields] = useState([]);
@@ -89,7 +89,7 @@ export default function ByokConfigForm({ agentId, loading, onSave }) {
   if (valuesLoading || loading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <Loader2 className="w-4 h-4 animate-spin text-[#9AA0A6]" />
+        <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
       </div>
     );
   }
@@ -105,12 +105,12 @@ export default function ByokConfigForm({ agentId, loading, onSave }) {
   return (
     <div className="space-y-3">
       {description && (
-        <p className={cn('text-xs rounded-md bg-[#F4F5F6] px-3 py-2', textSecondary)}>
+        <p className={cn('text-xs rounded-md bg-zinc-100 px-3 py-2', textSecondary)}>
           {description}
         </p>
       )}
       {error && (
-        <p className="text-sm text-[#C06C5D] bg-[#FDECEA] border border-[#FADBD8] rounded-md px-3 py-2">{error}</p>
+        <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{error}</p>
       )}
       {fields.map((f, idx) => {
         const isSecret = f.type === 'secret';
@@ -120,7 +120,7 @@ export default function ByokConfigForm({ agentId, loading, onSave }) {
             <div className="flex items-center gap-1.5 mb-1">
               <label className={cn('text-xs font-medium', textPrimary)}>
                 {f.label}
-                {f.required && <span className="text-[#C06C5D] ml-0.5">*</span>}
+                {f.required && <span className="text-red-600 ml-0.5">*</span>}
               </label>
               <span className="group relative inline-flex">
                 <HelpCircle className={cn('h-3 w-3 cursor-help', textPlaceholder)} />
@@ -128,7 +128,7 @@ export default function ByokConfigForm({ agentId, loading, onSave }) {
                   'absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5',
                   'hidden group-hover:block z-10',
                   'px-2 py-1 text-[11px] rounded whitespace-nowrap',
-                  'bg-[#202124] text-white',
+                  'bg-black text-white',
                   'pointer-events-none',
                 )}>
                   {f.tooltip}
@@ -155,8 +155,8 @@ export default function ByokConfigForm({ agentId, loading, onSave }) {
           onClick={handleSave}
           className={cn(
             'h-9 px-4 flex items-center justify-center gap-2',
-            'bg-[#202124] text-white rounded-md text-sm font-medium',
-            'hover:bg-[#3C4043] disabled:opacity-50',
+            'bg-black text-white rounded-md text-sm font-medium',
+            'hover:bg-zinc-700 disabled:opacity-50',
             consoleButtonFocusClass,
           )}
         >

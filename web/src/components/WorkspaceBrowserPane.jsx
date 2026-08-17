@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Globe, RefreshCw } from 'lucide-react';
-import { consoleButtonFocusClass, consoleInputClass } from '@/lib/consoleTheme';
+import { consoleButtonFocusClass, consoleInputClass } from '@/lib/consoleTokens';
 
 function normalizeUrl(raw) {
   const trimmed = String(raw || '').trim();
@@ -35,8 +35,8 @@ export default function WorkspaceBrowserPane() {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="workspace-browser-pane">
-      <div className="flex items-center gap-1.5 border-b border-[#E8EAED] px-2 py-1.5 shrink-0">
-        <Globe className="h-3.5 w-3.5 shrink-0 text-[#5F6368]" />
+      <div className="flex items-center gap-1.5 border-b border-zinc-200 px-2 py-1.5 shrink-0">
+        <Globe className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
         <input
           ref={inputRef}
           type="url"
@@ -55,7 +55,7 @@ export default function WorkspaceBrowserPane() {
           type="button"
           title="Go"
           onClick={navigate}
-          className={`p-1.5 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED] ${consoleButtonFocusClass}`}
+          className={`p-1.5 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
         >
           <ArrowRight className="h-3.5 w-3.5" />
         </button>
@@ -64,13 +64,13 @@ export default function WorkspaceBrowserPane() {
           title="Reload"
           onClick={reload}
           disabled={!activeUrl}
-          className={`p-1.5 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED] disabled:opacity-40 ${consoleButtonFocusClass}`}
+          className={`p-1.5 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 disabled:opacity-40 ${consoleButtonFocusClass}`}
         >
           <RefreshCw className="h-3.5 w-3.5" />
         </button>
       </div>
 
-      <div className="flex-1 min-h-0 bg-[#F4F5F6]">
+      <div className="flex-1 min-h-0 bg-zinc-100">
         {activeUrl ? (
           <iframe
             key={frameKey}

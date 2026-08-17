@@ -14,7 +14,7 @@ import {
   consoleButtonFocusClass,
   consoleInputClass,
   textPlaceholder,
-} from '../../lib/consoleTheme';
+} from '../../lib/consoleTokens';
 import { useToast } from '../Toast';
 
 const STATUS_STYLES = {
@@ -108,8 +108,8 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between border-b border-[#DADCE0] px-3 py-2 shrink-0 bg-white">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-[#5F6368]">
+      <div className="flex items-center justify-between border-b border-zinc-300 px-3 py-2 shrink-0 bg-white">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
           {label}
         </h3>
         <button
@@ -123,7 +123,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
         </button>
       </div>
-      <div className="flex items-center gap-2 border-b border-[#E8EAED] px-3 py-2 shrink-0 bg-white">
+      <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 shrink-0 bg-white">
         <div className="flex items-center gap-1">
           {FILTER_OPTIONS.map((opt) => (
             <button
@@ -132,8 +132,8 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
               onClick={() => setStatusFilter(opt.value)}
               className={`px-2 py-0.5 text-[10px] font-medium rounded-full transition-colors ${consoleButtonFocusClass} ${
                 statusFilter === opt.value
-                  ? 'bg-[#202124] text-white'
-                  : 'text-[#5F6368] hover:bg-[#E8EAED]'
+                  ? 'bg-black text-white'
+                  : 'text-zinc-500 hover:bg-zinc-200'
               }`}
             >
               {opt.label} ({countByStatus[opt.value] ?? 0})
@@ -141,7 +141,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
           ))}
         </div>
         <div className="relative flex-1 max-w-[180px] ml-auto">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[#9AA0A6]" />
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-zinc-400" />
           <input
             type="text"
             value={searchQuery}
@@ -151,17 +151,17 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
           />
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto bg-[#F0F1F3] p-3">
+      <div className="min-h-0 flex-1 overflow-auto bg-zinc-100 p-3">
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
           </div>
         ) : filteredMRs.length === 0 ? (
-          <div className={`p-6 text-center text-xs ${textPlaceholder} ${consoleEmptyStateClass} rounded-xl bg-white shadow-sm border border-[#E8EAED]`}>
+          <div className={`p-6 text-center text-xs ${textPlaceholder} ${consoleEmptyStateClass} rounded-xl bg-white shadow-sm border border-zinc-200`}>
             {mergeRequests.length === 0 ? `No ${label.toLowerCase()} yet.` : 'No results match your filter.'}
           </div>
         ) : (
-          <div className="rounded-xl bg-white shadow-sm border border-[#E8EAED] overflow-hidden">
+          <div className="rounded-xl bg-white shadow-sm border border-zinc-200 overflow-hidden">
             <table className={`w-full text-left ${consoleTableShellClass}`}>
               <thead className={consoleTableHeadRowClass}>
                 <tr>
@@ -175,7 +175,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
               </thead>
               <tbody className={consoleTableBodyDivideClass}>
                 {filteredMRs.map((mr) => (
-                  <tr key={mr.id} className={`${consoleTableBodyRowClass} transition-colors hover:bg-[#F4F5F6]`}>
+                  <tr key={mr.id} className={`${consoleTableBodyRowClass} transition-colors hover:bg-zinc-100`}>
                     <td className={consoleTableBodyCellDenseClass}>
                       {mr.remote_mr_number || mr.remoteMrNumber || mr.github_pr_number || '-'}
                     </td>
@@ -183,7 +183,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
                       <button
                         type="button"
                         onClick={() => onSelectMR?.(mr)}
-                        className="block truncate max-w-[12rem] text-[#202124] hover:text-[#5B8DB8] transition-colors font-medium"
+                        className="block truncate max-w-[12rem] text-zinc-900 hover:text-black transition-colors font-medium"
                         title={mr.title}
                       >
                         {mr.title}
@@ -195,7 +195,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
                       </span>
                     </td>
                     <td className={consoleTableBodyCellDenseClass}>
-                      <span className="block truncate max-w-[8rem] font-mono text-[10px] text-[#5F6368]" title={mr.source_branch || mr.sourceBranch}>
+                      <span className="block truncate max-w-[8rem] font-mono text-[10px] text-zinc-500" title={mr.source_branch || mr.sourceBranch}>
                         {mr.source_branch || mr.sourceBranch}
                       </span>
                     </td>

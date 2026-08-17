@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Loader2, X } from 'lucide-react';
 import { DiffEditor } from '@monaco-editor/react';
-import { consoleButtonFocusClass } from '@/lib/consoleTheme';
+import { consoleButtonFocusClass } from '@/lib/consoleTokens';
 import '@/lib/monacoSetup'; // Configure Monaco to load from local bundle, not CDN
 
 const LANG_MAP = {
@@ -65,12 +65,12 @@ export default function DiffViewer({
   if (loading) {
     return (
       <div className="flex flex-col h-full w-full">
-        <div className="flex items-center justify-between px-4 py-2 border-b border-[#E8EAED] bg-[#FAFBFC]">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-200 bg-zinc-50">
             <span className="text-sm text-zinc-600">Compare: {displayName}</span>
           <button
             aria-label="Close compare"
             onClick={onClose}
-            className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED] ${consoleButtonFocusClass}`}
+            className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
           >
             <X className="h-4 w-4" />
           </button>
@@ -90,12 +90,12 @@ export default function DiffViewer({
 
   return (
     <div className="flex flex-col h-full w-full">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-[#E8EAED] bg-[#FAFBFC]">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-200 bg-zinc-50">
         <span className="text-sm text-zinc-600">Compare: {displayName}</span>
         <button
           aria-label="Close compare"
           onClick={onClose}
-          className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED] ${consoleButtonFocusClass}`}
+          className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
         >
           <X className="h-4 w-4" />
         </button>

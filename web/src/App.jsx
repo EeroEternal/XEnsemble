@@ -12,7 +12,7 @@ import ConfirmDialog from './components/ConfirmDialog';
 import { useWorkspaces } from './hooks/useWorkspaces';
 import { cn } from './lib/utils';
 import { APP_SHELL_ADMIN_CLASS } from './lib/appShellLayout';
-import { bgCanvas } from './lib/consoleTheme';
+import { bgCanvas } from './lib/consoleTokens';
 import { getAccessToken, setTokens, clearTokens, apiFetch, isStoredAuthStale, setAuthExpiredHandler } from './lib/api';
 import { TerminalThemeProvider } from './hooks/useTerminalTheme.jsx';
 
@@ -268,8 +268,8 @@ function App() {
 
   if (!authReady) {
     return (
-      <div className="flex h-full items-center justify-center bg-[#F4F5F6]">
-        <div className="text-sm text-[#5F6368]">Loading…</div>
+      <div className="flex h-full items-center justify-center bg-zinc-100">
+        <div className="text-sm text-zinc-500">Loading…</div>
       </div>
     );
   }

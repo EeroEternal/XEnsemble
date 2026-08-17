@@ -66,7 +66,7 @@ import {
   hoverBgSecondary,
   hoverBgTertiary,
   hoverTextPrimary,
-} from '../lib/consoleTheme.js';
+} from '../lib/consoleTokens';
 import { buttonClass } from '../lib/buttonStyles';
 import { pathParent, pathJoin } from '../lib/workspaceFileTree';
 
@@ -1100,7 +1100,7 @@ export default React.forwardRef(function Sessions({
           <div className="p-5 text-sm">Remove this session?</div>
           <div className={consoleStructuredDialogFooterClass}>
             <button onClick={() => setDeleteConfirmSession(null)} className="h-9 px-4 border rounded-md">Cancel</button>
-            <button onClick={() => handleDeleteSession(deleteConfirmSession.sessionId)} className="h-9 px-4 bg-[#C06C5D] text-white rounded-md">Remove</button>
+            <button onClick={() => handleDeleteSession(deleteConfirmSession.sessionId)} className="h-9 px-4 bg-red-600 text-white rounded-md">Remove</button>
           </div>
         </ConsoleInlineDialog>
       )}
@@ -1163,7 +1163,7 @@ export default React.forwardRef(function Sessions({
               type="button"
               disabled={deletingWorkspaceId === deleteConfirmWorkspace.workspaceId}
               onClick={() => handleDeleteWorkspace(deleteConfirmWorkspace.workspaceId)}
-              className={`h-9 px-4 flex items-center justify-center gap-2 bg-[#C06C5D] text-white rounded-md text-sm font-medium hover:bg-[#A35A4D] disabled:opacity-50 ${transitionBase}`}
+              className={`h-9 px-4 flex items-center justify-center gap-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700 disabled:opacity-50 ${transitionBase}`}
             >
               {deletingWorkspaceId === deleteConfirmWorkspace.workspaceId
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> Removing…</>
@@ -1189,7 +1189,7 @@ export default React.forwardRef(function Sessions({
           </div>
           <div className="p-4 space-y-3">
             {sessionConfigError && (
-              <p className="text-sm text-[#C06C5D] bg-[#FDECEA] border border-[#FADBD8] rounded-md px-3 py-2">{sessionConfigError}</p>
+              <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{sessionConfigError}</p>
             )}
             <ByokConfigForm
               agentId={activeSession.agentId}
@@ -1235,7 +1235,7 @@ export default React.forwardRef(function Sessions({
             <button
               type="button"
               onClick={() => { setShowRestartPrompt(false); handleRestartSession(); }}
-              className={`h-9 px-3 flex items-center justify-center gap-2 bg-[#202124] text-white rounded-md text-sm font-medium hover:bg-[#3C4043] ${transitionBase}`}
+              className={`h-9 px-3 flex items-center justify-center gap-2 bg-black text-white rounded-md text-sm font-medium hover:bg-zinc-700 ${transitionBase}`}
             >
               <RefreshCw className="w-4 h-4" /> Restart Now
             </button>
@@ -1247,15 +1247,15 @@ export default React.forwardRef(function Sessions({
       <div className="flex min-h-0 flex-1 w-full flex-row items-stretch bg-white">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
           {showNewInstanceModal ? (
-            <div className="flex min-h-0 flex-1 flex-col bg-[#FAFBFC]">
+            <div className="flex min-h-0 flex-1 flex-col bg-zinc-50">
               <div className="flex items-center justify-between px-5 py-3 shrink-0">
                 <div className="flex items-center gap-2">
                   {launchModalMode === 'workspace' ? (
-                    <Plus className="w-4 h-4 shrink-0 text-[#9AA0A6]" />
+                    <Plus className="w-4 h-4 shrink-0 text-zinc-400" />
                   ) : (
-                    <Bot className="w-4 h-4 shrink-0 text-[#9AA0A6]" />
+                    <Bot className="w-4 h-4 shrink-0 text-zinc-400" />
                   )}
-                  <h3 className="text-sm font-semibold text-[#3C4043]">
+                  <h3 className="text-sm font-semibold text-zinc-700">
                     {launchModalMode === 'workspace' ? 'New Workspace' : 'New Agent'}
                   </h3>
                 </div>
@@ -1263,7 +1263,7 @@ export default React.forwardRef(function Sessions({
                   <button
                     type="button"
                     onClick={() => { setShowNewInstanceModal(false); setLaunchModalError(null); setCreateNewWorkspaceInline(false); setShowLaunchConfigModal(false); setGitImportMode(false); setImportedProject(null); onLaunchPanelClose?.(); }}
-                    className={`p-1.5 rounded-md text-[#9AA0A6] hover:text-[#5F6368] hover:bg-[#F4F5F6] ${consoleButtonFocusClass}`}
+                    className={`p-1.5 rounded-md text-zinc-400 hover:text-zinc-500 hover:bg-zinc-100 ${consoleButtonFocusClass}`}
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -1272,31 +1272,31 @@ export default React.forwardRef(function Sessions({
               <div className="flex-1 min-h-0 overflow-y-auto pb-6">
                 <div className="w-full px-6 pt-4 space-y-8">
                   {launchModalError && (
-                    <p className="text-sm text-[#C06C5D] bg-[#FDECEA] border border-[#FADBD8] rounded-lg px-3 py-2">{launchModalError}</p>
+                    <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{launchModalError}</p>
                   )}
 
                   {/* Page description */}
                   {launchModalMode === 'workspace' ? (
-                    <p className="text-sm text-[#5F6368] leading-relaxed">
+                    <p className="text-sm text-zinc-500 leading-relaxed">
                       Create a new workspace with its own file system, Git history, and agent configurations.
                     </p>
                   ) : (
-                    <p className="text-sm text-[#5F6368] leading-relaxed">
+                    <p className="text-sm text-zinc-500 leading-relaxed">
                       Select a workspace and agent to launch an isolated sandbox session.
                     </p>
                   )}
 
-                  <div className="h-px bg-[#E8EAED]" />
+                  <div className="h-px bg-zinc-200" />
 
                   {/* Form fields */}
-                  <div className="max-w-2xl mx-auto divide-y divide-[#E8EAED]">
+                  <div className="max-w-2xl mx-auto divide-y divide-zinc-200">
 
                   {/* Workspace */}
                   {launchModalMode === 'workspace' && (
                     <div className="flex items-start gap-12 py-5">
                       <div className="w-52 shrink-0 pt-2">
-                        <label className="block text-sm font-medium text-[#3C4043]">Workspace</label>
-                        <p className="text-[11px] text-[#9AA0A6] mt-0.5">A workspace is an isolated environment that stores your project files and session history.</p>
+                        <label className="block text-sm font-medium text-zinc-700">Workspace</label>
+                        <p className="text-[11px] text-zinc-400 mt-0.5">A workspace is an isolated environment that stores your project files and session history.</p>
                       </div>
                       <div className="flex-1 min-w-0">
                         <input type="text" value={newProjectName} onChange={e => setNewProjectName(e.target.value)} placeholder="my-workspace" className={consoleInputClass} autoFocus />
@@ -1306,27 +1306,27 @@ export default React.forwardRef(function Sessions({
                   {(launchModalMode === 'quickstart' || launchModalMode === 'session') && (
                     <div className="flex items-start gap-12 py-5">
                       <div className="w-52 shrink-0 pt-2">
-                        <label className="block text-sm font-medium text-[#3C4043]">Workspace</label>
-                        <p className="text-[11px] text-[#9AA0A6] mt-0.5">{importedProject ? 'Imported from Git (locked)' : 'Select an existing workspace or create a new one.'}</p>
+                        <label className="block text-sm font-medium text-zinc-700">Workspace</label>
+                        <p className="text-[11px] text-zinc-400 mt-0.5">{importedProject ? 'Imported from Git (locked)' : 'Select an existing workspace or create a new one.'}</p>
                       </div>
                       <div className="flex-1 min-w-0">
                         {importedProject ? (
-                          <div className="flex items-center gap-2 px-3 py-2 text-sm bg-[#F4F5F6] border border-[#E8EAED] rounded-md text-[#5F6368]">
-                            <Check className="w-3.5 h-3.5 shrink-0 text-[#4A7C59]" />
+                          <div className="flex items-center gap-2 px-3 py-2 text-sm bg-zinc-100 border border-zinc-200 rounded-md text-zinc-500">
+                            <Check className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
                             <span className="font-medium truncate">{importedProject.name}</span>
-                            <span className="text-[10px] text-[#9AA0A6] ml-auto shrink-0">Imported</span>
+                            <span className="text-[10px] text-zinc-400 ml-auto shrink-0">Imported</span>
                           </div>
                         ) : createNewWorkspaceInline ? (
                           <div className="flex items-center gap-2">
-                            <input type="text" value={newProjectName} onChange={e => setNewProjectName(e.target.value)} placeholder="my-workspace" className="flex-1 min-w-0 px-3 py-2 text-sm border border-[#DADCE0] rounded-md bg-white focus:outline-none focus:border-[#5B8DB8]" autoFocus />
-                            <button type="button" onClick={() => { setCreateNewWorkspaceInline(false); setNewProjectName(''); }} className={`shrink-0 h-9 px-3 text-xs font-medium text-[#5F6368] bg-[#F4F5F6] border border-[#E8EAED] rounded-md hover:bg-[#E8EAED] ${consoleButtonFocusClass}`}>Back</button>
+                            <input type="text" value={newProjectName} onChange={e => setNewProjectName(e.target.value)} placeholder="my-workspace" className="flex-1 min-w-0 px-3 py-2 text-sm border border-zinc-300 rounded-md bg-white focus:outline-none focus:border-black" autoFocus />
+                            <button type="button" onClick={() => { setCreateNewWorkspaceInline(false); setNewProjectName(''); }} className={`shrink-0 h-9 px-3 text-xs font-medium text-zinc-500 bg-zinc-100 border border-zinc-200 rounded-md hover:bg-zinc-200 ${consoleButtonFocusClass}`}>Back</button>
                           </div>
                         ) : (
                           <div className="flex items-center gap-2">
                             <div className="flex-1 min-w-0">
                               <SelectMenu value={launchWorkspaceId} onChange={setLaunchWorkspaceId} options={projects.map((p) => ({ value: p.id, label: p.name }))} placeholder="Select workspace" />
                             </div>
-                            <button type="button" onClick={() => { setCreateNewWorkspaceInline(true); setNewProjectName(''); setLaunchWorkspaceId(''); }} className={`shrink-0 h-9 px-3 text-xs font-medium text-[#5F6368] bg-[#F4F5F6] border border-[#E8EAED] rounded-md hover:bg-[#E8EAED] ${consoleButtonFocusClass}`}>New</button>
+                            <button type="button" onClick={() => { setCreateNewWorkspaceInline(true); setNewProjectName(''); setLaunchWorkspaceId(''); }} className={`shrink-0 h-9 px-3 text-xs font-medium text-zinc-500 bg-zinc-100 border border-zinc-200 rounded-md hover:bg-zinc-200 ${consoleButtonFocusClass}`}>New</button>
                           </div>
                         )}
                       </div>
@@ -1337,13 +1337,13 @@ export default React.forwardRef(function Sessions({
                   {launchModalMode !== 'workspace' && (
                     <div className="flex items-start gap-12 py-5">
                       <div className="w-52 shrink-0 pt-2">
-                        <label className="text-sm font-medium text-[#3C4043]">Agent</label>
-                        <p className="text-[11px] text-[#9AA0A6] mt-0.5">Select a built-in agent or a custom image you have built. Each agent has its own capabilities and configuration.</p>
+                        <label className="text-sm font-medium text-zinc-700">Agent</label>
+                        <p className="text-[11px] text-zinc-400 mt-0.5">Select a built-in agent or a custom image you have built. Each agent has its own capabilities and configuration.</p>
                       </div>
                       <div className="flex-1 min-w-0 space-y-2">
                         <div className="flex items-center gap-2">
-                          <button type="button" onClick={() => { setCustomImageId(''); setSelectedAgentId(''); }} className={`flex-1 h-9 px-3 text-xs font-medium rounded-md border transition-colors ${consoleButtonFocusClass} ${!customImageId ? 'bg-[#202124] text-white border-[#202124]' : 'bg-white text-[#5F6368] border-[#E8EAED] hover:bg-[#F4F5F6]'}`}>Built-in</button>
-                          <button type="button" onClick={handleSelectCustomImage} className={`flex-1 h-9 px-3 text-xs font-medium rounded-md border transition-colors ${consoleButtonFocusClass} ${customImageId ? 'bg-[#202124] text-white border-[#202124]' : 'bg-white text-[#5F6368] border-[#E8EAED] hover:bg-[#F4F5F6]'}`}>Custom</button>
+                          <button type="button" onClick={() => { setCustomImageId(''); setSelectedAgentId(''); }} className={`flex-1 h-9 px-3 text-xs font-medium rounded-md border transition-colors ${consoleButtonFocusClass} ${!customImageId ? 'bg-black text-white border-zinc-900' : 'bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100'}`}>Built-in</button>
+                          <button type="button" onClick={handleSelectCustomImage} className={`flex-1 h-9 px-3 text-xs font-medium rounded-md border transition-colors ${consoleButtonFocusClass} ${customImageId ? 'bg-black text-white border-zinc-900' : 'bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100'}`}>Custom</button>
                         </div>
                         <div className="flex items-center gap-2">
                           <div className="flex-1 min-w-0">
@@ -1372,11 +1372,11 @@ export default React.forwardRef(function Sessions({
                           />
                         )}
                         {customImageId && customImages.length === 0 && (
-                          <div className="flex items-center gap-2 py-2"><p className="text-xs text-[#9AA0A6]">No custom images found.</p><button type="button" onClick={() => navigate('/custom-images')} className={`text-xs text-[#5B8DB8] hover:text-[#4A7298] underline ${consoleButtonFocusClass}`}>Build one now</button></div>
+                          <div className="flex items-center gap-2 py-2"><p className="text-xs text-zinc-400">No custom images found.</p><button type="button" onClick={() => navigate('/custom-images')} className={`text-xs text-black hover:text-zinc-800 underline ${consoleButtonFocusClass}`}>Build one now</button></div>
                         )}
                         </div>
                         {selectedAgent && (selectedAgent.llm_auth_mode === 'byok' || !selectedAgent.llm_auth_mode) && (
-                          <button type="button" onClick={() => setShowLaunchConfigModal(v => !v)} className={`shrink-0 h-9 px-2.5 text-xs font-medium text-[#5B8DB8] hover:text-[#4A7298] border border-[#E8EAED] rounded-md hover:bg-[#F4F5F6] ${consoleButtonFocusClass}`}>
+                          <button type="button" onClick={() => setShowLaunchConfigModal(v => !v)} className={`shrink-0 h-9 px-2.5 text-xs font-medium text-black hover:text-zinc-800 border border-zinc-200 rounded-md hover:bg-zinc-100 ${consoleButtonFocusClass}`}>
                             <Settings2 className="w-3.5 h-3.5" />
                           </button>
                         )}
@@ -1385,10 +1385,10 @@ export default React.forwardRef(function Sessions({
                   </div>
                   )}
                   {showLaunchConfigModal && selectedAgent && (
-                    <div className="rounded-lg bg-white border border-[#E8EAED] p-4">
+                    <div className="rounded-lg bg-white border border-zinc-200 p-4">
                       <div className="flex items-center gap-2 mb-3">
-                        <Settings2 className="w-3.5 h-3.5 text-[#9AA0A6]" />
-                        <h4 className="text-xs font-medium text-[#5F6368]">Configure {selectedAgent.name}</h4>
+                        <Settings2 className="w-3.5 h-3.5 text-zinc-400" />
+                        <h4 className="text-xs font-medium text-zinc-500">Configure {selectedAgent.name}</h4>
                       </div>
                       <ByokConfigForm agentId={selectedAgentId} loading={false} onSave={() => { setShowLaunchConfigModal(false); showToast('success', 'Configuration saved.'); }} />
                     </div>
@@ -1398,21 +1398,21 @@ export default React.forwardRef(function Sessions({
                   {launchModalMode !== 'workspace' && (
                     <div className="flex items-start gap-12 py-5">
                       <div className="w-52 shrink-0 pt-2">
-                        <label className="block text-sm font-medium text-[#3C4043]">Git</label>
-                        <p className="text-[11px] text-[#9AA0A6] mt-0.5">Optionally import a Git repository. The agent will have access to the code for editing and development.</p>
+                        <label className="block text-sm font-medium text-zinc-700">Git</label>
+                        <p className="text-[11px] text-zinc-400 mt-0.5">Optionally import a Git repository. The agent will have access to the code for editing and development.</p>
                       </div>
                       <div className="flex-1 min-w-0 space-y-2">
                         {importedProject ? (
-                          <div className="flex items-center gap-2 px-3 py-2 text-sm bg-[#F4F5F6] border border-[#E8EAED] rounded-md text-[#5F6368]">
-                            <Check className="w-3.5 h-3.5 shrink-0 text-[#4A7C59]" />
+                          <div className="flex items-center gap-2 px-3 py-2 text-sm bg-zinc-100 border border-zinc-200 rounded-md text-zinc-500">
+                            <Check className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
                             <span className="font-medium truncate">{gitProvider}</span>
-                            <span className="text-[10px] text-[#9AA0A6] ml-auto shrink-0">Imported</span>
+                            <span className="text-[10px] text-zinc-400 ml-auto shrink-0">Imported</span>
                           </div>
                         ) : (
                           <div className="flex items-center gap-2">
-                            <button type="button" onClick={() => { setGitImportMode(false); setGitProvider(''); setImportedProject(null); }} className={`flex-1 h-9 px-2 text-xs font-medium rounded-md border transition-colors ${consoleButtonFocusClass} ${!gitProvider ? 'bg-[#202124] text-white border-[#202124]' : 'bg-white text-[#5F6368] border-[#E8EAED] hover:bg-[#F4F5F6]'}`}>None</button>
+                            <button type="button" onClick={() => { setGitImportMode(false); setGitProvider(''); setImportedProject(null); }} className={`flex-1 h-9 px-2 text-xs font-medium rounded-md border transition-colors ${consoleButtonFocusClass} ${!gitProvider ? 'bg-black text-white border-zinc-900' : 'bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100'}`}>None</button>
                             {['github', 'gitlab', 'gitea'].map((p) => (
-                              <button key={p} type="button" onClick={() => { setGitProvider(p); setGitImportMode(true); setImportedProject(null); }} className={`flex-1 h-9 px-2 text-xs font-medium rounded-md border transition-colors capitalize ${consoleButtonFocusClass} ${gitProvider === p ? 'bg-[#202124] text-white border-[#202124]' : 'bg-white text-[#5F6368] border-[#E8EAED] hover:bg-[#F4F5F6]'}`}>{p}</button>
+                              <button key={p} type="button" onClick={() => { setGitProvider(p); setGitImportMode(true); setImportedProject(null); }} className={`flex-1 h-9 px-2 text-xs font-medium rounded-md border transition-colors capitalize ${consoleButtonFocusClass} ${gitProvider === p ? 'bg-black text-white border-zinc-900' : 'bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100'}`}>{p}</button>
                             ))}
                           </div>
                         )}
@@ -1421,7 +1421,7 @@ export default React.forwardRef(function Sessions({
                   )}
                   {gitImportMode && !importedProject && gitProvider && (
                     gitProvider === 'gitea' ? (
-                      <p className="text-sm text-[#C06C5D] bg-[#FDECEA] border border-[#FADBD8] rounded-lg px-3 py-2">Gitea OAuth is not configured. Please ask an administrator to set it up.</p>
+                      <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">Gitea OAuth is not configured. Please ask an administrator to set it up.</p>
                     ) : (
                     <RepoImportDialog
                       key={gitProvider}
@@ -1449,7 +1449,7 @@ export default React.forwardRef(function Sessions({
                   </div>
                 </div>
               </div>
-              <div className="flex items-center justify-end gap-2 border-t border-[#E8EAED] px-5 py-3 shrink-0">
+              <div className="flex items-center justify-end gap-2 border-t border-zinc-200 px-5 py-3 shrink-0">
                 <button
                   type="button"
                   onClick={() => { setShowNewInstanceModal(false); setCreateNewWorkspaceInline(false); setGitImportMode(false); setImportedProject(null); onLaunchPanelClose?.(); }}
@@ -1471,35 +1471,35 @@ export default React.forwardRef(function Sessions({
             </div>
           ) : (
             <>
-          <div className="h-12 border-b border-[#E8EAED] flex items-center justify-between px-5 shrink-0 bg-white">
+          <div className="h-12 border-b border-zinc-200 flex items-center justify-between px-5 shrink-0 bg-white">
             <div className="flex items-center gap-3 min-w-0">
               {activeSession ? (
                 <>
                   <div className="flex items-center gap-2 min-w-0">
-                    <h1 className="truncate text-[15px] font-semibold text-[#202124]">
+                    <h1 className="truncate text-[15px] font-semibold text-zinc-900">
                       {activeSession.projectName || activeSession.agentName || 'Session'}
                     </h1>
-                    <span className="inline-flex shrink-0 items-center rounded-md bg-[#F4F5F6] px-2 py-0.5 text-[11px] font-medium text-[#5F6368]">
+                    <span className="inline-flex shrink-0 items-center rounded-md bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500">
                       {activeSession.agentName}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <span
-                      className={`w-1.5 h-1.5 rounded-full ${sessionAlive ? 'bg-[#4A7C59]' : sessionPending ? 'bg-[#E8B339]' : sessionFailed ? 'bg-[#C06C5D]' : 'bg-[#9AA0A6]'}`}
+                      className={`w-1.5 h-1.5 rounded-full ${sessionAlive ? 'bg-emerald-600' : sessionPending ? 'bg-amber-500' : sessionFailed ? 'bg-red-600' : 'bg-zinc-400'}`}
                     />
-                    <span className="text-[11px] text-[#9AA0A6]">
+                    <span className="text-[11px] text-zinc-400">
                       {sessionAlive ? 'Running' : sessionPending ? 'Preparing…' : sessionFailed ? 'Failed' : sessionWakeable ? 'Idle' : 'Stopped'}
                     </span>
                   </div>
                 </>
               ) : (
-                <h1 className="text-[15px] font-semibold text-[#202124]">Sessions</h1>
+                <h1 className="text-[15px] font-semibold text-zinc-900">Sessions</h1>
               )}
             </div>
             <div className="flex items-center gap-0.5 shrink-0">
               {activeSession && (
                 <>
-                  <div className="mx-0.5 h-5 w-px bg-[#E8EAED]" />
+                  <div className="mx-0.5 h-5 w-px bg-zinc-200" />
                   {!sessionPending && !sessionFailed && (
                     <>
                       {sessionAlive ? (
@@ -1579,7 +1579,7 @@ export default React.forwardRef(function Sessions({
                   <button
                     type="button"
                     onClick={() => setPanelOpen((prev) => !prev)}
-                    className={`${consoleIconButtonClass} ${panelOpen ? 'bg-[#F4F5F6] text-[#202124]' : ''}`}
+                    className={`${consoleIconButtonClass} ${panelOpen ? 'bg-zinc-100 text-zinc-900' : ''}`}
                     title={panelOpen ? 'Close workspace panel' : 'Open workspace panel'}
                     aria-label={panelOpen ? 'Close workspace panel' : 'Open workspace panel'}
                   >
@@ -1587,7 +1587,7 @@ export default React.forwardRef(function Sessions({
                   </button>
                   {activeSession.projectId ? (
                     <>
-                      <div className="mx-0.5 h-5 w-px bg-[#E8EAED]" />
+                      <div className="mx-0.5 h-5 w-px bg-zinc-200" />
                       <PreviewControlGroup {...preview} onAnalyze={() => { panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); }} />
                     </>
                   ) : null}
@@ -1598,26 +1598,26 @@ export default React.forwardRef(function Sessions({
           {activeSession ? (
             sessionPending ? (
               <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-white p-8 text-center">
-                <Loader2 className="w-8 h-8 text-[#9AA0A6] animate-spin mb-4" strokeWidth={1.5} />
-                <h3 className="text-lg font-semibold text-[#202124] mb-1.5">Preparing your environment…</h3>
-                <p className="text-sm text-[#9AA0A6] max-w-sm">
+                <Loader2 className="w-8 h-8 text-zinc-400 animate-spin mb-4" strokeWidth={1.5} />
+                <h3 className="text-lg font-semibold text-zinc-900 mb-1.5">Preparing your environment…</h3>
+                <p className="text-sm text-zinc-400 max-w-sm">
                   Pulling image and starting virtual machine. This usually takes less than a minute.
                 </p>
               </div>
             ) : sessionFailed ? (
               <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-white p-8 text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#FDECEA] mb-5">
-                  <X className="w-7 h-7 text-[#C06C5D]" strokeWidth={1.5} />
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 mb-5">
+                  <X className="w-7 h-7 text-red-600" strokeWidth={1.5} />
                 </div>
-                <h3 className="text-lg font-semibold text-[#202124] mb-1.5">Session failed to start</h3>
-                <p className="text-sm text-[#9AA0A6] max-w-md mb-5">
+                <h3 className="text-lg font-semibold text-zinc-900 mb-1.5">Session failed to start</h3>
+                <p className="text-sm text-zinc-400 max-w-md mb-5">
                   {activeSessionMeta?.provisioningError || 'An unexpected error occurred during provisioning.'}
                 </p>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => handleDeleteSession(activeSession.sessionId)}
-                    className="h-9 px-4 flex items-center gap-2 bg-[#C06C5D] text-white rounded-md text-sm font-medium hover:bg-[#A85544] disabled:opacity-50 transition-colors"
+                    className="h-9 px-4 flex items-center gap-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700 disabled:opacity-50 transition-colors"
                   >
                     <Trash2 className="w-4 h-4" strokeWidth={1.75} />
                     Delete session
@@ -1625,7 +1625,7 @@ export default React.forwardRef(function Sessions({
                   <button
                     type="button"
                     onClick={() => setActiveSession(null)}
-                    className="h-9 px-4 flex items-center gap-2 bg-white border border-[#E8EAED] text-[#202124] rounded-md text-sm font-medium hover:bg-[#F4F5F6] transition-colors"
+                    className="h-9 px-4 flex items-center gap-2 bg-white border border-zinc-200 text-zinc-900 rounded-md text-sm font-medium hover:bg-zinc-100 transition-colors"
                   >
                     Dismiss
                   </button>
@@ -1654,10 +1654,10 @@ export default React.forwardRef(function Sessions({
                 <>
                 <div
                   onMouseDown={startPanelResize}
-                  className="w-1 shrink-0 cursor-col-resize bg-[#E8EAED] hover:bg-[#202124] transition-colors"
+                  className="w-1 shrink-0 cursor-col-resize bg-zinc-200 hover:bg-black transition-colors"
                   title="Drag to resize"
                 />
-                <div className="flex min-h-0 shrink-0 flex-col border-l border-[#E8EAED] bg-white" style={{ width: panelWidth }}>
+                <div className="flex min-h-0 shrink-0 flex-col border-l border-zinc-200 bg-white" style={{ width: panelWidth }}>
                   <WorkspacePanel
                     ref={panelRef}
                     projectId={activeSession.projectId}
@@ -1706,11 +1706,11 @@ export default React.forwardRef(function Sessions({
             <div className="flex-1 bg-white" />
           ) : (
             <div className="flex h-full flex-col items-center justify-center bg-white p-8 text-center">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#F4F5F6] mb-5">
-                <TerminalSquare className="w-7 h-7 text-[#9AA0A6]" strokeWidth={1.25} />
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-100 mb-5">
+                <TerminalSquare className="w-7 h-7 text-zinc-400" strokeWidth={1.25} />
               </div>
-              <h3 className="text-lg font-semibold text-[#202124] mb-1.5">No active session</h3>
-              <p className="text-sm text-[#9AA0A6] max-w-sm">
+              <h3 className="text-lg font-semibold text-zinc-900 mb-1.5">No active session</h3>
+              <p className="text-sm text-zinc-400 max-w-sm">
                 {projects.length === 0
                   ? 'Create a workspace, then use New Agent in the sidebar to get started.'
                   : 'Select a session from the sidebar, or use New Agent to start one in a workspace.'}
@@ -1741,7 +1741,7 @@ export default React.forwardRef(function Sessions({
           }}
           panelClassName={`${consoleDialogPanelClass} w-[min(900px,calc(100vw-2rem))] h-[min(80vh,calc(100vh-2rem))]`}
         >
-          <div className={`flex items-center justify-between ${borderHairline} border-b bg-[#FAFBFC] px-4 py-3 shrink-0`}>
+          <div className={`flex items-center justify-between ${borderHairline} border-b bg-zinc-50 px-4 py-3 shrink-0`}>
             <div className="flex min-w-0 items-center gap-2">
               <FileText className={`w-4 h-4 shrink-0 ${textPlaceholder}`} />
               <span className={`truncate text-sm font-semibold ${textPrimary}`}>{viewingFile.name}</span>
@@ -1759,7 +1759,7 @@ export default React.forwardRef(function Sessions({
               <X className="w-4 h-4" />
             </button>
           </div>
-          <div className={`${consoleStructuredDialogBodyClass} bg-[#FAFBFC] text-sm font-mono ${textTertiary} whitespace-pre`}>
+          <div className={`${consoleStructuredDialogBodyClass} bg-zinc-50 text-sm font-mono ${textTertiary} whitespace-pre`}>
             {fileContent}
           </div>
         </ConsoleDialogShell>

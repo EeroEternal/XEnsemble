@@ -15,7 +15,7 @@ import WorkspaceBrowserPane from './WorkspaceBrowserPane';
 import MergeRequestListPanel from './git/MergeRequestListPanel';
 import CodeReviewPanel from './git/CodeReviewPanel';
 import CreatePRDialog from './git/CreatePRDialog';
-import { consoleButtonFocusClass, consoleInputClass } from '@/lib/consoleTheme';
+import { consoleButtonFocusClass, consoleInputClass } from '@/lib/consoleTokens';
 import { consoleDropdownPanelClass, consoleMenuDropdownZClass } from '@/lib/consoleTokens';
 import { buttonClass } from '@/lib/buttonStyles';
 import { pathBasename, pathJoin } from '@/lib/workspaceFileTree';
@@ -415,7 +415,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="workspace-panel">
-      <div className="flex items-center border-b border-[#E8EAED] px-1 shrink-0 bg-white">
+      <div className="flex items-center border-b border-zinc-200 px-1 shrink-0 bg-white">
         <div className="flex min-w-0 items-center overflow-x-auto console-scroll-hidden">
           {visibleTabs.map((tab) => {
             const Icon = tab.icon;
@@ -428,14 +428,14 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
                   onClick={() => { void selectMainTab(tab.key); }}
                   className={`relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${
                     isActive
-                      ? 'border-[#202124] text-[#202124]'
-                      : 'border-transparent text-[#5F6368] hover:text-[#202124]'
+                      ? 'border-zinc-900 text-zinc-900'
+                      : 'border-transparent text-zinc-500 hover:text-zinc-900'
                   } ${consoleButtonFocusClass}`}
                 >
                   <Icon className="h-3.5 w-3.5" />
                   {tab.label}
                   {tab.badge > 0 && (
-                    <span className="ml-0.5 inline-flex items-center justify-center h-3.5 min-w-[14px] rounded-full bg-[#C06C5D] text-white text-[9px] font-medium px-1">
+                    <span className="ml-0.5 inline-flex items-center justify-center h-3.5 min-w-[14px] rounded-full bg-red-600 text-white text-[9px] font-medium px-1">
                       {tab.badge > 9 ? '9+' : tab.badge}
                     </span>
                   )}
@@ -448,7 +448,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
                       e.stopPropagation();
                       closeExtraTab(tab.key);
                     }}
-                    className={`absolute right-0.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-[#E8EAED] opacity-0 group-hover:opacity-100 ${consoleButtonFocusClass}`}
+                    className={`absolute right-0.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200 opacity-0 group-hover:opacity-100 ${consoleButtonFocusClass}`}
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -461,7 +461,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
             type="button"
             title="Add panel"
             onClick={() => setAddMenuOpen((v) => !v)}
-            className={`ml-0.5 p-1.5 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED] ${consoleButtonFocusClass}`}
+            className={`ml-0.5 p-1.5 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -470,17 +470,17 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
         {mainTab === 'files' && (
           <div className="flex items-center gap-0.5 ml-auto pr-1">
             <button title="New file" onClick={() => { setNewName(''); setShowNewFile(true); }}
-              className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED] ${consoleButtonFocusClass}`}>
+              className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}>
               <Plus className="h-3.5 w-3.5" />
             </button>
             <button title="New folder" onClick={() => { setNewName(''); setShowNewFolder(true); }}
-              className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED] ${consoleButtonFocusClass}`}>
+              className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}>
               <FolderPlus className="h-3.5 w-3.5" />
             </button>
             <button
               title={sidebarOpen ? 'Collapse file tree' : 'Expand file tree'}
               onClick={() => setSidebarOpen((open) => !open)}
-              className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED] ${consoleButtonFocusClass}`}
+              className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
             >
               {sidebarOpen ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelLeft className="h-3.5 w-3.5" />}
             </button>
@@ -528,8 +528,8 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
         {mainTab === 'files' && (
           <>
             {sidebarOpen && (
-              <div className="w-44 shrink-0 border-r border-[#E8EAED] bg-[#F4F5F6] flex flex-col min-h-0">
-                <div className="shrink-0 flex items-center justify-between px-2 py-0.5 border-b border-[#E8EAED]">
+              <div className="w-44 shrink-0 border-r border-zinc-200 bg-zinc-100 flex flex-col min-h-0">
+                <div className="shrink-0 flex items-center justify-between px-2 py-0.5 border-b border-zinc-200">
                   <span className="text-[10px] font-medium text-zinc-400 tracking-wide uppercase">Files</span>
                   <button
                     type="button"
@@ -563,7 +563,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
               ) : activeTab ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   {!sidebarOpen && (
-                    <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-[#E8EAED] bg-[#FAFBFC]">
+                    <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-zinc-200 bg-zinc-50">
                       <button
                         type="button"
                         onClick={() => setSidebarOpen(true)}
@@ -652,7 +652,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
                   onSelectMR={setSelectedMR}
                   refreshTrigger={prRefreshTrigger}
                 />
-                <div className="flex items-center justify-end gap-2 border-t border-[#E8EAED] px-3 py-2 shrink-0">
+                <div className="flex items-center justify-end gap-2 border-t border-zinc-200 px-3 py-2 shrink-0">
                   <button
                     type="button"
                     onClick={() => setCreatePROpen(true)}

@@ -10,12 +10,12 @@ import { apiFetch } from '../lib/api';
 import { useToast } from './Toast';
 
 const STATUS_STYLES = {
-  pending: 'bg-[#E8EAED] text-[#5F6368]',
-  building: 'bg-[#FEF3C7] text-[#B45309]',
-  running: 'bg-[#E8F5E9] text-[#4A7C59]',
-  failed: 'bg-[#FDECEA] text-[#C06C5D]',
-  stopped: 'bg-[#E8EAED] text-[#9AA0A6]',
-  expired: 'bg-[#E8EAED] text-[#9AA0A6]',
+  pending: 'bg-zinc-200 text-zinc-500',
+  building: 'bg-amber-100 text-amber-700',
+  running: 'bg-emerald-50 text-emerald-600',
+  failed: 'bg-red-50 text-red-600',
+  stopped: 'bg-zinc-200 text-zinc-400',
+  expired: 'bg-zinc-200 text-zinc-400',
 };
 
 function pickActiveDeployment(list) {
@@ -234,7 +234,7 @@ export function usePreview(projectId, token) {
 }
 
 const ICON_BTN =
-  'rounded-md p-1.5 text-[#5F6368] hover:bg-[#E8EAED] hover:text-[#202124] disabled:opacity-50';
+  'rounded-md p-1.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 disabled:opacity-50';
 
 export function PreviewStatus({ deployment, status }) {
   if (!deployment) return null;
@@ -246,7 +246,7 @@ export function PreviewStatus({ deployment, status }) {
         {status}
       </span>
       {deployment.expires_at && status === 'running' && (
-        <span className="text-[10px] text-[#9AA0A6] font-mono hidden xl:inline">
+        <span className="text-[10px] text-zinc-400 font-mono hidden xl:inline">
           TTL {formatTtl(deployment.expires_at)}
         </span>
       )}
@@ -259,7 +259,7 @@ export function PreviewControlGroup(props) {
   return (
     <div className="flex items-center gap-0.5 shrink-0">
       <PreviewStatus {...props} />
-      {deployment && <div className="h-3.5 w-px bg-[#E8EAED] mx-0.5 shrink-0" aria-hidden />}
+      {deployment && <div className="h-3.5 w-px bg-zinc-200 mx-0.5 shrink-0" aria-hidden />}
       <PreviewActions {...props} />
     </div>
   );

@@ -27,7 +27,7 @@ import {
     accentRed,
     accentRedBg,
     accentBlue,
-} from '../lib/consoleTheme';
+} from '../lib/consoleTokens';
 import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
 
@@ -64,12 +64,12 @@ function formatDuration(started, finished) {
 }
 
 const STATUS_DOT = {
-    active: 'bg-[#4A7C59]',
-    ready: 'bg-[#5B8DB8]',
+    active: 'bg-emerald-600',
+    ready: 'bg-black',
     deprecated: 'bg-zinc-300',
-    building: 'bg-[#5B8DB8] animate-pulse',
-    queued: 'bg-[#9AA0A6]',
-    failed: 'bg-[#C06C5D]',
+    building: 'bg-black animate-pulse',
+    queued: 'bg-zinc-400',
+    failed: 'bg-red-600',
     none: bgActive,
 };
 
@@ -85,7 +85,7 @@ function WorkflowStrip({ hasVersions, hasActive }) {
                 <div key={s.label} className="flex items-center gap-2 flex-1 last:flex-none">
                     <div className={cn(
                         'w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0 transition-colors',
-                        s.done ? 'bg-[#4A7C59] text-white' : cn(bgActive, textPlaceholder),
+                        s.done ? 'bg-emerald-600 text-white' : cn(bgActive, textPlaceholder),
                     )}>
                         {s.done ? <Check className="h-3 w-3" /> : i + 1}
                     </div>
@@ -94,7 +94,7 @@ function WorkflowStrip({ hasVersions, hasActive }) {
                         <div className={cn('text-xs', textPlaceholder)}>{s.desc}</div>
                     </div>
                     {i < steps.length - 1 && (
-                        <div className={cn('flex-1 border-t-2 border-dashed mx-1', s.done ? 'border-[#4A7C59]' : 'border-[#DADCE0]')} />
+                        <div className={cn('flex-1 border-t-2 border-dashed mx-1', s.done ? 'border-emerald-600' : 'border-zinc-300')} />
                     )}
                 </div>
             ))}
@@ -126,14 +126,14 @@ function AgentListItem({ agent, selected, onClick }) {
             onClick={onClick}
             className={cn(
                 'w-full text-left px-3 py-2.5 transition-colors border-l-2',
-                selected ? cn(bgSecondary, 'border-[#5B8DB8]') : cn('border-transparent hover:bg-[#F4F5F6]'),
+                selected ? cn(bgSecondary, 'border-black') : cn('border-transparent hover:bg-zinc-100'),
                 consoleButtonFocusClass,
             )}
         >
             <div className="flex items-center gap-2">
                 <div className={cn('w-2 h-2 rounded-full shrink-0', dotClass)} />
                 <span className={cn('text-xs font-medium truncate', textPrimary)}>{agent.agent_name}</span>
-                {isBuilding && <Loader2 className="h-3 w-3 animate-spin text-[#5B8DB8] shrink-0" />}
+                {isBuilding && <Loader2 className="h-3 w-3 animate-spin text-black shrink-0" />}
             </div>
             <div className={cn(
                 'text-xs mt-0.5 ml-4 truncate',
@@ -149,12 +149,12 @@ function AgentListItem({ agent, selected, onClick }) {
 function VersionRow({ version, actionId, onActivate, onDeactivate, onDelete }) {
     const isBusy = actionId === `activate:${version.id}` || actionId === `deprecate:${version.id}` || actionId === `delete:${version.id}`;
     return (
-        <div className={cn('flex items-center gap-3 px-4 py-2.5 transition-colors border-b last:border-b-0', borderHairline, 'hover:bg-[#F4F5F6]')}>
+        <div className={cn('flex items-center gap-3 px-4 py-2.5 transition-colors border-b last:border-b-0', borderHairline, 'hover:bg-zinc-100')}>
             <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                     <span className={cn('font-mono text-xs truncate', textPrimary)}>{version.tag}</span>
                     {version.is_active ? (
-                        <span className="inline-flex items-center rounded-full bg-[#E8F5E9] px-1.5 py-0.5 text-xs font-medium text-[#4A7C59] shrink-0">
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-600 shrink-0">
                             <Check className="h-2.5 w-2.5 mr-0.5" />Active
                         </span>
                     ) : (
@@ -167,23 +167,23 @@ function VersionRow({ version, actionId, onActivate, onDeactivate, onDelete }) {
             </div>
             <div className="flex items-center gap-1 shrink-0">
                 {isBusy ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin text-[#9AA0A6]" />
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" />
                 ) : (
                     <>
                         {!version.is_active && (
-                            <button type="button" onClick={() => onActivate(version.id)} title="Activate" className={cn('group/btn inline-flex items-center gap-1 p-1 rounded text-[#4A7C59] hover:bg-[#E8F5E9]', consoleButtonFocusClass)}>
+                            <button type="button" onClick={() => onActivate(version.id)} title="Activate" className={cn('group/btn inline-flex items-center gap-1 p-1 rounded text-emerald-600 hover:bg-emerald-50', consoleButtonFocusClass)}>
                                 <Check className="h-3.5 w-3.5" />
                                 <span className="text-xs hidden group-hover/btn:inline">Activate</span>
                             </button>
                         )}
                         {version.is_active && (
-                            <button type="button" onClick={() => onDeactivate(version)} title="Deactivate" className={cn('group/btn inline-flex items-center gap-1 p-1 rounded text-[#9AA0A6] hover:bg-[#E8EAED]', consoleButtonFocusClass)}>
+                            <button type="button" onClick={() => onDeactivate(version)} title="Deactivate" className={cn('group/btn inline-flex items-center gap-1 p-1 rounded text-zinc-400 hover:bg-zinc-200', consoleButtonFocusClass)}>
                                 <XCircle className="h-3.5 w-3.5" />
                                 <span className="text-xs hidden group-hover/btn:inline">Deactivate</span>
                             </button>
                         )}
                         {!version.is_active && (
-                            <button type="button" onClick={() => onDelete(version)} title="Delete" className={cn('group/btn inline-flex items-center gap-1 p-1 rounded text-[#C06C5D] hover:bg-[#FDECEA]', consoleButtonFocusClass)}>
+                            <button type="button" onClick={() => onDelete(version)} title="Delete" className={cn('group/btn inline-flex items-center gap-1 p-1 rounded text-red-600 hover:bg-red-50', consoleButtonFocusClass)}>
                                 <Trash2 className="h-3 w-3" />
                                 <span className="text-xs hidden group-hover/btn:inline">Delete</span>
                             </button>
@@ -199,7 +199,7 @@ function BuildStatusCard({ agent, latestBuild, isBuilding, isQueued, isFailed, o
     if (isBuilding || isQueued) {
         return (
             <div className={cn('flex items-center gap-3 px-4 py-3 rounded-lg', bgTertiary)}>
-                <Loader2 className="h-4 w-4 animate-spin text-[#5B8DB8] shrink-0" />
+                <Loader2 className="h-4 w-4 animate-spin text-black shrink-0" />
                 <div className="min-w-0">
                     <div className={cn('text-xs font-medium', textPrimary)}>{isBuilding ? 'Building image…' : 'Queued for build…'}</div>
                     {latestBuild && (
@@ -214,7 +214,7 @@ function BuildStatusCard({ agent, latestBuild, isBuilding, isQueued, isFailed, o
 
     if (isFailed) {
         return (
-            <div className={cn('rounded-lg border', accentRedBg, 'border-[#FADBD8]')}>
+            <div className={cn('rounded-lg border', accentRedBg, 'border-red-100')}>
                 <div className="flex items-center gap-2 px-4 py-2.5">
                     <XCircle className={cn('h-4 w-4 shrink-0', accentRed)} />
                     <span className={cn('text-xs font-medium', accentRed)}>Build failed</span>
@@ -224,9 +224,9 @@ function BuildStatusCard({ agent, latestBuild, isBuilding, isQueued, isFailed, o
                         {latestBuild.failure_reason}
                     </pre>
                 )}
-                <div className="flex items-center gap-3 px-4 py-2 border-t border-[#FADBD8]">
+                <div className="flex items-center gap-3 px-4 py-2 border-t border-red-100">
                     {latestBuild && (
-                        <button type="button" onClick={() => onViewLogs(latestBuild.id)} className={cn('text-xs text-[#5B8DB8] hover:underline', consoleButtonFocusClass)}>
+                        <button type="button" onClick={() => onViewLogs(latestBuild.id)} className={cn('text-xs text-black hover:underline', consoleButtonFocusClass)}>
                             {logsBuildId === latestBuild.id ? 'Hide logs' : 'View logs'}
                         </button>
                     )}
@@ -251,7 +251,7 @@ function BuildStatusCard({ agent, latestBuild, isBuilding, isQueued, isFailed, o
             onClick={onBuild}
             className={cn(
                 'flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-lg text-white',
-                `${bgInverse} hover:bg-[#3C4043] transition-colors`,
+                `${bgInverse} hover:bg-zinc-700 transition-colors`,
                 consoleButtonFocusClass,
             )}
         >
@@ -274,7 +274,7 @@ function EmptyState({ onBuild }) {
                 onClick={onBuild}
                 className={cn(
                     'flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-lg text-white',
-                    `${bgInverse} hover:bg-[#3C4043] transition-colors`,
+                    `${bgInverse} hover:bg-zinc-700 transition-colors`,
                     consoleButtonFocusClass,
                 )}
             >
@@ -499,7 +499,7 @@ export function ImagesAdminContent() {
                         type="button"
                         onClick={() => loadCatalog({ reloadBuilds: true })}
                         disabled={refreshing}
-                        className={cn('p-1.5 rounded-md text-[#5F6368] hover:bg-[#E8EAED] transition-colors shrink-0', consoleButtonFocusClass)}
+                        className={cn('p-1.5 rounded-md text-zinc-500 hover:bg-zinc-200 transition-colors shrink-0', consoleButtonFocusClass)}
                     >
                         {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />}
                     </button>
@@ -524,7 +524,7 @@ export function ImagesAdminContent() {
                     ))}
                     {loading && (
                         <div className="flex items-center justify-center py-8">
-                            <Loader2 className="h-4 w-4 animate-spin text-[#9AA0A6]" />
+                            <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />
                         </div>
                     )}
                     {!loading && buildableAgents.length === 0 && (
@@ -554,7 +554,7 @@ export function ImagesAdminContent() {
                                         <h3 className={cn('text-sm font-bold', textPrimary)}>{selectedAgent.agent_name}</h3>
                                         {selectedAgent.active_version ? (
                                             <div className="mt-2 flex items-center gap-2">
-                                                <span className="inline-flex items-center rounded-full bg-[#E8F5E9] px-2 py-0.5 text-xs font-medium text-[#4A7C59]">
+                                                <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-600">
                                                     <Check className="h-2.5 w-2.5 mr-0.5" />Active
                                                 </span>
                                                 <span className={cn('text-xs font-mono truncate', textPrimary)}>
@@ -582,7 +582,7 @@ export function ImagesAdminContent() {
                                             type="button"
                                             onClick={() => setDeactivateTarget(selectedAgent.active_version)}
                                             disabled={actionId === `deprecate:${selectedAgent.active_version.id}`}
-                                            className={cn('text-xs text-[#9AA0A6] hover:text-[#5F6368] shrink-0', consoleButtonFocusClass)}
+                                            className={cn('text-xs text-zinc-400 hover:text-zinc-500 shrink-0', consoleButtonFocusClass)}
                                         >
                                             {actionId === `deprecate:${selectedAgent.active_version.id}` ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Deactivate'}
                                         </button>
@@ -645,16 +645,16 @@ export function ImagesAdminContent() {
                                 <div className="rounded-lg bg-[#0D1117] border border-[#0D1117] overflow-hidden">
                                     <div className={cn('flex items-center justify-between px-4 py-2.5 border-b border-[#21262d]')}>
                                         <div className="flex items-center gap-2">
-                                            <TerminalIcon className="h-3.5 w-3.5 text-[#8B949E]" />
+                                            <TerminalIcon className="h-3.5 w-3.5 text-zinc-400" />
                                             <span className="text-xs font-medium text-[#C9D1D9]">
                                                 Build logs
                                             </span>
-                                            <span className="text-xs font-mono text-[#8B949E]">{logsBuildId}</span>
+                                            <span className="text-xs font-mono text-zinc-400">{logsBuildId}</span>
                                         </div>
                                         <button
                                             type="button"
                                             onClick={() => setLogsBuildId(null)}
-                                            className={cn('text-xs text-[#8B949E] hover:text-[#C9D1D9] transition-colors', consoleButtonFocusClass)}
+                                            className={cn('text-xs text-zinc-400 hover:text-[#C9D1D9] transition-colors', consoleButtonFocusClass)}
                                         >
                                             Close
                                         </button>
@@ -682,12 +682,12 @@ export function ImagesAdminContent() {
                                             className={cn(
                                                 'flex items-center gap-3 px-4 py-2.5 transition-colors border-b last:border-b-0',
                                                 borderHairline,
-                                                'hover:bg-[#F4F5F6]',
+                                                'hover:bg-zinc-100',
                                             )}
                                         >
                                             <span className={cn(
                                                 'w-1.5 h-1.5 rounded-full shrink-0',
-                                                b.state === 'ready' ? 'bg-[#4A7C59]' : 'bg-[#C06C5D]',
+                                                b.state === 'ready' ? 'bg-emerald-600' : 'bg-red-600',
                                             )} />
                                             <span className={cn('font-mono text-xs truncate flex-1', textSecondary)}>
                                                 {b.id}
@@ -707,7 +707,7 @@ export function ImagesAdminContent() {
                                             <button
                                                 type="button"
                                                 onClick={() => handleViewLogs(b.id)}
-                                                className={cn('text-xs text-[#5B8DB8] hover:underline shrink-0', consoleButtonFocusClass)}
+                                                className={cn('text-xs text-black hover:underline shrink-0', consoleButtonFocusClass)}
                                             >
                                                 {logsBuildId === b.id ? 'Hide' : 'Logs'}
                                             </button>
@@ -715,7 +715,7 @@ export function ImagesAdminContent() {
                                                 <button
                                                     type="button"
                                                     onClick={() => handleDiscardBuild(b.id)}
-                                                    className={cn('text-xs text-[#C06C5D] hover:underline shrink-0', consoleButtonFocusClass)}
+                                                    className={cn('text-xs text-red-600 hover:underline shrink-0', consoleButtonFocusClass)}
                                                 >
                                                     Discard
                                                 </button>
@@ -784,7 +784,7 @@ export function ImagesAdminContent() {
                     </div>
                     <div className={cn('flex justify-end gap-2 px-5 py-3 border-t', borderHairline)}>
                         <Button type="button" variant="secondary" size="sm" onClick={() => setDeleteVersionTarget(null)}>Cancel</Button>
-                        <Button type="button" size="sm" onClick={handleDeleteVersion} className="bg-[#C06C5D] hover:bg-[#a55a4d] text-white">Delete</Button>
+                        <Button type="button" size="sm" onClick={handleDeleteVersion} className="bg-red-600 hover:bg-red-700 text-white">Delete</Button>
                     </div>
                 </ConsoleDialogShell>
             )}

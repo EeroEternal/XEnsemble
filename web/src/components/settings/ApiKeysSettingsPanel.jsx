@@ -10,7 +10,7 @@ import {
   textPrimary,
   textPlaceholder,
   borderHairline,
-} from '../../lib/consoleTheme';
+} from '../../lib/consoleTokens';
 import ByokConfigForm from '../ByokConfigForm';
 
 export default function ApiKeysSettingsPanel() {
@@ -99,8 +99,8 @@ export default function ApiKeysSettingsPanel() {
                   'ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0',
                   isByok
                     ? isConfigured
-                      ? 'bg-[#E8F5E9] text-[#4A7C59]'
-                      : 'bg-[#FFF3E0] text-[#E8B339]'
+                      ? 'bg-emerald-50 text-emerald-600'
+                      : 'bg-amber-50 text-amber-500'
                     : 'bg-zinc-100 text-zinc-500',
                 )}>
                   {isByok

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Loader2, Monitor } from 'lucide-react';
 import { usePreview, PreviewActions, PreviewStatus } from './PreviewPanel';
-import { consoleButtonFocusClass } from '@/lib/consoleTheme';
+import { consoleButtonFocusClass } from '@/lib/consoleTokens';
 import { buttonClass } from '@/lib/buttonStyles';
 
 /** Deployed app preview (start/stop + embed). */
@@ -39,10 +39,10 @@ export default function WorkspacePreviewPane({ projectId }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="workspace-preview-pane">
-      <div className="flex items-center justify-between gap-2 border-b border-[#E8EAED] px-3 py-1.5 shrink-0">
+      <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-1.5 shrink-0">
         <div className="flex min-w-0 items-center gap-2">
-          <Monitor className="h-3.5 w-3.5 shrink-0 text-[#5F6368]" />
-          <span className="truncate text-xs text-[#5F6368] font-mono">
+          <Monitor className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+          <span className="truncate text-xs text-zinc-500 font-mono">
             {previewUrl || 'Preview'}
           </span>
           <PreviewStatus deployment={preview.deployment} status={status} />
@@ -52,7 +52,7 @@ export default function WorkspacePreviewPane({ projectId }) {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 bg-[#F4F5F6]">
+      <div className="flex-1 min-h-0 bg-zinc-100">
         {embedLoading || isBusy ? (
           <div className="flex h-full items-center justify-center gap-2 text-zinc-400">
             <Loader2 className="h-4 w-4 animate-spin" />

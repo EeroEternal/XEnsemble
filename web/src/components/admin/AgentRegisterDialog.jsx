@@ -1,34 +1,51 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import { Loader2 } from 'lucide-react';
 import Button from '../Button';
-import Input from '../Input';
+import Input, { FormLabel } from '../Input';
 import {
   ConsoleDialogShell,
+  ConsoleStructuredDialogHeader,
+  ConsoleStructuredDialogBody,
+  ConsoleStructuredDialogFooter,
 } from '../ConsoleDialog';
 import { useToast } from '../Toast';
-import {
-  consoleDialogAdminFormPanelClass,
-  consoleSectionLabelClass,
-} from '../../lib/consoleTokens';
+import { consoleDialogMdClass } from '../../lib/consoleTokens';
 import { apiFetch } from '../../lib/api';
 
 const EMPTY_AGENT = { id: '', name: '', cmd: '', args: '[]', env_required: '[]' };
 
+function parseJsonSafe(value) {
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return { ok: false, error: 'Must be a JSON array' };
+    return { ok: true, value: parsed };
+  } catch {
+    return { ok: false, error: 'Invalid JSON' };
+  }
+}
+
 export default function AgentRegisterDialog({ open, onClose, onRegistered }) {
   const { showToast } = useToast();
   const [newAgent, setNewAgent] = useState(EMPTY_AGENT);
+  const [saving, setSaving] = useState(false);
+
+  const argsValidation = useMemo(() => parseJsonSafe(newAgent.args), [newAgent.args]);
+  const envValidation = useMemo(() => parseJsonSafe(newAgent.env_required), [newAgent.env_required]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!argsValidation.ok || !envValidation.ok) {
+      showToast('error', 'Fix JSON errors in Arguments or Required env before saving.');
+      return;
+    }
+    setSaving(true);
     try {
-      const parsedArgs = JSON.parse(newAgent.args);
-      const parsedEnv = JSON.parse(newAgent.env_required);
-
       const res = await apiFetch('/api/v1/agents', {
         method: 'POST',
         body: JSON.stringify({
           ...newAgent,
-          args: parsedArgs,
-          env_required: parsedEnv,
+          args: argsValidation.value,
+          env_required: envValidation.value,
         }),
       });
       const data = await res.json();
@@ -39,80 +56,119 @@ export default function AgentRegisterDialog({ open, onClose, onRegistered }) {
       onClose();
       onRegistered?.();
     } catch (err) {
-      showToast('error', err.message || 'Invalid JSON in Args or Env Required');
+      showToast('error', err.message || 'Failed to register agent.');
+    } finally {
+      setSaving(false);
     }
   };
 
   if (!open) return null;
 
   return (
-    <ConsoleDialogShell
-      fitContent
-      onClose={onClose}
-      panelClassName={`${consoleDialogAdminFormPanelClass} p-6`}
-    >
-      <h2 className="font-bold text-lg text-zinc-900 mb-4">Register new agent</h2>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-1 gap-4">
+    <ConsoleDialogShell onClose={onClose} panelClassName={consoleDialogMdClass}>
+      <ConsoleStructuredDialogHeader title="Register new agent" />
+      <ConsoleStructuredDialogBody>
+        <form id="agent-register-form" onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className={`block mb-1 ${consoleSectionLabelClass}`}>ID</label>
-            <Input
-              required
-              autoFocus
-              value={newAgent.id}
-              onChange={(e) => setNewAgent({ ...newAgent, id: e.target.value })}
-              className="h-9 py-1.5"
-            />
-          </div>
-          <div>
-            <label className={`block mb-1 ${consoleSectionLabelClass}`}>Display name</label>
-            <Input
-              required
-              value={newAgent.name}
-              onChange={(e) => setNewAgent({ ...newAgent, name: e.target.value })}
-              className="h-9 py-1.5"
-            />
-          </div>
-          <div>
-            <label className={`block mb-1 ${consoleSectionLabelClass}`}>Command</label>
-            <Input
-              required
-              value={newAgent.cmd}
-              onChange={(e) => setNewAgent({ ...newAgent, cmd: e.target.value })}
-              className="h-9 py-1.5"
-            />
-          </div>
-          <div>
-            <label className={`block mb-1 ${consoleSectionLabelClass}`}>Arguments (JSON)</label>
-            <Input
-              required
-              value={newAgent.args}
-              onChange={(e) => setNewAgent({ ...newAgent, args: e.target.value })}
-              className="h-9 py-1.5 font-mono"
-            />
-          </div>
-          <div>
-            <label className={`block mb-1 ${consoleSectionLabelClass}`}>Required env (JSON)</label>
-            <Input
-              required
-              value={newAgent.env_required}
-              onChange={(e) => setNewAgent({ ...newAgent, env_required: e.target.value })}
-              className="h-9 py-1.5 font-mono"
-            />
-            <p className="mt-1 text-xs text-zinc-400">
-              Configure API keys on this page after registration.
+            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">
+              Identity
             </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <FormLabel htmlFor="agent-id" className="mb-1.5">ID</FormLabel>
+                <Input
+                  id="agent-id"
+                  required
+                  autoFocus
+                  value={newAgent.id}
+                  onChange={(e) => setNewAgent({ ...newAgent, id: e.target.value })}
+                  placeholder="kimi-code"
+                />
+              </div>
+              <div>
+                <FormLabel htmlFor="agent-name" className="mb-1.5">Display name</FormLabel>
+                <Input
+                  id="agent-name"
+                  required
+                  value={newAgent.name}
+                  onChange={(e) => setNewAgent({ ...newAgent, name: e.target.value })}
+                  placeholder="Kimi Code"
+                />
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="secondary" size="md" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" size="md">
-            Save
-          </Button>
-        </div>
-      </form>
+
+          <div className="border-t border-zinc-100 pt-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">
+              Execution
+            </p>
+            <div className="space-y-3">
+              <div>
+                <FormLabel htmlFor="agent-cmd" className="mb-1.5">Command</FormLabel>
+                <Input
+                  id="agent-cmd"
+                  required
+                  value={newAgent.cmd}
+                  onChange={(e) => setNewAgent({ ...newAgent, cmd: e.target.value })}
+                  placeholder="npx"
+                  className="font-mono"
+                />
+              </div>
+              <div>
+                <FormLabel htmlFor="agent-args" className="mb-1.5">Arguments (JSON)</FormLabel>
+                <Input
+                  id="agent-args"
+                  required
+                  value={newAgent.args}
+                  onChange={(e) => setNewAgent({ ...newAgent, args: e.target.value })}
+                  placeholder='["-y","kimi-code@latest"]'
+                  className={`font-mono ${!argsValidation.ok ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''}`}
+                />
+                {!argsValidation.ok && (
+                  <p className="mt-1 text-xs text-red-600">{argsValidation.error}</p>
+                )}
+              </div>
+              <div>
+                <FormLabel htmlFor="agent-env" className="mb-1.5">Required env (JSON)</FormLabel>
+                <Input
+                  id="agent-env"
+                  required
+                  value={newAgent.env_required}
+                  onChange={(e) => setNewAgent({ ...newAgent, env_required: e.target.value })}
+                  placeholder='["KIMI_API_KEY"]'
+                  className={`font-mono ${!envValidation.ok ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''}`}
+                />
+                {!envValidation.ok && (
+                  <p className="mt-1 text-xs text-red-600">{envValidation.error}</p>
+                )}
+                <p className="mt-1 text-xs text-zinc-400">
+                  Configure API keys on this page after registration.
+                </p>
+              </div>
+            </div>
+          </div>
+        </form>
+      </ConsoleStructuredDialogBody>
+      <ConsoleStructuredDialogFooter>
+        <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={saving}>
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          form="agent-register-form"
+          size="sm"
+          disabled={saving || !argsValidation.ok || !envValidation.ok}
+        >
+          {saving ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Saving…
+            </>
+          ) : (
+            'Save'
+          )}
+        </Button>
+      </ConsoleStructuredDialogFooter>
     </ConsoleDialogShell>
   );
 }

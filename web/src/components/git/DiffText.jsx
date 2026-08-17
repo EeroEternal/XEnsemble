@@ -18,26 +18,26 @@ export function renderDiffLines(raw, { showLineNumbers = false } = {}) {
       newLine++;
       if (showLineNumbers) {
         return (
-          <div key={i} className="bg-[#DFF7E4] text-[#1A7F37] flex">
-            <span className="text-[#9AA0A6] select-none w-10 text-right pr-1.5 shrink-0 border-r border-[#E8EAED] mr-1.5">{ln}</span>
+          <div key={i} className="bg-emerald-50 text-emerald-600 flex">
+            <span className="text-zinc-400 select-none w-10 text-right pr-1.5 shrink-0 border-r border-zinc-200 mr-1.5">{ln}</span>
             <span className="pl-0.5">{line.slice(1)}</span>
           </div>
         );
       }
-      return <div key={i} className="bg-[#DFF7E4] text-[#1A7F37] pl-2">{line.slice(1)}</div>;
+      return <div key={i} className="bg-emerald-50 text-emerald-600 pl-2">{line.slice(1)}</div>;
     }
     if (first === '-') {
       const ln = oldLine;
       oldLine++;
       if (showLineNumbers) {
         return (
-          <div key={i} className="bg-[#FFEBE9] text-[#CF222E] flex">
-            <span className="text-[#9AA0A6] select-none w-10 text-right pr-1.5 shrink-0 border-r border-[#E8EAED] mr-1.5">{ln}</span>
+          <div key={i} className="bg-red-50 text-red-600 flex">
+            <span className="text-zinc-400 select-none w-10 text-right pr-1.5 shrink-0 border-r border-zinc-200 mr-1.5">{ln}</span>
             <span className="pl-0.5">{line.slice(1)}</span>
           </div>
         );
       }
-      return <div key={i} className="bg-[#FFEBE9] text-[#CF222E] pl-2">{line.slice(1)}</div>;
+      return <div key={i} className="bg-red-50 text-red-600 pl-2">{line.slice(1)}</div>;
     }
     const ol = oldLine;
     const nl = newLine;
@@ -45,13 +45,13 @@ export function renderDiffLines(raw, { showLineNumbers = false } = {}) {
     newLine++;
     if (showLineNumbers) {
       return (
-        <div key={i} className="bg-white text-[#1F2328] flex">
-          <span className="text-[#9AA0A6] select-none w-10 text-right pr-1.5 shrink-0 border-r border-[#E8EAED] mr-1.5">{nl}</span>
+        <div key={i} className="bg-white text-zinc-900 flex">
+          <span className="text-zinc-400 select-none w-10 text-right pr-1.5 shrink-0 border-r border-zinc-200 mr-1.5">{nl}</span>
           <span className="pl-0.5">{line.slice(1) || ' '}</span>
         </div>
       );
     }
-    return <div key={i} className="bg-white text-[#1F2328] pl-2">{line || ' '}</div>;
+    return <div key={i} className="bg-white text-zinc-900 pl-2">{line || ' '}</div>;
   });
 }
 

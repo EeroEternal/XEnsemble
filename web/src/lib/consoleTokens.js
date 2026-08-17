@@ -47,7 +47,8 @@ export const consolePageTitleClass = 'text-2xl font-bold tracking-tight text-zin
 export const consoleAdminPageClass = 'flex h-full min-h-0 w-full flex-col gap-6';
 
 /** Console tool surface: workspace sidebar + terminal fill the shell main */
-export const consoleToolPageClass = 'flex h-full min-h-0 w-full flex-col';
+export const consoleToolPageClass =
+  'flex h-full min-h-0 w-full flex-col bg-zinc-50 text-zinc-900';
 
 export const consoleAdminTableScrollClass = 'min-h-0 flex-1 overflow-auto console-scroll-hidden';
 
@@ -128,3 +129,77 @@ export const consoleIconButtonClass =
 
 export const consoleIconButtonDangerClass =
   `inline-flex items-center justify-center rounded-md p-1.5 text-red-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`;
+
+/* ───────────────────────────────────────────────────────────
+ * Semantic surface tokens (zinc-mapped, formerly consoleTheme.js)
+ * Consumers should import these from consoleTokens, not consoleTheme.
+ * ─────────────────────────────────────────────────────────── */
+
+export const bgCanvas = 'bg-white';
+export const bgContainer = 'bg-zinc-50';
+export const bgSecondary = 'bg-zinc-100';
+export const bgTertiary = 'bg-zinc-50';
+export const bgActive = 'bg-zinc-100';
+export const bgInverse = 'bg-black';
+
+export const textPrimary = 'text-zinc-900';
+export const textSecondary = 'text-zinc-500';
+export const textTertiary = 'text-zinc-700';
+export const textPlaceholder = 'text-zinc-400';
+export const textInverse = 'text-white';
+
+export const borderHairline = 'border-zinc-200';
+export const borderSubtle = 'border-zinc-300';
+export const divideHairline = 'divide-zinc-200';
+
+export const accentBlue = 'text-black hover:text-zinc-800';
+export const accentBlueBg = 'bg-black hover:bg-zinc-800';
+export const accentGreen = 'text-emerald-600';
+export const accentGreenBg = 'bg-emerald-50';
+export const accentGreenText = 'text-emerald-600';
+export const accentRed = 'text-red-600 hover:text-red-700';
+export const accentRedBg = 'bg-red-50 hover:bg-red-100';
+
+export const panelPadding = 'p-3';
+export const headerPadding = 'px-3 py-2';
+export const compactRadius = 'rounded-lg';
+export const containerRadius = 'rounded-2xl';
+export const transitionBase = 'transition-colors duration-150 ease-in-out';
+
+export const hoverBgSecondary = 'hover:bg-zinc-100';
+export const hoverBgCanvas = 'hover:bg-white';
+export const hoverBgTertiary = 'hover:bg-zinc-50';
+export const hoverBgActive = 'hover:bg-zinc-100';
+export const hoverTextPrimary = 'hover:text-zinc-900';
+export const hoverTextSecondary = 'hover:text-zinc-500';
+
+/* ───────────────────────────────────────────────────────────
+ * Git file status colors - single source of truth
+ * Replaces scattered #C06C5D / #4A7C59 / #5B8DB8 / #CF222E / #1A7F37 hex
+ * ─────────────────────────────────────────────────────────── */
+
+export const gitStatusModifiedTextClass = 'text-red-600';
+export const gitStatusAddedTextClass = 'text-emerald-600';
+export const gitStatusDeletedTextClass = 'text-red-600';
+export const gitStatusRenamedTextClass = 'text-blue-600';
+export const gitStatusUntrackedTextClass = 'text-emerald-600';
+
+/* ───────────────────────────────────────────────────────────
+ * Terminal theme re-exports (migrated from consoleTheme.js)
+ * ─────────────────────────────────────────────────────────── */
+
+export {
+  XTERM_MINIMUM_CONTRAST_RATIO as xtermMinimumContrastRatio,
+  getTerminalTheme,
+  getDefaultTerminalThemeId,
+} from './terminalThemes.js';
+
+import { getTerminalTheme, getDefaultTerminalThemeId } from './terminalThemes.js';
+import { loadTerminalThemeId } from './terminalPrefs.js';
+
+export function getActiveXtermTheme() {
+  return getTerminalTheme(loadTerminalThemeId()).xterm;
+}
+
+export const xtermTheme = getTerminalTheme(getDefaultTerminalThemeId()).xterm;
+export const xtermBackground = xtermTheme.background;
