@@ -273,6 +273,7 @@ export function PreviewActions({
   deployPreview,
   stopPreview,
   restartPreview,
+  onAnalyze,
 }) {
   if (status === 'running') {
     return (
@@ -313,7 +314,7 @@ export function PreviewActions({
     <button
       type="button"
       disabled={isBusy}
-      onClick={deployPreview}
+      onClick={onAnalyze || deployPreview}
       title="Deploy preview"
       className={ICON_BTN}
     >

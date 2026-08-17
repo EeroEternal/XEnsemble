@@ -18,8 +18,9 @@ function loadAllowedPreviewHosts() {
     const publicUrl = process.env.CONTROL_PLANE_PUBLIC_URL?.trim();
     if (publicUrl) {
         try {
-            const host = new URL(publicUrl).host;
-            if (host) hosts.add(host);
+            const u = new URL(publicUrl);
+            if (u.host) hosts.add(u.host);
+            if (u.hostname) hosts.add(u.hostname);
         } catch {
             /* ignore invalid public url */
         }
@@ -32,7 +33,9 @@ const allowedPreviewHosts = loadAllowedPreviewHosts();
 function isAllowedPreviewHost(request) {
     const host = request.headers.host;
     if (!host) return false;
-    return allowedPreviewHosts.has(host);
+    if (allowedPreviewHosts.has(host)) return true;
+    const hostname = host.split(':')[0];
+    return allowedPreviewHosts.has(hostname);
 }
 
 const proxy = httpProxy.createProxyServer({
@@ -128,10 +131,11 @@ async function proxyPreviewRequest(request, reply) {
     await new Promise((resolve, reject) => {
         reply.hijack();
         request.raw.url = path;
+        request.raw.headers.host = 'localhost';
         proxy.web(
             request.raw,
             reply.raw,
-            { target, changeOrigin: true },
+            { target, changeOrigin: false },
             (err) => {
                 if (err) reject(err);
                 else resolve();
@@ -183,7 +187,8 @@ async function registerPreviewGateway(fastify) {
 
             const target = `http://127.0.0.1:${resolved.entry.port}`;
             req.url = stripPreviewPrefix(req.url, deploymentId);
-            proxy.ws(req, socket, head, { target }, (err) => {
+            req.headers.host = 'localhost';
+            proxy.ws(req, socket, head, { target, changeOrigin: false }, (err) => {
                 if (err) socket.destroy();
             });
         } catch (err) {
