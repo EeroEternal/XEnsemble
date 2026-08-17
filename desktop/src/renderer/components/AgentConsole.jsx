@@ -63,6 +63,11 @@ function stripAlternateScreen(text) {
     .replace(/\x1b\[\?1015l/g, '');
 }
 
+// Mouse-tracking SET sequences that capture mouse events, preventing text
+// selection.  Stripped in live mode so xterm.js handles mouse selection
+// natively.  Wheel scrolling is preserved via a wheel event listener.
+const MOUSE_TRACKING_SET_RE = /\x1b\[\?(?:1000|1002|1003|1005|1006|1015|1016)h/g;
+
 function parseMessage(raw) {
   if (typeof raw === 'string') return JSON.parse(raw);
   return JSON.parse(raw.toString());
@@ -306,12 +311,22 @@ function AgentConsole({
       }
     };
 
+    const handleWheel = (e) => {
+      const inAlt = terminal.buffer.active === terminal.buffer.alternate;
+      if (!inAlt || serverEnded || disposed) return;
+      if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+      e.preventDefault();
+      e.stopPropagation();
+      wsRef.current.send(JSON.stringify({ type: 'input', data: e.deltaY > 0 ? '\x1b[6~' : '\x1b[5~' }));
+    };
+
     const focusTerminal = () => {
       if (!serverEnded) terminal.focus();
     };
     host.addEventListener('mousedown', focusTerminal);
     host.addEventListener('click', focusTerminal);
     host.addEventListener('contextmenu', handleContextMenu);
+    host.addEventListener('wheel', handleWheel, { passive: false });
 
     let lastHostWidth = 0;
     let lastHostHeight = 0;
@@ -668,40 +683,50 @@ function AgentConsole({
                     const data = syncTermPending;
                     syncTermPending = '';
                     if (!data) return;
-                    // Find the last complete block in the buffered data.
-                    const lastSyncStart = data.lastIndexOf('\x1b[?2026h');
-                    const lastSyncEnd = data.indexOf('\x1b[?2026l', lastSyncStart);
-                    if (lastSyncEnd === -1) {
-                      syncTermPending = data.slice(lastSyncStart);
-                      const firstSyncStart = data.indexOf('\x1b[?2026h');
-                      if (firstSyncStart > 0) {
-                        writeTerminalData(data.slice(0, firstSyncStart) + '\x1b[?25l');
-                      }
-                    } else {
-                      // Extract all non-sync-term data from the coalesced
-                      // buffer (data outside \x1b[?2026h...\x1b[?2026l
-                      // blocks).  This preserves mouse-tracking
-                      // (\x1b[?1003h) and other terminal-state sequences
-                      // that the discarded intermediate blocks are
-                      // full-screen redraws that don't affect.
-                      let nonSync = '';
-                      let pos = 0;
-                      while (pos < data.length) {
-                        const h = data.indexOf('\x1b[?2026h', pos);
-                        if (h === -1) { nonSync += data.slice(pos); break; }
-                        nonSync += data.slice(pos, h);
-                        const l = data.indexOf('\x1b[?2026l', h);
-                        if (l === -1) break;
-                        pos = l + '\x1b[?2026l'.length;
-                      }
-                      const lastBlockEnd = lastSyncEnd + '\x1b[?2026l'.length;
-                      writeTerminalData(
-                        nonSync
-                        + data.slice(lastSyncStart, lastBlockEnd)
-                        + data.slice(lastBlockEnd)
-                        + '\x1b[?25l'
-                      );
+                    // Find the last COMPLETE sync-term block (has both
+                    // ?2026h and ?2026l).  Use lastIndexOf('?2026l') to
+                    // find the last block end, then locate its matching
+                    // '?2026h'.  This correctly handles trailing incomplete
+                    // blocks (a ?2026h without a matching ?2026l) which
+                    // occur when the server's flush splits a block across
+                    // WS messages.  Previously, a trailing incomplete block
+                    // caused ALL complete blocks to be discarded (the code
+                    // only emitted data before the FIRST ?2026h), leaving
+                    // the screen frozen in 98.6% of timer fires.
+                    const lastCompleteEnd = data.lastIndexOf('\x1b[?2026l');
+                    if (lastCompleteEnd === -1) {
+                      // No complete block yet; keep buffering everything.
+                      syncTermPending = data;
+                      return;
                     }
+                    const lastCompleteStart = data.lastIndexOf('\x1b[?2026h', lastCompleteEnd);
+                    const blockEnd = lastCompleteEnd + '\x1b[?2026l'.length;
+                    // Save any trailing incomplete block (data after the
+                    // last complete block) for the next coalesce cycle.
+                    const afterBlock = data.slice(blockEnd);
+                    if (afterBlock.includes('\x1b[?2026h')) {
+                      syncTermPending = afterBlock.slice(afterBlock.indexOf('\x1b[?2026h'));
+                    }
+                    // Extract all non-sync-term data (content outside
+                    // ?2026h...?2026l blocks), stopping before any trailing
+                    // incomplete block.  This preserves terminal-state
+                    // sequences while discarding intermediate full-screen
+                    // redraws.
+                    let nonSync = '';
+                    let pos = 0;
+                    while (pos < data.length) {
+                      const h = data.indexOf('\x1b[?2026h', pos);
+                      if (h === -1) { nonSync += data.slice(pos); break; }
+                      nonSync += data.slice(pos, h);
+                      const l = data.indexOf('\x1b[?2026l', h);
+                      if (l === -1) break;
+                      pos = l + '\x1b[?2026l'.length;
+                    }
+                    writeTerminalData(
+                      nonSync
+                      + data.slice(lastCompleteStart, blockEnd)
+                      + '\x1b[?25l'
+                    );
                   }, 100);
                 }
               } else {
@@ -716,6 +741,7 @@ function AgentConsole({
           };
 
           function writeTerminalData(processed) {
+            processed = processed.replace(MOUSE_TRACKING_SET_RE, '');
             const buf = terminal.buffer.active;
             const atBottom = buf.baseY + terminal.rows >= buf.length;
             terminal.write(processed, () => {
@@ -841,6 +867,7 @@ function AgentConsole({
       host.removeEventListener('mousedown', focusTerminal);
       host.removeEventListener('click', focusTerminal);
       host.removeEventListener('contextmenu', handleContextMenu);
+      host.removeEventListener('wheel', handleWheel);
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
