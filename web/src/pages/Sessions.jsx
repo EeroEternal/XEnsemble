@@ -1426,7 +1426,6 @@ export default React.forwardRef(function Sessions({
                     <RepoImportDialog
                       key={gitProvider}
                       open={true}
-                      inline={true}
                       forceProvider={gitProvider}
                       onClose={() => { setGitImportMode(false); setGitProvider(''); setImportedProject(null); }}
                       onImported={(projectId) => {
