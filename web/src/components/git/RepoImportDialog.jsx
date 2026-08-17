@@ -297,23 +297,6 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
         autoComplete="off"
         spellCheck={false}
       />
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={handleConnectPat}
-          disabled={!patToken.trim() || patConnecting}
-          className="text-xs font-medium text-[#1967D2] hover:text-[#174EA6] disabled:opacity-50"
-        >
-          {patConnecting ? 'Connecting…' : 'Connect with token'}
-        </button>
-        {patToken && (
-          <span className="text-xs text-[#9AA0A6]">
-            {provider === 'github'
-              ? 'Requires the "repo" scope to push.'
-              : 'Stored encrypted; used for Git operations.'}
-          </span>
-        )}
-      </div>
       {patError && (
         <div className="flex items-center gap-1.5 text-xs text-red-600">
           <AlertCircle className="h-3 w-3 shrink-0" />
@@ -361,13 +344,6 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
           )}
           {patSectionOpen ? (
             <div className="space-y-3">
-              <button
-                type="button"
-                onClick={() => { setPatSectionOpen(false); setPatError(null); }}
-                className={`text-xs font-medium text-[#5F6368] hover:text-[#202124] ${consoleButtonFocusClass}`}
-              >
-                ← Back
-              </button>
               {patSection}
             </div>
           ) : (
@@ -608,11 +584,26 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
         type="button"
         variant="secondary"
         size="sm"
-        onClick={handleClose}
+        onClick={patSectionOpen ? () => { setPatSectionOpen(false); setPatError(null); } : handleClose}
         disabled={importing && !cloneStatus}
       >
-        Cancel
+        {patSectionOpen ? 'Back' : 'Cancel'}
       </Button>
+      {patSectionOpen && !connection && (
+        <Button
+          type="button"
+          size="sm"
+          disabled={!patToken.trim() || patConnecting}
+          onClick={handleConnectPat}
+        >
+          {patConnecting ? (
+            <>
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              Connecting…
+            </>
+          ) : 'Connect'}
+        </Button>
+      )}
       {connection && (
         <Button
           type="button"
