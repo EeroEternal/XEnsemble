@@ -4,7 +4,7 @@ import AgentConsole from '../components/AgentConsole';
 import WorkspaceShell from '../components/WorkspaceShell';
 import WorkspacePanel from '../components/WorkspacePanel';
 import RepoImportDialog from '../components/git/RepoImportDialog';
-import GitStatusBar from '../components/git/GitStatusBar';
+import BranchSwitcher, { GIT_REPO_PROVIDERS } from '../components/git/BranchSwitcher';
 import { apiFetch } from '../lib/api';
 import * as githubApi from '../lib/githubApi';
 import {
@@ -1476,9 +1476,13 @@ export default React.forwardRef(function Sessions({
               {activeSession ? (
                 <>
                   <div className="flex items-center gap-2 min-w-0">
-                    <h1 className="truncate text-[15px] font-semibold text-zinc-900">
-                      {activeSession.projectName || activeSession.agentName || 'Session'}
-                    </h1>
+                    {activeSession.projectId && activeProject?.repoProvider && GIT_REPO_PROVIDERS.has(activeProject.repoProvider) ? (
+                      <BranchSwitcher projectId={activeSession.projectId} project={activeProject} git={gitChanges} />
+                    ) : (
+                      <h1 className="truncate text-[15px] font-semibold text-zinc-900">
+                        {activeSession.projectName || activeSession.agentName || 'Session'}
+                      </h1>
+                    )}
                     <span className="inline-flex shrink-0 items-center rounded-md bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500">
                       {activeSession.agentName}
                     </span>
@@ -1648,7 +1652,6 @@ export default React.forwardRef(function Sessions({
                     sessionWakeable={sessionWakeable}
                   />
                 </div>
-                <GitStatusBar projectId={activeSession.projectId} project={activeProject} git={gitChanges} />
               </div>
               {panelOpen && (
                 <>

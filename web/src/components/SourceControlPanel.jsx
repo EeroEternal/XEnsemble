@@ -622,16 +622,30 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 {gitChanges?.ahead > 0 ? ` · ↑${gitChanges.ahead}` : ''}
               </span>
               <div className="flex items-stretch shrink-0">
-                <button
-                  type="button"
-                  onClick={handleCommit}
-                  disabled={!commitMessage.trim() || (gitStagedFiles.length === 0 && gitUnstagedFiles.length === 0) || committing || gitChanges?.operation === 'commit'}
-                  className={`${buttonClass('primary', 'sm')} h-7 rounded-r-none px-3 text-xs ${consoleButtonFocusClass}`}
-                >
-                  {committing || gitChanges?.operation === 'commit' ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : gitStagedFiles.length === 0 && gitUnstagedFiles.length > 0 ? 'Stage All & Commit' : 'Commit'}
-                </button>
+                {gitHasChanges ? (
+                  <button
+                    type="button"
+                    onClick={handleCommit}
+                    disabled={!commitMessage.trim() || (gitStagedFiles.length === 0 && gitUnstagedFiles.length === 0) || committing || gitChanges?.operation === 'commit'}
+                    className={`${buttonClass('primary', 'sm')} h-7 rounded-r-none px-3 text-xs ${consoleButtonFocusClass}`}
+                  >
+                    {committing || gitChanges?.operation === 'commit' ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : gitStagedFiles.length === 0 && gitUnstagedFiles.length > 0 ? 'Stage All & Commit' : 'Commit'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handlePull}
+                    disabled={pulling || gitChanges?.operation === 'pull'}
+                    title="Pull latest changes"
+                    className={`${buttonClass('primary', 'sm')} h-7 rounded-r-none px-3 text-xs ${consoleButtonFocusClass}`}
+                  >
+                    {pulling || gitChanges?.operation === 'pull' ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : 'Pull'}
+                  </button>
+                )}
                 <button
                   ref={actionMenuBtnRef}
                   type="button"
@@ -679,22 +693,20 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             <GitCommit className="h-3.5 w-3.5" />
             Commit
           </button>
-          {gitChanges?.behind > 0 && (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={pulling || gitChanges?.operation === 'pull'}
-              onClick={handlePull}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
-            >
-              {pulling || gitChanges?.operation === 'pull' ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Download className="h-3.5 w-3.5" />
-              )}
-              Pull ({gitChanges.behind})
-            </button>
-          )}
+          <button
+            type="button"
+            role="menuitem"
+            disabled={pulling || gitChanges?.operation === 'pull'}
+            onClick={handlePull}
+            className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
+          >
+            {pulling || gitChanges?.operation === 'pull' ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
+            Pull{gitChanges?.behind > 0 ? ` (${gitChanges.behind})` : ''}
+          </button>
           {!isLocalGit && (
             <button
               type="button"
