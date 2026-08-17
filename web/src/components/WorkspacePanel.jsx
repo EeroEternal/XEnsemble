@@ -484,6 +484,19 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
             className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}>
             {sidebarOpen ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelLeft className="h-3.5 w-3.5" />}
           </button>
+          {activeTab && (
+            <>
+              <span className="mx-1 h-4 w-px bg-zinc-200" />
+              <button
+                type="button"
+                onClick={() => onCloseTab?.(activeTab.path)}
+                title="Close file"
+                aria-label="Close file"
+                className={`p-1 rounded text-zinc-400 hover:text-red-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}>
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -528,9 +541,6 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
           <>
             {sidebarOpen && (
               <div className="w-44 shrink-0 border-r border-zinc-200 bg-zinc-100 flex flex-col min-h-0">
-                <div className="shrink-0 flex items-center px-2 py-0.5 border-b border-zinc-200">
-                  <span className="text-[10px] font-medium text-zinc-400 tracking-wide uppercase">Files</span>
-                </div>
                 <div className="flex-1 min-h-0 overflow-y-auto px-2 py-1">
                   <WorkspaceFileTree lazy projectId={projectId} onFetchDir={onFetchDir}
                     selectedPath={activePath} onOpenFile={handleOpenFile}
@@ -553,26 +563,6 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
                 </Suspense>
               ) : activeTab ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  {!sidebarOpen && (
-                    <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-zinc-200 bg-zinc-50">
-                      <button
-                        type="button"
-                        onClick={() => setSidebarOpen(true)}
-                        className={`flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-700 ${consoleButtonFocusClass}`}
-                      >
-                        <PanelLeft className="h-3 w-3" />
-                        <span>Show file tree</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onCloseTab?.(activeTab.path)}
-                        className={`ml-auto flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-600 ${consoleButtonFocusClass}`}
-                        title="Close file"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  )}
                   <div className="flex-1 min-h-0 overflow-hidden">
                     <CodeEditor
                       content={activeTab.content}
@@ -593,16 +583,6 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
                 <div className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-400">
                   <FileText className="h-12 w-12" />
                   <p className="text-sm">Select a file from the tree to open</p>
-                  {!sidebarOpen && (
-                    <button
-                      type="button"
-                      onClick={() => setSidebarOpen(true)}
-                      className={`flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-700 ${consoleButtonFocusClass}`}
-                    >
-                      <PanelLeft className="h-3 w-3" />
-                      <span>Show file tree</span>
-                    </button>
-                  )}
                 </div>
               )}
             </div>
