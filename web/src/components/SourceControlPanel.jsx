@@ -1,9 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  GitBranch, GitCommit, GitPullRequest, RefreshCw, PanelLeftClose, ArrowUp, ArrowDown,
+  GitCommit, GitPullRequest, RefreshCw, PanelLeftClose,
   Plus, Minus, Loader2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, FileText,
-  Upload, Download, AlertTriangle, RotateCcw, User, GitMerge,
+  Upload, Download, AlertTriangle, RotateCcw, User,
 } from 'lucide-react';
 import {
   consoleButtonFocusClass,
@@ -457,34 +457,53 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
 
   return (
     <div className="flex flex-col h-full min-h-0 w-full relative">
-      <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-1.5 shrink-0">
-        <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-zinc-500">
-          <GitBranch className="h-3 w-3 shrink-0" />
-          <span className="font-mono truncate">{branch || '—'}</span>
-          {gitChanges?.ahead > 0 && (
-            <span className="flex items-center gap-0.5 text-emerald-600 shrink-0">
-              <ArrowUp className="h-2.5 w-2.5" />{gitChanges.ahead}
-            </span>
-          )}
-          {gitChanges?.behind > 0 && (
-            <span className="flex items-center gap-0.5 text-red-600 shrink-0">
-              <ArrowDown className="h-2.5 w-2.5" />{gitChanges.behind}
-            </span>
-          )}
-        </div>
+      <div className="flex items-center justify-end gap-2 border-b border-zinc-200 px-3 py-1.5 shrink-0">
         <div className="flex items-center gap-0.5 shrink-0">
-          <button
-            ref={actionMenuBtnRef}
-            type="button"
-            onClick={() => setActionMenuOpen((v) => !v)}
-            title="Git actions"
-            aria-label="Git actions"
-            aria-haspopup="menu"
-            aria-expanded={actionMenuOpen}
-            className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass} ${actionMenuOpen ? 'bg-zinc-200 text-zinc-900' : ''}`}
-          >
-            <GitMerge className="h-3.5 w-3.5" />
-          </button>
+          <div className="flex items-stretch shrink-0 rounded-md border border-zinc-200 overflow-hidden">
+            {gitHasChanges ? (
+              <button
+                type="button"
+                onClick={() => setShowCommitDialog(true)}
+                disabled={committing || gitChanges?.operation === 'commit'}
+                title="Commit changes"
+                className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`}
+              >
+                {committing || gitChanges?.operation === 'commit' ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <GitCommit className="h-3.5 w-3.5" />
+                )}
+                Commit
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handlePull}
+                disabled={pulling || gitChanges?.operation === 'pull'}
+                title="Pull latest changes"
+                className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`}
+              >
+                {pulling || gitChanges?.operation === 'pull' ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Download className="h-3.5 w-3.5" />
+                )}
+                Pull
+              </button>
+            )}
+            <button
+              ref={actionMenuBtnRef}
+              type="button"
+              onClick={() => setActionMenuOpen((v) => !v)}
+              title="More git actions"
+              aria-label="More git actions"
+              aria-haspopup="menu"
+              aria-expanded={actionMenuOpen}
+              className={`flex items-center px-1.5 text-zinc-500 hover:bg-zinc-100 border-l border-zinc-200 ${consoleButtonFocusClass} ${actionMenuOpen ? 'bg-zinc-100 text-zinc-900' : ''}`}
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          </div>
           {gitHasChanges && (
             <button
               title={allExpanded ? 'Collapse all' : 'Expand all'}
