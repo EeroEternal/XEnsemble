@@ -533,9 +533,12 @@ export default function AppSidebar({
       <div
         key={s.id}
         className={`group/session relative flex items-center gap-1 rounded-md pl-6 pr-1.5 py-1.5 ${transitionBase} ${
-          isActive ? bgCanvas : hoverBgTertiary
-        } ${!isLive ? 'opacity-70' : ''}`}
+          isActive ? `${bgCanvas} shadow-sm ring-1 ring-zinc-200` : hoverBgTertiary
+        } ${!isLive && !isActive ? 'opacity-70' : ''}`}
       >
+        {isActive && (
+          <span className="absolute left-1.5 top-1.5 bottom-1.5 w-1 rounded-full bg-zinc-900" />
+        )}
         <button
           type="button"
           onClick={() => selectSession(s, ws)}
