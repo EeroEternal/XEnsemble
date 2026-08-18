@@ -24,6 +24,7 @@ import {
   consoleTableHeadCellClass,
 } from '../lib/consoleTokens';
 import { formatDuration, getBuildState } from '../lib/imageBuildStates';
+import { formatRelativeTime } from '../lib/formatRelativeTime';
 import { cn } from '../lib/utils';
 import { apiFetch } from '../lib/api';
 
@@ -478,14 +479,14 @@ export function CustomImagesContent() {
 
       {/* Image List */}
       <div className={cn(consoleAdminTableShellClass, '!overflow-auto')}>
-        <table className="w-full min-w-[720px] table-fixed border-collapse text-left">
+        <table className="w-full min-w-[640px] table-fixed border-collapse text-left">
           <colgroup>
             <col className="w-auto" />
             <col className="w-36" />
             <col className="w-auto" />
-            <col className="w-28" />
-            <col className="w-40" />
             <col className="w-24" />
+            <col className="w-28" />
+            <col className="w-32" />
           </colgroup>
           <thead>
             <tr className="border-b border-zinc-200">
@@ -555,7 +556,7 @@ export function CustomImagesContent() {
                       {buildTimeMs != null ? formatDuration(buildTimeMs) : '\u2014'}
                     </td>
                     <td className={cn(consoleTableBodyCellClass, 'text-zinc-500')}>
-                      <span className="block truncate" title={formatTime(img.created_at)}>{formatTime(img.created_at)}</span>
+                      <span className="block truncate" title={formatTime(img.created_at)}>{formatRelativeTime(img.created_at)}</span>
                     </td>
                     <td className={consoleTableBodyCellClass}>
                       <div className="flex items-center gap-1">
