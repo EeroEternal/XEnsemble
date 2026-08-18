@@ -25,15 +25,15 @@ Login 等公开页、终端 Chat 区可有独立密度；**勿**把 Marketing �
 
 | 能力 | 文件 |
 |------|------|
-| Design tokens | `client/src/lib/consoleTokens.js` |
-| 状态徽章（固定槽） | `consoleStatusBadgeClass`、`consoleStatusIconSlotClass` |
-| Shell 宽度/内边距 | `client/src/lib/appShellLayout.js` |
-| 按钮 | `client/src/components/Button.jsx`、`client/src/lib/buttonStyles.js` |
-| 文本输入 | `client/src/components/Input.jsx`（含 `FormLabel`、`Textarea`） |
-| 页头 | `client/src/components/PageHeader.jsx` |
-| 弹窗 | `client/src/components/ConsoleDialog.jsx`（含 `ConsoleStructuredDialog*`） |
-| 下拉 | `client/src/components/SelectMenu.jsx`、`MultiSelectMenu.jsx` |
-| Toast | `client/src/components/Toast.jsx` |
+| Design tokens | `web/src/lib/consoleTokens.js`、`consoleTheme.js` |
+| 状态徽章 | `web/src/components/StatusBadge.jsx`（含 `STATUS_TONES`）；token `consoleStatusBadgeClass`、`consoleStatusIconSlotClass` |
+| Shell 宽度/内边距 | `web/src/lib/appShellLayout.js` |
+| 按钮 | `web/src/components/Button.jsx`、`web/src/lib/buttonStyles.js` |
+| 文本输入 | `web/src/components/Input.jsx`（含 `FormLabel`、`Textarea`） |
+| 页头 | `web/src/components/PageHeader.jsx` |
+| 弹窗 | `web/src/components/ConsoleDialog.jsx`（含 `ConsoleStructuredDialog*`） |
+| 下拉 | `web/src/components/SelectMenu.jsx`、`MultiSelectMenu.jsx` |
+| Toast | `web/src/components/Toast.jsx` |
 | 完整 UI 细则 | **`docs/Designs.md`** |
 
 ## 核心原则（ParaRouter Console）
@@ -58,7 +58,7 @@ Console 在加载、验证、路由切换、弹窗开关时**不得出现可感�
 ### 表格与列表
 
 - **列宽固定**：Status、Actions 等窄列用 `<colgroup>` 或 `table-fixed` + 明确宽度；Name 等主列 `min-w-0 truncate`
-- **状态徽章**：使用 `consoleStatusBadgeClass` + `consoleStatusIconSlotClass` — 固定 `min-w` / `h-4`，**始终保留**图标槽（验证中显示 `Loader2`，其余状态空槽占位），文案切换不得增删图标列
+- **状态徽章**：使用 `consoleStatusBadgeClass` + `consoleStatusIconSlotClass` — 宽度随文案自适应（`text-xs whitespace-nowrap`），**始终保留**固定尺寸图标槽（验证中显示 `Loader2`，其余状态空槽占位），文案/图标切换不得引起列宽跳动
 - **行内操作**：图标按钮统一 `w-3.5 h-3.5`；loading 时用同尺寸 `Loader2` **原位替换**，禁止文字按钮与图标按钮混排切换
 - **单元格内容**：简短标签 + 详情放 `title` / tooltip；禁止在格内展开长文本撑开列宽
 
@@ -75,7 +75,7 @@ Console 在加载、验证、路由切换、弹窗开关时**不得出现可感�
 
 ### 参考实现
 
-- Gateway Provider 表：`client/src/components/settings/GatewaySettingsPanel.jsx` — Status 列固定槽位
+- Gateway Provider 表：`web/src/components/settings/GatewaySettingsPanel.jsx` — Status 列固定槽位
 - 图标按钮 loading：`Loader2` 替换 lucide 图标，尺寸不变
 
 ## 配色（Console）

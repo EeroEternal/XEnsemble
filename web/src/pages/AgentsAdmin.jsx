@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Download, KeyRound, Pencil, Trash2, RefreshCw, Info, MoreHorizontal } from 'lucide-react';
+import { Plus, Download, KeyRound, Pencil, Trash2, RefreshCw, Info, MoreHorizontal, CheckCircle, Clock } from 'lucide-react';
 
 import Button from '../components/Button';
 import PageHeader from '../components/PageHeader';
+import StatusBadge from '../components/StatusBadge';
 import { useToast } from '../components/Toast';
 import { confirm } from '../components/ConfirmDialog';
 import {
@@ -32,8 +33,8 @@ const ACTION_LOADING_HINT = {
 
 function statusBadge(installed) {
   return installed
-    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-    : 'bg-amber-50 text-amber-700 border-amber-200';
+    ? { tone: 'success', icon: CheckCircle, label: 'Installed' }
+    : { tone: 'warning', icon: Clock, label: 'Not installed' };
 }
 
 function formatLifecycleTime(ts) {
@@ -455,9 +456,7 @@ export default function AgentsAdmin() {
                     </td>
                     <td className={consoleTableBodyCellClass}>
                       <div className="flex items-center">
-                        <span className={`inline-flex rounded border px-1.5 py-0.5 text-xs font-medium ${statusBadge(agent.installed)}`}>
-                          {agent.installed ? 'Installed' : 'Not installed'}
-                        </span>
+                        <StatusBadge tone={statusBadge(agent.installed).tone} icon={statusBadge(agent.installed).icon} label={statusBadge(agent.installed).label} />
                         <LifecycleInfoDot lifecycle={agent.last_lifecycle} />
                       </div>
                     </td>

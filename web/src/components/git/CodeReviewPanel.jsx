@@ -7,6 +7,7 @@ import { useToast } from '../Toast';
 import { renderDiffLines, DiffText } from './DiffText';
 import {
   consoleIconButtonClass,
+  consoleIconButtonDangerClass,
   consoleButtonFocusClass,
   consoleInputClass,
   textPrimary,
@@ -97,7 +98,7 @@ function CommentActionButtons({ comment, isOwnComment, onReply, onEdit, onDelete
             onClick={() => onDelete(comment)}
             disabled={disabled}
             title="Delete"
-            className={`p-1 rounded text-zinc-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
+            className={consoleIconButtonDangerClass}
           >
             <Trash2 className="h-3 w-3" />
           </button>

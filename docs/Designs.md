@@ -15,7 +15,8 @@ Agent 控制台、Settings 弹窗、Registry 等 authenticated 页面均属 Cons
 
 | 能力 | 文件 |
 |------|------|
-| Token | `client/src/lib/consoleTokens.js` |
+| Token | `web/src/lib/consoleTokens.js`、`consoleTheme.js` |
+| 状态徽章 | `web/src/components/StatusBadge.jsx`（含 `STATUS_TONES`） |
 | 表单标签 | `FormLabel`（`consoleFormLabelClass`） |
 | 多行输入 | `Textarea`（同 `Input` / `consoleInputClass`） |
 | 结构化弹窗 | `ConsoleStructuredDialogHeader` / `Body` / `Footer` |
@@ -32,10 +33,11 @@ Agent 控制台、Settings 弹窗、Registry 等 authenticated 页面均属 Cons
 
 - **主操作**（Save、Add Agent、Add provider、表单 Submit / Cancel）：`Button` + 文案；`variant="primary"` 或 `secondary`。
 - **图标按钮**（工具栏、Settings 卡片内联、**列表行内操作**、**表单内辅助操作**（Test connection、Fetch models 等）、表格 Actions 列、Preview 控件）：**仅图标**，禁止图标与文字并排（如 ~~Configure~~、~~Edit~~、~~Test connection~~、~~Fetch models~~）。
-- 样式：`consoleIconButtonClass`；**破坏性操作**（删除、卸载等）用 `consoleIconButtonDangerClass`（红色，`Trash2` 图标）。深色终端工具栏（Preview）可用本地变体（如 `text-zinc-400 hover:bg-zinc-800`）。
+- 样式：`consoleIconButtonClass`；**破坏性操作**（删除、卸载等）用 `consoleIconButtonDangerClass`（`Trash2` 图标）。深色终端工具栏（Preview）可用本地变体（如 `text-zinc-400 hover:bg-zinc-800`）。
+- **破坏性图标按钮配色**：默认灰（与普通图标按钮一致），**hover 才变红**（`hover:text-red-700 hover:bg-red-50`）——避免整页红点密集、红色失去警示意义；仅右键菜单（context menu）中的删除项默认红（对齐 macOS / VS Code）。
 - 图标尺寸：表格 / 列表行内 / 表单辅助区 `w-3.5 h-3.5`；Settings 卡片工具条 `w-4 h-4`。
 - 必须同时提供 `title`（hover 提示）与 `aria-label`（读屏）；进行中用 `Loader2` + `animate-spin` 替换图标，`title` 用进行时（如 `Starting…`、`Removing…`）。
-- **常用图标语义**：编辑 `Pencil`、删除 `Trash2`、刷新/重试/测连 `RefreshCw`、拉取列表 `List`、启动 `Play`、停止 `Square`、配置 `Settings2`。
+- **常用图标语义**：编辑 `Pencil`、删除 `Trash2`、刷新/重试/测连 `RefreshCw`、拉取列表 `List`、启动 `Play`、停止 `Square`、暂停 `Pause`、恢复 `Play`、配置 `Settings2`。
 - **列表行内**（如 Gateway Provider 行的 Test / Edit / Remove）：与 Admin 表格 Actions 同一套规则，禁止文字链或 ghost 文字按钮。
 
 ## Toast
@@ -148,6 +150,44 @@ Admin 与 Console 中的数据表格（`consoleTableShellClass` 等）须遵守�
 - 复合标识（如 Name + ID）若必须同格展示，主名一行、ID 一行仅作该列的附属标注；其余字段一律拆列。
 - 单元格内容超出列宽时用 `truncate` + `title`，不在格内换行堆叠第二项。
 - **页面稳定性**（详见根目录 `DESIGN.md` § 页面稳定性）：Status / Actions 列宽固定；状态徽章用 `consoleStatusBadgeClass` 预留图标槽；行内 loading 用同尺寸 spinner 原位替换，禁止验证/保存时整表或整列横向位移。
+
+## 状态徽章（StatusBadge）
+
+统一组件 `web/src/components/StatusBadge.jsx`，所有列表 / 表格 / 弹窗中的状态徽章**必须复用**，禁止手写徽章样式。
+
+### 用法
+
+```jsx
+<StatusBadge tone="success" icon={CheckCircle} label="Active" />
+<StatusBadge tone="info" spinning label="Building…" />   // loading 态，spinner 占图标槽
+<StatusBadge tone="neutral" icon={Clock} label="Not verified" title="详情 tooltip" />
+```
+
+### 色系（`STATUS_TONES`）
+
+| tone | Tailwind | 语义 |
+|------|----------|------|
+| `success` | `bg-emerald-50 text-emerald-700 border-emerald-200` | 就绪 / 正常（Active、Installed、Ready、Available） |
+| `warning` | `bg-amber-50 text-amber-700 border-amber-200` | 待处理 / 未就绪（Pending、Not installed、Queued） |
+| `danger` | `bg-red-50 text-red-700 border-red-200` | 失败 / 停用（Failed、Suspended、Unavailable） |
+| `info` | `bg-blue-50 text-blue-700 border-blue-200` | 进行中（Building、Verifying） |
+| `neutral` | `bg-zinc-100 text-zinc-600 border-zinc-200` | 未知 / 未验证（Not verified） |
+
+### 状态 → 图标语义
+
+| 状态 | 图标 |
+|------|------|
+| active / installed / ok | `CheckCircle` |
+| pending / not installed / queued / not verified | `Clock` |
+| suspended | `Pause` |
+| failed / error | `XCircle` |
+| building / testing / verifying（进行中） | `Loader2` + `animate-spin`（走 `spinning` prop） |
+
+### 结构约定
+
+- 宽度随文案自适应（`text-xs whitespace-nowrap`），**不设**固定 `min-width`；短词（Active / Ready）不撑满列。
+- **图标槽固定** `consoleStatusIconSlotClass`（`w-3 h-3 shrink-0`）：loading 时 `Loader2` 原位替换图标，其余状态保留空槽占位，**文案/图标切换不得引起列宽跳动**。
+- 破坏性状态（`danger`）不另加红色 border 描边，统一走 `STATUS_TONES`。
 
 ## Agents（Admin）
 

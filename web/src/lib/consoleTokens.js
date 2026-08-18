@@ -110,9 +110,9 @@ export const consoleSettingsTabIdleClass =
 export const consoleSettingsPanelScrollClass =
   'flex-1 min-h-0 min-w-0 overflow-y-auto console-scroll-hidden bg-white px-5 py-4';
 
-/** Fixed-size status badge slot — prevents column shift when spinner appears (DESIGN.md § 页面稳定性) */
+/** Status badge — content-sized; the icon slot (consoleStatusIconSlotClass) stays fixed to prevent column shift when spinner appears (DESIGN.md § 页面稳定性) */
 export const consoleStatusBadgeClass =
-  'inline-flex items-center gap-1 min-w-[6.5rem] h-4 text-xs';
+  'inline-flex items-center gap-1 text-xs whitespace-nowrap';
 
 export const consoleStatusIconSlotClass =
   'inline-flex w-3 h-3 shrink-0 items-center justify-center';
@@ -128,7 +128,7 @@ export const consoleIconButtonClass =
   `inline-flex items-center justify-center rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`;
 
 export const consoleIconButtonDangerClass =
-  `inline-flex items-center justify-center rounded-md p-1.5 text-red-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`;
+  `inline-flex items-center justify-center rounded-md p-1.5 text-zinc-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`;
 
 /* ───────────────────────────────────────────────────────────
  * Semantic surface tokens (zinc-mapped, formerly consoleTheme.js)

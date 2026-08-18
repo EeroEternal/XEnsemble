@@ -5,6 +5,7 @@ import Button from '../components/Button';
 import Input from '../components/Input';
 import PageHeader from '../components/PageHeader';
 import SelectMenu from '../components/SelectMenu';
+import StatusBadge from '../components/StatusBadge';
 import {
   ConsoleDialogShell,
   ConsoleStructuredDialogBody,
@@ -15,8 +16,6 @@ import { useToast } from '../components/Toast';
 import {
   consoleAdminPageClass,
   consoleSectionLabelClass,
-  consoleStatusBadgeClass,
-  consoleStatusIconSlotClass,
   consoleStructuredDialogPanelClass,
   consoleAdminTableShellClass,
   consoleTableBodyCellClass,
@@ -26,10 +25,10 @@ import { cn } from '../lib/utils';
 import { apiFetch } from '../lib/api';
 
 const BUILD_STATES = {
-  queued: { label: 'Queued', icon: Clock, color: 'bg-amber-50 text-amber-700 border-amber-200' },
-  building: { label: 'Building', icon: Loader2, color: 'bg-blue-50 text-blue-700 border-blue-200' },
-  ready: { label: 'Ready', icon: CheckCircle2, color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  failed: { label: 'Failed', icon: XCircle, color: 'bg-red-50 text-red-700 border-red-200' },
+  queued: { label: 'Queued', icon: Clock, tone: 'warning' },
+  building: { label: 'Building', icon: Loader2, tone: 'info', spinning: true },
+  ready: { label: 'Ready', icon: CheckCircle2, tone: 'success' },
+  failed: { label: 'Failed', icon: XCircle, tone: 'danger' },
 };
 
 function formatTime(ts) {
@@ -38,15 +37,9 @@ function formatTime(ts) {
 }
 
 function stateBadge(state) {
-  const entry = BUILD_STATES[state] || { label: state || '\u2014', icon: null, color: 'bg-zinc-50 text-zinc-600 border-zinc-200' };
-  const Icon = entry.icon;
+  const entry = BUILD_STATES[state] || { label: state || '\u2014', icon: null, tone: 'neutral' };
   return (
-    <span className={cn(consoleStatusBadgeClass, entry.color, 'rounded border px-1.5')}>
-      <span className={consoleStatusIconSlotClass}>
-        {Icon && <Icon className={cn('h-3 w-3', state === 'building' && 'animate-spin')} />}
-      </span>
-      {entry.label}
-    </span>
+    <StatusBadge tone={entry.tone} icon={entry.icon} spinning={entry.spinning} label={entry.label} />
   );
 }
 
@@ -222,15 +215,16 @@ export function CustomImagesContent() {
     <>
       <PageHeader
         title="Custom Images"
-        description="Combine multiple components (languages, databases, dev tools) into a single image. When creating a new agent, select this image to get a sandbox with everything pre-installed."
+        description="Combine components into a pre-installed sandbox image."
         actions={
           <div className="flex items-center gap-2">
-            <Button onClick={loadAll} disabled={loading} size="sm" variant="secondary">
-              <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-              &ensp;Refresh
+            <Button onClick={loadAll} disabled={loading} size="md" variant="secondary">
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              Refresh
             </Button>
-            <Button onClick={openCreate} disabled={!enabled || imageQuota.count >= imageQuota.max} size="sm">
-              <Plus className="h-3.5 w-3.5" />&ensp;New Image
+            <Button onClick={openCreate} disabled={!enabled || imageQuota.count >= imageQuota.max} size="md">
+              <Plus className="w-4 h-4" />
+              New Image
             </Button>
           </div>
         }
@@ -388,7 +382,7 @@ export function CustomImagesContent() {
                 </Button>
                 <Button type="submit" disabled={creating || !imageName.trim() || selectedComponentIds.length === 0 || !agentSelected} size="sm">
                   {creating ? (
-                    <><Loader2 className="h-3.5 w-3.5 animate-spin" />&ensp;Building…</>
+                    <><Loader2 className="h-3.5 w-3.5 animate-spin" />Building…</>
                   ) : (
                     'Start Build'
                   )}
@@ -420,7 +414,7 @@ export function CustomImagesContent() {
                   className="bg-red-600 hover:bg-red-700 text-white"
                 >
                   {deletingId === confirmDelete.id ? (
-                    <><Loader2 className="h-3.5 w-3.5 animate-spin" />&ensp;Deleting…</>
+                    <><Loader2 className="h-3.5 w-3.5 animate-spin" />Deleting…</>
                   ) : (
                     'Delete'
                   )}

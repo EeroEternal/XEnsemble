@@ -5,6 +5,8 @@ import {
   ConsoleStructuredDialogHeader,
 } from '../ConsoleDialog';
 import Button from '../Button';
+import StatusBadge from '../StatusBadge';
+import { CheckCircle, Clock } from 'lucide-react';
 import {
   consoleCardClass,
   consoleSectionLabelClass,
@@ -13,8 +15,8 @@ import {
 
 function statusBadge(installed) {
   return installed
-    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-    : 'bg-amber-50 text-amber-700 border-amber-200';
+    ? { tone: 'success', icon: CheckCircle, label: 'Installed' }
+    : { tone: 'warning', icon: Clock, label: 'Not installed' };
 }
 
 function getAuthSummary(agent) {
@@ -70,11 +72,7 @@ export default function AgentDetailsDialog({ agent, onClose }) {
             <h3 className="font-bold text-lg text-zinc-900">{agent.name}</h3>
             <p className="mt-0.5 truncate font-mono text-xs text-zinc-500">{agent.id}</p>
           </div>
-          <span
-            className={`inline-flex shrink-0 rounded border px-2 py-0.5 text-xs font-medium ${statusBadge(agent.installed)}`}
-          >
-            {agent.installed ? 'Installed' : 'Not installed'}
-          </span>
+          <StatusBadge tone={statusBadge(agent.installed).tone} icon={statusBadge(agent.installed).icon} label={statusBadge(agent.installed).label} />
         </div>
       </ConsoleStructuredDialogHeader>
       <ConsoleStructuredDialogBody>

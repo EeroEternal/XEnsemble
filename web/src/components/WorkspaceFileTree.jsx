@@ -91,6 +91,8 @@ function LazyTree({ selectedPath, onOpenFile, projectId, onFetchDir, refreshTrig
   const [initialLoading, setInitialLoading] = useState(true);
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
+  const loadedDirsRef = useRef(loadedDirs);
+  loadedDirsRef.current = loadedDirs;
   const prevRefresh = useRef(refreshTrigger);
 
   useEffect(() => {
@@ -195,7 +197,7 @@ function LazyTree({ selectedPath, onOpenFile, projectId, onFetchDir, refreshTrig
   }, [dirChildren, expanded, loadingDirs]);
 
   useEffect(() => {
-    if (!selectedPath) return;
+    if (!selectedPath || !onFetchDir || !projectId) return;
     const ancestors = collectAncestorFolderPaths(selectedPath);
     if (!ancestors.length) return;
     setExpanded((prev) => {
@@ -204,6 +206,28 @@ function LazyTree({ selectedPath, onOpenFile, projectId, onFetchDir, refreshTrig
       return next;
     });
   }, [selectedPath]);
+
+  // Fetch contents of ancestor directories not yet loaded. Runs only after the
+  // root directory has finished loading (initialLoading === false). This matters
+  // when the component remounts (e.g., switching tabs): the selectedPath effect
+  // above adds ancestor folders to `expanded`, but their children may not have
+  // been loaded yet. Fetching here — after the root load has completed — avoids
+  // racing the root effect, which does a full `setDirChildren({ '.': files })`
+  // replacement and would otherwise clobber ancestor data fetched concurrently.
+  useEffect(() => {
+    if (initialLoading) return;
+    if (!selectedPath || !onFetchDir || !projectId) return;
+    const ancestors = collectAncestorFolderPaths(selectedPath);
+    if (!ancestors.length) return;
+    const currentLoaded = loadedDirsRef.current;
+    for (const p of ancestors) {
+      if (p === '.' || currentLoaded.has(p)) continue;
+      onFetchDir(projectId, p).then((files) => {
+        setDirChildren((prev) => ({ ...prev, [p]: files }));
+        setLoadedDirs((prev) => new Set(prev).add(p));
+      }).catch(() => {});
+    }
+  }, [initialLoading, onFetchDir, projectId, selectedPath]);
 
   if (initialLoading) {
     return (
