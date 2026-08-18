@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   GitCommit, GitPullRequest, RefreshCw, PanelLeftClose,
   Plus, Minus, Loader2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, FileText,
-  Upload, Download, AlertTriangle, RotateCcw, User,
+  Upload, Download, AlertTriangle, RotateCcw, User, Sparkles,
 } from 'lucide-react';
 import {
   consoleButtonFocusClass,
@@ -49,6 +49,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   const { showToast } = useToast();
   const [commitMessage, setCommitMessage] = useState('');
   const [committing, setCommitting] = useState(false);
+  const [generatingMsg, setGeneratingMsg] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [showAuthorDialog, setShowAuthorDialog] = useState(false);
@@ -264,6 +265,25 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     }
   }, [commitMessage, gitChanges, authorName, authorEmail, gitStagedFiles, gitUnstagedFiles]);
 
+  const handleGenerateMessage = useCallback(async () => {
+    setGeneratingMsg(true);
+    try {
+      const res = await apiFetch(`/api/v1/projects/${encodeURIComponent(projectId)}/git/commit-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to generate message');
+      if (data.message) setCommitMessage(data.message);
+      else showToast('error', data.error || 'No changes to describe');
+    } catch (err) {
+      showToast('error', err.message || 'Failed to generate message');
+    } finally {
+      setGeneratingMsg(false);
+    }
+  }, [projectId, showToast]);
+
   const handlePull = useCallback(async () => {
     setActionMenuOpen(false);
     setPulling(true);
@@ -409,7 +429,10 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             onClick={() => toggleFileExpand(f.path)}
             className={`flex items-center gap-2 flex-1 min-w-0 px-2 py-1.5 text-left transition-colors ${consoleButtonFocusClass}`}
           >
-            <span className={`w-4 text-center font-mono text-[11px] font-semibold ${colorCls} shrink-0`}>
+            <span
+              className={`w-4 text-center font-mono text-[11px] font-semibold ${colorCls} shrink-0`}
+              title={desc || f.status}
+            >
               {label}
             </span>
             <span className="truncate text-zinc-900 text-xs">{fileName}</span>
@@ -604,6 +627,11 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             </div>
           )}
           <div className="flex-1 min-h-0 overflow-y-auto console-scroll-hidden">
+            {!gitHasChanges && conflictFiles.length === 0 && (
+              <div className="px-3 py-2 border-b border-zinc-200 bg-zinc-50/60 text-[11px] text-zinc-500">
+                Ask the agent to write or change code, then come back here to review and save your changes.
+              </div>
+            )}
             {conflictFiles.length > 0 && (
               <div className="border-b border-zinc-200">
                 <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-zinc-200 bg-amber-50">
@@ -627,15 +655,16 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             {!gitHasChanges && conflictFiles.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 gap-2 text-zinc-400">
                 <GitCommit className="h-6 w-6" />
-                <p className="text-[10px]">No saved changes</p>
+                <p className="text-[10px]">No changes yet</p>
+                <p className="text-[10px] text-zinc-400">Let the agent edit some code first.</p>
               </div>
             ) : (
               <div className="flex flex-col">
                 {gitStagedFiles.length > 0 && (
                   <>
                     <div className="flex items-center justify-between px-3 py-1.5 border-b border-zinc-200">
-                      <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
-                        Staged ({gitStagedFiles.length})
+                      <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider" title="Files staged and ready to commit">
+                        Ready to commit ({gitStagedFiles.length})
                       </span>
                       <button
                         onClick={handleUnstageAll}
@@ -651,8 +680,8 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 {gitUnstagedFiles.length > 0 && (
                   <>
                     <div className="flex items-center justify-between px-3 py-1.5 border-b border-zinc-200">
-                      <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
-                        Changes ({gitUnstagedFiles.length})
+                      <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider" title="Edited but not yet staged">
+                        Not staged ({gitUnstagedFiles.length})
                       </span>
                       <button
                         onClick={handleStageAll}
@@ -766,13 +795,27 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       {/* Commit dialog */}
       {showCommitDialog && (
         <ConsoleDialogShell onClose={() => setShowCommitDialog(false)} panelClassName={consoleDialogSmClass}>
-          <div className="px-5 pt-5 pb-2">
+          <div className="px-5 pt-5 pb-2 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-zinc-900">Commit changes</h3>
+            <button
+              type="button"
+              onClick={handleGenerateMessage}
+              disabled={generatingMsg}
+              title="Let AI draft a commit message from your changes"
+              className={`flex items-center gap-1 text-xs font-medium text-zinc-600 hover:text-zinc-900 disabled:opacity-50 ${consoleButtonFocusClass}`}
+            >
+              {generatingMsg ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              {generatingMsg ? 'Generating…' : 'AI draft'}
+            </button>
           </div>
           <div className="px-5 pb-5 flex flex-col gap-3">
             <textarea
               ref={commitMsgRef}
-              placeholder="Commit message"
+              placeholder="Describe what changed, or use AI draft"
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
               onKeyDown={(e) => {

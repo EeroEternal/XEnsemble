@@ -34,8 +34,6 @@ import {
   PanelRightOpen,
   PanelRightClose,
   FileText,
-  Square,
-  Unplug,
   Loader2,
   Trash2,
 } from 'lucide-react';
@@ -291,7 +289,6 @@ export default React.forwardRef(function Sessions({
   const [_deletingSessionId, setDeletingSessionId] = useState(null);
   const [restartingSession, setRestartingSession] = useState(false);
   const [reconnectVersion, setReconnectVersion] = useState(0);
-  const [stoppingSession, setStoppingSession] = useState(false);
   const [deleteConfirmSession, setDeleteConfirmSession] = useState(null);
   const [deleteConfirmWorkspace, setDeleteConfirmWorkspace] = useState(null);
   const [deletingWorkspaceId, setDeletingWorkspaceId] = useState(null);
@@ -989,24 +986,6 @@ export default React.forwardRef(function Sessions({
     }
   };
 
-  const handleStopSession = async () => {
-    if (!activeSession?.sessionId) return;
-    setStoppingSession(true);
-    try {
-      const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(activeSession.sessionId)}/stop`, { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to pause session');
-      rememberRecentSession({ id: activeSession.sessionId, agentId: activeSession.agentId, projectId: activeSession.projectId, projectName: activeSession.projectName, createdAt: Date.now() });
-      handleSessionIdle(activeSession.sessionId);
-      fetchWorkspaces();
-      showToast('success', 'Session paused.');
-    } catch (err) {
-      showToast('error', err.message);
-    } finally {
-      setStoppingSession(false);
-    }
-  };
-
   const handleDeleteSession = async (sessionId) => {
     setDeletingSessionId(sessionId);
     try {
@@ -1126,7 +1105,7 @@ export default React.forwardRef(function Sessions({
   const sessionWakeable = !sessionAlive && !sessionPending && !sessionFailed
     && activeSessionMeta?.recoverable === true
     && activeSessionMeta?.status === 'idle';
-  const sessionControlPending = restartingSession || stoppingSession;
+  const sessionControlPending = restartingSession;
 
   const handleSessionConnected = useCallback((sessionId) => {
     setSessions((prev) => prev.map((s) => (
@@ -1563,22 +1542,7 @@ export default React.forwardRef(function Sessions({
                   <div className="mx-0.5 h-5 w-px bg-zinc-200" />
                   {!sessionPending && !sessionFailed && (
                     <>
-                      {sessionAlive ? (
-                        <button
-                          type="button"
-                          onClick={handleStopSession}
-                          disabled={sessionControlPending}
-                          className={`${consoleIconButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
-                          title={stoppingSession ? 'Pausing…' : 'Pause session (keep history)'}
-                          aria-label={stoppingSession ? 'Pausing session' : 'Pause session'}
-                        >
-                          {stoppingSession ? (
-                            <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.75} />
-                          ) : (
-                            <Square className="w-4 h-4" strokeWidth={1.75} />
-                          )}
-                        </button>
-                      ) : (
+                      {!sessionAlive && (
                         <button
                           type="button"
                           onClick={handleRestartSession}
@@ -1612,31 +1576,6 @@ export default React.forwardRef(function Sessions({
                       )}
                     </>
                   )}
-                  {(() => {
-                    const sessionAgent = agents.find((a) => a.id === activeSession?.agentId);
-                    const isByok = sessionAgent && (sessionAgent.llm_auth_mode === 'byok' || !sessionAgent.llm_auth_mode);
-                    if (!isByok) return null;
-                    return (
-                      <button
-                        type="button"
-                        onClick={() => setShowSessionConfigModal(true)}
-                        className={consoleIconButtonClass}
-                        title="Agent configuration"
-                        aria-label="Agent configuration"
-                      >
-                        <Settings2 className="w-4 h-4" strokeWidth={1.75} />
-                      </button>
-                    );
-                  })()}
-                  <button
-                    type="button"
-                    onClick={() => setActiveSession(null)}
-                    className={consoleIconButtonClass}
-                    title="Disconnect view"
-                    aria-label="Disconnect view"
-                  >
-                    <Unplug className="w-4 h-4" strokeWidth={1.75} />
-                  </button>
                   <button
                     type="button"
                     onClick={() => setPanelOpen((prev) => !prev)}

@@ -160,7 +160,7 @@ describe('WorkspacePanel', () => {
     renderPanel(<WorkspacePanel {...defaultProps} gitChanges={gitChanges} />);
     fireEvent.click(screen.getByText('Changes'));
     await waitFor(() => {
-      expect(screen.getByText(/No saved changes/)).toBeInTheDocument();
+      expect(screen.getByText(/No changes yet/)).toBeInTheDocument();
     });
   });
 

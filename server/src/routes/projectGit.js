@@ -12,6 +12,40 @@ function newId(prefix) {
     return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
 }
 
+// Generate a commit message from the working-tree diff using the configured
+// DeepSeek-compatible LLM (same env as session titleService).
+async function generateCommitMessage(project, gitOperationService) {
+    const result = await gitOperationService.getDiff(project, { base: 'HEAD' });
+    const diff = (result?.diff || '').trim();
+    if (!diff) return { message: '' };
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    const apiUrl = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
+    const model = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+    if (!apiKey) return { message: '', error: 'AI not configured' };
+    const truncated = diff.slice(0, 8000);
+    const prompt = 'You are a commit message generator. Given a git diff, output a concise conventional commit message (e.g. "feat: add login form"). Respond with the message only, no quotes, no markdown, no explanation.';
+    const res = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+            model,
+            messages: [
+                { role: 'system', content: prompt },
+                { role: 'user', content: truncated },
+            ],
+            max_tokens: 80,
+            temperature: 0.4,
+        }),
+    });
+    if (!res.ok) throw new Error(`AI error ${res.status}`);
+    const data = await res.json();
+    const content = (data.choices?.[0]?.message?.content || '')
+        .replace(/^["'`]|["'`]$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return { message: content };
+}
+
 async function upsertProjectBranch(projectId, branchName, values = {}) {
     const now = Date.now();
     const existing = await db.select().from(schema.projectBranches)
@@ -106,6 +140,20 @@ function registerProjectGitRoutes(fastify) {
             const result = await gitOperationService.commitStaged(project, message, author);
             const status = await gitOperationService.getStatus(project).catch(() => null);
             return { ...result, status };
+        } catch (err) {
+            request.log.error(err);
+            return reply.code(500).send({ error: err.message });
+        }
+    });
+
+    fastify.post('/api/v1/projects/:id/git/commit-message', {
+        preValidation: [fastify.authenticate, fastify.requireActive],
+    }, async (request, reply) => {
+        const project = await getProjectForUser(request.user.id, request.params.id);
+        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        try {
+            const result = await generateCommitMessage(project, gitOperationService);
+            return result;
         } catch (err) {
             request.log.error(err);
             return reply.code(500).send({ error: err.message });

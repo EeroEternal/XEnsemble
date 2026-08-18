@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
@@ -130,6 +130,20 @@ function AgentConsole({
   const [connected, setConnected] = useState(false);
   // eslint-disable-next-line no-unused-vars
   const [ended, setEnded] = useState(!shouldConnect && !shouldReplayIdle);
+  // First-use guide card: shown only for a fresh live session with no output yet.
+  const [guideVisible, setGuideVisible] = useState(shouldConnect && !shouldReplayIdle);
+  const guideVisibleRef = useRef(guideVisible);
+  guideVisibleRef.current = guideVisible;
+
+  const dismissGuide = useCallback(() => {
+    if (guideVisibleRef.current) setGuideVisible(false);
+  }, []);
+
+  const sendInput = useCallback((data) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'input', data }));
+    }
+  }, []);
 
   useEffect(() => {
     onSessionEndRef.current = onSessionEnd;
@@ -298,6 +312,7 @@ function AgentConsole({
     terminal.onData((data) => {
       if (disposed || serverEnded) return;
       if (!replayDoneRef.current) return;
+      dismissGuide();
       if (wsRef.current?.readyState !== WebSocket.OPEN) return;
       wsRef.current.send(JSON.stringify({ type: 'input', data }));
     });
@@ -742,6 +757,7 @@ function AgentConsole({
 
           function writeTerminalData(processed) {
             processed = processed.replace(MOUSE_TRACKING_SET_RE, '');
+            if (processed.trim()) dismissGuide();
             const buf = terminal.buffer.active;
             const atBottom = buf.baseY + terminal.rows >= buf.length;
             terminal.write(processed, () => {
@@ -893,6 +909,33 @@ function AgentConsole({
         </div>
       </div>
       <div ref={hostRef} className="min-h-0 w-full flex-1" />
+      {guideVisible && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-6">
+          <div className="pointer-events-auto w-full max-w-md rounded-xl border border-zinc-700/60 bg-zinc-900/95 p-5 shadow-2xl backdrop-blur">
+            <p className="text-sm font-semibold text-zinc-100">Tell the agent what to build</p>
+            <p className="mt-1 text-xs text-zinc-400">
+              Type a task in natural language, or pick an example to get started.
+            </p>
+            <div className="mt-3 flex flex-col gap-2">
+              {[
+                'Build a simple todo app with add and delete',
+                'Explain the structure of this project',
+                'Write unit tests for the existing code',
+              ].map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  onClick={() => { sendInput(`${prompt}\n`); dismissGuide(); }}
+                  className="rounded-md border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-left text-xs text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-800 focus:outline-none focus:ring-0"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+            <p className="mt-3 text-[10px] text-zinc-500">Click an example or start typing to dismiss.</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

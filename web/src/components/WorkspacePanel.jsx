@@ -409,7 +409,6 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   const addableRemaining = ADDABLE_TABS.filter((t) => {
     if (extraTabs.includes(t.key)) return false;
     if (t.key === 'pullrequests') return isExternalGit;
-    if (t.key === 'deploy') return false;
     return true;
   });
 
@@ -641,13 +640,16 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
                 <span className="text-zinc-300">|</span>
                 <span>Paste <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">Ctrl+Shift+V</kbd> or <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">Ctrl+V</kbd> (in terminal)</span>
                 <span className="text-zinc-300">|</span>
-                <span>Right-click -> Copy/Paste</span>
+                <span>Right-click → Copy/Paste</span>
+                <span className="text-zinc-300">|</span>
+                <span>Try: <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">npm test</kbd> <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">pytest</kbd> <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">npm run dev</kbd></span>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden">
             {shellContent || (
               <div className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-400 h-full">
                 <Terminal className="h-12 w-12" />
                 <p className="text-sm">Workspace shell</p>
+                <p className="text-[11px]">Run commands like <code className="font-mono">npm test</code> or <code className="font-mono">npm run dev</code></p>
               </div>
             )}
           </div>
