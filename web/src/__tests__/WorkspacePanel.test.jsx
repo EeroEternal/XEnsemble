@@ -164,12 +164,12 @@ describe('WorkspacePanel', () => {
     });
   });
 
-  it('adds Workspace shell from plus menu', async () => {
+  it('adds Terminal from plus menu', async () => {
     renderPanel(<WorkspacePanel {...defaultProps} />);
     fireEvent.click(screen.getByTitle('Add panel'));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Workspace shell' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Terminal' }));
     await waitFor(() => {
-      expect(screen.getAllByText('Workspace shell').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Terminal').length).toBeGreaterThan(0);
     });
   });
 });

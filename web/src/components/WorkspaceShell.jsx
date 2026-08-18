@@ -178,7 +178,7 @@ const WorkspaceShell = forwardRef(function WorkspaceShell({ projectId, onOutput 
       if (disposed) return;
       const next = reconnectState.nextReconnect();
       if (next.exhausted) {
-        terminal.write(`\r\n\x1b[31m[System] Workspace shell could not be restored${reason ? ` (${reason})` : ''}. Switch tabs to retry.\x1b[0m\r\n`);
+        terminal.write(`\r\n\x1b[31m[System] Terminal could not be restored${reason ? ` (${reason})` : ''}. Switch tabs to retry.\x1b[0m\r\n`);
         serverEnded = true;
         return;
       }

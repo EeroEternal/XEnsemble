@@ -37,7 +37,7 @@ const PINNED_TABS = [
 
 const ADDABLE_TABS = [
   { key: 'pullrequests', label: 'Pull Requests', icon: GitPullRequest },
-  { key: 'terminal', label: 'Workspace shell', icon: Terminal },
+  { key: 'terminal', label: 'Terminal', icon: Terminal },
   { key: 'preview', label: 'Preview', icon: Monitor },
   { key: 'browser', label: 'Browser', icon: Globe },
   { key: 'deploy', label: 'Deploy', icon: Rocket },
@@ -636,20 +636,11 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
         )}
 
         <div className={mainTab === 'terminal' ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : 'hidden'}>
-          <div className="px-3 py-1 text-[10px] text-zinc-500 bg-zinc-50 border-b border-zinc-200 shrink-0 flex items-center gap-2 flex-wrap">
-            <span>💡 Auto-copy on selection</span>
-                <span className="text-zinc-300">|</span>
-                <span>Paste <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">Ctrl+Shift+V</kbd> or <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">Ctrl+V</kbd> (in terminal)</span>
-                <span className="text-zinc-300">|</span>
-                <span>Right-click → Copy/Paste</span>
-                <span className="text-zinc-300">|</span>
-                <span>Try: <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">npm test</kbd> <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">pytest</kbd> <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">npm run dev</kbd></span>
-          </div>
           <div className="flex-1 min-h-0 overflow-hidden">
             {shellContent || (
               <div className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-400 h-full">
                 <Terminal className="h-12 w-12" />
-                <p className="text-sm">Workspace shell</p>
+                <p className="text-sm">Terminal</p>
                 <p className="text-[11px]">Run commands like <code className="font-mono">npm test</code> or <code className="font-mono">npm run dev</code></p>
               </div>
             )}
