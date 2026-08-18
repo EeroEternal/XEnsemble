@@ -462,7 +462,7 @@ export function ImagesAdminContent() {
                             <table className="w-full table-fixed text-left">
                                 <colgroup>
                                     <col className="w-auto" />
-                                    <col className="w-24" />
+                                    <col className="w-36" />
                                     <col className="w-40" />
                                     <col className="w-28" />
                                 </colgroup>

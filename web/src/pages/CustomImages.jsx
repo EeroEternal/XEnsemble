@@ -481,7 +481,7 @@ export function CustomImagesContent() {
         <table className="w-full min-w-[720px] table-fixed border-collapse text-left">
           <colgroup>
             <col className="w-auto" />
-            <col className="w-28" />
+            <col className="w-36" />
             <col className="w-auto" />
             <col className="w-28" />
             <col className="w-40" />

@@ -32,6 +32,7 @@ export default function StatusBadge({ tone = 'neutral', icon: Icon, spinning = f
         ) : null}
       </span>
       <span>{label}</span>
+      <span className={consoleStatusIconSlotClass} aria-hidden />
     </span>
   );
 }
