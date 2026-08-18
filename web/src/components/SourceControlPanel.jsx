@@ -131,7 +131,6 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   const gitStagedFiles = gitChanges?.stagedFiles || [];
   const gitUnstagedFiles = gitChanges?.unstagedFiles || [];
   const gitHasChanges = gitStagedFiles.length + gitUnstagedFiles.length > 0;
-  const changeCount = gitStagedFiles.length + gitUnstagedFiles.length;
   const branch = gitChanges?.branch || '';
   const isLocalGit = !provider || provider === 'none' || provider === 'local_git';
   const conflictFiles = (gitChanges?.conflicts || []).filter((f) => !resolvedPaths.has(f.path));
@@ -627,11 +626,6 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             </div>
           )}
           <div className="flex-1 min-h-0 overflow-y-auto console-scroll-hidden">
-            {!gitHasChanges && conflictFiles.length === 0 && (
-              <div className="px-3 py-2 border-b border-zinc-200 bg-zinc-50/60 text-[11px] text-zinc-500">
-                Ask the agent to write or change code, then come back here to review and save your changes.
-              </div>
-            )}
             {conflictFiles.length > 0 && (
               <div className="border-b border-zinc-200">
                 <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-zinc-200 bg-amber-50">
@@ -696,13 +690,6 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 )}
               </div>
             )}
-          </div>
-
-          <div className="flex items-center px-3 py-2 border-t border-zinc-200 shrink-0">
-            <span className="text-[11px] text-zinc-500">
-              {changeCount > 0 ? `${changeCount} change${changeCount === 1 ? '' : 's'}` : 'No changes'}
-              {gitChanges?.ahead > 0 ? ` · ↑${gitChanges.ahead}` : ''}
-            </span>
           </div>
         </div>
       </div>
