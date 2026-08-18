@@ -14,7 +14,6 @@ import {
   ConsoleDialogShell,
   ConsoleInlineDialog,
 } from '../components/ConsoleDialog';
-import SelectMenu from '../components/SelectMenu';
 import { useToast } from '../components/Toast';
 import { useTerminalTheme } from '../hooks/useTerminalTheme.jsx';
 import { useEditorTabs } from '../hooks/useEditorTabs';
@@ -27,17 +26,12 @@ import {
   Settings2,
   X,
   RefreshCw,
-  Plus,
-  Bot,
-  GitBranch,
-  Check,
   PanelRightOpen,
   PanelRightClose,
   FileText,
   Loader2,
   Trash2,
 } from 'lucide-react';
-import { getSecretLabel, getSecretPlaceholder, isSecretPasswordField } from '../lib/secretLabels';
 import ByokConfigForm from '../components/ByokConfigForm';
 import { formatQuotaExceeded } from '../lib/quotaLabels';
 import {
@@ -55,8 +49,6 @@ import {
   consoleStructuredDialogFooterClass,
   consoleStructuredDialogBodyClass,
   consoleIconButtonClass,
-  consoleInputClass,
-  consoleButtonFocusClass,
   bgCanvas,
   textPrimary,
   textSecondary,
@@ -68,7 +60,6 @@ import {
   hoverBgTertiary,
   hoverTextPrimary,
 } from '../lib/consoleTokens';
-import { buttonClass } from '../lib/buttonStyles';
 import { pathParent, pathJoin } from '../lib/workspaceFileTree';
 
 const DEFAULT_AGENT_ID = 'kimi-code';
@@ -301,10 +292,14 @@ export default React.forwardRef(function Sessions({
   const [createNewWorkspaceInline, setCreateNewWorkspaceInline] = useState(false);
   const [customImageId, setCustomImageId] = useState('');
   const [customImages, setCustomImages] = useState([]);
+  // Onboarding wizard flow config
+  const [wizardMode, setWizardMode] = useState('full'); // 'full' | 'session'
+  const [wizardStartStep, setWizardStartStep] = useState(1);
+  const [wizardWorkspace, setWizardWorkspace] = useState(null);
 
   // Launch modal: agent config files
   const [launchConfigFiles, setLaunchConfigFiles] = useState([]);
-  const [showLaunchConfigModal, setShowLaunchConfigModal] = useState(false);
+  const [, setShowLaunchConfigModal] = useState(false);
 
   // Session config dialog (running session)
   const [showSessionConfigModal, setShowSessionConfigModal] = useState(false);
@@ -539,23 +534,6 @@ export default React.forwardRef(function Sessions({
     }
   };
 
-  const resolveDefaultWorkspace = useCallback(() => {
-    if (activeSession?.projectId) {
-      const ws = projects.find((p) => p.id === activeSession.projectId);
-      if (ws) return ws;
-    }
-    const prefs = loadSidebarPrefs();
-    for (const sessionId of prefs.recentSessionIds || []) {
-      const snap = prefs.recentSessionSnapshots?.[sessionId];
-      if (snap?.projectId) {
-        const ws = projects.find((p) => p.id === snap.projectId);
-        if (ws) return ws;
-      }
-    }
-    if (projects.length === 0) return null;
-    return [...projects].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
-  }, [activeSession?.projectId, projects]);
-
   const openLaunchModal = async (mode = 'session', workspace = null) => {
     setLaunchModalError(null);
     setCreateNewWorkspaceInline(false);
@@ -563,30 +541,38 @@ export default React.forwardRef(function Sessions({
     setGitImportMode(false);
     setGitProvider('');
     setImportedProject(null);
+    setNewProjectName('');
     fetchCustomImages();
     const freshAgents = await fetchAgents?.() || agents;
-    if (mode === 'workspace') {
-      setLaunchModalMode('workspace');
-      setStartSessionAfterCreate(false);
-      setLaunchWorkspaceId('');
-      setNewProjectName('');
-    } else if (projects.length === 0) {
+    // Decide wizard flow: 'full' = step1 source + step2 agent (create workspace);
+    // 'session' = step2 only, start a new agent session in the current workspace.
+    let nextMode = 'full';
+    let nextStartStep = 1;
+    let nextWorkspace = null;
+    if (mode === 'workspace' || projects.length === 0) {
+      // New Workspace button or no workspaces -> full creation flow.
       setLaunchModalMode('quickstart');
       setStartSessionAfterCreate(true);
       setLaunchWorkspaceId('');
-      setNewProjectName('');
     } else {
-      setLaunchModalMode('session');
-      setStartSessionAfterCreate(true);
-      const ws = workspace || resolveDefaultWorkspace();
+      // New Session -> step 2 (agent) in current workspace, if one is selected.
+      const ws = workspace || projects.find((p) => p.id === activeWorkspaceId) || null;
       if (ws) {
+        nextMode = 'session';
+        nextStartStep = 2;
+        nextWorkspace = ws;
+        setLaunchModalMode('session');
+        setStartSessionAfterCreate(true);
         setLaunchWorkspaceId(ws.id);
-        setNewProjectName(ws.name);
       } else {
+        setLaunchModalMode('quickstart');
+        setStartSessionAfterCreate(true);
         setLaunchWorkspaceId('');
-        setNewProjectName('');
       }
     }
+    setWizardMode(nextMode);
+    setWizardStartStep(nextStartStep);
+    setWizardWorkspace(nextWorkspace);
     const prefs = loadSidebarPrefs();
     const sorted = sortAgentsByRecentUsage(freshAgents, prefs);
     if (sorted.length > 0) {
@@ -689,8 +675,18 @@ export default React.forwardRef(function Sessions({
     setGitProvider('');
     setImportedProject(null);
     setNewProjectName('');
+    setWizardMode('full');
+    setWizardStartStep(1);
+    setWizardWorkspace(null);
     onLaunchPanelClose?.();
   }, [onLaunchPanelClose]);
+
+  // New Session wizard (session mode): start a new agent session directly in
+  // the current workspace, skipping workspace/source selection.
+  const handleLaunchSessionInWorkspace = useCallback(async () => {
+    if (!wizardWorkspace?.id) return;
+    await handleStartSession(wizardWorkspace.id, wizardWorkspace.name, { closeLaunchModal: true });
+  }, [wizardWorkspace, handleStartSession]);
 
   const handleSaveLaunchConfig = async () => {
     setConfigError(null);
@@ -1073,26 +1069,6 @@ export default React.forwardRef(function Sessions({
     requestDeleteWorkspace,
   }), [openLaunchModal, closeLaunchModal, requestDeleteSession, requestDeleteWorkspace]);
 
-  const agentSelectOptions = useMemo(
-    () => sortAgentsByRecentUsage(agents, loadSidebarPrefs()).map((agent) => ({ value: agent.id, label: agent.name })),
-    [agents],
-  );
-
-  const handleSelectCustomImage = useCallback(() => {
-    if (customImages.length > 0) {
-      const img = customImages[0];
-      setCustomImageId(img?.id || '');
-      if (img) {
-        const ac = (img.components || []).find((c) => (c.component_id || '').startsWith('agent:'));
-        const aid = ac ? ac.component_id.replace('agent:', '') : '';
-        if (aid && agents.find((a) => a.id === aid)) setSelectedAgentId(aid);
-      }
-    } else {
-      setCustomImageId('__none__');
-      setSelectedAgentId('');
-    }
-  }, [customImages, agents]);
-
   const activeProject = useMemo(
     () => projects.find((p) => p.id === activeSession?.projectId) || null,
     [projects, activeSession?.projectId],
@@ -1269,254 +1245,33 @@ export default React.forwardRef(function Sessions({
       {/* Main area */}
       <div className="flex min-h-0 flex-1 w-full flex-row items-stretch bg-white">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
-          {showNewInstanceModal && launchModalMode === 'quickstart' ? (
-            <div className="flex min-h-0 flex-1 flex-col bg-white">
-              <OnboardingWizard
-                agents={agents}
-                selectedAgentId={selectedAgentId}
-                onSelectAgent={(id) => { setSelectedAgentId(id); setShowLaunchConfigModal(false); }}
-                customImages={customImages}
-                customImageId={customImageId}
-                setCustomImageId={setCustomImageId}
-                gitProvider={gitProvider}
-                setGitProvider={setGitProvider}
-                gitImportMode={gitImportMode}
-                setGitImportMode={setGitImportMode}
-                importedProject={importedProject}
-                setImportedProject={setImportedProject}
-                onRepoImported={handleRepoImported}
-                fetchWorkspaces={fetchWorkspaces}
-                newProjectName={newProjectName}
-                setNewProjectName={setNewProjectName}
-                onClose={closeOnboarding}
-                onLaunch={handleLaunchFromModal}
-                launching={launchingSession || isLoading || projectCreating}
-                launchError={launchModalError}
-              />
-            </div>
-          ) : showNewInstanceModal ? (
-            <div className="flex min-h-0 flex-1 flex-col bg-zinc-50">
-              <div className="flex items-center justify-between px-5 py-3 shrink-0">
-                <div className="flex items-center gap-2">
-                  {launchModalMode === 'workspace' ? (
-                    <Plus className="w-4 h-4 shrink-0 text-zinc-400" />
-                  ) : (
-                    <Bot className="w-4 h-4 shrink-0 text-zinc-400" />
-                  )}
-                  <h3 className="text-sm font-semibold text-zinc-700">
-                    {launchModalMode === 'workspace' ? 'New Workspace' : 'New Agent'}
-                  </h3>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => { setShowNewInstanceModal(false); setLaunchModalError(null); setCreateNewWorkspaceInline(false); setShowLaunchConfigModal(false); setGitImportMode(false); setImportedProject(null); onLaunchPanelClose?.(); }}
-                    className={`p-1.5 rounded-md text-zinc-400 hover:text-zinc-500 hover:bg-zinc-100 ${consoleButtonFocusClass}`}
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-              <div className="flex-1 min-h-0 overflow-y-auto pb-6">
-                <div className="w-full px-6 pt-4 space-y-8">
-                  {launchModalError && (
-                    <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{launchModalError}</p>
-                  )}
-
-                  {/* Page description */}
-                  {launchModalMode === 'workspace' ? (
-                    <p className="text-sm text-zinc-500 leading-relaxed">
-                      Create a new workspace with its own file system, Git history, and agent configurations.
-                    </p>
-                  ) : (
-                    <p className="text-sm text-zinc-500 leading-relaxed">
-                      Select a workspace and agent to launch an isolated sandbox session.
-                    </p>
-                  )}
-
-                  <div className="h-px bg-zinc-200" />
-
-                  {/* Form fields */}
-                  <div className="max-w-2xl mx-auto divide-y divide-zinc-200">
-
-                  {/* Workspace */}
-                  {launchModalMode === 'workspace' && (
-                    <div className="flex items-start gap-12 py-5">
-                      <div className="w-52 shrink-0 pt-2">
-                        <label className="block text-sm font-medium text-zinc-700">Workspace</label>
-                        <p className="text-[11px] text-zinc-400 mt-0.5">A workspace is an isolated environment that stores your project files and session history.</p>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <input type="text" value={newProjectName} onChange={e => setNewProjectName(e.target.value)} placeholder="my-workspace" className={consoleInputClass} autoFocus />
-                      </div>
-                    </div>
-                  )}
-                  {(launchModalMode === 'quickstart' || launchModalMode === 'session') && (
-                    <div className="flex items-start gap-12 py-5">
-                      <div className="w-52 shrink-0 pt-2">
-                        <label className="block text-sm font-medium text-zinc-700">Workspace</label>
-                        <p className="text-[11px] text-zinc-400 mt-0.5">{importedProject ? 'Imported from Git (locked)' : 'Select an existing workspace or create a new one.'}</p>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        {importedProject ? (
-                          <div className="flex items-center gap-2 px-3 py-2 text-sm bg-zinc-100 border border-zinc-200 rounded-md text-zinc-500">
-                            <Check className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
-                            <span className="font-medium truncate">{importedProject.name}</span>
-                            <span className="text-[10px] text-zinc-400 ml-auto shrink-0">Imported</span>
-                          </div>
-                        ) : createNewWorkspaceInline ? (
-                          <div className="flex items-center gap-2">
-                            <input type="text" value={newProjectName} onChange={e => setNewProjectName(e.target.value)} placeholder="my-workspace" className="flex-1 min-w-0 px-3 py-2 text-sm border border-zinc-300 rounded-md bg-white focus:outline-none focus:border-black" autoFocus />
-                            <button type="button" onClick={() => { setCreateNewWorkspaceInline(false); setNewProjectName(''); }} className={`shrink-0 h-9 px-3 text-xs font-medium text-zinc-500 bg-zinc-100 border border-zinc-200 rounded-md hover:bg-zinc-200 ${consoleButtonFocusClass}`}>Back</button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 min-w-0">
-                              <SelectMenu value={launchWorkspaceId} onChange={setLaunchWorkspaceId} options={projects.map((p) => ({ value: p.id, label: p.name }))} placeholder="Select workspace" />
-                            </div>
-                            <button type="button" onClick={() => { setCreateNewWorkspaceInline(true); setNewProjectName(''); setLaunchWorkspaceId(''); }} className={`shrink-0 h-9 px-3 text-xs font-medium text-zinc-500 bg-zinc-100 border border-zinc-200 rounded-md hover:bg-zinc-200 ${consoleButtonFocusClass}`}>New</button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Agent (built-in|custom buttons + dropdown) */}
-                  {launchModalMode !== 'workspace' && (
-                    <div className="flex items-start gap-12 py-5">
-                      <div className="w-52 shrink-0 pt-2">
-                        <label className="text-sm font-medium text-zinc-700">Agent</label>
-                        <p className="text-[11px] text-zinc-400 mt-0.5">Select a built-in agent or a custom image you have built. Each agent has its own capabilities and configuration.</p>
-                      </div>
-                      <div className="flex-1 min-w-0 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <button type="button" onClick={() => { setCustomImageId(''); setSelectedAgentId(''); }} className={`flex-1 h-9 px-3 text-xs font-medium rounded-md border transition-colors ${consoleButtonFocusClass} ${!customImageId ? 'bg-black text-white border-zinc-900' : 'bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100'}`}>Built-in</button>
-                          <button type="button" onClick={handleSelectCustomImage} className={`flex-1 h-9 px-3 text-xs font-medium rounded-md border transition-colors ${consoleButtonFocusClass} ${customImageId ? 'bg-black text-white border-zinc-900' : 'bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100'}`}>Custom</button>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 min-w-0">
-                            {!customImageId && (
-                              <SelectMenu value={selectedAgentId} onChange={(v) => { setSelectedAgentId(v); setShowLaunchConfigModal(false); }} options={agentSelectOptions} placeholder="Select agent" />
-                            )}
-                            {customImageId && customImages.length > 0 && (
-                              <SelectMenu
-                            value={customImageId}
-                            onChange={(v) => {
-                              setCustomImageId(v);
-                              const img = customImages.find((c) => c.id === v);
-                              if (img) {
-                                const ac = (img.components || []).find((c) => (c.component_id || '').startsWith('agent:'));
-                                const aid = ac ? ac.component_id.replace('agent:', '') : '';
-                                if (aid && agents.find((a) => a.id === aid)) setSelectedAgentId(aid);
-                              }
-                            }}
-                            options={customImages.map((img) => {
-                              const ac = (img.components || []).find((c) => (c.component_id || '').startsWith('agent:'));
-                              const agentId = ac ? ac.component_id.replace('agent:', '') : '';
-                              const agent = agents.find((a) => a.id === agentId);
-                              return { value: img.id, label: `${img.name}${agent ? ` (${agent.name})` : ''}` };
-                            })}
-                            placeholder="Select custom image"
-                          />
-                        )}
-                        {customImageId && customImages.length === 0 && (
-                          <div className="flex items-center gap-2 py-2"><p className="text-xs text-zinc-400">No custom images found.</p><button type="button" onClick={() => navigate('/custom-images')} className={`text-xs text-black hover:text-zinc-800 underline ${consoleButtonFocusClass}`}>Build one now</button></div>
-                        )}
-                        </div>
-                        {selectedAgent && (selectedAgent.llm_auth_mode === 'byok' || !selectedAgent.llm_auth_mode) && (
-                          <button type="button" onClick={() => setShowLaunchConfigModal(v => !v)} className={`shrink-0 h-9 px-2.5 text-xs font-medium text-black hover:text-zinc-800 border border-zinc-200 rounded-md hover:bg-zinc-100 ${consoleButtonFocusClass}`}>
-                            <Settings2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  )}
-                  {showLaunchConfigModal && selectedAgent && (
-                    <div className="rounded-lg bg-white border border-zinc-200 p-4">
-                      <div className="flex items-center gap-2 mb-3">
-                        <Settings2 className="w-3.5 h-3.5 text-zinc-400" />
-                        <h4 className="text-xs font-medium text-zinc-500">Configure {selectedAgent.name}</h4>
-                      </div>
-                      <ByokConfigForm agentId={selectedAgentId} loading={false} onSave={() => { setShowLaunchConfigModal(false); showToast('success', 'Configuration saved.'); }} />
-                    </div>
-                  )}
-
-                  {/* Git */}
-                  {launchModalMode !== 'workspace' && (
-                    <div className="flex items-start gap-12 py-5">
-                      <div className="w-52 shrink-0 pt-2">
-                        <label className="block text-sm font-medium text-zinc-700">Git</label>
-                        <p className="text-[11px] text-zinc-400 mt-0.5">Optionally import a Git repository. The agent will have access to the code for editing and development.</p>
-                      </div>
-                      <div className="flex-1 min-w-0 space-y-2">
-                        {importedProject ? (
-                          <div className="flex items-center gap-2 px-3 py-2 text-sm bg-zinc-100 border border-zinc-200 rounded-md text-zinc-500">
-                            <Check className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
-                            <span className="font-medium truncate">{gitProvider}</span>
-                            <span className="text-[10px] text-zinc-400 ml-auto shrink-0">Imported</span>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <button type="button" onClick={() => { setGitImportMode(false); setGitProvider(''); setImportedProject(null); }} className={`flex-1 h-9 px-2 text-xs font-medium rounded-md border transition-colors ${consoleButtonFocusClass} ${!gitProvider ? 'bg-black text-white border-zinc-900' : 'bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100'}`}>None</button>
-                            {['github', 'gitlab', 'gitea'].map((p) => (
-                              <button key={p} type="button" onClick={() => { setGitProvider(p); setGitImportMode(true); setImportedProject(null); }} className={`flex-1 h-9 px-2 text-xs font-medium rounded-md border transition-colors capitalize ${consoleButtonFocusClass} ${gitProvider === p ? 'bg-black text-white border-zinc-900' : 'bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100'}`}>{p}</button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  {gitImportMode && !importedProject && gitProvider && (
-                    gitProvider === 'gitea' ? (
-                      <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">Gitea OAuth is not configured. Please ask an administrator to set it up.</p>
-                    ) : (
-                    <RepoImportDialog
-                      key={gitProvider}
-                      open={true}
-                      forceProvider={gitProvider}
-                      onClose={() => { setGitImportMode(false); setGitProvider(''); }}
-                      onImported={(projectId) => {
-                        fetchWorkspaces();
-                        const ws = projects.find((p) => p.id === projectId);
-                        setImportedProject({ id: projectId, name: ws?.name || projectId });
-                        if (!ws) {
-                          setTimeout(() => {
-                            setProjects((prev) => {
-                              const found = prev.find((p) => p.id === projectId);
-                              if (found) setImportedProject({ id: projectId, name: found.name });
-                              return prev;
-                            });
-                          }, 1000);
-                        }
-                      }}
-                      fetchWorkspaces={fetchWorkspaces}
-                    />
-                    )
-                  )}
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center justify-end gap-2 border-t border-zinc-200 px-5 py-3 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => { setShowNewInstanceModal(false); setCreateNewWorkspaceInline(false); setGitImportMode(false); setImportedProject(null); onLaunchPanelClose?.(); }}
-                  className={`${buttonClass('secondary', 'sm')} ${consoleButtonFocusClass}`}
-                >
-                  Cancel
-                </button>
-                {(!gitImportMode || importedProject) && (
-                  <button
-                    type="button"
-                    disabled={isLoading || projectCreating || (launchModalMode !== 'workspace' && !selectedAgentId) || (!importedProject && launchModalMode !== 'workspace' && !createNewWorkspaceInline && !launchWorkspaceId) || (createNewWorkspaceInline && !newProjectName.trim())}
-                    onClick={handleLaunchFromModal}
-                    className={`${buttonClass('primary', 'sm')} ${consoleButtonFocusClass}`}
-                  >
-                    {isLoading || projectCreating ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Starting...</> : launchModalMode === 'workspace' ? 'Create workspace' : 'Start agent'}
-                  </button>
-                )}
-              </div>
-            </div>
+          {showNewInstanceModal ? (
+            <OnboardingWizard
+              mode={wizardMode}
+              startStep={wizardStartStep}
+              workspace={wizardWorkspace}
+              agents={agents}
+              selectedAgentId={selectedAgentId}
+              onSelectAgent={(id) => { setSelectedAgentId(id); setShowLaunchConfigModal(false); }}
+              customImages={customImages}
+              customImageId={customImageId}
+              setCustomImageId={setCustomImageId}
+              gitProvider={gitProvider}
+              setGitProvider={setGitProvider}
+              gitImportMode={gitImportMode}
+              setGitImportMode={setGitImportMode}
+              importedProject={importedProject}
+              setImportedProject={setImportedProject}
+              onRepoImported={handleRepoImported}
+              fetchWorkspaces={fetchWorkspaces}
+              newProjectName={newProjectName}
+              setNewProjectName={setNewProjectName}
+              onClose={closeOnboarding}
+              onLaunch={handleLaunchFromModal}
+              onLaunchSession={handleLaunchSessionInWorkspace}
+              launching={launchingSession || isLoading || projectCreating}
+              launchError={launchModalError}
+            />
           ) : (
             <>
           <div className="h-12 border-b border-zinc-200 flex items-center justify-between px-5 shrink-0 bg-white">
