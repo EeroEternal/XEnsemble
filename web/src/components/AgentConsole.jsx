@@ -189,13 +189,11 @@ function AgentConsole({
     // Fit terminal to container BEFORE creating WebSocket so transcript
     // replay doesn't wrap at the wrong width.
     try { fitAddon.fit(); } catch (_) {}
-    try {
-      const webglAddon = new WebglAddon();
-      webglAddon.onContextLoss(() => { webglAddon.dispose(); });
-      terminal.loadAddon(webglAddon);
-    } catch (_) {
-      // WebGL not available, fall back to default DOM renderer
-    }
+    // WebGL renderer is disabled: on context loss xterm.js disposes the
+    // addon but does NOT fall back to the Canvas2D renderer, leaving the
+    // terminal with no renderer at all (blank screen).  The Canvas2D
+    // renderer is slightly slower but reliable across all GPU/driver
+    // combinations and does not suffer from context-loss dead-ends.
     terminalRef.current = terminal;
 
     let overlayTimer = null;
