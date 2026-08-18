@@ -7,6 +7,7 @@ import ImagesManager from './pages/ImagesManager';
 import UsersAdmin from './pages/UsersAdmin';
 import GatewayAdmin from './pages/GatewayAdmin';
 import AppSidebar from './components/AppSidebar';
+import BrandMark from './components/BrandMark';
 import SettingsModal from './components/SettingsModal';
 import ConfirmDialog from './components/ConfirmDialog';
 import { useWorkspaces } from './hooks/useWorkspaces';
@@ -41,6 +42,7 @@ function AuthenticatedLayout({
   const navigate = useNavigate();
   const sessionsRef = useRef(null);
   const [launchPanelOpen, setLaunchPanelOpen] = useState(false);
+  const [wizardActive, setWizardActive] = useState(false);
   const activeWorkspaceName = projects.find((p) => p.id === activeWorkspaceId)?.name || null;
 
   useEffect(() => {
@@ -76,7 +78,21 @@ function AuthenticatedLayout({
   }, [activeSession?.sessionId, setActiveSession]);
 
   return (
-    <div className={`h-full flex ${bgCanvas}`}>
+    <div className={`h-full flex flex-col ${bgCanvas}`}>
+      {/* Full-width top bar (above the sidebar). Collapses when the onboarding
+          wizard is active — the wizard then renders its own full-width header. */}
+      <div
+        className={`shrink-0 border-b border-zinc-200 bg-white flex items-center px-4 gap-3 relative z-30 ${
+          wizardActive ? 'h-0 overflow-hidden border-0' : 'h-12'
+        }`}
+      >
+        <BrandMark className="h-7 w-7 shrink-0" iconClassName="h-3.5 w-3.5" />
+        <span className="text-sm font-bold text-zinc-900 shrink-0">XEnsemble</span>
+        <div id="xe-topbar-dynamic" className="flex-1 min-w-0 flex items-center justify-between gap-3" />
+      </div>
+
+      <div className="flex flex-1 min-h-0">
+      {!wizardActive && (
       <AppSidebar
         agents={agents}
         sessions={sessions}
@@ -92,6 +108,7 @@ function AuthenticatedLayout({
         onOpenSettings={() => setShowSettingsModal(true)}
         onLogout={logout}
       />
+      )}
       <main
         className={`relative flex h-full min-h-0 flex-1 flex-col min-w-0 ${bgCanvas}`}
       >
@@ -113,6 +130,7 @@ function AuthenticatedLayout({
           fetchAgents={fetchAgents}
           launchPanelOpen={launchPanelOpen}
           onLaunchPanelClose={() => setLaunchPanelOpen(false)}
+          onWizardActiveChange={setWizardActive}
           className={cn(
             'flex h-full min-h-0 flex-1 flex-col',
             (isSessions || launchPanelOpen) ? 'relative z-20' : offRouteClass,
@@ -164,6 +182,7 @@ function AuthenticatedLayout({
             </div>
         )}
       </main>
+      </div>
       {showSettingsModal && (
         <SettingsModal onClose={() => setShowSettingsModal(false)} />
       )}

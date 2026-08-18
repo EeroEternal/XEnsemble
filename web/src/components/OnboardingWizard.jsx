@@ -37,9 +37,9 @@ function agentSubtitle(a) {
 
 function StepDot({ n, label, active, done }) {
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-2">
       <span
-        className={`flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-semibold transition-colors ${
+        className={`flex h-7 w-7 items-center justify-center rounded-full border text-sm font-semibold transition-colors ${
           active
             ? 'border-black bg-black text-white'
             : done
@@ -47,9 +47,9 @@ function StepDot({ n, label, active, done }) {
               : 'border-zinc-300 bg-white text-zinc-400'
         }`}
       >
-        {done ? <Check className="h-3 w-3" /> : n}
+        {done ? <Check className="h-4 w-4" /> : n}
       </span>
-      <span className={`text-xs font-medium ${active ? 'text-zinc-900' : 'text-zinc-400'}`}>{label}</span>
+      <span className={`text-sm font-medium ${active ? 'text-zinc-900' : 'text-zinc-400'}`}>{label}</span>
     </div>
   );
 }
@@ -193,7 +193,7 @@ export default function OnboardingWizard({
       </div>
 
       {/* Centered card */}
-      <div className="flex min-h-0 flex-1 items-start justify-center overflow-y-auto p-6">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto py-16 px-6">
         <div className="w-full max-w-xl rounded-lg border border-zinc-200 bg-white shadow-sm">
           {/* Card header */}
           <div className="shrink-0 border-b border-zinc-200 px-6 pt-5 pb-4">

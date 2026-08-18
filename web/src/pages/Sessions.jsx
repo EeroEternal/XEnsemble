@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AgentConsole from '../components/AgentConsole';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
-import BrandMark from '../components/BrandMark';
 import WorkspaceShell from '../components/WorkspaceShell';
 import WorkspacePanel from '../components/WorkspacePanel';
 import RepoImportDialog from '../components/git/RepoImportDialog';
@@ -96,6 +96,7 @@ export default React.forwardRef(function Sessions({
   fetchAgents,
   launchPanelOpen,
   onLaunchPanelClose,
+  onWizardActiveChange,
   className,
 }, ref) {
   const navigate = useNavigate();
@@ -193,6 +194,23 @@ export default React.forwardRef(function Sessions({
 
   const [showNewInstanceModal, setShowNewInstanceModal] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
+
+  // Signal the wizard active state up to App so it can hide the sidebar and
+  // collapse the top bar slot (the wizard renders its own full-width header).
+  useEffect(() => {
+    onWizardActiveChange?.(showNewInstanceModal);
+  }, [showNewInstanceModal, onWizardActiveChange]);
+
+  // Portal target for the session header (rendered into the full-width top bar
+  // provided by App.jsx). Null until mounted; the portal renders once available.
+  const isSessionsRoute = location.pathname === '/sessions';
+  const topbarVisible = (isSessionsRoute || launchPanelOpen) && !showNewInstanceModal;
+  const [topbarEl, setTopbarEl] = useState(null);
+  useEffect(() => {
+    if (!topbarVisible) { setTopbarEl(null); return; }
+    const el = document.getElementById('xe-topbar-dynamic');
+    if (el) setTopbarEl(el);
+  }, [topbarVisible]);
   const [gitImportMode, setGitImportMode] = useState(false);
   const [gitProvider, setGitProvider] = useState('');
   const [importedProject, setImportedProject] = useState(null);
@@ -1180,82 +1198,84 @@ export default React.forwardRef(function Sessions({
             />
           ) : (
             <>
-          <div className="h-12 border-b border-zinc-200 flex items-center justify-between px-5 shrink-0 bg-white">
-            <div className="flex items-center gap-2 min-w-0">
-              <BrandMark className="h-7 w-7" iconClassName="h-3.5 w-3.5" />
-              <span className="min-w-0 text-sm font-bold text-zinc-900">XEnsemble</span>
-              <span className="text-zinc-300">/</span>
-              <WorkspaceSwitcher
-                projects={projects}
-                activeWorkspaceId={activeWorkspaceId}
-                sessions={sessions}
-                onSelect={switchWorkspace}
-                onCreate={() => openLaunchModal('workspace')}
-                onDelete={requestDeleteWorkspace}
-              />
-              {activeSession?.projectId && activeProject?.repoProvider && GIT_REPO_PROVIDERS.has(activeProject.repoProvider) && (
-                <BranchSwitcher projectId={activeSession.projectId} project={activeProject} git={gitChanges} />
-              )}
-            </div>
-            <div className="flex items-center gap-0.5 shrink-0">
-              {activeSession && (
-                <>
-                  <div className="mx-0.5 h-5 w-px bg-zinc-200" />
-                  {!sessionPending && !sessionFailed && (
-                    <>
-                      {!sessionAlive && (
-                        <button
-                          type="button"
-                          onClick={handleRestartSession}
-                          disabled={sessionControlPending}
-                          className={`${consoleIconButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
-                          title={restartingSession ? 'Starting…' : 'Start session'}
-                          aria-label={restartingSession ? 'Starting session' : 'Start session'}
-                        >
-                          {restartingSession ? (
-                            <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.75} />
-                          ) : (
-                            <Play className="w-4 h-4" strokeWidth={1.75} />
-                          )}
-                        </button>
-                      )}
-                      {sessionAlive && (
-                        <button
-                          type="button"
-                          onClick={handleRestartSession}
-                          disabled={sessionControlPending}
-                          className={`${consoleIconButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
-                          title={restartingSession ? 'Restarting…' : 'Restart session'}
-                          aria-label={restartingSession ? 'Restarting session' : 'Restart session'}
-                        >
-                          {restartingSession ? (
-                            <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.75} />
-                          ) : (
-                            <RefreshCw className="w-4 h-4" strokeWidth={1.75} />
-                          )}
-                        </button>
-                      )}
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setPanelOpen((prev) => !prev)}
-                    className={`${consoleIconButtonClass} ${panelOpen ? 'bg-zinc-100 text-zinc-900' : ''}`}
-                    title={panelOpen ? 'Close workspace panel' : 'Open workspace panel'}
-                    aria-label={panelOpen ? 'Close workspace panel' : 'Open workspace panel'}
-                  >
-                    {panelOpen ? <PanelRightClose className="w-4 h-4" strokeWidth={1.75} /> : <PanelRightOpen className="w-4 h-4" strokeWidth={1.75} />}
-                  </button>
-                  {activeSession.projectId ? (
-                    <>
-                      <div className="mx-0.5 h-5 w-px bg-zinc-200" />
-                      <PreviewControlGroup {...preview} onAnalyze={() => { panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); }} />
-                    </>
-                  ) : null}
-                </>
-              )}
-            </div>
-          </div>
+          {topbarEl && createPortal(
+            <>
+              <div className="flex items-center gap-2 min-w-0">
+                <WorkspaceSwitcher
+                  projects={projects}
+                  activeWorkspaceId={activeWorkspaceId}
+                  sessions={sessions}
+                  onSelect={switchWorkspace}
+                  onCreate={() => openLaunchModal('workspace')}
+                  onDelete={requestDeleteWorkspace}
+                />
+              </div>
+              <div className="flex items-center min-w-0 justify-center">
+                {activeSession?.projectId && activeProject?.repoProvider && GIT_REPO_PROVIDERS.has(activeProject.repoProvider) && (
+                  <BranchSwitcher projectId={activeSession.projectId} project={activeProject} git={gitChanges} />
+                )}
+              </div>
+              <div className="flex items-center gap-0.5 shrink-0">
+                {activeSession && (
+                  <>
+                    <div className="mx-0.5 h-5 w-px bg-zinc-200" />
+                    {!sessionPending && !sessionFailed && (
+                      <>
+                        {!sessionAlive && (
+                          <button
+                            type="button"
+                            onClick={handleRestartSession}
+                            disabled={sessionControlPending}
+                            className={`${consoleIconButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
+                            title={restartingSession ? 'Starting…' : 'Start session'}
+                            aria-label={restartingSession ? 'Starting session' : 'Start session'}
+                          >
+                            {restartingSession ? (
+                              <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.75} />
+                            ) : (
+                              <Play className="w-4 h-4" strokeWidth={1.75} />
+                            )}
+                          </button>
+                        )}
+                        {sessionAlive && (
+                          <button
+                            type="button"
+                            onClick={handleRestartSession}
+                            disabled={sessionControlPending}
+                            className={`${consoleIconButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
+                            title={restartingSession ? 'Restarting…' : 'Restart session'}
+                            aria-label={restartingSession ? 'Restarting session' : 'Restart session'}
+                          >
+                            {restartingSession ? (
+                              <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.75} />
+                            ) : (
+                              <RefreshCw className="w-4 h-4" strokeWidth={1.75} />
+                            )}
+                          </button>
+                        )}
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setPanelOpen((prev) => !prev)}
+                      className={`${consoleIconButtonClass} ${panelOpen ? 'bg-zinc-100 text-zinc-900' : ''}`}
+                      title={panelOpen ? 'Close workspace panel' : 'Open workspace panel'}
+                      aria-label={panelOpen ? 'Close workspace panel' : 'Open workspace panel'}
+                    >
+                      {panelOpen ? <PanelRightClose className="w-4 h-4" strokeWidth={1.75} /> : <PanelRightOpen className="w-4 h-4" strokeWidth={1.75} />}
+                    </button>
+                    {activeSession.projectId ? (
+                      <>
+                        <div className="mx-0.5 h-5 w-px bg-zinc-200" />
+                        <PreviewControlGroup {...preview} onAnalyze={() => { panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); }} />
+                      </>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </>,
+            topbarEl
+          )}
           {activeSession ? (
             sessionPending ? (
               <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-white p-8 text-center">
