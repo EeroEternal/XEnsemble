@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ExternalLink, GitPullRequest, Loader2, RefreshCw, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink, GitPullRequest, Loader2, RefreshCw, Search } from 'lucide-react';
 import { openExternal } from '../../lib/githubApi';
 import * as gitApi from '../../lib/gitApi';
 import { buttonClass } from '../../lib/buttonStyles';
@@ -56,6 +56,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
   const [syncingId, setSyncingId] = useState(null);
   const [statusFilter, setStatusFilter] = useState('open');
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
 
   const label = provider === 'gitlab' ? 'Merge Requests' : 'Pull Requests';
 
@@ -119,10 +120,20 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
     return counts;
   }, [mergeRequests]);
 
+  const PAGE_SIZE = 10;
+  useEffect(() => { setPage(1); }, [statusFilter, searchQuery]);
+  const totalItems = filteredMRs.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedMRs = useMemo(
+    () => filteredMRs.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [filteredMRs, currentPage],
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 shrink-0 bg-white">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
           {FILTER_OPTIONS.map((opt) => {
             const active = statusFilter === opt.value;
             return (
@@ -144,7 +155,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
             );
           })}
         </div>
-        <div className="relative flex-1 max-w-[200px] ml-auto">
+        <div className="relative flex-1 min-w-0 max-w-[200px]">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400 pointer-events-none" />
           <input
             type="text"
@@ -154,26 +165,28 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
             className={`w-full pl-8 pr-2 py-1 text-xs ${consoleInputClass}`}
           />
         </div>
-        <button
-          type="button"
-          onClick={fetchMRs}
-          disabled={loading}
-          title={`Refresh ${label.toLowerCase()}`}
-          aria-label={`Refresh ${label.toLowerCase()}`}
-          className={consoleIconButtonClass}
-        >
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-        </button>
-        {onCreatePR && (
+        <div className="ml-auto flex items-center gap-1 shrink-0">
           <button
             type="button"
-            onClick={onCreatePR}
-            className={`${buttonClass('primary', 'sm')} h-7 px-3 text-xs ${consoleButtonFocusClass}`}
+            onClick={fetchMRs}
+            disabled={loading}
+            title={`Refresh ${label.toLowerCase()}`}
+            aria-label={`Refresh ${label.toLowerCase()}`}
+            className={consoleIconButtonClass}
           >
-            <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
-            New Pull Request
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           </button>
-        )}
+          {onCreatePR && (
+            <button
+              type="button"
+              onClick={onCreatePR}
+              className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-zinc-700 rounded-md border border-zinc-200 hover:bg-zinc-100 ${consoleButtonFocusClass}`}
+            >
+              <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
+              New Pull Request
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto bg-zinc-50">
@@ -210,7 +223,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
           </div>
         ) : (
           <ul className="divide-y divide-zinc-100">
-            {filteredMRs.map((mr) => {
+            {pagedMRs.map((mr) => {
               const meta = STATUS_META[mr.status] || STATUS_META.closed;
               const number = mr.remote_mr_number || mr.remoteMrNumber || mr.github_pr_number;
               const src = mr.source_branch || mr.sourceBranch;
@@ -287,6 +300,39 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
           </ul>
         )}
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between gap-2 border-t border-zinc-200 px-3 py-1.5 shrink-0 bg-white">
+          <span className="text-[11px] text-zinc-500 tabular-nums">
+            {currentPage * PAGE_SIZE - PAGE_SIZE + 1}-{Math.min(currentPage * PAGE_SIZE, totalItems)} of {totalItems}
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage <= 1}
+              title="Previous page"
+              aria-label="Previous page"
+              className={consoleIconButtonClass}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+            <span className="text-[11px] text-zinc-500 tabular-nums min-w-[2.5rem] text-center">
+              {currentPage} / {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage >= totalPages}
+              title="Next page"
+              aria-label="Next page"
+              className={consoleIconButtonClass}
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

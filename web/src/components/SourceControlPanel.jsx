@@ -14,7 +14,6 @@ import {
 } from '../lib/consoleTokens';
 import { buttonClass } from '../lib/buttonStyles';
 import { ConsoleDialogShell } from './ConsoleDialog';
-import { confirm } from './ConfirmDialog';
 import CreatePRDialog from './git/CreatePRDialog';
 import { ConflictFileItem } from './git/ConflictResolutionPanel';
 import { DiffText } from './git/DiffText';
@@ -182,48 +181,62 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   }, [gitChanges, expandedFiles, projectId]);
 
   const [discarding, setDiscarding] = useState(false);
+  const [discardConfirm, setDiscardConfirm] = useState(null);
 
-  const handleDiscardFile = useCallback(async (path) => {
-    const ok = await confirm({
+  const requestDiscardFile = useCallback((path) => {
+    setDiscardConfirm({
+      kind: 'file',
+      path,
       title: 'Discard Changes',
       message: `Discard changes to ${path}? This cannot be undone.`,
       confirmLabel: 'Discard',
-      variant: 'danger',
     });
-    if (!ok) return;
-    setDiscarding(true);
-    try {
-      setFileDiffs((prev) => { const next = { ...prev }; delete next[path]; return next; });
-      await gitChanges?.discard([path]);
-      showToast('success', 'Changes discarded.');
-    } catch (err) {
-      showToast('error', err.message || 'Discard failed');
-    } finally {
-      setDiscarding(false);
-    }
-  }, [gitChanges, showToast]);
+  }, []);
 
-  const handleDiscardAll = useCallback(async () => {
+  const requestDiscardAll = useCallback(() => {
     const allPaths = [...gitStagedFiles, ...gitUnstagedFiles].map((f) => f.path).filter(Boolean);
     if (allPaths.length === 0) return;
-    const ok = await confirm({
+    setDiscardConfirm({
+      kind: 'all',
+      paths: allPaths,
       title: 'Discard All Changes',
       message: `Discard all ${allPaths.length} change(s)? This cannot be undone.`,
       confirmLabel: 'Discard All',
-      variant: 'danger',
     });
-    if (!ok) return;
+  }, [gitStagedFiles, gitUnstagedFiles]);
+
+  const cancelDiscard = useCallback(() => setDiscardConfirm(null), []);
+
+  const executeDiscard = useCallback(async () => {
+    const target = discardConfirm;
+    if (!target) return;
     setDiscarding(true);
     try {
-      setFileDiffs({});
-      await gitChanges?.discard(allPaths);
-      showToast('success', 'All changes discarded.');
+      if (target.kind === 'file') {
+        setFileDiffs((prev) => { const next = { ...prev }; delete next[target.path]; return next; });
+        await gitChanges?.discard([target.path]);
+        showToast('success', 'Changes discarded.');
+      } else {
+        setFileDiffs({});
+        await gitChanges?.discard(target.paths);
+        showToast('success', 'All changes discarded.');
+      }
     } catch (err) {
       showToast('error', err.message || 'Discard failed');
     } finally {
       setDiscarding(false);
+      setDiscardConfirm(null);
     }
-  }, [gitStagedFiles, gitUnstagedFiles, gitChanges, showToast]);
+  }, [discardConfirm, gitChanges, showToast]);
+
+  useEffect(() => {
+    if (!discardConfirm) return;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); cancelDiscard(); }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [discardConfirm, cancelDiscard]);
 
   const handleCommit = useCallback(async () => {
     if (!commitMessage.trim()) return;
@@ -419,7 +432,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             </button>
           )}
           <button
-            onClick={() => handleDiscardFile(f.path)}
+            onClick={() => requestDiscardFile(f.path)}
             title="Discard changes"
             className={`shrink-0 p-1 rounded text-zinc-400 hover:text-red-600 hover:bg-zinc-300 transition-opacity ${consoleButtonFocusClass}`}
           >
@@ -730,7 +743,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               type="button"
               role="menuitem"
               disabled={discarding}
-              onClick={() => { setActionMenuOpen(false); handleDiscardAll(); }}
+              onClick={() => { setActionMenuOpen(false); requestDiscardAll(); }}
               className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-red-600 hover:bg-red-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
             >
               {discarding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
@@ -846,6 +859,46 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             </button>
           </div>
         </ConsoleDialogShell>
+      )}
+
+      {discardConfirm && (
+        <div
+          className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 p-3"
+          onClick={cancelDiscard}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={discardConfirm.title}
+            className="pointer-events-auto w-full max-w-sm rounded-lg border border-zinc-200 bg-white shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 pt-4 pb-2">
+              <h3 className="text-sm font-semibold text-zinc-900">{discardConfirm.title}</h3>
+            </div>
+            <div className="px-4 pb-4">
+              <p className="text-xs text-zinc-600 leading-relaxed whitespace-pre-wrap break-words">{discardConfirm.message}</p>
+            </div>
+            <div className="flex justify-end gap-2 flex-wrap px-4 py-3 border-t border-zinc-200">
+              <button
+                type="button"
+                onClick={cancelDiscard}
+                disabled={discarding}
+                className={`${buttonClass('secondary', 'sm')} ${consoleButtonFocusClass}`}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={executeDiscard}
+                disabled={discarding}
+                className={`${buttonClass('danger', 'sm')} ${consoleButtonFocusClass}`}
+              >
+                {discarding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : discardConfirm.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
