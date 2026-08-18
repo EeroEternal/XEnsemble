@@ -100,6 +100,14 @@ if command -v psql >/dev/null 2>&1; then
     DB_URL_NAME="$(printf '%s' "$DATABASE_URL" | sed -nE 's|.*/([^?]+).*|\1|p')"
     echo "    (using external DATABASE_URL: user=${DB_URL_USER} db=${DB_URL_NAME} host=${DB_URL_HOST}:${DB_URL_PORT})"
 
+    for _llm_var in LLM_ANALYZE_API_URL LLM_ANALYZE_API_KEY LLM_ANALYZE_MODEL LLM_VERIFY_MODEL; do
+      _llm_val="${!_llm_var:-}"
+      [ -z "$_llm_val" ] && continue
+      grep -v "^${_llm_var}=" "$ENV_FILE" > "$ENV_FILE.tmp" 2>/dev/null || true
+      mv "$ENV_FILE.tmp" "$ENV_FILE" 2>/dev/null || true
+      echo "${_llm_var}=${_llm_val}" >> "$ENV_FILE"
+    done
+
     # Create or update role with the provided password
     if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_URL_USER}'" 2>/dev/null | grep -q 1; then
       sudo -u postgres psql -c "CREATE ROLE ${DB_URL_USER} LOGIN PASSWORD '${DB_URL_PASS}'"
