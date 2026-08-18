@@ -10,7 +10,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { usePreview } from './PreviewPanel';
-import { consoleButtonFocusClass } from '@/lib/consoleTheme';
+import { consoleButtonFocusClass } from '@/lib/consoleTokens';
 import { buttonClass } from '@/lib/buttonStyles';
 import { useToast } from './Toast';
 
