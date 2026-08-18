@@ -7,7 +7,7 @@
 //   On failure: returns the stage 2 finalStderr + plan for the front-end to show.
 
 const crypto = require('crypto');
-const { eq } = require('drizzle-orm');
+const { eq, and } = require('drizzle-orm');
 const { getRuntime } = require('../runtime/registry');
 const { ensureProjectRuntime } = require('../runtime/RuntimeService');
 const { analyzeProjectDeploy } = require('./analyzeDeploy');
@@ -109,6 +109,21 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
         return { ok: false, error: 'LLM_ANALYZE_* env not configured.' };
     }
     const startedAt = Date.now();
+
+    // A new deploy attempt supersedes any existing 'running' deployment for
+    // this project. Mark them 'stopped' so a failed retry doesn't leave a
+    // stale 'running' record that misleads the UI into showing RUNNING.
+    // The old tunnel process is left alone: it will be stopped on verify
+    // success (stopByProjectId below) or expire by TTL; only the DB status
+    // is corrected here so the preview badge reflects the latest attempt.
+    try {
+        await db.update(schema.deployments)
+            .set({ status: 'stopped', updatedAt: Date.now() })
+            .where(and(eq(schema.deployments.projectId, projectId), eq(schema.deployments.status, 'running')));
+    } catch (e) {
+        console.error('[twoStage] failed to mark old deployments stopped:', e.message);
+    }
+
     const ready = await ensureProjectRuntime(project);
     const runtime = getRuntime();
     const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
