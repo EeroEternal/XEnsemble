@@ -65,7 +65,14 @@ function agentBadge(agent) {
     if (agent.build_state === 'queued') return { tone: 'warning', icon: Clock, label: 'Queued' };
     if (agent.build_state === 'failed') return { tone: 'danger', icon: XCircle, label: 'Failed' };
     if (agent.active_version) return { tone: 'success', icon: CheckCircle, label: 'Active' };
-    if (agent.default_image_ref) return { tone: 'neutral', icon: null, label: 'Default' };
+    if (agent.default_image_ref) {
+        return {
+            tone: 'neutral',
+            icon: null,
+            label: 'Using default',
+            title: 'No active version — new sessions use the default image.',
+        };
+    }
     return { tone: 'neutral', icon: null, label: 'Not built' };
 }
 
@@ -265,7 +272,7 @@ export function ImagesAdminContent() {
     return (
         <div className={cn('flex flex-col h-full min-h-0', bgContainer)}>
             {/* Toolbar */}
-            <div className={cn('flex items-center justify-between gap-3 px-1 shrink-0')}>
+            <div className={cn('flex items-center justify-between gap-6 px-1 shrink-0')}>
                 <div className="flex items-center gap-2 min-w-0">
                     <span className={cn('text-xs shrink-0', textSecondary)}>Agent</span>
                     <SelectMenu
@@ -275,11 +282,7 @@ export function ImagesAdminContent() {
                         placeholder="Select an agent…"
                         className="w-56"
                     />
-                    {selectedAgent && (
-                        <span className="shrink-0">
-                            <StatusBadge {...agentBadge(selectedAgent)} />
-                        </span>
-                    )}
+                    {selectedAgent && <StatusBadge {...agentBadge(selectedAgent)} />}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                     <button
