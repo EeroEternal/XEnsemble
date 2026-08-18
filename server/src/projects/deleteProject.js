@@ -95,6 +95,8 @@ async function deleteProjectForUser(userId, project, opts = {}) {
                 db.delete(schema.deployments).where(eq(schema.deployments.projectId, projectId)),
                 db.delete(schema.events).where(eq(schema.events.projectId, projectId)),
                 db.execute(sql`DELETE FROM pull_requests WHERE project_id = ${projectId}`),
+                db.execute(sql`DELETE FROM auto_deploy_runs WHERE project_id = ${projectId}`),
+                db.execute(sql`DELETE FROM deploy_verify_states WHERE project_id = ${projectId}`),
                 sidList.length > 0
                     ? db.delete(schema.sessionConfigs).where(inArray(schema.sessionConfigs.sessionId, sidList))
                     : Promise.resolve(),
