@@ -152,9 +152,42 @@ class TranscriptStore {
         return stored;
     }
 
+    _syncFromFile(state) {
+        if (!state?.file || !fs.existsSync(state.file)) return;
+        try {
+            const contents = fs.readFileSync(state.file, 'utf8');
+            const fileFrames = [];
+            for (const line of contents.split('\n')) {
+                if (!line.trim()) continue;
+                try {
+                    const frame = JSON.parse(line);
+                    if (!frame || typeof frame.seq !== 'number' || !VALID_KINDS.has(frame.kind)) continue;
+                    fileFrames.push(frame);
+                } catch (_) { /* ignore malformed lines */ }
+            }
+            const newFrames = fileFrames.filter((f) => f.seq > state.headSeq);
+            if (newFrames.length === 0) return;
+            for (const frame of newFrames) {
+                state.frames.push(frame);
+                state.headSeq = Math.max(state.headSeq, frame.seq);
+                state.bytes += Number(frame.bytes) || bytesFor(frame.kind, frame.data);
+                if (frame.kind === 'exit') {
+                    state.exited = true;
+                    state.exitSeq = frame.seq;
+                    state.exitCode = frame?.data?.code ?? null;
+                }
+            }
+            if (state.frames.length > MAX_FRAMES) {
+                state.frames.splice(0, state.frames.length - MAX_FRAMES);
+            }
+            state.nextSeq = state.headSeq + 1;
+        } catch (_) { /* best-effort */ }
+    }
+
     readFrom(streamRef, afterSeq = 0) {
         const state = this._state(streamRef);
         if (!state) return [];
+        this._syncFromFile(state);
         const cursor = Number(afterSeq) || 0;
         return state.frames.filter((frame) => frame.seq > cursor);
     }
@@ -167,7 +200,9 @@ class TranscriptStore {
      */
     readTail(streamRef, maxBytes = TAIL_BYTES) {
         const state = this._state(streamRef);
-        if (!state || state.frames.length === 0) {
+        if (!state) return { frames: [], omittedCount: 0 };
+        this._syncFromFile(state);
+        if (state.frames.length === 0) {
             return { frames: [], omittedCount: 0 };
         }
         let totalBytes = 0;
@@ -188,7 +223,9 @@ class TranscriptStore {
 
     head(streamRef) {
         const state = this._state(streamRef);
-        return state ? state.headSeq : 0;
+        if (!state) return 0;
+        this._syncFromFile(state);
+        return state.headSeq;
     }
 
     /**
@@ -224,6 +261,7 @@ class TranscriptStore {
     reattachCursor(streamRef) {
         const state = this._state(streamRef);
         if (!state) return 0;
+        this._syncFromFile(state);
 
         // If the agent process has already exited (onExit appended an exit
         // frame), there is nothing to reattach to: attachSession would open a
