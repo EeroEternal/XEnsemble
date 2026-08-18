@@ -2,37 +2,28 @@ import { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } fr
 import { createPortal } from 'react-dom';
 import { NavLink } from 'react-router-dom';
 import {
-  FolderOpen,
-  FolderPlus,
-  Pin,
   Trash2,
   Archive,
   Play,
-  ChevronRight,
-  ChevronDown,
   LogOut,
   Settings2,
   Search,
-  ListFilter,
   PenSquare,
   Users,
   Bot,
   Globe,
   Container,
-  GitBranch,
   Loader2,
+  ChevronDown,
   PanelLeftClose,
   PanelLeft,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
-import { getProviderLabel, getWorkspaceRepoLabel, isGitLinkedProject, isWorkspaceClonePending } from '../lib/gitLabels';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
 import {
   loadSidebarPrefs,
-  togglePinnedWorkspace,
   archiveSession,
   isPinnedSession,
-  isPinnedWorkspace,
   isArchivedSession,
   selectActiveSession,
 } from '../lib/sidebarPrefs';
@@ -57,7 +48,7 @@ import {
 
 const SIDEBAR_COLLAPSED_KEY = 'xensemble.sidebar.collapsed';
 
-const SESSION_PREVIEW_LIMIT = 8;
+const SESSION_PREVIEW_LIMIT = 12;
 
 function sortSessions(list, prefs) {
   return [...list].sort((a, b) => {
@@ -68,51 +59,6 @@ function sortSessions(list, prefs) {
     const bLive = b.alive === true ? 1 : 0;
     if (aLive !== bLive) return bLive - aLive;
     return (b.createdAt || 0) - (a.createdAt || 0);
-  });
-}
-
-function buildWorkspaces(projects, sessions, prefs) {
-  const visible = sessions.filter(
-    (s) => !isArchivedSession(prefs, s.id) && s.status !== 'exited',
-  );
-  const byProject = {};
-  for (const s of visible) {
-    const pid = s.projectId || '_orphan';
-    if (!byProject[pid]) byProject[pid] = [];
-    byProject[pid].push(s);
-  }
-  const list = projects.map((p) => {
-    const sess = sortSessions(byProject[p.id] || [], prefs);
-    const lastActivity = Math.max(
-      p.createdAt || 0,
-      ...sess.map((s) => s.createdAt || 0),
-    );
-    return {
-      id: p.id,
-      name: p.name,
-      sessions: sess,
-      lastActivity,
-      repoProvider: p.repoProvider ?? p.repo_provider ?? 'none',
-      githubFullName: p.githubFullName ?? p.github_full_name ?? null,
-      repoUrl: p.repoUrl ?? p.repo_url ?? null,
-      currentBranch: p.currentBranch ?? p.current_branch ?? null,
-      cloneStatus: p.cloneStatus ?? p.clone_status ?? null,
-    };
-  });
-  if (byProject._orphan?.length) {
-    const sess = sortSessions(byProject._orphan, prefs);
-    list.push({
-      id: '_orphan',
-      name: 'Unassigned',
-      sessions: sess,
-      lastActivity: Math.max(...sess.map((s) => s.createdAt || 0)),
-    });
-  }
-  return list.sort((a, b) => {
-    const aPin = isPinnedWorkspace(prefs, a.id) ? 1 : 0;
-    const bPin = isPinnedWorkspace(prefs, b.id) ? 1 : 0;
-    if (aPin !== bPin) return bPin - aPin;
-    return b.lastActivity - a.lastActivity;
   });
 }
 
@@ -278,16 +224,14 @@ function SidebarAccountMenu({ user, onOpenSettings, onLogout, adminLinkClass, co
 
 export default function AppSidebar({
   agents,
-  projects,
   sessions,
   activeSession,
+  activeWorkspaceId,
+  activeWorkspaceName,
   onSelectSession,
   fetchWorkspaces,
-  onCreateWorkspace,
-  onImportFromGit,
   onNewSession,
   onRequestDeleteSession,
-  onRequestDeleteWorkspace,
   onArchiveSession,
   user,
   onOpenSettings,
@@ -301,12 +245,7 @@ export default function AppSidebar({
       return false;
     }
   });
-  const [expandedWorkspaces, setExpandedWorkspaces] = useState(() => {
-    const ids = new Set();
-    if (activeSession?.projectId) ids.add(activeSession.projectId);
-    return ids;
-  });
-  const [expandedSessionLists, setExpandedSessionLists] = useState(() => new Set());
+  const [sessionListExpanded, setSessionListExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   const setSidebarCollapsed = useCallback((next) => {
@@ -318,12 +257,8 @@ export default function AppSidebar({
     }
   }, []);
 
-  const [activeOnlyFilter, setActiveOnlyFilter] = useState(false);
   const [resumingSessionId, setResumingSessionId] = useState(null);
   const [customImageMap, setCustomImageMap] = useState({});
-  const [renameId, setRenameId] = useState(null);
-  const [renameValue, setRenameValue] = useState('');
-  const [renameLoading, setRenameLoading] = useState(false);
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -339,42 +274,15 @@ export default function AppSidebar({
 
   useEffect(() => {
     refreshSidebarPrefs();
-  }, [sessions, projects, refreshSidebarPrefs]);
-
-
-  useEffect(() => {
-    if (!activeSession?.projectId) return;
-    setExpandedWorkspaces((prev) => {
-      if (prev.has(activeSession.projectId)) return prev;
-      const next = new Set(prev);
-      next.add(activeSession.projectId);
-      return next;
-    });
-  }, [activeSession?.projectId]);
-
-  useEffect(() => {
-    const runningIds = [...new Set(sessions.filter((s) => s.alive && s.projectId).map((s) => s.projectId))];
-    if (runningIds.length === 0) return;
-    setExpandedWorkspaces((prev) => {
-      const next = new Set(prev);
-      let changed = false;
-      for (const id of runningIds) {
-        if (!next.has(id)) {
-          next.add(id);
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [sessions]);
+  }, [sessions, refreshSidebarPrefs]);
 
   const getAgentLabel = useCallback(
     (agentId) => agents.find((a) => a.id === agentId)?.name || agentId,
     [agents],
   );
 
-  const selectSession = useCallback((s, ws) => {
-    const projectName = s.projectName || ws?.name;
+  const selectSession = useCallback((s) => {
+    const projectName = s.projectName || activeWorkspaceName;
     selectActiveSession(s.id, {
       agentId: s.agentId ?? null,
       projectId: s.projectId ?? null,
@@ -383,33 +291,7 @@ export default function AppSidebar({
     });
     refreshSidebarPrefs();
     onSelectSession({ ...s, projectName });
-    if (s.projectId) {
-      setExpandedWorkspaces((prev) => {
-        if (prev.has(s.projectId)) return prev;
-        const next = new Set(prev);
-        next.add(s.projectId);
-        return next;
-      });
-    }
-  }, [onSelectSession, refreshSidebarPrefs]);
-
-  const toggleWorkspaceExpanded = (workspaceId) => {
-    setExpandedWorkspaces((prev) => {
-      const next = new Set(prev);
-      if (next.has(workspaceId)) next.delete(workspaceId);
-      else next.add(workspaceId);
-      return next;
-    });
-  };
-
-  const toggleSessionListExpanded = (key) => {
-    setExpandedSessionLists((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
+  }, [onSelectSession, refreshSidebarPrefs, activeWorkspaceName]);
 
   const handleArchiveSession = (e, sessionId) => {
     e.stopPropagation();
@@ -418,7 +300,7 @@ export default function AppSidebar({
     onArchiveSession?.(sessionId);
   };
 
-  const handleResumeSession = useCallback(async (session, ws) => {
+  const handleResumeSession = useCallback(async (session) => {
     if (!session?.id || resumingSessionId) return;
     setResumingSessionId(session.id);
     try {
@@ -443,82 +325,23 @@ export default function AppSidebar({
       await fetchWorkspaces?.();
       onSelectSession?.({
         ...session,
-        projectName: session.projectName || ws?.name || null,
+        projectName: session.projectName || activeWorkspaceName || null,
       });
     } catch (err) {
       showToast('error', err.message || 'Failed to resume session');
     } finally {
       setResumingSessionId(null);
     }
-  }, [fetchWorkspaces, onSelectSession, resumingSessionId, showToast]);
+  }, [fetchWorkspaces, onSelectSession, resumingSessionId, showToast, activeWorkspaceName]);
 
-  const handlePinWorkspace = (e, workspaceId) => {
-    e.stopPropagation();
-    togglePinnedWorkspace(workspaceId);
-    refreshSidebarPrefs();
-  };
-
-  const handleRequestDeleteWorkspace = (e, ws) => {
-    e.stopPropagation();
-    const rect = e.currentTarget.getBoundingClientRect();
-    onRequestDeleteWorkspace?.(ws, {
-      top: rect.top,
-      left: rect.left,
-      right: rect.right,
-      bottom: rect.bottom,
-      width: rect.width,
-      height: rect.height,
-    });
-  };
-
-  const handleStartRename = (e, ws) => {
-    e.stopPropagation();
-    setRenameId(ws.id);
-    setRenameValue(ws.name);
-  };
-
-  const handleConfirmRename = async (wsId) => {
-    if (renameLoading) return;
-    const trimmed = renameValue.trim();
-    const ws = workspaces.find((w) => w.id === wsId);
-    if (!trimmed || !ws || trimmed === ws.name) {
-      setRenameId(null);
-      setRenameValue('');
-      return;
-    }
-    setRenameLoading(true);
-    try {
-      const res = await apiFetch(`/api/v1/projects/${encodeURIComponent(wsId)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ name: trimmed }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Rename failed');
-      fetchWorkspaces?.();
-      showToast('success', 'Workspace renamed');
-    } catch (err) {
-      showToast('error', err.message);
-    } finally {
-      setRenameLoading(false);
-      setRenameId(null);
-      setRenameValue('');
-    }
-  };
-
-  const handleCancelRename = () => {
-    setRenameId(null);
-    setRenameValue('');
-  };
-
-  const sessionMatchesQuery = useCallback((s, ws) => {
+  const sessionMatchesQuery = useCallback((s) => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return true;
     const label = (s.title?.trim() || getAgentLabel(s.agentId)).toLowerCase();
-    const wsName = (ws?.name || '').toLowerCase();
-    return label.includes(q) || wsName.includes(q);
+    return label.includes(q);
   }, [searchQuery, getAgentLabel]);
 
-  const renderNestedSessionRow = (s, ws) => {
+  const renderSessionRow = (s) => {
     const isActive = activeSession?.sessionId === s.id;
     const isLive = s.alive === true;
     const isPending = s.status === 'pending';
@@ -532,16 +355,16 @@ export default function AppSidebar({
     return (
       <div
         key={s.id}
-        className={`group/session relative flex items-center gap-1 rounded-md pl-6 pr-1.5 py-1.5 ${transitionBase} ${
+        className={`group/session relative flex items-center gap-1 rounded-md pl-2.5 pr-1.5 py-1.5 ${transitionBase} ${
           isActive ? `${bgCanvas} shadow-sm ring-1 ring-zinc-200` : hoverBgTertiary
         } ${!isLive && !isActive ? 'opacity-70' : ''}`}
       >
         {isActive && (
-          <span className="absolute left-1.5 top-1.5 bottom-1.5 w-1 rounded-full bg-zinc-900" />
+          <span className="absolute left-1 top-1.5 bottom-1.5 w-1 rounded-full bg-zinc-900" />
         )}
         <button
           type="button"
-          onClick={() => selectSession(s, ws)}
+          onClick={() => selectSession(s)}
           className="flex flex-1 min-w-0 items-center gap-2 text-left"
           title={imageName ? `${label} · ${imageName}` : label}
         >
@@ -572,7 +395,7 @@ export default function AppSidebar({
               aria-label={isResuming ? 'Resuming session' : 'Resume session'}
               onClick={(e) => {
                 e.stopPropagation();
-                handleResumeSession(s, ws);
+                handleResumeSession(s);
               }}
               disabled={Boolean(resumingSessionId)}
               className={`p-1 rounded-md ${textPlaceholder} ${hoverTextPrimary} hover:bg-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed`}
@@ -593,7 +416,7 @@ export default function AppSidebar({
             title={isLive ? 'Stop and remove' : 'Remove'}
             onClick={(e) => {
               e.stopPropagation();
-              onRequestDeleteSession?.(s, ws);
+              onRequestDeleteSession?.(s, { name: s.projectName || activeWorkspaceName });
             }}
             className={`p-1 rounded-md ${textPlaceholder} ${accentRed} ${accentRedBg}`}
           >
@@ -604,48 +427,20 @@ export default function AppSidebar({
     );
   };
 
-  const renderSessionList = (sessionList, ws, listKey) => {
-    const filtered = sessionList.filter((s) => sessionMatchesQuery(s, ws));
-    if (filtered.length === 0) {
-      return (
-        <p className={`py-1.5 pl-6 pr-2 text-xs ${textPlaceholder}`}>
-          {searchQuery.trim() ? 'No matching sessions' : 'No sessions yet'}
-        </p>
-      );
-    }
-    const expanded = expandedSessionLists.has(listKey);
-    const visible = expanded ? filtered : filtered.slice(0, SESSION_PREVIEW_LIMIT);
-    const hasMore = filtered.length > SESSION_PREVIEW_LIMIT;
-
-    return (
-      <>
-        {visible.map((s) => renderNestedSessionRow(s, ws))}
-        {hasMore && !expanded && (
-          <button
-            type="button"
-            onClick={() => toggleSessionListExpanded(listKey)}
-            className={`pl-6 pr-2 py-1 text-xs ${textPlaceholder} ${hoverTextPrimary} text-left ${transitionBase}`}
-          >
-            More
-          </button>
-        )}
-      </>
+  const visibleSessions = useMemo(() => {
+    const filtered = sessions.filter(
+      (s) =>
+        !isArchivedSession(sidebarPrefs, s.id) &&
+        s.status !== 'exited' &&
+        (activeWorkspaceId ? s.projectId === activeWorkspaceId : true),
     );
-  };
+    return sortSessions(filtered, sidebarPrefs);
+  }, [sessions, sidebarPrefs, activeWorkspaceId]);
 
-  const workspaces = useMemo(() => buildWorkspaces(projects, sessions, sidebarPrefs), [projects, sessions, sidebarPrefs]);
-
-  const filteredWorkspaces = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return workspaces.filter((ws) => {
-      if (activeOnlyFilter && ws.id !== '_orphan' && !ws.sessions.some((s) => s.alive)) {
-        return false;
-      }
-      if (!q) return true;
-      if (ws.name.toLowerCase().includes(q)) return true;
-      return ws.sessions.some((s) => sessionMatchesQuery(s, ws));
-    });
-  }, [workspaces, searchQuery, activeOnlyFilter, sessionMatchesQuery]);
+  const filteredSessions = useMemo(
+    () => visibleSessions.filter((s) => sessionMatchesQuery(s)),
+    [visibleSessions, sessionMatchesQuery],
+  );
 
   const adminLinkClass = ({ isActive }) =>
     `flex w-full items-center gap-2 px-3 py-2 text-xs font-medium transition-colors ${
@@ -702,9 +497,8 @@ export default function AppSidebar({
   return (
     <aside className={`h-full w-[272px] ${bgSecondary} border-r border-zinc-200 flex flex-col flex-shrink-0 select-none`}>
       <div className="shrink-0 px-3 pt-3 pb-2 border-b border-zinc-200">
-        <div className="flex items-center gap-2 px-0.5 mb-2">
-          <BrandMark className="h-7 w-7" iconClassName="h-3.5 w-3.5" />
-          <span className="min-w-0 flex-1 truncate text-sm font-bold text-zinc-900">XEnsemble</span>
+        <div className="flex items-center justify-between px-0.5 mb-2">
+          <h3 className="text-xs font-medium text-zinc-400">Sessions</h3>
           <button
             type="button"
             title="Collapse sidebar"
@@ -740,162 +534,39 @@ export default function AppSidebar({
 
       <div className="flex-1 min-h-0 overflow-auto px-2 py-3">
         <div className="flex flex-col gap-0.5">
-          <div className="flex items-center justify-between px-1.5 mb-1">
-            <h3 className="text-xs font-medium text-zinc-400">Workspaces</h3>
-            <div className="flex items-center gap-0.5">
-              <button
-                type="button"
-                title="Import from Git"
-                disabled={!onImportFromGit}
-                onClick={onImportFromGit}
-                className={`p-1 rounded-md ${textPlaceholder} hover:text-zinc-900 ${hoverBgTertiary} ${transitionBase} disabled:opacity-40`}
-              >
-                <GitBranch className="w-3.5 h-3.5" strokeWidth={1.75} />
-              </button>
-              <button
-                type="button"
-                title={activeOnlyFilter ? 'Show all workspaces' : 'Show active workspaces'}
-                onClick={() => setActiveOnlyFilter((v) => !v)}
-                className={`p-1 rounded-md ${transitionBase} ${
-                  activeOnlyFilter
-                    ? `text-zinc-900 ${bgCanvas}`
-                    : `${textPlaceholder} hover:text-zinc-900 ${hoverBgTertiary}`
-                }`}
-              >
-                <ListFilter className="w-3.5 h-3.5" strokeWidth={1.75} />
-              </button>
-              <button
-                type="button"
-                title="New workspace"
-                disabled={!onCreateWorkspace}
-                onClick={onCreateWorkspace}
-                className={`p-1 rounded-md ${textPlaceholder} hover:text-zinc-900 ${hoverBgTertiary} ${transitionBase} disabled:opacity-40`}
-              >
-                <FolderPlus className="w-3.5 h-3.5" strokeWidth={1.75} />
-              </button>
-            </div>
-          </div>
-          {filteredWorkspaces.length === 0 ? (
+          {filteredSessions.length === 0 ? (
             <p className={`text-xs ${textSecondary} px-2.5 py-2`}>
-              {projects.length === 0
-                ? 'No workspaces yet. Create one, then start a session.'
-                : 'No matching workspaces.'}
+              {searchQuery.trim()
+                ? 'No matching sessions'
+                : (activeWorkspaceId
+                  ? 'No sessions in this workspace yet.'
+                  : 'Select a workspace to view its sessions.')}
             </p>
           ) : (
-            filteredWorkspaces.map((ws) => {
-              const expanded = expandedWorkspaces.has(ws.id) || !!searchQuery.trim();
-              const liveInWs = ws.sessions.filter((s) => s.alive === true).length;
-              const isOrphan = ws.id === '_orphan';
-              const wsPinned = isPinnedWorkspace(sidebarPrefs, ws.id);
-              const visibleSessions = ws.sessions.filter((s) => sessionMatchesQuery(s, ws));
-              const gitLinked = isGitLinkedProject(ws);
-              const repoLabel = getWorkspaceRepoLabel(ws);
-              const providerLabel = getProviderLabel(ws.repoProvider);
-              const gitTitle = gitLinked
-                ? [providerLabel, repoLabel, ws.currentBranch ? `branch: ${ws.currentBranch}` : null]
-                  .filter(Boolean)
-                  .join(' · ')
-                : ws.name;
-              const isCloning = isWorkspaceClonePending(ws);
-              return (
-                <div key={ws.id} className="rounded-lg">
-                  <div className={`group flex items-center gap-0.5 rounded-lg hover:bg-zinc-50 ${expanded ? 'bg-zinc-50' : ''}`}>
-                    <button
-                      type="button"
-                      onClick={() => toggleWorkspaceExpanded(ws.id)}
-                      className={`p-1.5 ${textPlaceholder} ${hoverTextPrimary} shrink-0 ${transitionBase}`}
-                      aria-expanded={expanded}
-                    >
-                      {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                    </button>
-                    {gitLinked ? (
-                      <GitBranch className={`w-3.5 h-3.5 ${textPlaceholder} shrink-0`} strokeWidth={1.75} />
-                    ) : (
-                      <FolderOpen className={`w-3.5 h-3.5 ${textPlaceholder} shrink-0`} strokeWidth={1.75} />
-                    )}
-                    {renameId === ws.id ? (
-                      <>
-                        <input
-                          type="text"
-                          autoFocus
-                          value={renameValue}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') { e.preventDefault(); handleConfirmRename(ws.id); }
-                            if (e.key === 'Escape') { e.preventDefault(); handleCancelRename(); }
-                          }}
-                          onBlur={() => handleConfirmRename(ws.id)}
-                          disabled={renameLoading}
-                          className={`flex-1 min-w-0 bg-transparent text-[13px] ${textPrimary} outline-none border-b border-zinc-400 py-1 mr-1`}
-                        />
-                        {renameLoading && (
-                          <Loader2 className={`w-3.5 h-3.5 shrink-0 animate-spin ${textPlaceholder}`} />
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => toggleWorkspaceExpanded(ws.id)}
-                          className={`flex-1 min-w-0 text-left py-2 pr-1 text-[13px] ${textPrimary}`}
-                          title={gitTitle}
-                        >
-                          <span className="flex items-center gap-1.5 min-w-0">
-                            <span className="truncate">{ws.name}</span>
-                            {liveInWs > 0 && (
-                              <span className={`shrink-0 text-[10px] font-medium ${accentGreen}`}>{liveInWs}</span>
-                            )}
-                          </span>
-                          {gitLinked && repoLabel && (
-                            <span className={`block truncate text-[10px] ${textPlaceholder}`}>
-                              {providerLabel}: {repoLabel}
-                            </span>
-                          )}
-                        </button>
-                        {isCloning && (
-                          <Loader2 className={`w-3.5 h-3.5 shrink-0 animate-spin ${textPlaceholder}`} />
-                        )}
-                        {!isOrphan && (
-                          <button
-                            type="button"
-                            title="Rename workspace"
-                            onClick={(e) => handleStartRename(e, ws)}
-                            className={`p-1.5 rounded-lg ${textPlaceholder} ${hoverTextPrimary} hover:bg-zinc-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity ${transitionBase}`}
-                          >
-                            <PenSquare className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        {!isOrphan && (
-                          <button
-                            type="button"
-                            title={wsPinned ? 'Unpin workspace' : 'Pin workspace'}
-                            onClick={(e) => handlePinWorkspace(e, ws.id)}
-                            className={`p-1.5 rounded-lg ${textPlaceholder} ${hoverTextPrimary} hover:bg-zinc-200 transition-opacity ${
-                              wsPinned ? `opacity-100 ${textSecondary}` : 'opacity-0 group-hover:opacity-100 focus:opacity-100'
-                            }`}
-                          >
-                            <Pin className={`w-3.5 h-3.5 ${wsPinned ? 'fill-current' : ''}`} />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          title={isOrphan ? 'Clear unassigned sessions' : 'Delete workspace'}
-                          onClick={(e) => handleRequestDeleteWorkspace(e, ws)}
-                          className={`p-1.5 mr-0.5 ${textPlaceholder} ${accentRed} ${accentRedBg} rounded-lg opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity ${transitionBase}`}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                  {expanded && (
-                    <div className="flex flex-col pb-0.5">
-                      {renderSessionList(visibleSessions, ws, ws.id)}
-                    </div>
-                  )}
-                </div>
-              );
-            })
+            <>
+              {(sessionListExpanded || filteredSessions.length <= SESSION_PREVIEW_LIMIT
+                ? filteredSessions
+                : filteredSessions.slice(0, SESSION_PREVIEW_LIMIT)
+              ).map((s) => renderSessionRow(s))}
+              {filteredSessions.length > SESSION_PREVIEW_LIMIT && !sessionListExpanded && (
+                <button
+                  type="button"
+                  onClick={() => setSessionListExpanded(true)}
+                  className={`px-2.5 py-1 text-xs ${textPlaceholder} ${hoverTextPrimary} text-left ${transitionBase}`}
+                >
+                  More ({filteredSessions.length - SESSION_PREVIEW_LIMIT})
+                </button>
+              )}
+              {filteredSessions.length > SESSION_PREVIEW_LIMIT && sessionListExpanded && (
+                <button
+                  type="button"
+                  onClick={() => setSessionListExpanded(false)}
+                  className={`px-2.5 py-1 text-xs ${textPlaceholder} ${hoverTextPrimary} text-left ${transitionBase}`}
+                >
+                  Show fewer
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>

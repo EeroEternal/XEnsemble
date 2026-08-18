@@ -29,6 +29,8 @@ function AuthenticatedLayout({
   setSessions,
   activeSession,
   setActiveSession,
+  activeWorkspaceId,
+  switchWorkspace,
   fetchWorkspaces,
   fetchAgents,
   logout,
@@ -39,6 +41,7 @@ function AuthenticatedLayout({
   const navigate = useNavigate();
   const sessionsRef = useRef(null);
   const [launchPanelOpen, setLaunchPanelOpen] = useState(false);
+  const activeWorkspaceName = projects.find((p) => p.id === activeWorkspaceId)?.name || null;
 
   useEffect(() => {
     setLaunchPanelOpen(false);
@@ -76,16 +79,14 @@ function AuthenticatedLayout({
     <div className={`h-full flex ${bgCanvas}`}>
       <AppSidebar
         agents={agents}
-        projects={projects}
         sessions={sessions}
         activeSession={activeSession}
-        fetchWorkspaces={fetchWorkspaces}
+        activeWorkspaceId={activeWorkspaceId}
+        activeWorkspaceName={activeWorkspaceName}
         onSelectSession={onSelectSession}
-        onCreateWorkspace={() => sessionsRef.current?.openLaunchModal?.('workspace')}
-        onImportFromGit={() => sessionsRef.current?.openImportDialog?.()}
-        onNewAgent={() => { setLaunchPanelOpen(true); sessionsRef.current?.openLaunchModal?.('session'); }}
+        fetchWorkspaces={fetchWorkspaces}
+        onNewSession={() => { setLaunchPanelOpen(true); sessionsRef.current?.openLaunchModal?.('session'); }}
         onRequestDeleteSession={(session, ws) => sessionsRef.current?.requestDeleteSession?.(session, ws)}
-        onRequestDeleteWorkspace={(ws) => sessionsRef.current?.requestDeleteWorkspace?.(ws)}
         onArchiveSession={onArchiveSession}
         user={user}
         onOpenSettings={() => setShowSettingsModal(true)}
@@ -106,6 +107,8 @@ function AuthenticatedLayout({
           setSessions={setSessions}
           activeSession={activeSession}
           setActiveSession={setActiveSession}
+          activeWorkspaceId={activeWorkspaceId}
+          switchWorkspace={switchWorkspace}
           fetchWorkspaces={fetchWorkspaces}
           fetchAgents={fetchAgents}
           launchPanelOpen={launchPanelOpen}
@@ -185,6 +188,8 @@ function App() {
     setSessions,
     activeSession,
     setActiveSession,
+    activeWorkspaceId,
+    switchWorkspace,
     fetchWorkspaces,
     fetchAgents,
   } = useWorkspaces(user);
@@ -301,6 +306,8 @@ function App() {
                     setSessions={setSessions}
                     activeSession={activeSession}
                     setActiveSession={setActiveSession}
+                    activeWorkspaceId={activeWorkspaceId}
+                    switchWorkspace={switchWorkspace}
                     fetchWorkspaces={fetchWorkspaces}
                     fetchAgents={fetchAgents}
                     logout={logout}

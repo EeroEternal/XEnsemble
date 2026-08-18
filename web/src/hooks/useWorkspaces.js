@@ -31,6 +31,14 @@ export function useWorkspaces(user) {
   // Let the sessions-fetch effect (below) validate and restore it instead.
   const [activeSession, setActiveSession] = useState(null);
 
+  // The "current workspace" context. Follows the active session's project,
+  // but can be switched independently (clears the active session view without
+  // stopping the underlying session).
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState(null);
+  // Latch set when the user explicitly switches workspace so the auto-restore
+  // effect below doesn't immediately re-pick a session for the new workspace.
+  const userSwitchedWorkspaceRef = useRef(false);
+
   // True after the first workspaces fetch resolves, so consumers can tell an
   // genuinely-empty workspace list apart from the initial pre-fetch state.
   const [projectsLoaded, setProjectsLoaded] = useState(false);
@@ -211,8 +219,13 @@ export function useWorkspaces(user) {
       }
       return;
     }
+    // User just switched workspace: leave the view empty for them to pick.
+    if (userSwitchedWorkspaceRef.current) return;
     const prefs = loadSidebarPrefs();
-    const candidate = pickSessionToRestore(sessions, prefs);
+    const scoped = activeWorkspaceId
+      ? sessions.filter((s) => s.projectId === activeWorkspaceId)
+      : sessions;
+    const candidate = pickSessionToRestore(scoped, prefs);
     if (!candidate || candidate.alive !== true) return;
     const projectName = candidate.projectName || projects.find((p) => p.id === candidate.projectId)?.name;
     setActiveSession({
@@ -222,7 +235,52 @@ export function useWorkspaces(user) {
       projectId: candidate.projectId ?? null,
       projectName: projectName ?? null,
     });
-  }, [sessions]);
+  }, [sessions, activeWorkspaceId]);
+
+  // activeWorkspaceId follows the active session's project so the sidebar
+  // and header stay in sync when a session is selected/restored.
+  useEffect(() => {
+    if (activeSession?.projectId) {
+      setActiveWorkspaceId(activeSession.projectId);
+    }
+  }, [activeSession?.projectId]);
+
+  // Clear the user-switched latch once a session becomes active again.
+  useEffect(() => {
+    if (activeSession) userSwitchedWorkspaceRef.current = false;
+  }, [activeSession]);
+
+  // Pick a default workspace when none is set yet (recent session -> latest).
+  useEffect(() => {
+    if (activeWorkspaceId) return;
+    if (projects.length === 0) return;
+    const prefs = loadSidebarPrefs();
+    for (const sessionId of prefs.recentSessionIds || []) {
+      const snap = prefs.recentSessionSnapshots?.[sessionId];
+      if (snap?.projectId && projects.some((p) => p.id === snap.projectId)) {
+        setActiveWorkspaceId(snap.projectId);
+        return;
+      }
+    }
+    const latest = [...projects].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+    if (latest) setActiveWorkspaceId(latest.id);
+  }, [projects, activeWorkspaceId]);
+
+  // If the current workspace is deleted, fall back to the latest remaining.
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    if (projects.some((p) => p.id === activeWorkspaceId)) return;
+    const latest = [...projects].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+    setActiveWorkspaceId(latest?.id || null);
+  }, [projects, activeWorkspaceId]);
+
+  // Switch the current workspace without stopping the previous session:
+  // just clear the active view and let the user pick one in the new workspace.
+  const switchWorkspace = useCallback((workspaceId) => {
+    userSwitchedWorkspaceRef.current = true;
+    setActiveWorkspaceId(workspaceId);
+    setActiveSession(null);
+  }, []);
 
   useEffect(() => {
     const userId = getCacheUserId(user);
@@ -240,6 +298,8 @@ export function useWorkspaces(user) {
     setSessions,
     activeSession,
     setActiveSession,
+    activeWorkspaceId,
+    switchWorkspace,
     fetchWorkspaces,
     fetchAgents,
   };

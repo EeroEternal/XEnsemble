@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AgentConsole from '../components/AgentConsole';
+import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
+import BrandMark from '../components/BrandMark';
 import WorkspaceShell from '../components/WorkspaceShell';
 import WorkspacePanel from '../components/WorkspacePanel';
 import RepoImportDialog from '../components/git/RepoImportDialog';
@@ -99,6 +101,8 @@ export default React.forwardRef(function Sessions({
   setSessions,
   activeSession,
   setActiveSession,
+  activeWorkspaceId,
+  switchWorkspace,
   fetchWorkspaces,
   fetchAgents,
   launchPanelOpen,
@@ -1537,32 +1541,20 @@ export default React.forwardRef(function Sessions({
           ) : (
             <>
           <div className="h-12 border-b border-zinc-200 flex items-center justify-between px-5 shrink-0 bg-white">
-            <div className="flex items-center gap-3 min-w-0">
-              {activeSession ? (
-                <>
-                  <div className="flex items-center gap-2 min-w-0">
-                    {activeSession.projectId && activeProject?.repoProvider && GIT_REPO_PROVIDERS.has(activeProject.repoProvider) ? (
-                      <BranchSwitcher projectId={activeSession.projectId} project={activeProject} git={gitChanges} />
-                    ) : (
-                      <h1 className="truncate text-[15px] font-semibold text-zinc-900">
-                        {activeSession.projectName || activeSession.agentName || 'Session'}
-                      </h1>
-                    )}
-                    <span className="inline-flex shrink-0 items-center rounded-md bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500">
-                      {activeSession.agentName}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full ${sessionAlive ? 'bg-emerald-600' : sessionPending ? 'bg-amber-500' : sessionFailed ? 'bg-red-600' : 'bg-zinc-400'}`}
-                    />
-                    <span className="text-[11px] text-zinc-400">
-                      {sessionAlive ? 'Running' : sessionPending ? 'Preparing…' : sessionFailed ? 'Failed' : sessionWakeable ? 'Idle' : 'Stopped'}
-                    </span>
-                  </div>
-                </>
-              ) : (
-                <h1 className="text-[15px] font-semibold text-zinc-900">Sessions</h1>
+            <div className="flex items-center gap-2 min-w-0">
+              <BrandMark className="h-7 w-7" iconClassName="h-3.5 w-3.5" />
+              <span className="min-w-0 text-sm font-bold text-zinc-900">XEnsemble</span>
+              <span className="text-zinc-300">/</span>
+              <WorkspaceSwitcher
+                projects={projects}
+                activeWorkspaceId={activeWorkspaceId}
+                sessions={sessions}
+                onSelect={switchWorkspace}
+                onCreate={() => openLaunchModal('workspace')}
+                onDelete={requestDeleteWorkspace}
+              />
+              {activeSession?.projectId && activeProject?.repoProvider && GIT_REPO_PROVIDERS.has(activeProject.repoProvider) && (
+                <BranchSwitcher projectId={activeSession.projectId} project={activeProject} git={gitChanges} />
               )}
             </div>
             <div className="flex items-center gap-0.5 shrink-0">
