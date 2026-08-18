@@ -4,6 +4,7 @@ import AgentConsole from '../components/AgentConsole';
 import WorkspaceShell from '../components/WorkspaceShell';
 import WorkspacePanel from '../components/WorkspacePanel';
 import RepoImportDialog from '../components/git/RepoImportDialog';
+import OnboardingWizard from '../components/OnboardingWizard';
 import BranchSwitcher, { GIT_REPO_PROVIDERS } from '../components/git/BranchSwitcher';
 import { apiFetch } from '../lib/api';
 import * as githubApi from '../lib/githubApi';
@@ -93,6 +94,7 @@ export default React.forwardRef(function Sessions({
   agents,
   projects,
   setProjects,
+  projectsLoaded,
   sessions,
   setSessions,
   activeSession,
@@ -592,6 +594,17 @@ export default React.forwardRef(function Sessions({
     setShowNewInstanceModal(true);
   };
 
+  // Auto-open the onboarding wizard once for users with no workspaces.
+  const onboardingAutoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (onboardingAutoOpenedRef.current) return;
+    if (!projectsLoaded) return;
+    if (projects.length > 0) return;
+    if (activeSession) return;
+    onboardingAutoOpenedRef.current = true;
+    openLaunchModal('session');
+  }, [projectsLoaded, projects.length, activeSession, openLaunchModal]);
+
   const handleLaunchFromModal = async () => {
     setLaunchModalError(null);
     setLaunchingSession(true);
@@ -650,6 +663,33 @@ export default React.forwardRef(function Sessions({
       if (!started) setLaunchingSession(false);
     }
   };
+
+  const handleRepoImported = useCallback((projectId) => {
+    fetchWorkspaces();
+    const ws = projects.find((p) => p.id === projectId);
+    setImportedProject({ id: projectId, name: ws?.name || projectId });
+    if (!ws) {
+      setTimeout(() => {
+        setProjects((prev) => {
+          const found = prev.find((p) => p.id === projectId);
+          if (found) setImportedProject({ id: projectId, name: found.name });
+          return prev;
+        });
+      }, 1000);
+    }
+  }, [fetchWorkspaces, projects, setProjects]);
+
+  const closeOnboarding = useCallback(() => {
+    setShowNewInstanceModal(false);
+    setLaunchModalError(null);
+    setCreateNewWorkspaceInline(false);
+    setShowLaunchConfigModal(false);
+    setGitImportMode(false);
+    setGitProvider('');
+    setImportedProject(null);
+    setNewProjectName('');
+    onLaunchPanelClose?.();
+  }, [onLaunchPanelClose]);
 
   const handleSaveLaunchConfig = async () => {
     setConfigError(null);
@@ -1246,7 +1286,32 @@ export default React.forwardRef(function Sessions({
       {/* Main area */}
       <div className="flex min-h-0 flex-1 w-full flex-row items-stretch bg-white">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
-          {showNewInstanceModal ? (
+          {showNewInstanceModal && launchModalMode === 'quickstart' ? (
+            <div className="flex min-h-0 flex-1 flex-col bg-white">
+              <OnboardingWizard
+                agents={agents}
+                selectedAgentId={selectedAgentId}
+                onSelectAgent={(id) => { setSelectedAgentId(id); setShowLaunchConfigModal(false); }}
+                customImages={customImages}
+                customImageId={customImageId}
+                setCustomImageId={setCustomImageId}
+                gitProvider={gitProvider}
+                setGitProvider={setGitProvider}
+                gitImportMode={gitImportMode}
+                setGitImportMode={setGitImportMode}
+                importedProject={importedProject}
+                setImportedProject={setImportedProject}
+                onRepoImported={handleRepoImported}
+                fetchWorkspaces={fetchWorkspaces}
+                newProjectName={newProjectName}
+                setNewProjectName={setNewProjectName}
+                onClose={closeOnboarding}
+                onLaunch={handleLaunchFromModal}
+                launching={launchingSession || isLoading || projectCreating}
+                launchError={launchModalError}
+              />
+            </div>
+          ) : showNewInstanceModal ? (
             <div className="flex min-h-0 flex-1 flex-col bg-zinc-50">
               <div className="flex items-center justify-between px-5 py-3 shrink-0">
                 <div className="flex items-center gap-2">

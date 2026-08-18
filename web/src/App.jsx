@@ -24,6 +24,7 @@ function AuthenticatedLayout({
   agents,
   projects,
   setProjects,
+  projectsLoaded,
   sessions,
   setSessions,
   activeSession,
@@ -100,6 +101,7 @@ function AuthenticatedLayout({
           agents={agents}
           projects={projects}
           setProjects={setProjects}
+          projectsLoaded={projectsLoaded}
           sessions={sessions}
           setSessions={setSessions}
           activeSession={activeSession}
@@ -178,6 +180,7 @@ function App() {
     agents,
     projects,
     setProjects,
+    projectsLoaded,
     sessions,
     setSessions,
     activeSession,
@@ -293,6 +296,7 @@ function App() {
                     agents={agents}
                     projects={projects}
                     setProjects={setProjects}
+                    projectsLoaded={projectsLoaded}
                     sessions={sessions}
                     setSessions={setSessions}
                     activeSession={activeSession}

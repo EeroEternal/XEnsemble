@@ -31,6 +31,10 @@ export function useWorkspaces(user) {
   // Let the sessions-fetch effect (below) validate and restore it instead.
   const [activeSession, setActiveSession] = useState(null);
 
+  // True after the first workspaces fetch resolves, so consumers can tell an
+  // genuinely-empty workspace list apart from the initial pre-fetch state.
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
+
   const hasPendingRef = useRef(false);
   const [hasPending, setHasPending] = useState(false);
   const pendingSinceRef = useRef(0);
@@ -69,6 +73,8 @@ export function useWorkspaces(user) {
       }
     } catch {
       // ignore transient errors
+    } finally {
+      setProjectsLoaded(true);
     }
   }, []);
 
@@ -229,6 +235,7 @@ export function useWorkspaces(user) {
     setAgents,
     projects,
     setProjects,
+    projectsLoaded,
     sessions,
     setSessions,
     activeSession,
