@@ -106,7 +106,7 @@ export default function TerminalThemePicker({ variant = 'toolbar' }) {
     setThemeId(nextId, {
       onAppearanceChange: (prevAppearance, nextAppearance) => {
         if (prevAppearance !== nextAppearance) {
-          showToast('error', '明暗主题切换需新开 session 后 Agent 输入条才能完全同步。');
+          showToast('error', 'Switching light/dark theme requires a new session for the agent input bar to fully sync.');
         }
       },
     });

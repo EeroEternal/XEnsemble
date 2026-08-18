@@ -140,7 +140,7 @@ export default function GitBlamePanel({ projectId }) {
           <button
             type="button"
             onClick={() => setShowFilePicker((v) => !v)}
-            title="选择文件"
+            title="Select file"
             className={consoleIconButtonClass}
           >
             <FolderOpen className="h-3.5 w-3.5" />
@@ -149,7 +149,7 @@ export default function GitBlamePanel({ projectId }) {
             type="button"
             onClick={fetchBlame}
             disabled={loading || !selectedFile}
-            title="刷新"
+            title="Refresh"
             className={consoleIconButtonClass}
           >
             {loading ? (
@@ -168,7 +168,7 @@ export default function GitBlamePanel({ projectId }) {
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-zinc-400" />
               <input
                 type="text"
-                placeholder="搜索文件..."
+                placeholder="Search files..."
                 value={fileSearch}
                 onChange={(e) => setFileSearch(e.target.value)}
                 autoFocus={showFilePicker}
@@ -180,7 +180,7 @@ export default function GitBlamePanel({ projectId }) {
             {loadingFiles ? (
               <div className="flex items-center justify-center gap-2 py-4 text-sm text-zinc-500">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                加载文件列表…
+                Loading file list…
               </div>
             ) : Object.keys(groupedFiles).sort().map((dir) => (
               <div key={dir}>
@@ -214,12 +214,12 @@ export default function GitBlamePanel({ projectId }) {
         {!selectedFile ? (
           <div className="flex flex-col items-center justify-center py-12 gap-3 text-zinc-400">
             <FolderOpen className="h-10 w-10" />
-            <p className={`text-sm ${textSecondary}`}>选择一个文件查看 Blame</p>
+            <p className={`text-sm ${textSecondary}`}>Select a file to view Blame</p>
             <button
               onClick={() => { fetchFiles(); setShowFilePicker(true); }}
               className={`text-xs ${textPlaceholder} hover:${textPrimary} transition-colors underline underline-offset-2`}
             >
-              点击浏览文件列表
+              Click to browse file list
             </button>
           </div>
         ) : loading ? (

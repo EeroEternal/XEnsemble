@@ -29,7 +29,7 @@ export default function TerminalSettingsPanel() {
         if (prevAppearance !== nextAppearance) {
           showToast(
             'error',
-            '明暗主题切换需新开 session 后 Agent 输入条才能完全同步。',
+            'Switching light/dark theme requires a new session for the agent input bar to fully sync.',
           );
         }
       },
@@ -43,7 +43,7 @@ export default function TerminalSettingsPanel() {
       <div>
         <h3 className="text-base font-semibold text-[#202124]">Terminal</h3>
         <p className={`mt-1 text-sm ${textSecondary}`}>
-          终端上方工具栏可即时切换配色；此处为同一偏好。若 Agent 输入条未更新，可切换 workspace 或新开 session。
+          The toolbar above the terminal can switch color schemes instantly; this is the same preference. If the agent input bar does not update, switch workspace or start a new session.
         </p>
       </div>
 
@@ -67,7 +67,7 @@ export default function TerminalSettingsPanel() {
           {active ? <ThemePreviewSwatch preset={active} /> : null}
         </div>
         <p className={`mt-2 text-xs ${textSecondary}`}>
-          配色参考{' '}
+          Color scheme reference{' '}
           <a
             href="https://terminalcolors.com/"
             className="text-[#5B8DB8] hover:underline"

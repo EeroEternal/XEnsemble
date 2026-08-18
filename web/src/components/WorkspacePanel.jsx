@@ -637,11 +637,11 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
 
         <div className={mainTab === 'terminal' ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : 'hidden'}>
           <div className="px-3 py-1 text-[10px] text-zinc-500 bg-zinc-50 border-b border-zinc-200 shrink-0 flex items-center gap-2 flex-wrap">
-            <span>💡 选中文本自动复制</span>
+            <span>💡 Auto-copy on selection</span>
                 <span className="text-zinc-300">|</span>
-                <span>粘贴 <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">Ctrl+Shift+V</kbd> 或 <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">Ctrl+V</kbd>（终端内）</span>
+                <span>Paste <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">Ctrl+Shift+V</kbd> or <kbd className="px-1 py-0.5 bg-white border border-zinc-200 rounded font-mono">Ctrl+V</kbd> (in terminal)</span>
                 <span className="text-zinc-300">|</span>
-                <span>右键 → Copy/Paste</span>
+                <span>Right-click -> Copy/Paste</span>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden">
             {shellContent || (

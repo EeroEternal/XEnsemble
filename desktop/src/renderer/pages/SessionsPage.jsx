@@ -308,7 +308,7 @@ export default React.forwardRef(function Sessions({
       const data = await res.json();
       if (!res.ok) {
         if (res.status === 401 || data.error === 'Unauthorized') {
-          throw new Error('登录已过期，请重新登录。');
+          throw new Error('Session expired, please log in again.');
         }
         if (data.error === 'quota_exceeded') {
           throw new Error(formatQuotaExceeded(data.dimension || 'max_projects', data.current, data.limit));
@@ -367,7 +367,7 @@ export default React.forwardRef(function Sessions({
       if (!response.ok) {
         const msg = data.detail || data.error || data.message || 'Failed to start session';
         if (response.status === 401 || msg === 'Unauthorized') {
-          setLaunchModalError('登录已过期，请重新登录。');
+          setLaunchModalError('Session expired, please log in again.');
           return false;
         }
         if (data.error === 'agent_not_granted') {
