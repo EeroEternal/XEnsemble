@@ -7,6 +7,8 @@ const {
   listImages,
   getImage,
   getBuild,
+  getBuildLog,
+  rebuildImage,
   deleteImage,
 } = require('../runtime/CustomImageService');
 
@@ -61,6 +63,25 @@ function registerCustomImageRoutes(fastify) {
     } catch (err) {
       const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
       return sendPublicError(reply, err, 'Failed to get build status', statusCode);
+    }
+  });
+
+  fastify.get('/api/v1/custom-images/:id/log', { preValidation: authPre }, async (request, reply) => {
+    try {
+      return await getBuildLog(request.user.id, request.params.id);
+    } catch (err) {
+      const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
+      return sendPublicError(reply, err, 'Failed to get build log', statusCode);
+    }
+  });
+
+  fastify.post('/api/v1/custom-images/:id/rebuild', { preValidation: authPre }, async (request, reply) => {
+    try {
+      const result = await rebuildImage(request.user.id, request.params.id);
+      return reply.code(201).send(result);
+    } catch (err) {
+      const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
+      return sendPublicError(reply, err, 'Failed to rebuild custom image', statusCode);
     }
   });
 

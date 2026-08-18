@@ -15,6 +15,11 @@ const { renderDockerfile } = require('./customImageRenderer');
 const BUILD_LOG_DIR = process.env.CUSTOM_IMAGE_BUILD_LOG_DIR
   || path.join(process.cwd(), '.data', 'custom-image-builds');
 
+const MAX_LOG_TAIL_BYTES = parseInt(
+  process.env.CUSTOM_IMAGE_BUILD_LOG_MAX_BYTES || String(256 * 1024),
+  10,
+);
+
 const MAX_GLOBAL_CONCURRENCY = parseInt(
   process.env.CUSTOM_IMAGE_BUILD_MAX_CONCURRENCY || '2',
   10,
@@ -342,6 +347,89 @@ async function getBuild(ownerUserId, imageId) {
   return formatBuildRow(latestBuild);
 }
 
+async function getBuildLog(ownerUserId, imageId) {
+  const image = await assertOwnership(ownerUserId, imageId);
+  if (!image) throw new RuntimeError('custom image not found', 404);
+
+  const latestBuild = await getLatestBuild(image.id);
+  if (!latestBuild || !latestBuild.logsRef) {
+    return { logs: '', truncated: false, available: false };
+  }
+
+  const logPath = path.resolve(BUILD_LOG_DIR, latestBuild.logsRef);
+  if (!logPath.startsWith(path.resolve(BUILD_LOG_DIR) + path.sep)) {
+    return { logs: '', truncated: false, available: false };
+  }
+
+  let size;
+  try {
+    size = fs.statSync(logPath).size;
+  } catch {
+    return { logs: '', truncated: false, available: false };
+  }
+
+  if (size === 0) return { logs: '', truncated: false, available: true };
+
+  const start = Math.max(0, size - MAX_LOG_TAIL_BYTES);
+  try {
+    const fd = fs.openSync(logPath, 'r');
+    try {
+      const buffer = Buffer.alloc(size - start);
+      fs.readSync(fd, buffer, 0, buffer.length, start);
+      return {
+        logs: buffer.toString('utf8'),
+        truncated: start > 0,
+        available: true,
+      };
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return { logs: '', truncated: false, available: false };
+  }
+}
+
+async function rebuildImage(ownerUserId, imageId) {
+  if (!enabled) {
+    throw new RuntimeError('custom image builds are not available', 503);
+  }
+  if (!dockerAvailable) {
+    throw new RuntimeError('docker is not available', 503);
+  }
+
+  const image = await assertOwnership(ownerUserId, imageId);
+  if (!image) throw new RuntimeError('custom image not found', 404);
+
+  const latestBuild = await getLatestBuild(image.id);
+  if (latestBuild && (latestBuild.state === 'queued' || latestBuild.state === 'building')) {
+    throw new RuntimeError('image build already in progress', 409);
+  }
+
+  const now = Date.now();
+  const buildId = `cbld_${crypto.randomBytes(8).toString('hex')}`;
+
+  await db.insert(schema.customImageBuilds).values({
+    id: buildId,
+    customImageId: imageId,
+    state: 'queued',
+    imageRef: null,
+    logsRef: null,
+    failureReason: null,
+    startedAt: null,
+    finishedAt: null,
+    createdAt: now,
+  });
+
+  setImmediate(() => processBuildQueue(ownerUserId));
+
+  const buildRows = await db.select().from(schema.customImageBuilds)
+    .where(eq(schema.customImageBuilds.id, buildId));
+  return {
+    ...formatImageRow(image, buildRows[0]),
+    build: formatBuildRow(buildRows[0]),
+  };
+}
+
 async function deleteImage(ownerUserId, imageId) {
   const image = await assertOwnership(ownerUserId, imageId);
   if (!image) throw new RuntimeError('custom image not found', 404);
@@ -598,6 +686,8 @@ module.exports = {
   listImages,
   getImage,
   getBuild,
+  getBuildLog,
+  rebuildImage,
   deleteImage,
   getReadyImageRef,
   formatImageRow,

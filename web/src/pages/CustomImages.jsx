@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock, Loader2, Plus, RefreshCw, Trash2, XCircle } from 'lucide-react';
+import { Loader2, Plus, RefreshCw, RotateCw, ScrollText, Search, Trash2 } from 'lucide-react';
 
 import Button from '../components/Button';
+import BuildLogDialog from '../components/BuildLogDialog';
 import Input from '../components/Input';
 import PageHeader from '../components/PageHeader';
 import SelectMenu from '../components/SelectMenu';
@@ -15,21 +16,17 @@ import {
 import { useToast } from '../components/Toast';
 import {
   consoleAdminPageClass,
+  consoleIconButtonClass,
+  consoleIconButtonDangerClass,
   consoleSectionLabelClass,
   consoleStructuredDialogPanelClass,
   consoleAdminTableShellClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
 } from '../lib/consoleTokens';
+import { formatDuration, getBuildState } from '../lib/imageBuildStates';
 import { cn } from '../lib/utils';
 import { apiFetch } from '../lib/api';
-
-const BUILD_STATES = {
-  queued: { label: 'Queued', icon: Clock, tone: 'warning' },
-  building: { label: 'Building', icon: Loader2, tone: 'info', spinning: true },
-  ready: { label: 'Ready', icon: CheckCircle2, tone: 'success' },
-  failed: { label: 'Failed', icon: XCircle, tone: 'danger' },
-};
 
 function formatTime(ts) {
   if (!ts) return '\u2014';
@@ -37,10 +34,16 @@ function formatTime(ts) {
 }
 
 function stateBadge(state) {
-  const entry = BUILD_STATES[state] || { label: state || '\u2014', icon: null, tone: 'neutral' };
+  const entry = getBuildState(state);
   return (
     <StatusBadge tone={entry.tone} icon={entry.icon} spinning={entry.spinning} label={entry.label} />
   );
+}
+
+function componentIds(components) {
+  return Array.isArray(components)
+    ? components.map((c) => (c.component_id || '').replace(/^(agent:|lang:|tool:)/, ''))
+    : [];
 }
 
 async function fetchCatalog() {
@@ -72,6 +75,29 @@ export function CustomImagesContent() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [pollIds, setPollIds] = useState(new Set());
   const [showCreate, setShowCreate] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [logImage, setLogImage] = useState(null);
+  const [rebuildingId, setRebuildingId] = useState(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  const inProgressCount = images.filter(
+    (img) => img.status === 'queued' || img.status === 'building',
+  ).length;
+
+  useEffect(() => {
+    if (inProgressCount === 0) return;
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [inProgressCount]);
+
+  const filteredImages = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return images;
+    return images.filter((img) => {
+      const haystack = [img.name, ...componentIds(img.components)].join(' ').toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [images, searchQuery]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -185,6 +211,23 @@ export function CustomImagesContent() {
     }
   }
 
+  async function handleRebuild(image) {
+    setRebuildingId(image.id);
+    try {
+      const res = await apiFetch(`/api/v1/custom-images/${image.id}/rebuild`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to rebuild image');
+
+      setImages((prev) => prev.map((img) => (img.id === image.id ? data : img)));
+      setPollIds((prev) => new Set([...prev, image.id]));
+      showToast('success', `Rebuild started for "${image.name}"`);
+    } catch (err) {
+      showToast('error', err.message || 'Failed to rebuild image');
+    } finally {
+      setRebuildingId(null);
+    }
+  }
+
   async function handleDelete(image) {
     setDeletingId(image.id);
     try {
@@ -236,11 +279,22 @@ export function CustomImagesContent() {
         </div>
       )}
 
-      <div className="flex items-center gap-2 text-xs text-zinc-500 mt-1">
-        <span>{imageQuota.count} / {imageQuota.max} images</span>
-        {imageQuota.count >= imageQuota.max && (
-          <span className="text-amber-600 font-medium">(limit reached)</span>
-        )}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs text-zinc-500">
+          <span>{imageQuota.count} / {imageQuota.max} images</span>
+          {imageQuota.count >= imageQuota.max && (
+            <span className="text-amber-600 font-medium">(limit reached)</span>
+          )}
+        </div>
+        <div className="relative w-64 shrink-0">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search images…"
+            className="w-full pl-8"
+          />
+        </div>
       </div>
 
       {/* Create Dialog */}
@@ -394,6 +448,11 @@ export function CustomImagesContent() {
       </ConsoleDialogShell>
       )}
 
+      {/* Build Log Dialog */}
+      {logImage && (
+        <BuildLogDialog image={logImage} onClose={() => setLogImage(null)} />
+      )}
+
       {/* Delete Confirm Dialog */}
       {confirmDelete && (
         <ConsoleDialogShell onClose={() => setConfirmDelete(null)} fitContent>
@@ -427,12 +486,21 @@ export function CustomImagesContent() {
 
       {/* Image List */}
       <div className={cn(consoleAdminTableShellClass, '!overflow-auto')}>
-        <table className="w-full min-w-[640px] border-collapse text-left">
+        <table className="w-full min-w-[720px] table-fixed border-collapse text-left">
+          <colgroup>
+            <col className="w-auto" />
+            <col className="w-28" />
+            <col className="w-auto" />
+            <col className="w-28" />
+            <col className="w-40" />
+            <col className="w-24" />
+          </colgroup>
           <thead>
             <tr className="border-b border-zinc-200">
               <th className={consoleTableHeadCellClass}>Name</th>
               <th className={consoleTableHeadCellClass}>Status</th>
               <th className={consoleTableHeadCellClass}>Components</th>
+              <th className={consoleTableHeadCellClass}>Build time</th>
               <th className={consoleTableHeadCellClass}>Created</th>
               <th className={consoleTableHeadCellClass}>Actions</th>
             </tr>
@@ -440,49 +508,47 @@ export function CustomImagesContent() {
           <tbody>
             {loading && images.length === 0 ? (
               <tr>
-                <td colSpan={5} className={cn(consoleTableBodyCellClass, 'text-center text-zinc-400')}>
+                <td colSpan={6} className={cn(consoleTableBodyCellClass, 'text-center text-zinc-400')}>
                   <Loader2 className="h-4 w-4 inline-block animate-spin" /> Loading…
                 </td>
               </tr>
-            ) : images.length === 0 ? (
+            ) : filteredImages.length === 0 ? (
               <tr>
-                <td colSpan={5} className={cn(consoleTableBodyCellClass, 'text-center text-zinc-400')}>
-                  No custom images yet. Click &ldquo;New Image&rdquo; to create one.
+                <td colSpan={6} className={cn(consoleTableBodyCellClass, 'text-center text-zinc-400')}>
+                  {images.length === 0
+                    ? <>No custom images yet. Click &ldquo;New Image&rdquo; to create one.</>
+                    : 'No images match your search.'}
                 </td>
               </tr>
             ) : (
-              images.map((img) => (
-                <tr key={img.id} className="border-b border-zinc-100 align-top">
-                  <td className={cn(consoleTableBodyCellClass, 'font-medium text-zinc-900')}>
-                    {img.name}
-                    {img.status === 'failed' && img.latest_build?.failure_reason && (
-                      <p className="mt-1 max-w-[320px] whitespace-pre-wrap break-words font-normal text-xs text-red-600">
-                        {img.latest_build.failure_reason}
-                      </p>
-                    )}
-                  </td>
-                  <td className={consoleTableBodyCellClass}>
-                    {stateBadge(img.status)}
-                  </td>
-                  <td className={cn(consoleTableBodyCellClass, 'max-w-[320px]')}>
-                    {(() => {
-                      const comps = Array.isArray(img.components) ? img.components : [];
-                      if (comps.length === 0) return <span className="text-zinc-400">\u2014</span>;
-                      const names = comps.map((c) => {
-                        const id = (c.component_id || '').replace(/^(agent:|lang:|tool:)/, '');
-                        return id;
-                      });
-                      const max = 5;
-                      if (names.length <= max) {
-                        return (
-                          <div className="flex flex-wrap gap-1">
-                            {names.map((n, i) => (
-                              <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">{n}</span>
-                            ))}
-                          </div>
-                        );
-                      }
-                      return (
+              filteredImages.map((img) => {
+                const build = img.latest_build;
+                const buildTimeMs = img.status === 'building' && build?.started_at
+                  ? nowMs - new Date(build.started_at).getTime()
+                  : build?.started_at && build?.finished_at
+                    ? new Date(build.finished_at) - new Date(build.started_at)
+                    : null;
+                const names = componentIds(img.components);
+                const max = 5;
+
+                return (
+                  <tr key={img.id} className="border-b border-zinc-100 align-top">
+                    <td className={cn(consoleTableBodyCellClass, 'font-medium text-zinc-900')}>
+                      <span className="block truncate" title={img.name}>{img.name}</span>
+                    </td>
+                    <td className={consoleTableBodyCellClass}>
+                      {stateBadge(img.status)}
+                    </td>
+                    <td className={cn(consoleTableBodyCellClass, 'max-w-[320px]')}>
+                      {names.length === 0 ? (
+                        <span className="text-zinc-400">\u2014</span>
+                      ) : names.length <= max ? (
+                        <div className="flex flex-wrap gap-1">
+                          {names.map((n, i) => (
+                            <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">{n}</span>
+                          ))}
+                        </div>
+                      ) : (
                         <div className="flex flex-wrap gap-1">
                           {names.slice(0, max).map((n, i) => (
                             <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">{n}</span>
@@ -491,31 +557,51 @@ export function CustomImagesContent() {
                             +{names.length - max} more
                           </span>
                         </div>
-                      );
-                    })()}
-                  </td>
-                  <td className={cn(consoleTableBodyCellClass, 'text-zinc-500')}>
-                    {formatTime(img.created_at)}
-                  </td>
-                  <td className={consoleTableBodyCellClass}>
-                    <div className="flex items-center gap-1">
-                      {img.latest_build?.failure_reason && (
-                        <span className="text-red-500 cursor-help" title={img.latest_build.failure_reason}>
-                          <AlertTriangle className="h-4 w-4" />
-                        </span>
                       )}
-                      <button
-                        onClick={() => setConfirmDelete(img)}
-                        disabled={deletingId === img.id}
-                        className="text-zinc-400 hover:text-red-600 transition-colors disabled:opacity-50"
-                        title="Delete image"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
+                    </td>
+                    <td className={cn(consoleTableBodyCellClass, 'text-zinc-500 tabular-nums')}>
+                      {buildTimeMs != null ? formatDuration(buildTimeMs) : '\u2014'}
+                    </td>
+                    <td className={cn(consoleTableBodyCellClass, 'text-zinc-500')}>
+                      <span className="block truncate" title={formatTime(img.created_at)}>{formatTime(img.created_at)}</span>
+                    </td>
+                    <td className={consoleTableBodyCellClass}>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setLogImage(img)}
+                          className={consoleIconButtonClass}
+                          title="View build log"
+                        >
+                          <ScrollText className="h-4 w-4" />
+                        </button>
+                        {img.status === 'failed' && (
+                          <button
+                            type="button"
+                            onClick={() => handleRebuild(img)}
+                            disabled={rebuildingId === img.id}
+                            className={consoleIconButtonClass}
+                            title="Rebuild image"
+                          >
+                            {rebuildingId === img.id
+                              ? <Loader2 className="h-4 w-4 animate-spin" />
+                              : <RotateCw className="h-4 w-4" />}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDelete(img)}
+                          disabled={deletingId === img.id}
+                          className={consoleIconButtonDangerClass}
+                          title="Delete image"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
