@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { NavLink } from 'react-router-dom';
 import {
   Trash2,
-  Archive,
+  RotateCw,
   Play,
   LogOut,
   Settings2,
@@ -22,7 +22,6 @@ import { apiFetch } from '../lib/api';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
 import {
   loadSidebarPrefs,
-  archiveSession,
   isPinnedSession,
   isArchivedSession,
   selectActiveSession,
@@ -232,7 +231,7 @@ export default function AppSidebar({
   fetchWorkspaces,
   onNewSession,
   onRequestDeleteSession,
-  onArchiveSession,
+  onRestartSession,
   user,
   onOpenSettings,
   onLogout,
@@ -292,13 +291,6 @@ export default function AppSidebar({
     refreshSidebarPrefs();
     onSelectSession({ ...s, projectName });
   }, [onSelectSession, refreshSidebarPrefs, activeWorkspaceName]);
-
-  const handleArchiveSession = (e, sessionId) => {
-    e.stopPropagation();
-    archiveSession(sessionId);
-    refreshSidebarPrefs();
-    onArchiveSession?.(sessionId);
-  };
 
   const handleResumeSession = useCallback(async (session) => {
     if (!session?.id || resumingSessionId) return;
@@ -405,11 +397,15 @@ export default function AppSidebar({
           )}
           <button
             type="button"
-            title="Archive"
-            onClick={(e) => handleArchiveSession(e, s.id)}
+            title="Restart"
+            aria-label="Restart session"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRestartSession?.(s);
+            }}
             className={`p-1 rounded-md ${textPlaceholder} ${hoverTextPrimary} hover:bg-zinc-200`}
           >
-            <Archive className="w-3 h-3" />
+            <RotateCw className="w-3 h-3" />
           </button>
           <button
             type="button"

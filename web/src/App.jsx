@@ -80,10 +80,6 @@ function AuthenticatedLayout({
     if (location.pathname !== '/sessions') navigate('/sessions');
   }, [setActiveSession, agents, navigate, location.pathname]);
 
-  const onArchiveSession = useCallback((sessionId) => {
-    if (activeSession?.sessionId === sessionId) setActiveSession(null);
-  }, [activeSession?.sessionId, setActiveSession]);
-
   return (
     <div className={`h-full flex flex-col ${bgCanvas}`}>
       {/* Full-width top bar (above the sidebar). Collapses when the onboarding
@@ -125,7 +121,7 @@ function AuthenticatedLayout({
         fetchWorkspaces={fetchWorkspaces}
         onNewSession={() => { setLaunchPanelOpen(true); sessionsRef.current?.openLaunchModal?.('session'); }}
         onRequestDeleteSession={(session, ws) => sessionsRef.current?.requestDeleteSession?.(session, ws)}
-        onArchiveSession={onArchiveSession}
+        onRestartSession={(session) => sessionsRef.current?.restartSession?.(session)}
         user={user}
         onOpenSettings={() => setShowSettingsModal(true)}
         onLogout={logout}

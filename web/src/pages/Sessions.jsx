@@ -26,8 +26,6 @@ import {
   Settings2,
   X,
   RefreshCw,
-  PanelRightOpen,
-  PanelRightClose,
   FileText,
   Loader2,
   Trash2,
@@ -240,8 +238,10 @@ export default React.forwardRef(function Sessions({
     e.preventDefault();
     const startX = e.clientX;
     const startW = panelWidth;
+    let moved = false;
     const maxW = Math.max(720, window.innerWidth - 240);
     const onMove = (ev) => {
+      if (Math.abs(ev.clientX - startX) > 3) moved = true;
       const delta = startX - ev.clientX;
       const next = Math.min(maxW, Math.max(420, startW + delta));
       setPanelWidth(next);
@@ -251,6 +251,8 @@ export default React.forwardRef(function Sessions({
       window.removeEventListener('mouseup', onUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      // A click without dragging toggles the panel closed.
+      if (!moved) setPanelOpen(false);
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -822,16 +824,25 @@ export default React.forwardRef(function Sessions({
     fetchWorkspaces();
   };
 
-  const handleRestartSession = async () => {
-    if (!activeSession) return;
-    const agentId = activeSession.agentId || sessions.find((s) => s.id === activeSession.sessionId)?.agentId;
-    if (!agentId || !activeSession.projectId) {
+  const handleRestartSession = async (sessionParam) => {
+    const sess = sessionParam || activeSession;
+    if (!sess) return;
+    const sessionId = sess.sessionId || sess.id;
+    const agentId = sess.agentId || sessions.find((s) => s.id === sessionId)?.agentId;
+    const projectId = sess.projectId;
+    const projectName = sess.projectName;
+    if (!agentId || !projectId) {
       showToast('error', 'Cannot start: missing agent or workspace.');
       return;
     }
     const agent = agents.find((a) => a.id === agentId);
-    const oldSessionId = activeSession.sessionId;
+    const oldSessionId = sessionId;
     const sessionMeta = sessions.find((s) => s.id === oldSessionId);
+    const targetAlive = sessionMeta?.alive === true;
+    // Restarting a non-active sidebar session: switch the view to it first.
+    if (sessionParam && activeSession?.sessionId !== sessionId) {
+      setActiveSession({ sessionId, agentId, agentName: sess.agentName || agent?.name, projectId, projectName });
+    }
 
     setRestartingSession(true);
     try {
@@ -842,7 +853,7 @@ export default React.forwardRef(function Sessions({
       }
 
       if (sessionMeta?.recoverable) {
-        if (sessionAlive) {
+        if (targetAlive) {
           const stopRes = await apiFetch(`/api/v1/sessions/${encodeURIComponent(oldSessionId)}/stop`, { method: 'POST' });
           const stopData = await stopRes.json();
           if (!stopRes.ok) throw new Error(stopData.error || 'Failed to pause session');
@@ -859,7 +870,7 @@ export default React.forwardRef(function Sessions({
         )));
         setReconnectVersion((v) => v + 1);
         fetchWorkspaces();
-        showToast('success', sessionAlive ? 'Session restarted.' : 'Session resumed.');
+        showToast('success', targetAlive ? 'Session restarted.' : 'Session resumed.');
         return;
       }
 
@@ -871,7 +882,7 @@ export default React.forwardRef(function Sessions({
         method: 'POST',
         body: JSON.stringify({
           agent_id: agentId,
-          project_id: activeSession.projectId,
+          project_id: projectId,
           terminal_theme_id: themeId,
           custom_image_id: sessionMeta?.customImageId || undefined,
         }),
@@ -880,22 +891,22 @@ export default React.forwardRef(function Sessions({
       if (!response.ok) throw new Error(data.error || 'Failed to start session');
 
       replaceRecentSessionId(oldSessionId, data.session_id, {
-        agentId, projectId: activeSession.projectId, projectName: activeSession.projectName, createdAt: Date.now(),
+        agentId, projectId, projectName, createdAt: Date.now(),
       });
       rememberRecentAgent(agentId);
       setActiveSession({
         sessionId: data.session_id,
         agentId,
-        agentName: agent?.name || activeSession.agentName,
-        projectId: activeSession.projectId,
-        projectName: activeSession.projectName,
+        agentName: agent?.name || sess.agentName,
+        projectId,
+        projectName,
       });
       goToSessions();
       setSessions((prev) => {
         const withoutOld = prev.filter((s) => s.id !== oldSessionId);
         if (withoutOld.some((s) => s.id === data.session_id)) return withoutOld;
         const now = Date.now();
-        return [...withoutOld, { id: data.session_id, projectId: activeSession.projectId, agentId, status: 'running', alive: true, projectName: activeSession.projectName, createdAt: now }];
+        return [...withoutOld, { id: data.session_id, projectId, agentId, status: 'running', alive: true, projectName, createdAt: now }];
       });
       fetchWorkspaces();
       showToast('success', 'Session started.');
@@ -991,7 +1002,8 @@ export default React.forwardRef(function Sessions({
     openImportDialog: () => setShowImportDialog(true),
     requestDeleteSession,
     requestDeleteWorkspace,
-  }), [openLaunchModal, closeLaunchModal, requestDeleteSession, requestDeleteWorkspace]);
+    restartSession: handleRestartSession,
+  }), [openLaunchModal, closeLaunchModal, requestDeleteSession, requestDeleteWorkspace, handleRestartSession]);
 
   const activeProject = useMemo(
     () => projects.find((p) => p.id === activeSession?.projectId) || null,
@@ -1220,56 +1232,31 @@ export default React.forwardRef(function Sessions({
                   <>
                     <div className="mx-0.5 h-5 w-px bg-zinc-200" />
                     {!sessionPending && !sessionFailed && (
-                      <>
-                        {!sessionAlive && (
-                          <button
-                            type="button"
-                            onClick={handleRestartSession}
-                            disabled={sessionControlPending}
-                            className={`${consoleIconButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
-                            title={restartingSession ? 'Starting…' : 'Start session'}
-                            aria-label={restartingSession ? 'Starting session' : 'Start session'}
-                          >
-                            {restartingSession ? (
-                              <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.75} />
-                            ) : (
-                              <Play className="w-4 h-4" strokeWidth={1.75} />
-                            )}
-                          </button>
-                        )}
-                        {sessionAlive && (
-                          <button
-                            type="button"
-                            onClick={handleRestartSession}
-                            disabled={sessionControlPending}
-                            className={`${consoleIconButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
-                            title={restartingSession ? 'Restarting…' : 'Restart session'}
-                            aria-label={restartingSession ? 'Restarting session' : 'Restart session'}
-                          >
-                            {restartingSession ? (
-                              <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.75} />
-                            ) : (
-                              <RefreshCw className="w-4 h-4" strokeWidth={1.75} />
-                            )}
-                          </button>
-                        )}
-                      </>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setPanelOpen((prev) => !prev)}
-                      className={`${consoleIconButtonClass} ${panelOpen ? 'bg-zinc-100 text-zinc-900' : ''}`}
-                      title={panelOpen ? 'Close workspace panel' : 'Open workspace panel'}
-                      aria-label={panelOpen ? 'Close workspace panel' : 'Open workspace panel'}
-                    >
-                      {panelOpen ? <PanelRightClose className="w-4 h-4" strokeWidth={1.75} /> : <PanelRightOpen className="w-4 h-4" strokeWidth={1.75} />}
-                    </button>
-                    {activeSession.projectId ? (
-                      <>
-                        <div className="mx-0.5 h-5 w-px bg-zinc-200" />
-                        <PreviewControlGroup {...preview} onAnalyze={() => { panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); }} />
-                      </>
-                    ) : null}
+                    <>
+                      {!sessionAlive && (
+                        <button
+                          type="button"
+                          onClick={handleRestartSession}
+                          disabled={sessionControlPending}
+                          className={`${consoleIconButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
+                          title={restartingSession ? 'Starting…' : 'Start session'}
+                          aria-label={restartingSession ? 'Starting session' : 'Start session'}
+                        >
+                          {restartingSession ? (
+                            <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.75} />
+                          ) : (
+                            <Play className="w-4 h-4" strokeWidth={1.75} />
+                          )}
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {activeSession.projectId ? (
+                    <>
+                      <div className="mx-0.5 h-5 w-px bg-zinc-200" />
+                      <PreviewControlGroup {...preview} onAnalyze={() => { panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); }} />
+                    </>
+                  ) : null}
                   </>
                 )}
               </div>
@@ -1314,7 +1301,7 @@ export default React.forwardRef(function Sessions({
               </div>
             ) : (
 <div ref={panelRowRef} className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden">
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                 <div
                   className="flex min-h-0 flex-1 flex-col overflow-hidden"
                   style={{ backgroundColor: preset.xterm.background }}
@@ -1329,13 +1316,22 @@ export default React.forwardRef(function Sessions({
                     sessionWakeable={sessionWakeable}
                   />
                 </div>
+                {!panelOpen && (
+                  <button
+                    type="button"
+                    onClick={() => setPanelOpen(true)}
+                    title="Open workspace panel"
+                    aria-label="Open workspace panel"
+                    className="absolute right-0 top-0 h-full w-1.5 shrink-0 bg-zinc-200/40 hover:bg-zinc-400 transition-colors z-10"
+                  />
+                )}
               </div>
               {panelOpen && (
                 <>
                 <div
                   onMouseDown={startPanelResize}
                   className="w-1 shrink-0 cursor-col-resize bg-zinc-200 hover:bg-black transition-colors"
-                  title="Drag to resize"
+                  title="Click to hide · drag to resize"
                 />
                 <div className="flex min-h-0 shrink-0 flex-col border-l border-zinc-200 bg-white" style={{ width: panelWidth }}>
                   <WorkspacePanel

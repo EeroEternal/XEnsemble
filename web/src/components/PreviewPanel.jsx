@@ -316,9 +316,10 @@ export function PreviewActions({
       disabled={isBusy}
       onClick={onAnalyze || deployPreview}
       title="Deploy preview"
-      className={ICON_BTN}
+      className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md bg-black text-white hover:bg-zinc-800 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-0"
     >
       {isBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />}
+      Deploy
     </button>
   );
 }

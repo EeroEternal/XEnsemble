@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XEnsemble - 开发流程引导 Dev Flow Guide</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 4px; }
+    .term-line { white-space: pre; }
+  </style>
+</head>
+<body class="bg-white text-zinc-900 h-screen flex flex-col font-sans select-none overflow-hidden">
+
+  <!-- ============ TOP BAR (full width, existing) ============ -->
+  <header class="h-12 shrink-0 border-b border-zinc-200 bg-white flex items-center px-4 gap-3">
+    <div class="flex items-center gap-2">
+      <div class="w-7 h-7 rounded-md bg-zinc-900 flex items-center justify-center">
+        <i data-lucide="layers" class="w-4 h-4 text-white"></i>
+      </div>
+      <span class="text-sm font-bold">XEnsemble</span>
+    </div>
+    <div class="flex-1 min-w-0 flex items-center justify-between gap-3">
+      <!-- workspace (left) -->
+      <div class="flex items-center gap-1.5 text-xs">
+        <i data-lucide="box" class="w-3.5 h-3.5 text-zinc-400"></i>
+        <span class="font-medium text-zinc-900">my-todo-app</span>
+        <i data-lucide="chevrons-up-down" class="w-3.5 h-3.5 text-zinc-400"></i>
+      </div>
+      <!-- branch (center) -->
+      <div class="flex items-center gap-1.5 text-xs">
+        <i data-lucide="git-branch" class="w-3.5 h-3.5 text-zinc-500"></i>
+        <span class="font-mono text-zinc-700">main</span>
+      </div>
+      <!-- icons (right) -->
+      <div class="flex items-center gap-0.5">
+        <button class="p-1.5 rounded-md text-zinc-500 hover:bg-zinc-100" title="Restart"><i data-lucide="rotate-cw" class="w-4 h-4"></i></button>
+        <button class="p-1.5 rounded-md text-zinc-500 hover:bg-zinc-100" title="Panel"><i data-lucide="panel-right-close" class="w-4 h-4"></i></button>
+        <div class="mx-0.5 h-5 w-px bg-zinc-200"></div>
+        <span class="inline-flex items-center gap-1 text-[11px] text-zinc-500"><span class="w-1.5 h-1.5 rounded-full bg-zinc-300"></span>Preview</span>
+        <button class="p-1.5 rounded-md text-zinc-500 hover:bg-zinc-100" title="Deploy"><i data-lucide="rocket" class="w-4 h-4"></i></button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ DEV FLOW BAR (NEW - the core of this mock) ============ -->
+  <div id="flow-bar" class="shrink-0 border-b border-zinc-200 bg-zinc-50/80">
+    <div class="px-4 py-2.5 flex items-center gap-4">
+      <!-- label -->
+      <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-400 shrink-0">
+        <i data-lucide="route" class="w-3.5 h-3.5"></i>
+        Dev Flow
+      </div>
+
+      <!-- stepper -->
+      <div id="stepper" class="flex items-center gap-1.5 min-w-0 flex-1">
+        <!-- stages injected by JS -->
+      </div>
+
+      <!-- collapse -->
+      <button id="collapse-btn" class="p-1.5 rounded-md text-zinc-400 hover:bg-zinc-100" title="Collapse flow">
+        <i data-lucide="chevron-up" class="w-4 h-4"></i>
+      </button>
+    </div>
+
+    <!-- active stage: hint + CTA -->
+    <div id="flow-cta" class="px-4 pb-2.5 flex items-center gap-3">
+      <!-- injected by JS -->
+    </div>
+  </div>
+
+  <!-- ============ MAIN BODY ============ -->
+  <div class="flex-1 min-h-0 flex">
+
+    <!-- LEFT: Agent terminal -->
+    <main class="flex-1 min-w-0 flex flex-col border-r border-zinc-200" style="background:#0c0c0f;">
+      <div class="h-9 border-b border-zinc-800 px-3 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-2 text-[11px] text-zinc-400">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+          <span class="text-zinc-300 font-medium">Claude</span>
+          <span class="text-zinc-600">·</span>
+          <span class="font-mono text-zinc-500">claude-code</span>
+        </div>
+        <span class="text-[11px] text-zinc-600">Session #1</span>
+      </div>
+      <div id="term" class="flex-1 min-h-0 overflow-y-auto p-3 font-mono text-[12px] leading-5 text-zinc-300">
+        <div class="term-line text-zinc-500">┌──────────────────────────────────────────┐</div>
+        <div class="term-line text-zinc-500">│  ✓ Workspace ready                        │</div>
+        <div class="term-line text-zinc-500">│  › What would you like to build?          │</div>
+        <div class="term-line text-zinc-500">└──────────────────────────────────────────┘</div>
+        <div class="term-line text-zinc-400 mt-1">> <span id="term-input" class="text-zinc-200">build a todo app with add and delete</span><span class="animate-pulse">▋</span></div>
+        <div id="term-output" class="mt-1 space-y-0.5"></div>
+      </div>
+    </main>
+
+    <!-- RIGHT: panel tabs -->
+    <aside class="w-[420px] shrink-0 flex flex-col bg-white">
+      <div class="h-9 border-b border-zinc-200 flex items-center px-2 gap-1 shrink-0 overflow-x-auto">
+        <button data-tab="files" class="tab-btn px-2.5 py-1.5 text-xs font-medium border-b-2 border-transparent text-zinc-500">Files</button>
+        <button data-tab="changes" class="tab-btn px-2.5 py-1.5 text-xs font-medium border-b-2 border-transparent text-zinc-500 flex items-center gap-1">
+          Changes
+          <span id="changes-badge" class="hidden items-center justify-center h-3.5 min-w-[14px] rounded-full bg-red-600 text-white text-[9px] px-1">0</span>
+        </button>
+        <button data-tab="terminal" class="tab-btn px-2.5 py-1.5 text-xs font-medium border-b-2 border-transparent text-zinc-500">Terminal</button>
+        <button data-tab="preview" class="tab-btn px-2.5 py-1.5 text-xs font-medium border-b-2 border-transparent text-zinc-500">Preview</button>
+        <button data-tab="deploy" class="tab-btn px-2.5 py-1.5 text-xs font-medium border-b-2 border-transparent text-zinc-500">Deploy</button>
+      </div>
+      <div id="panel-content" class="flex-1 min-h-0 overflow-y-auto p-4 text-sm">
+        <!-- injected -->
+      </div>
+    </aside>
+  </div>
+
+  <!-- ============ TOAST ============ -->
+  <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 hidden">
+    <div class="bg-zinc-900 text-white text-xs px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
+      <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i>
+      <span id="toast-text"></span>
+    </div>
+  </div>
+
+  <!-- ============ CONTROL BAR (demo controls) ============ -->
+  <div class="shrink-0 border-t border-zinc-200 bg-zinc-50 px-4 py-2 flex items-center gap-2 text-[11px]">
+    <span class="text-zinc-400 font-semibold uppercase tracking-wider">Demo:</span>
+    <button data-state="1" class="state-btn px-2.5 py-1 rounded border border-zinc-300 bg-white hover:bg-zinc-100">① 初始(Develop)</button>
+    <button data-state="2" class="state-btn px-2.5 py-1 rounded border border-zinc-300 bg-white hover:bg-zinc-100">② 改动产出(Deploy)</button>
+    <button data-state="3" class="state-btn px-2.5 py-1 rounded border border-zinc-300 bg-white hover:bg-zinc-100">③ 预览运行(Commit)</button>
+    <button data-state="4" class="state-btn px-2.5 py-1 rounded border border-zinc-300 bg-white hover:bg-zinc-100">④ 全部完成</button>
+    <span class="ml-auto text-zinc-400">← 点击不同阶段观察流程条与右侧面板联动</span>
+  </div>
+
+  <script>
+    lucide.createIcons();
+
+    // ============ STAGE DEFINITIONS ============
+    // 4 stages per user spec: 创建/导入 -> 开发 -> 部署 -> 提交
+    const STAGES = [
+      { id: 'setup',    n: 1, label: '创建/导入', icon: 'git-branch', cta: null,
+        hint: '工作空间与 Agent 已就绪。' },
+      { id: 'develop',  n: 2, label: '开发', icon: 'terminal', cta: 'Open agent',
+        hint: '告诉 Agent 你想做什么，它会在工作空间里写代码。' },
+      { id: 'deploy',   n: 3, label: '部署', icon: 'rocket', cta: 'Run & preview',
+        hint: '运行你的应用并实时预览效果，确认没问题再提交。' },
+      { id: 'commit',   n: 4, label: '提交', icon: 'git-commit', cta: 'Commit & ship',
+        hint: '保存本次改动并推送到远端 / 发起 PR。' },
+    ];
+
+    // state machine: which stage is active (1..4) or 0 = all done
+    let activeStage = 2; // start at Develop
+    let collapsed = false;
+
+    function stageStatus(n) {
+      if (activeStage === 0) return 'done';
+      if (n < activeStage) return 'done';
+      if (n === activeStage) return 'active';
+      return 'pending';
+    }
+
+    function renderStepper() {
+      const el = document.getElementById('stepper');
+      el.innerHTML = '';
+      STAGES.forEach((s, i) => {
+        const st = stageStatus(s.n);
+        // clickable chip: navigates to the stage's panel
+        const wrap = document.createElement('button');
+        wrap.type = 'button';
+        wrap.title = 'Go to ' + s.label;
+        wrap.className = 'group flex items-center gap-1.5 rounded-md px-1.5 py-1 cursor-pointer transition-colors hover:bg-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-300';
+        wrap.onclick = () => goToStage(s.id);
+        const circle = document.createElement('span');
+        const base = 'flex h-6 w-6 items-center justify-center rounded-full border text-[11px] font-semibold transition-colors ';
+        if (st === 'done')      circle.className = base + 'border-zinc-900 bg-zinc-900 text-white';
+        else if (st === 'active') circle.className = base + 'border-black bg-black text-white';
+        else                   circle.className = base + 'border-zinc-300 bg-white text-zinc-400 group-hover:border-zinc-500 group-hover:text-zinc-600';
+        circle.innerHTML = st === 'done' ? '<i data-lucide="check" class="w-3.5 h-3.5"></i>' : s.n;
+        const label = document.createElement('span');
+        label.className = 'text-xs font-medium ' + (st === 'active' ? 'text-zinc-900' : st === 'done' ? 'text-zinc-500' : 'text-zinc-400 group-hover:text-zinc-700');
+        label.textContent = s.label;
+        wrap.appendChild(circle);
+        wrap.appendChild(label);
+        el.appendChild(wrap);
+        if (i < STAGES.length - 1) {
+          const conn = document.createElement('div');
+          conn.className = 'h-px w-5 ' + (st === 'done' ? 'bg-zinc-900' : 'bg-zinc-200');
+          el.appendChild(conn);
+        }
+      });
+      lucide.createIcons();
+    }
+
+    // clicking a stage chip navigates to its panel (and surfaces the auto-deploy UI for deploy)
+    function goToStage(id) {
+      const map = { setup: 'files', develop: 'terminal', deploy: 'deploy', commit: 'changes' };
+      setActiveTab(map[id] || 'files');
+      const name = STAGES.find(s => s.id === id).label;
+      showToast('已跳转到「' + name + '」');
+    }
+
+    function renderCTA() {
+      const el = document.getElementById('flow-cta');
+      el.innerHTML = '';
+      if (collapsed) { el.className = 'hidden'; return; }
+      el.className = 'px-4 pb-2.5 flex items-center gap-3';
+      if (activeStage === 0) {
+        el.innerHTML = `
+          <div class="flex items-center gap-2 text-xs text-emerald-700">
+            <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+            <span class="font-medium">本轮流程完成</span>
+            <span class="text-zinc-500">— 改动已交付，可开始下一轮开发。</span>
+          </div>
+          <button onclick="resetFlow()" class="ml-auto inline-flex items-center gap-1 h-8 px-3 text-xs font-medium rounded-md bg-black text-white hover:bg-zinc-800">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i> 开始新任务
+          </button>`;
+        lucide.createIcons();
+        return;
+      }
+      const s = STAGES[activeStage - 1];
+      el.innerHTML = `
+        <span class="flex items-center gap-1.5 text-xs text-zinc-600">
+          <i data-lucide="${s.icon}" class="w-3.5 h-3.5 text-zinc-400"></i>
+          <span class="text-zinc-900 font-medium">${s.label}</span>
+          <span class="text-zinc-400">·</span>
+          <span class="text-zinc-500">${s.hint}</span>
+        </span>
+        <button onclick="advance()" class="ml-auto inline-flex items-center gap-1 h-8 px-3 text-xs font-medium rounded-md bg-black text-white hover:bg-zinc-800">
+          <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i> ${s.cta}
+        </button>`;
+      lucide.createIcons();
+    }
+
+    function renderPanel() {
+      const el = document.getElementById('panel-content');
+      const badge = document.getElementById('changes-badge');
+      // active tab highlight
+      document.querySelectorAll('.tab-btn').forEach(b => {
+        b.className = b.className.replace('border-black text-zinc-900','').replace('border-zinc-900 text-zinc-900','') + ' ';
+        if (b.dataset.tab === activeTab) b.className = b.className.replace('border-transparent text-zinc-500','border-black text-zinc-900');
+        else b.className = b.className.replace('border-black text-zinc-900','border-transparent text-zinc-500');
+      });
+
+      // changes badge
+      const changeCount = (activeStage >= 3 || activeStage === 0) ? 2 : 0;
+      if (changeCount > 0) { badge.classList.remove('hidden'); badge.classList.add('inline-flex'); badge.textContent = changeCount; }
+      else { badge.classList.add('hidden'); badge.classList.remove('inline-flex'); }
+
+      el.innerHTML = '';
+      if (activeTab === 'files') {
+        el.innerHTML = `<div class="text-xs text-zinc-400 space-y-1 font-mono">
+          <div class="flex items-center gap-1.5"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i><i data-lucide="folder-open" class="w-4 h-4 text-amber-500"></i><b>src/</b></div>
+          <div class="pl-5 flex items-center gap-1.5"><i data-lucide="file-code" class="w-4 h-4 text-zinc-400"></i>App.jsx ${changeCount? '<span class="text-red-600 text-[10px]">M</span>':''}</div>
+          <div class="pl-5 flex items-center gap-1.5"><i data-lucide="file-code" class="w-4 h-4 text-zinc-400"></i>TodoList.jsx ${changeCount? '<span class="text-emerald-600 text-[10px]">A</span>':''}</div>
+          <div class="flex items-center gap-1.5"><i data-lucide="file-json" class="w-4 h-4 text-amber-500"></i>package.json ${changeCount? '<span class="text-red-600 text-[10px]">M</span>':''}</div>
+        </div>`;
+      } else if (activeTab === 'changes') {
+        el.innerHTML = changeCount ? `
+          <div class="text-xs text-zinc-500 mb-2">本次修改 (${changeCount})</div>
+          <div class="rounded-md border border-zinc-200 divide-y divide-zinc-100">
+            <div class="px-3 py-2 flex items-center justify-between"><span class="font-mono text-xs">src/App.jsx</span><span class="text-[10px] text-red-600 font-mono">M</span></div>
+            <div class="px-3 py-2 flex items-center justify-between"><span class="font-mono text-xs">src/TodoList.jsx</span><span class="text-[10px] text-emerald-600 font-mono">A</span></div>
+          </div>
+          <p class="text-[11px] text-zinc-400 mt-3">检查 Agent 的改动，确认无误后去「提交」步骤保存。</p>` :
+          `<div class="flex flex-col items-center justify-center py-10 text-zinc-400 gap-2"><i data-lucide="git-commit" class="w-6 h-6"></i><p class="text-xs">暂无改动</p><p class="text-[11px]">让 Agent 先写点代码</p></div>`;
+      } else if (activeTab === 'terminal') {
+        el.innerHTML = `<div class="font-mono text-[11px] text-zinc-500 space-y-1">
+          <div class="text-zinc-400">workspace@app:~$ <span class="text-zinc-700">npm run dev</span></div>
+          <div class="text-emerald-600">VITE v5  ready in 280ms</div>
+          <div class="text-zinc-400">➜ Local: http://localhost:5173/</div>
+        </div>`;
+      } else if (activeTab === 'preview') {
+        el.innerHTML = activeStage >= 3 || activeStage === 0 ? `
+          <div class="rounded-lg border border-zinc-200 overflow-hidden">
+            <div class="bg-zinc-50 px-2 py-1 text-[10px] text-zinc-500 font-mono border-b border-zinc-200">http://localhost:5173</div>
+            <div class="p-3 space-y-2">
+              <div class="font-semibold text-sm">My Todos</div>
+              <div class="flex items-center gap-1.5"><input class="flex-1 border border-zinc-200 rounded px-2 py-1 text-xs" value="Buy milk" readonly><button class="text-xs px-2 py-1 bg-black text-white rounded">Add</button></div>
+              <div class="text-xs space-y-1">
+                <div class="flex items-center gap-2"><input type="checkbox" checked> Buy milk <button class="ml-auto text-red-500 text-[10px]">del</button></div>
+                <div class="flex items-center gap-2"><input type="checkbox"> Clean room <button class="ml-auto text-red-500 text-[10px]">del</button></div>
+              </div>
+            </div>
+          </div>` :
+          `<div class="flex flex-col items-center justify-center py-10 text-zinc-400 gap-2"><i data-lucide="monitor" class="w-6 h-6"></i><p class="text-xs">预览未运行</p><p class="text-[11px]">先去「部署」步骤运行应用</p></div>`;
+      } else if (activeTab === 'deploy') {
+        const deployed = activeStage >= 4 || activeStage === 0;
+        const running = activeStage === 3;
+        el.innerHTML = `
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="font-semibold text-sm text-zinc-900 flex items-center gap-1.5">
+                  <i data-lucide="rocket" class="w-4 h-4 text-zinc-500"></i>
+                  自动部署预览
+                </div>
+                <p class="text-[11px] text-zinc-500 mt-0.5">AI 已分析项目并生成部署步骤，一键运行即可预览。</p>
+              </div>
+              <button onclick="runDeploy()" class="inline-flex items-center gap-1.5 h-9 px-3.5 text-xs font-medium rounded-md bg-black text-white hover:bg-zinc-800 disabled:opacity-50 ${deployed||running?'opacity-50 pointer-events-none':''}">
+                ${deployed ? '<i data-lucide=\"check\" class=\"w-3.5 h-3.5\"></i>已部署' : running ? '<i data-lucide=\"loader-2\" class=\"w-3.5 h-3.5 animate-spin\"></i>部署中…' : '<i data-lucide=\"play\" class=\"w-3.5 h-3.5\"></i>一键部署'}
+              </button>
+            </div>
+            <div class="rounded-md border border-zinc-200 divide-y divide-zinc-100 text-[11px]">
+              <div class="px-3 py-2 flex items-center justify-between">
+                <span class="flex items-center gap-2"><i data-lucide="package" class="w-3.5 h-3.5 text-zinc-400"></i> 安装依赖 <code class="font-mono text-zinc-500">npm install</code></span>
+                <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600"></i>
+              </div>
+              <div class="px-3 py-2 flex items-center justify-between">
+                <span class="flex items-center gap-2"><i data-lucide="hammer" class="w-3.5 h-3.5 text-zinc-400"></i> 构建 <code class="font-mono text-zinc-500">npm run build</code></span>
+                <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600"></i>
+              </div>
+              <div class="px-3 py-2 flex items-center justify-between">
+                <span class="flex items-center gap-2"><i data-lucide="play-circle" class="w-3.5 h-3.5 text-zinc-400"></i> 启动预览 <code class="font-mono text-zinc-500">:5173</code></span>
+                ${deployed||running ? '<i data-lucide=\"check\" class=\"w-3.5 h-3.5 text-emerald-600\"></i>' : '<span class=\"text-zinc-400\">待运行</span>'}
+              </div>
+            </div>
+            ${deployed ? '<div class="text-[11px] text-emerald-700 flex items-center gap-1.5"><i data-lucide=\"external-link\" class=\"w-3.5 h-3.5\"></i>预览运行中：http://localhost:5173</div>' : ''}
+          </div>`;
+      }
+      lucide.createIcons();
+    }
+
+    // auto-deploy: simulate run -> preview running
+    function runDeploy() {
+      if (activeStage < 3) { showToast('先完成开发步骤再部署'); return; }
+      if (activeStage >= 4) return;
+      activeStage = 3;
+      renderAll();
+      setTimeout(() => {
+        activeStage = 4;
+        setActiveTab('preview');
+        renderAll();
+        showToast('部署完成，预览已运行 :5173');
+      }, 900);
+    }
+
+
+    // ============ INTERACTION ============
+    let activeTab = 'changes';
+    function setActiveTab(t) { activeTab = t; renderPanel(); }
+
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      b.addEventListener('click', () => setActiveTab(b.dataset.tab));
+    });
+
+    function advance() {
+      // CTA clicked -> open the relevant tab + advance stage
+      if (activeStage === 2) { setActiveTab('terminal'); appendTermOutput(); setActiveTab('changes'); setTimeout(()=>{activeStage=3; renderAll();}, 600); }
+      else if (activeStage === 3) { setActiveTab('deploy'); setTimeout(()=>{ setActiveTab('preview'); activeStage=4; renderAll(); showToast('Preview running at :5173'); }, 700); }
+      else if (activeStage === 4) { setActiveTab('changes'); setTimeout(()=>{ activeStage=0; renderAll(); showToast('Committed & pushed'); }, 500); }
+      renderAll();
+    }
+
+    function resetFlow() {
+      activeStage = 2;
+      document.getElementById('term-output').innerHTML = '';
+      setActiveTab('changes');
+      renderAll();
+      showToast('New task started');
+    }
+
+    function appendTermOutput() {
+      const el = document.getElementById('term-output');
+      el.innerHTML = `
+        <div class="text-zinc-400">⏺ I'll create a todo app. Let me set up the files.</div>
+        <div class="text-emerald-400">✓ Created src/App.jsx, src/TodoList.jsx</div>
+        <div class="text-emerald-400">✓ Updated package.json</div>
+        <div class="text-zinc-500 mt-1">2 files changed. Review them in the Changes panel.</div>`;
+    }
+
+    function renderAll() { renderStepper(); renderCTA(); renderPanel(); }
+
+    // demo state buttons
+    document.querySelectorAll('.state-btn').forEach(b => {
+      b.addEventListener('click', () => {
+        const s = parseInt(b.dataset.state, 10);
+        if (s === 1) { activeStage = 2; document.getElementById('term-output').innerHTML=''; }
+        else if (s === 2) { activeStage = 3; appendTermOutput(); }
+        else if (s === 3) { activeStage = 4; appendTermOutput(); }
+        else if (s === 4) { activeStage = 0; appendTermOutput(); }
+        renderAll();
+      });
+    });
+
+    // collapse
+    document.getElementById('collapse-btn').addEventListener('click', () => {
+      collapsed = !collapsed;
+      document.getElementById('flow-cta').classList.toggle('hidden', collapsed);
+      const ic = document.getElementById('collapse-btn').querySelector('i');
+      ic.setAttribute('data-lucide', collapsed ? 'chevron-down' : 'chevron-up');
+      lucide.createIcons();
+    });
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      document.getElementById('toast-text').textContent = msg;
+      t.classList.remove('hidden');
+      clearTimeout(window._tt);
+      window._tt = setTimeout(() => t.classList.add('hidden'), 2200);
+    }
+
+    // init
+    renderAll();
+  </script>
+</body>
+</html>
