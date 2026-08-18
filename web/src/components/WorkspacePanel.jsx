@@ -103,6 +103,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   onRenameFile,
   onCopyPath,
   deployContent,
+  previewDeployInfo,
 }, ref) {
   const [showNewFile, setShowNewFile] = useState(false);
   const [showNewFolder, setShowNewFolder] = useState(false);
@@ -661,7 +662,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
 
         {mainTab === 'preview' && (
           <div className="flex-1 min-h-0 overflow-hidden">
-            <WorkspacePreviewPane projectId={projectId} />
+            <WorkspacePreviewPane projectId={projectId} deployInfo={previewDeployInfo} />
           </div>
         )}
 

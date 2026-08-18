@@ -166,6 +166,19 @@ const deployments = pgTable('deployments', {
   runtimeLog: text('runtime_log'),
 });
 
+// 一键部署第二阶段（verify agent）的"断点续修"状态：每项目一份。
+// 超轮数失败时保存对话历史，下次 resume 时接回继续修，避免从头重跑。
+const deployVerifyStates = pgTable('deploy_verify_states', {
+  projectId: text('project_id').primaryKey().references(() => projects.id),
+  plan: jsonb('plan').notNull(),
+  messages: jsonb('messages').notNull(),
+  trail: jsonb('trail').notNull().default([]),
+  roundsUsed: integer('rounds_used').notNull().default(0),
+  runtimeRef: text('runtime_ref'),
+  workspacePath: text('workspace_path'),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+});
+
 const events = pgTable('events', {
   id: text('id').primaryKey(),
   userId: text('user_id').references(() => users.id),
@@ -390,6 +403,7 @@ module.exports = {
   agents,
   runtimes,
   deployments,
+  deployVerifyStates,
   events,
   devEnvironmentProfiles,
   repoSnapshots,

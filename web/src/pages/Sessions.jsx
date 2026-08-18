@@ -116,7 +116,6 @@ export default React.forwardRef(function Sessions({
   // eslint-disable-next-line no-unused-vars
   const [_error, setError] = useState(null);
   const [panelOpen, setPanelOpen] = useState(true);
-  const [shellMounted, setShellMounted] = useState(false);
   const [panelWidth, setPanelWidth] = useState(() => {
     const maxW = typeof window !== 'undefined' ? Math.max(720, window.innerWidth - 240) : 800;
     return Math.min(Math.floor(maxW / 2), maxW);
@@ -164,109 +163,17 @@ export default React.forwardRef(function Sessions({
   const shellRef = useRef(null);
   // 每次点小火箭自增，用于强制 DeployPanel remount（重新分析），而不是复用上次内容
   const [deployVersion, setDeployVersion] = useState(0);
-  // 部署执行中注册的 output handler（哨兵检测），非部署时为 null
-  const deployOutputHandlerRef = useRef(null);
-
-  // WorkspaceShell output 回调：部署执行时检测哨兵标记判断命令完成
-  const handleShellOutput = useCallback((data) => {
-    deployOutputHandlerRef.current?.(data);
-  }, []);
-
-  // 向 Terminal 注入命令并等待哨兵标记返回退出码
-  const sendCommandAndWaitSentinel = useCallback((step) => new Promise((resolve) => {
-    let buffer = '';
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (!settled) { settled = true; deployOutputHandlerRef.current = null; resolve(-1); }
-    }, 180000);
-    deployOutputHandlerRef.current = (data) => {
-      buffer += data;
-      const match = buffer.match(/__XENS_STEP_DONE__:(\w+):(-?\d+)/);
-      if (match && !settled) {
-        settled = true;
-        clearTimeout(timer);
-        deployOutputHandlerRef.current = null;
-        resolve(parseInt(match[2], 10));
-      }
-    };
-    const sentinel = `; printf '\\n__XENS_STEP_DONE__:${step.id}:%s\\n' "$?"`;
-    shellRef.current?.sendInput(`${step.command}${sentinel}\n`);
-  }), []);
-
-  // 执行部署：先写配置文件，再从 startIndex 开始执行 steps（prepare 走终端，serve 启动服务 + 隧道）
-  // 失败时返回 { failedIndex, stepResults }，不 throw，让 DeployPanel 决定重试/继续
-  const executeDeploy = useCallback(async ({ steps, configFiles, startIndex = 0 } = {}) => {
-    const projectId = activeSession?.projectId;
-    if (!projectId) return { failedIndex: -1, stepResults: [] };
-    const safeSteps = steps || [];
-    const safeConfigs = configFiles || [];
-    const stepResults = safeSteps.map((s) => ({ id: s.id, name: s.name, status: 'pending' }));
-
-    // 1. 写配置文件（用户填写的 .env/config 等）到 VM（仅在从头开始时写）
-    if (startIndex === 0) {
-      for (const cf of safeConfigs) {
-        const res = await apiFetch(
-          `/api/v1/workspace/file?project_id=${encodeURIComponent(projectId)}&path=${encodeURIComponent(cf.path)}`,
-          { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: cf.template }) },
-        );
-        if (!res.ok) {
-          showToast('error', `Failed to write config: ${cf.path}`);
-          return { failedIndex: -1, stepResults, error: `Failed to write config: ${cf.path}` };
-        }
-      }
-    }
-    const vmPort = 5173;
-    for (let i = startIndex; i < safeSteps.length; i++) {
-      const step = safeSteps[i];
-      stepResults[i].status = 'running';
-      try {
-        if (step.kind === 'serve') {
-          shellRef.current?.sendInput(`export PORT=${vmPort}; ${step.command}\n`);
-          const res = await apiFetch(`/api/v1/projects/${encodeURIComponent(projectId)}/tunnel-preview`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ port: vmPort }),
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || 'Tunnel preview failed');
-        } else {
-          const exitCode = await sendCommandAndWaitSentinel(step);
-          if (exitCode !== 0) throw new Error(`Step "${step.name}" failed (exit ${exitCode})`);
-        }
-        stepResults[i].status = 'success';
-      } catch (err) {
-        stepResults[i].status = 'failed';
-        stepResults[i].error = err.message || String(err);
-        return { failedIndex: i, stepResults, error: err.message };
-      }
-    }
+  // 最近一次自动部署成功后的结果摘要，展示在 Preview 面板的"部署详情"里
+  const [lastDeployInfo, setLastDeployInfo] = useState(null);
+  // 自动部署成功 → 关闭 Deploy tab，跳转到 Preview tab（Preview 面板常驻，可展开部署详情）
+  const onDeploySuccess = useCallback((info) => {
+    setLastDeployInfo(info);
     panelRef.current?.addTab('preview');
-    showToast('success', 'Deployment complete');
+    panelRef.current?.selectMainTab('preview');
+    panelRef.current?.closeExtraTab('deploy');
     preview.loadDeployments();
-    return { failedIndex: -1, stepResults, success: true };
-  }, [activeSession?.projectId, sendCommandAndWaitSentinel, showToast, preview]);
+  }, [preview.loadDeployments]);
 
-  // DeployDialog 确认后：DeployPanel 保持打开供手动参照 -> 创建 Terminal tab -> 等 shell 就绪 -> 执行部署
-  // 支持 startIndex（重试该步/从该步继续时由 DeployPanel 传入）
-  const handleDeployConfirm = useCallback(async ({ steps, configFiles, startIndex = 0 } = {}) => {
-    panelRef.current?.addTab('terminal');
-    const ready = await new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(false), 15000);
-      const check = () => {
-        if (shellRef.current?.isReady()) { clearTimeout(timer); resolve(true); }
-        else setTimeout(check, 200);
-      };
-      check();
-    });
-    if (!ready) {
-      showToast('error', 'Terminal not ready');
-      return { failedIndex: -1, error: 'Terminal not ready' };
-    }
-    // executeDeploy 失败时返回 { failedIndex } 而非 throw，DeployPanel 据此显示重试/继续
-    const result = await executeDeploy({ steps, configFiles, startIndex });
-    if (result?.failedIndex >= 0) {
-      showToast('error', result.error || `Step failed at index ${result.failedIndex}`);
-    }
-    return result;
-  }, [executeDeploy, showToast]);
   const [gitDiffView, setGitDiffView] = useState(null);
 
   const [configEnvVars, setConfigEnvVars] = useState([{ key: '', value: '' }]);
@@ -345,7 +252,6 @@ export default React.forwardRef(function Sessions({
   useEffect(() => {
     if (!activeSession?.projectId) {
       setPanelOpen(false);
-      setShellMounted(false);
     } else {
       setPanelOpen(true);
     }
@@ -1434,17 +1340,15 @@ export default React.forwardRef(function Sessions({
                     onCloseGitDiff={handleCloseGitDiff}
                     provider={activeProject?.repoProvider}
                     sessionLive={sessionAlive}
-                    shellContent={shellMounted && <WorkspaceShell ref={shellRef} projectId={activeSession.projectId} onOutput={handleShellOutput} />}
-                    onShellMount={() => setShellMounted(true)}
+                    shellContent={<WorkspaceShell ref={shellRef} projectId={activeSession.projectId} />}
                     deployContent={activeSession?.projectId ? (
                       <DeployPanel
                         key={`${activeSession.projectId}-${deployVersion}`}
                         projectId={activeSession.projectId}
-                        onConfirm={handleDeployConfirm}
-                        onCancel={() => panelRef.current?.closeExtraTab('deploy')}
-                        onEnd={() => panelRef.current?.closeExtraTab('deploy')}
+                        onSuccess={onDeploySuccess}
                       />
                     ) : null}
+                    previewDeployInfo={lastDeployInfo}
                     refreshTrigger={editorTabs.treeRefreshTrigger}
                     onDeleteFile={handleDeleteFile}
                     onDeleteDir={handleDeleteDir}

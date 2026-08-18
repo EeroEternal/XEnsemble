@@ -1,317 +1,230 @@
-import { useState, useEffect } from 'react';
-import { Loader2, Rocket, FileText, CheckCircle2, AlertCircle, Terminal, X, RotateCcw } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Loader2, CheckCircle2, AlertCircle, RotateCcw, Copy, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { buttonClass } from '../lib/buttonStyles';
-import Input, { Textarea } from './Input';
 import { apiFetch } from '../lib/api';
-import { useToast } from './Toast';
 
 /**
- * 一键部署面板（WorkspacePanel 的 'deploy' tab）。
+ * 一键部署面板（WorkspacePanel 的 'deploy' tab）。全自动，无任何模式切换。
  *
- * 职责：调 analyze-deploy API 分析项目 -> 展示配置文件编辑区 + 部署步骤 -> 用户确认。
- * 确认后调 onConfirm({ steps, configFiles })，由 Sessions.jsx 接管：
- *   - 先写 configFiles 到 VM（用户填写的配置）
- *   - 关闭 deploy tab + 创建 terminal tab
- *   - prepare 步骤通过 WorkspaceShell.sendInput 注入 Terminal 执行
- *   - serve 步骤在 Terminal 启动 + 建立 tunnel-preview 隧道
+ * mount 后立即调 POST /api/v1/projects/:id/auto-deploy：
+ *   阶段 1 用 LLM_ANALYZE_MODEL 出部署计划；阶段 2 用 LLM_VERIFY_MODEL
+ *   在沙箱内准备环境 + 跑 install/build + 健康检查，失败时 agent 自主
+ *   edit_file / run_shell 修复，循环直到通过。
+ *
+ * 成功 → 短暂显示完成状态后回调 onSuccess（父组件跳转到 Preview tab）；
+ * 失败 → 显示错误 + 「重新部署」按钮。
  */
-export default function DeployPanel({ projectId, onConfirm, onCancel, onEnd }) {
-    const { showToast } = useToast();
-    const [phase, setPhase] = useState('analyzing');
-    const [steps, setSteps] = useState([]);
-    const [configFiles, setConfigFiles] = useState([]);
-    const [source, setSource] = useState('');
-    const [warning, setWarning] = useState(null);
-    const [deploying, setDeploying] = useState(false);
-    const [deployResult, setDeployResult] = useState(null);
-    // 每步执行状态: 'pending' | 'running' | 'success' | 'failed' | 'skipped'
-    const [stepStatuses, setStepStatuses] = useState([]);
-    // 最近一次失败的步骤索引（用于"重试该步"/"从该步继续"）
-    const [failedIndex, setFailedIndex] = useState(-1);
+export default function DeployPanel({ projectId, onSuccess }) {
+    const [runState, setRunState] = useState('idle');
+    const [result, setResult] = useState(null);
+    const [latestMessage, setLatestMessage] = useState(null);
+    const autoStartedRef = useRef(false);
+    const jumpTimerRef = useRef(null);
 
-    useEffect(() => {
-        let cancelled = false;
-        (async () => {
-            try {
-                const res = await apiFetch(
-                    `/api/v1/projects/${encodeURIComponent(projectId)}/analyze-deploy`,
-                    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
-                );
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Analysis failed');
-                if (cancelled) return;
-                setSteps(data.steps || []);
-                setConfigFiles((data.configFiles || []).map((c) => ({ ...c, _originalTemplate: c.template })));
-                setSource(data.source || 'fallback');
-                setWarning(data.warning || null);
-                setPhase('reviewing');
-            } catch (e) {
-                if (cancelled) return;
-                showToast('error', e.message);
-                onCancel();
-            }
-        })();
-        return () => { cancelled = true; };
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-    const updateStep = (idx, field, value) => {
-        setSteps((prev) => prev.map((s, i) => (i === idx ? { ...s, [field]: value } : s)));
-    };
-
-    const updateConfigFile = (idx, value) => {
-        setConfigFiles((prev) => prev.map((c, i) => (i === idx ? { ...c, template: value } : c)));
-    };
-
-    const runDeploy = async (startIndex = 0) => {
-        setDeploying(true);
-        setDeployResult(null);
-        if (startIndex === 0) {
-            setStepStatuses(steps.map(() => 'pending'));
-            setFailedIndex(-1);
-        }
+    const startRun = useCallback(async (opts = {}) => {
+        setRunState('running');
+        setResult(null);
+        setLatestMessage(null);
         try {
-            const result = await onConfirm({ steps, configFiles, startIndex });
-            // result: { failedIndex, stepResults, success?, error? }
-            if (result?.stepResults) {
-                setStepStatuses((prev) => {
-                    const next = [...prev];
-                    result.stepResults.forEach((r, i) => {
-                        if (i >= startIndex && r.status) next[i] = r.status;
-                    });
-                    return next;
-                });
-            }
-            if (result?.failedIndex >= 0) {
-                setFailedIndex(result.failedIndex);
-                setDeployResult({ ok: false, message: result.error || `Step ${result.failedIndex} failed` });
+            const res = await apiFetch(
+                `/api/v1/projects/${encodeURIComponent(projectId)}/auto-deploy`,
+                { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resume: !!opts.resume }) },
+            );
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `Auto-deploy failed (${res.status})`);
+            if (data.ok) {
+                setResult(data);
+                setRunState('success');
+                jumpTimerRef.current = setTimeout(() => onSuccess?.(data), 800);
             } else {
-                setFailedIndex(-1);
-                setDeployResult({ ok: true });
+                setResult(data);
+                setRunState('failed');
             }
         } catch (e) {
-            setDeployResult({ ok: false, message: e.message || String(e) });
-            showToast('error', e.message);
-        } finally {
-            setDeploying(false);
+            setResult({ ok: false, error: e.message || String(e) });
+            setRunState('failed');
+        }
+    }, [projectId, onSuccess]);
+
+    useEffect(() => {
+        if (autoStartedRef.current) return;
+        autoStartedRef.current = true;
+        startRun();
+    }, [startRun]);
+
+    useEffect(() => () => {
+        if (jumpTimerRef.current) clearTimeout(jumpTimerRef.current);
+    }, []);
+
+    const friendlyStage = (stage) => {
+        switch (stage) {
+            case 'A': return '正在分析你的项目…';
+            case 'B': return '正在准备运行环境并测试…';
+            case 'preview': return '正在开启预览…';
+            default: return '';
         }
     };
 
-    const handleConfirm = () => runDeploy(0);
-    const handleRetryFailed = () => failedIndex >= 0 && runDeploy(failedIndex);
+    useEffect(() => {
+        if (runState !== 'running' || !result) return;
+        const text = friendlyStage(result?.stage) || (result?.error || '');
+        if (text) setLatestMessage(text);
+    }, [result, runState]);
+
+    const retry = () => {
+        autoStartedRef.current = false;
+        setRunState('idle');
+        setResult(null);
+        setLatestMessage(null);
+        setTimeout(() => { autoStartedRef.current = true; startRun(); }, 0);
+    };
+
+    const resumeRun = () => {
+        autoStartedRef.current = false;
+        setRunState('idle');
+        setResult(null);
+        setLatestMessage(null);
+        setTimeout(() => { autoStartedRef.current = true; startRun({ resume: true }); }, 0);
+    };
+
+    const resumeReady = !!result?.verify?.resumeReady;
 
     return (
-        <div className="flex h-full flex-col bg-white">
-            <div className="px-5 py-3 border-b border-zinc-200 shrink-0">
-                <div className="flex items-center justify-between">
-                    <h3 className="font-bold text-sm text-zinc-900">Deploy Preview</h3>
-                    {phase === 'reviewing' && !deploying && !deployResult && (
-                        <span className="text-xs text-zinc-500">AI-analyzed steps ({source})</span>
-                    )}
-                    {deploying && (
-                        <span className="flex items-center gap-1.5 text-xs text-blue-700 font-medium">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            Deploying in progress — watch the Terminal tab on the right
-                        </span>
-                    )}
-                    {deployResult?.ok && (
-                        <span className="flex items-center gap-1.5 text-xs text-green-700 font-medium">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Deployment complete
-                        </span>
-                    )}
-                    {deployResult && !deployResult.ok && (
-                        <span className="flex items-center gap-1.5 text-xs text-red-700 font-medium">
-                            <AlertCircle className="w-3.5 h-3.5" />
-                            Deployment failed
-                        </span>
-                    )}
-                </div>
-                {phase === 'reviewing' && !deploying && (
-                    <p className="text-xs text-zinc-500 mt-1 flex items-center gap-1">
-                        <Terminal className="w-3 h-3" />
-                        Tip: this panel stays open during deployment so you can copy / adjust commands in the Terminal.
-                    </p>
-                )}
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
-                {phase === 'analyzing' && (
-                    <div className="flex items-center gap-2 text-sm text-zinc-500 py-8 justify-center">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Analyzing project...
+        <div className="flex-1 min-h-0 flex flex-col">
+            <div className="flex-1 min-h-0 overflow-y-auto flex items-center justify-center">
+                {runState === 'running' && (
+                    <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8">
+                        <Loader2 className="w-9 h-9 animate-spin text-blue-600" />
+                        <div className="text-sm font-medium text-zinc-900">分析部署中…</div>
+                        {latestMessage ? (
+                            <div className="text-xs text-zinc-500 max-w-md truncate" title={latestMessage}>{latestMessage}</div>
+                        ) : null}
                     </div>
                 )}
-                {phase === 'reviewing' && (
-                    <>
-                        {warning && (
-                            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-                                {warning}
-                            </div>
-                        )}
-                        {configFiles.length > 0 && (
-                            <div className="space-y-3">
-                                <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-700 uppercase tracking-wide">
-                                    <FileText className="w-3.5 h-3.5" />
-                                    Configuration Files
-                                    <span className="text-[10px] font-normal text-zinc-500 normal-case">({configFiles.length} 需要填写)</span>
-                                </div>
-                                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-                                    ⚠ 部署前必须填写这些配置（特别是 API key、密钥等），否则服务可能启动失败。
-                                </p>
-                                {configFiles.map((cf, idx) => {
-                                    const descLines = (cf.description || '').split(/\n+/).map((s) => s.replace(/^[\s\-\*•]+/, '').trim()).filter(Boolean);
-                                    const keyList = Array.isArray(cf.keys) && cf.keys.length > 0 ? cf.keys : null;
-                                    const isDirty = cf._originalTemplate != null && cf._originalTemplate !== cf.template;
-                                    return (
-                                        <div key={cf.path} className="space-y-1.5 border border-amber-200 rounded-md p-3 bg-amber-50/30">
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-xs font-mono font-semibold text-amber-900 bg-amber-100 px-1.5 py-0.5 rounded">{cf.path}</span>
-                                                <button
-                                                    type="button"
-                                                    className="text-[10px] text-zinc-500 hover:text-zinc-900 disabled:opacity-50"
-                                                    onClick={() => updateConfigFile(idx, cf._originalTemplate ?? cf.template)}
-                                                    disabled={!isDirty || deploying}
-                                                    title="恢复 AI 生成的原始模板"
-                                                >
-                                                    <RotateCcw className="w-3 h-3 inline mr-0.5" />重置
-                                                </button>
-                                            </div>
-                                            {descLines.length > 0 && (
-                                                <ul className="text-xs text-zinc-700 list-disc list-inside space-y-0.5 pl-1">
-                                                    {descLines.map((line, i) => (
-                                                        <li key={i}>{line}</li>
-                                                    ))}
-                                                </ul>
-                                            )}
-                                            {keyList && (
-                                                <div className="flex flex-wrap gap-1.5 pt-0.5">
-                                                    <span className="text-[10px] text-zinc-500">需要填写:</span>
-                                                    {keyList.map((k) => (
-                                                        <span key={k} className="text-[10px] font-mono bg-red-100 text-red-700 px-1.5 py-0.5 rounded border border-red-200">{k}</span>
-                                                    ))}
-                                                </div>
-                                            )}
-                                            <Textarea
-                                                value={cf.template}
-                                                onChange={(e) => updateConfigFile(idx, e.target.value)}
-                                                className="font-mono text-xs bg-white"
-                                                rows={8}
-                                                autoFocus={idx === 0}
-                                            />
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                        {steps.length > 0 && (
-                            <div className="space-y-3">
-                                <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-700 uppercase tracking-wide">
-                                    <Rocket className="w-3.5 h-3.5" />
-                                    Deployment Steps
-                                </div>
-                                {steps.map((step, idx) => {
-                                    const status = stepStatuses[idx] || 'pending';
-                                    return (
-                                        <div key={step.id} className={`space-y-1.5 ${status === 'failed' ? 'rounded-md ring-1 ring-red-300 p-1 -m-1' : ''}`}>
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-xs font-mono text-zinc-400 shrink-0 w-4">{idx + 1}.</span>
-                                                {status === 'success' && <CheckCircle2 className="w-3.5 h-3.5 text-green-600 shrink-0" />}
-                                                {status === 'failed' && <AlertCircle className="w-3.5 h-3.5 text-red-600 shrink-0" />}
-                                                {status === 'running' && <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600 shrink-0" />}
-                                                <Input
-                                                    value={step.name}
-                                                    onChange={(e) => updateStep(idx, 'name', e.target.value)}
-                                                    className="text-sm font-medium"
-                                                    autoFocus={idx === 0 && configFiles.length === 0}
-                                                    disabled={deploying}
-                                                />
-                                                <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded shrink-0 ${step.kind === 'serve' ? 'bg-green-100 text-green-700' : 'bg-zinc-100 text-zinc-500'}`}>
-                                                    {step.kind}
-                                                </span>
-                                            </div>
-                                            <Textarea
-                                                value={step.command}
-                                                onChange={(e) => updateStep(idx, 'command', e.target.value)}
-                                                className="font-mono text-xs bg-white"
-                                                rows={Math.min(6, Math.max(2, step.command.split('\n').length + 1))}
-                                                disabled={deploying}
-                                            />
-                                            {status === 'failed' && stepStatuses.length > idx && (
-                                                <div className="flex items-center gap-2 pl-6 mt-1">
-                                                    <span className="text-xs text-red-700">failed</span>
-                                                    <button
-                                                        type="button"
-                                                        className={buttonClass('secondary', 'sm')}
-                                                        onClick={handleRetryFailed}
-                                                        title={`重跑第 ${failedIndex + 1} 步: ${step.name || ''}`}
-                                                    >
-                                                        <RotateCcw className="w-3.5 h-3.5" />
-                                                        重试该步
-                                                    </button>
-                                                </div>
-                                            )}
-                                            {step.description && status !== 'failed' && (
-                                                <p className="text-xs text-zinc-500 pl-6">{step.description}</p>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </>
+                {runState === 'success' && result && (
+                    <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8">
+                        <CheckCircle2 className="w-10 h-10 text-green-600" />
+                        <div className="text-base font-semibold text-zinc-900">部署完成 ✓</div>
+                        <div className="text-xs text-zinc-500">正在打开预览…</div>
+                    </div>
+                )}
+                {runState === 'failed' && result && (
+                    <FailureView result={result} />
                 )}
             </div>
-            <div className="border-t border-zinc-200 px-5 py-3 bg-zinc-50/80 flex justify-between items-center gap-2 shrink-0">
-                <div className="text-xs text-zinc-500">
-                    {deploying && 'Commands are running in the Terminal tab. You can copy / adjust them there if needed.'}
-                    {deployResult?.ok && 'Done. Open the Preview tab to see the app, or re-edit steps and Redeploy.'}
-                    {deployResult && !deployResult.ok && 'Failed. Check the Terminal tab for the error and re-deploy after fixing.'}
-                </div>
-                <div className="flex gap-2">
-                    <button
-                        type="button"
-                        className={buttonClass('danger', 'sm')}
-                        onClick={onEnd}
-                        disabled={deploying}
-                        title="关闭本次部署，清空当前内容"
-                    >
-                        <X className="w-3.5 h-3.5" />
-                        结束本次部署
+            {runState === 'failed' && (
+                <div className="border-t border-zinc-200 px-5 py-3 bg-zinc-50/80 flex justify-center items-center gap-2 shrink-0">
+                    <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => copyDiagnostics(result)}>
+                        <Copy className="w-3.5 h-3.5" />
+                        复制诊断信息
                     </button>
-                    <button
-                        type="button"
-                        className={buttonClass('secondary', 'sm')}
-                        onClick={onCancel}
-                        disabled={deploying}
-                    >
-                        {deployResult ? 'Close' : 'Cancel'}
-                    </button>
-                    {phase === 'reviewing' && (
-                        <button
-                            type="button"
-                            className={buttonClass('primary', 'sm')}
-                            onClick={handleConfirm}
-                            disabled={deploying || steps.length === 0}
-                        >
-                            {deploying ? (
-                                <>
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    Deploying...
-                                </>
-                            ) : deployResult ? (
-                                <>
-                                    <Rocket className="w-3.5 h-3.5" />
-                                    Redeploy
-                                </>
-                            ) : (
-                                <>
-                                    <Rocket className="w-3.5 h-3.5" />
-                                    Deploy
-                                </>
-                            )}
+                    {resumeReady && (
+                        <button type="button" className={buttonClass('primary', 'sm')} onClick={resumeRun}>
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            从上次继续修复
                         </button>
                     )}
+                    <button type="button" className={buttonClass(resumeReady ? 'secondary' : 'primary', 'sm')} onClick={retry}>
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        重新部署
+                    </button>
                 </div>
+            )}
+        </div>
+    );
+}
+
+function copyDiagnostics(result) {
+    const lines = [
+        '== XEnsemble 部署诊断 ==',
+        `错误: ${result?.error || ''}`,
+        `警告: ${result?.verify?.warning || ''}`,
+        '',
+        '== 最终输出 ==',
+        result?.finalStderr || result?.verify?.finalStderr || '(无)',
+        '',
+        '== 已尝试的步骤 ==',
+        ...((result?.verify?.tested || []).map((t, i) => `${i + 1}. ${t}`)),
+        '',
+        '== AI 修复过程（最近）==',
+        ...((result?.verify?.trail || []).slice(-20).map((t) => {
+            if (t.action === 'tool') return `[${t.round}] ${t.tool} ${JSON.stringify(t.args || '')} → ${t.out || ''}`;
+            if (t.action === 'invalid_json') return `[${t.round}] 输出超长/截断(truncated=${t.truncated}, ${t.len} chars)，JSON 解析失败`;
+            if (t.action === 'repeat') return `[${t.round}] 重复调用 ${t.tool}，被阻止`;
+            if (t.action === 'final') return `[${t.round}] final ok=${t.ok}`;
+            return `[${t.round}] ${t.action} ${t.name || ''}`;
+        })),
+    ];
+    navigator.clipboard?.writeText(lines.join('\n')).catch(() => {});
+}
+
+function FailureView({ result }) {
+    const [showDetails, setShowDetails] = useState(false);
+    const trail = result?.verify?.trail || [];
+    const fallback = result?.verify?.fallback;
+    const showTrail = Array.isArray(trail) && trail.length > 0;
+    const showFallback = fallback && !fallback.ok;
+    const hasDetails = showTrail || showFallback;
+
+    return (
+        <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8 w-full max-w-lg">
+            <AlertCircle className="w-9 h-9 text-red-600" />
+            <div className="text-sm font-semibold text-red-700">部署失败</div>
+            {result?.verify?.warning ? (
+                <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-1.5">{result.verify.warning}</div>
+            ) : null}
+            <div className="text-xs text-zinc-600 max-w-md break-words px-4 text-left">
+                {result.error ? <div className="mb-2">{result.error}</div> : null}
+                {result.finalStderr || result?.verify?.finalStderr ? (
+                    <pre className="mt-1 bg-white/60 border border-red-200 rounded p-2 font-mono text-[10px] text-red-800 max-h-40 overflow-y-auto whitespace-pre-wrap break-words">{result.finalStderr || result.verify.finalStderr}</pre>
+                ) : null}
             </div>
+            {hasDetails && (
+                <>
+                    <button
+                        type="button"
+                        onClick={() => setShowDetails((v) => !v)}
+                        className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-900"
+                    >
+                        {showDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                        {showDetails ? '收起修复过程' : '查看 AI 修复过程'}
+                    </button>
+                    {showDetails && (
+                        <div className="w-full text-left">
+                            {showFallback && (
+                                <div className="mb-3 text-xs text-red-800 bg-red-50 border border-red-200 rounded p-2">
+                                    <div className="font-semibold mb-1">按计划直接执行时发现：</div>
+                                    <div className="font-mono text-[10px] whitespace-pre-wrap break-words max-h-32 overflow-y-auto">{fallback.finalStderr || fallback.warning}</div>
+                                    <div className="mt-1 text-[10px] text-zinc-500">{fallback.tested?.join(' · ')}</div>
+                                </div>
+                            )}
+                            {showTrail && (
+                                <div className="text-[10px] font-mono text-zinc-500 space-y-0.5 max-h-48 overflow-y-auto bg-white/60 border border-zinc-200 rounded p-2">
+                                    {trail.slice(-20).map((t, i) => (
+                                        <div key={`${t.round}-${i}`} className="whitespace-pre-wrap break-words">
+                                            {t.action === 'tool' ? (
+                                                <>
+                                                    <span className="text-blue-700">[轮 {t.round}] {t.tool}</span>{' '}
+                                                    <span className="text-zinc-400">{JSON.stringify(t.args || '')}</span>
+                                                    <div className="text-zinc-400 pl-2">{t.out}</div>
+                                                </>
+                                            ) : t.action === 'invalid_json' ? (
+                                                <span className="text-red-700">[轮 {t.round}] 输出超长被截断（{t.len} 字符），JSON 解析失败</span>
+                                            ) : t.action === 'repeat' ? (
+                                                <span className="text-amber-700">[轮 {t.round}] 重复调用 {t.tool}，已阻止</span>
+                                            ) : t.action === 'final' ? (
+                                                <span className="text-green-700">[轮 {t.round}] final ok={String(t.ok)}</span>
+                                            ) : (
+                                                <span>[轮 {t.round}] {t.action}{t.name ? ` ${t.name}` : ''}</span>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </>
+            )}
         </div>
     );
 }

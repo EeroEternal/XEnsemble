@@ -50,6 +50,20 @@
       "when": 1785933000000,
       "tag": "0006_agent_image_builds",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786966990469,
+      "tag": "0007_gorgeous_starbolt",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787100000000,
+      "tag": "0008_verify_resume",
+      "breakpoints": true
     }
   ]
 }
