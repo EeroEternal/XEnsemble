@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import RepoImportDialog from './git/RepoImportDialog';
 import BrandMark from './BrandMark';
+import SelectMenu from './SelectMenu';
 import {
   consoleButtonFocusClass,
   consoleInputClass,
@@ -27,13 +28,6 @@ const GIT_PROVIDERS = [
   { id: 'gitlab', label: 'GitLab' },
   { id: 'gitea', label: 'Gitea' },
 ];
-
-function agentSubtitle(a) {
-  if (a.llm_auth_mode === 'gateway' && a.gateway_config?.model) return a.gateway_config.model;
-  if (a.llm_auth_mode === 'byok') return 'Bring your own key';
-  if (!a.installed) return 'Not installed';
-  return a.id;
-}
 
 function StepDot({ n, label, active, done }) {
   return (
@@ -58,7 +52,6 @@ export default function OnboardingWizard({
   // flow config
   mode = 'full', // 'full' = step 1 (source) + step 2 (agent); 'session' = step 2 only in current workspace
   startStep = 1,
-  workspace, // current workspace project object (session mode)
   // agents
   agents,
   selectedAgentId,
@@ -117,17 +110,45 @@ export default function OnboardingWizard({
     setImportedProject(null);
   };
 
-  const selectBuiltInAgent = (agentId) => {
-    setCustomImageId('');
-    onSelectAgent(agentId);
+  // "Custom" toggle clicked: pick the first available custom image (or mark as
+  // custom-mode-without-images so the empty hint shows).
+  const handleSelectCustomImage = () => {
+    if ((customImages || []).length > 0) {
+      const img = customImages[0];
+      setCustomImageId(img.id);
+      const ac = (img.components || []).find((c) => (c.component_id || '').startsWith('agent:'));
+      const aid = ac ? ac.component_id.replace('agent:', '') : '';
+      if (aid && (agents || []).some((a) => a.id === aid)) onSelectAgent(aid);
+    } else {
+      setCustomImageId('__none__');
+      onSelectAgent('');
+    }
   };
 
-  const selectCustomImage = (img) => {
-    setCustomImageId(img.id);
-    const ac = (img.components || []).find((c) => (c.component_id || '').startsWith('agent:'));
-    const aid = ac ? ac.component_id.replace('agent:', '') : '';
-    if (aid && (agents || []).some((a) => a.id === aid)) onSelectAgent(aid);
+  // SelectMenu passes the image id.
+  const selectCustomImageById = (id) => {
+    setCustomImageId(id);
+    const img = (customImages || []).find((c) => c.id === id);
+    if (img) {
+      const ac = (img.components || []).find((c) => (c.component_id || '').startsWith('agent:'));
+      const aid = ac ? ac.component_id.replace('agent:', '') : '';
+      if (aid && (agents || []).some((a) => a.id === aid)) onSelectAgent(aid);
+    }
   };
+
+  const agentOptions = useMemo(
+    () => sortedAgents.map((a) => ({ value: a.id, label: a.name })),
+    [sortedAgents],
+  );
+  const customImageOptions = useMemo(
+    () => (customImages || []).map((img) => {
+      const ac = (img.components || []).find((c) => (c.component_id || '').startsWith('agent:'));
+      const agentId = ac ? ac.component_id.replace('agent:', '') : '';
+      const agent = (agents || []).find((a) => a.id === agentId);
+      return { value: img.id, label: `${img.name}${agent ? ` (${agent.name})` : ''}` };
+    }),
+    [customImages, agents],
+  );
 
   const canAdvanceStep1 = Boolean(
     importedProject || (sourceChoice === 'blank' && newProjectName.trim()),
@@ -143,14 +164,6 @@ export default function OnboardingWizard({
     if (isSession) onLaunchSession?.();
     else onLaunch?.();
   };
-
-  // Workspace name shown in step 2 summary
-  const workspaceName = isSession
-    ? (workspace?.name || 'Current workspace')
-    : (importedProject ? importedProject.name : newProjectName.trim() || 'my-workspace');
-  const workspaceKind = isSession
-    ? (workspace ? 'Current' : 'Current')
-    : (importedProject ? 'From Git' : 'Blank');
 
   // Stepper config
   const stepper = isSession
@@ -326,80 +339,54 @@ export default function OnboardingWizard({
                   </p>
                 </div>
 
-                {/* Workspace summary */}
-                <div className="flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
-                  <GitBranch className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
-                  <span className="text-zinc-500">Workspace:</span>
-                  <span className="truncate font-medium text-zinc-900">{workspaceName}</span>
-                  <span className="ml-auto shrink-0 text-[10px] text-zinc-400">{workspaceKind}</span>
+                {/* Built-in | Custom toggle */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setCustomImageId(''); onSelectAgent(''); }}
+                    className={`flex-1 h-9 px-3 text-xs font-medium rounded-md border transition-colors ${consoleButtonFocusClass} ${
+                      !customImageId ? 'bg-black text-white border-zinc-900' : 'bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100'
+                    }`}
+                  >
+                    Built-in
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSelectCustomImage}
+                    className={`flex-1 h-9 px-3 text-xs font-medium rounded-md border transition-colors ${consoleButtonFocusClass} ${
+                      customImageId ? 'bg-black text-white border-zinc-900' : 'bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100'
+                    }`}
+                  >
+                    Custom
+                  </button>
                 </div>
 
-                <div>
-                  <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                    Built-in agents
-                  </span>
-                  {sortedAgents.length === 0 ? (
-                    <div className="mt-2 flex items-center gap-2 text-xs text-zinc-400">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Loading agents…
-                    </div>
-                  ) : (
-                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                      {sortedAgents.map((a) => {
-                        const selected = !customImageId && a.id === selectedAgentId;
-                        return (
-                          <button
-                            key={a.id}
-                            type="button"
-                            onClick={() => selectBuiltInAgent(a.id)}
-                            className={`flex flex-col gap-1 rounded-lg border-2 p-3 text-left transition-colors ${consoleButtonFocusClass} ${
-                              selected
-                                ? 'border-black bg-zinc-50'
-                                : 'border-zinc-200 hover:border-zinc-400 bg-white'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-1">
-                              <span className="truncate text-sm font-semibold text-zinc-900">{a.name}</span>
-                              {selected && <Check className="h-3.5 w-3.5 shrink-0 text-black" />}
-                            </div>
-                            <span className="truncate font-mono text-[10px] text-zinc-500">{agentSubtitle(a)}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {customImages && customImages.length > 0 && (
-                  <div>
-                    <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                      Custom images
-                    </span>
-                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                      {customImages.map((img) => {
-                        const selected = customImageId === img.id;
-                        return (
-                          <button
-                            key={img.id}
-                            type="button"
-                            onClick={() => selectCustomImage(img)}
-                            className={`flex flex-col gap-1 rounded-lg border-2 p-3 text-left transition-colors ${consoleButtonFocusClass} ${
-                              selected
-                                ? 'border-black bg-zinc-50'
-                                : 'border-zinc-200 hover:border-zinc-400 bg-white'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-1">
-                              <span className="truncate text-sm font-semibold text-zinc-900">{img.name}</span>
-                              {selected && <Check className="h-3.5 w-3.5 shrink-0 text-black" />}
-                            </div>
-                            <span className="truncate text-[10px] text-zinc-500">Custom image</span>
-                          </button>
-                        );
-                      })}
-                    </div>
+                {/* Agent dropdown */}
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    {!customImageId && (
+                      <SelectMenu
+                        value={selectedAgentId}
+                        onChange={(v) => onSelectAgent(v)}
+                        options={agentOptions}
+                        placeholder="Select agent"
+                      />
+                    )}
+                    {customImageId && customImages && customImages.length > 0 && (
+                      <SelectMenu
+                        value={customImageId}
+                        onChange={selectCustomImageById}
+                        options={customImageOptions}
+                        placeholder="Select custom image"
+                      />
+                    )}
+                    {customImageId && (!customImages || customImages.length === 0) && (
+                      <div className="flex items-center gap-2 py-2">
+                        <p className="text-xs text-zinc-400">No custom images found.</p>
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
 
                 {launchError && (
                   <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">
