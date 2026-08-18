@@ -3,6 +3,7 @@ import { Plus, Settings2, Play, Square, RefreshCw, Loader2, Pencil, Trash2, Acti
 import Button from '../Button';
 import Input, { FormLabel, Textarea } from '../Input';
 import MaskedApiKeyInput from '../MaskedApiKeyInput';
+import RowActionsMenu from '../RowActionsMenu';
 import StatusBadge from '../StatusBadge';
 import {
   ConsoleDialogShell,
@@ -14,7 +15,6 @@ import { useToast } from '../Toast';
 import {
   consoleCardClass,
   consoleIconButtonClass,
-  consoleIconButtonDangerClass,
   consoleStructuredDialogPanelClass,
   consoleTableBodyCellClass,
   consoleTableBodyDivideClass,
@@ -918,37 +918,28 @@ export default function GatewaySettingsPanel() {
                           <ProviderStatusBadge health={providerHealth[p.name]} />
                         </td>
                         <td className={`${consoleTableBodyCellClass} text-right pl-1 pr-3`}>
-                          <div className="inline-flex items-center justify-end gap-0.5">
-                            <TestConnectionButton
-                              health={providerHealth[p.name]}
-                              testing={testingProvider === p.name}
-                              onClick={() => runProviderTest(p.name)}
-                              title={`Verify ${p.name}`}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => openEditProviderDialog(p)}
-                              className={consoleIconButtonClass}
-                              title={`Edit ${p.name}`}
-                              aria-label={`Edit ${p.name}`}
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              disabled={deleting === p.name}
-                              onClick={() => handleDelete(p.name)}
-                              className={consoleIconButtonDangerClass}
-                              title={deleting === p.name ? 'Removing…' : `Remove ${p.name}`}
-                              aria-label={deleting === p.name ? `Removing ${p.name}` : `Remove ${p.name}`}
-                            >
-                              {deleting === p.name ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <Trash2 className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          </div>
+                          <RowActionsMenu
+                            label={`Actions for ${p.name}`}
+                            items={[
+                              {
+                                icon: Activity,
+                                label: 'Test connection',
+                                onClick: () => runProviderTest(p.name),
+                                busy: testingProvider === p.name || providerHealth[p.name]?.status === 'testing',
+                                busyLabel: 'Verifying…',
+                              },
+                              { icon: Pencil, label: 'Edit', onClick: () => openEditProviderDialog(p) },
+                              { separator: true },
+                              {
+                                icon: Trash2,
+                                label: 'Remove',
+                                danger: true,
+                                onClick: () => handleDelete(p.name),
+                                busy: deleting === p.name,
+                                busyLabel: 'Removing…',
+                              },
+                            ]}
+                          />
                         </td>
                       </tr>
                     );

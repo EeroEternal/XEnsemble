@@ -4,6 +4,7 @@ import { Loader2, Plus, RefreshCw, RotateCw, ScrollText, Search, Trash2 } from '
 import Button from '../components/Button';
 import BuildLogDialog from '../components/BuildLogDialog';
 import Input from '../components/Input';
+import RowActionsMenu from '../components/RowActionsMenu';
 import SelectMenu from '../components/SelectMenu';
 import StatusBadge from '../components/StatusBadge';
 import {
@@ -15,8 +16,6 @@ import {
 import { useToast } from '../components/Toast';
 import {
   consoleAdminPageClass,
-  consoleIconButtonClass,
-  consoleIconButtonDangerClass,
   consoleSectionLabelClass,
   consoleStructuredDialogPanelClass,
   consoleAdminTableShellClass,
@@ -484,7 +483,7 @@ export function CustomImagesContent() {
             <col className="w-auto" />
             <col className="w-36" />
             <col className="w-auto" />
-            <col className="w-24" />
+            <col className="w-20" />
             <col className="w-28" />
             <col className="w-32" />
           </colgroup>
@@ -559,38 +558,28 @@ export function CustomImagesContent() {
                       <span className="block truncate" title={formatTime(img.created_at)}>{formatRelativeTime(img.created_at)}</span>
                     </td>
                     <td className={consoleTableBodyCellClass}>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setLogImage(img)}
-                          className={consoleIconButtonClass}
-                          title="View build log"
-                        >
-                          <ScrollText className="h-4 w-4" />
-                        </button>
-                        {img.status === 'failed' && (
-                          <button
-                            type="button"
-                            onClick={() => handleRebuild(img)}
-                            disabled={rebuildingId === img.id}
-                            className={consoleIconButtonClass}
-                            title="Rebuild image"
-                          >
-                            {rebuildingId === img.id
-                              ? <Loader2 className="h-4 w-4 animate-spin" />
-                              : <RotateCw className="h-4 w-4" />}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDelete(img)}
-                          disabled={deletingId === img.id}
-                          className={consoleIconButtonDangerClass}
-                          title="Delete image"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
+                      <RowActionsMenu
+                        label={`Actions for ${img.name}`}
+                        items={[
+                          { icon: ScrollText, label: 'View build log', onClick: () => setLogImage(img) },
+                          img.status === 'failed' && {
+                            icon: RotateCw,
+                            label: 'Rebuild image',
+                            onClick: () => handleRebuild(img),
+                            busy: rebuildingId === img.id,
+                            busyLabel: 'Rebuilding…',
+                          },
+                          { separator: true },
+                          {
+                            icon: Trash2,
+                            label: 'Delete image',
+                            danger: true,
+                            onClick: () => setConfirmDelete(img),
+                            busy: deletingId === img.id,
+                            busyLabel: 'Deleting…',
+                          },
+                        ].filter(Boolean)}
+                      />
                     </td>
                   </tr>
                 );

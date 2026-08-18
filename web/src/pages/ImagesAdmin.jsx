@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { ConsoleDialogShell } from '../components/ConsoleDialog';
 import Button from '../components/Button';
+import RowActionsMenu from '../components/RowActionsMenu';
 import SelectMenu from '../components/SelectMenu';
 import StatusBadge from '../components/StatusBadge';
 import { useToast } from '../components/Toast';
@@ -464,7 +465,7 @@ export function ImagesAdminContent() {
                                     <col className="w-auto" />
                                     <col className="w-36" />
                                     <col className="w-40" />
-                                    <col className="w-28" />
+                                    <col className="w-20" />
                                 </colgroup>
                                 <thead>
                                     <tr className={cn('border-b', borderHairline)}>
@@ -476,7 +477,6 @@ export function ImagesAdminContent() {
                                 </thead>
                                 <tbody>
                                     {selectedAgent.versions?.map((version) => {
-                                        const isBusy = actionId === `activate:${version.id}` || actionId === `deprecate:${version.id}` || actionId === `delete:${version.id}`;
                                         const badge = versionBadge(version);
                                         return (
                                             <tr key={version.id} className={cn('border-b last:border-b-0 transition-colors hover:bg-zinc-50/50', borderHairline)}>
@@ -489,46 +489,33 @@ export function ImagesAdminContent() {
                                                 <td className={cn('px-4 py-2.5 text-xs', textPlaceholder)}>
                                                     {formatTime(version.built_at || version.created_at)}
                                                 </td>
-                                                <td className="px-4 py-2.5">
-                                                    <div className="flex items-center gap-1">
-                                                        {isBusy ? (
-                                                            <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" />
-                                                        ) : (
-                                                            <>
-                                                                {!version.is_active && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleActivate(version.id)}
-                                                                        className={cn('inline-flex items-center justify-center rounded-md p-1.5 text-emerald-600 hover:bg-emerald-50', consoleButtonFocusClass)}
-                                                                        title="Activate"
-                                                                    >
-                                                                        <Check className="h-3.5 w-3.5" />
-                                                                    </button>
-                                                                )}
-                                                                {version.is_active && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => setDeactivateTarget(version)}
-                                                                        className={cn('inline-flex items-center justify-center rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600', consoleButtonFocusClass)}
-                                                                        title="Deactivate"
-                                                                    >
-                                                                        <Pause className="h-3.5 w-3.5" />
-                                                                    </button>
-                                                                )}
-                                                                {!version.is_active && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => setDeleteVersionTarget(version)}
-                                                                        className={cn('inline-flex items-center justify-center rounded-md p-1.5 text-zinc-500 hover:bg-red-50 hover:text-red-700', consoleButtonFocusClass)}
-                                                                        title="Delete version"
-                                                                    >
-                                                                        <Trash2 className="h-3.5 w-3.5" />
-                                                                    </button>
-                                                                )}
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </td>
+                                                 <td className="px-4 py-2.5">
+                                                    <RowActionsMenu
+                                                        label={`Actions for ${version.tag}`}
+                                                        items={[
+                                                            !version.is_active && {
+                                                                icon: Check,
+                                                                label: 'Activate',
+                                                                onClick: () => handleActivate(version.id),
+                                                                busy: actionId === `activate:${version.id}`,
+                                                            },
+                                                            version.is_active && {
+                                                                icon: Pause,
+                                                                label: 'Deactivate',
+                                                                onClick: () => setDeactivateTarget(version),
+                                                                busy: actionId === `deprecate:${version.id}`,
+                                                            },
+                                                            !version.is_active && {
+                                                                icon: Trash2,
+                                                                label: 'Delete version',
+                                                                danger: true,
+                                                                onClick: () => setDeleteVersionTarget(version),
+                                                                busy: actionId === `delete:${version.id}`,
+                                                                busyLabel: 'Deleting…',
+                                                            },
+                                                        ].filter(Boolean)}
+                                                    />
+                                                 </td>
                                             </tr>
                                         );
                                     })}

@@ -4,6 +4,7 @@ import { Plus, Pencil, Pause, Play, CheckCircle, Clock, KeyRound } from 'lucide-
 import Button from '../components/Button';
 import Input from '../components/Input';
 import PageHeader from '../components/PageHeader';
+import RowActionsMenu from '../components/RowActionsMenu';
 import SelectMenu from '../components/SelectMenu';
 import MultiSelectMenu from '../components/MultiSelectMenu';
 import StatusBadge from '../components/StatusBadge';
@@ -20,7 +21,6 @@ import {
 } from '../lib/consoleTokens';
 
 import { apiFetch } from '../lib/api';
-import { cn } from '../lib/utils';
 
 function statusBadge(status) {
   const map = {
@@ -315,43 +315,22 @@ export default function UsersAdmin() {
                     <span className="text-xs text-zinc-500">{formatLastLogin(user.last_login_at)}</span>
                   </td>
                   <td className={consoleTableBodyCellClass}>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => openEdit(user)}
-                        className="p-1.5 rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
-                        title="Edit"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                      {user.status === 'pending' && (
-                        <button
-                          type="button"
-                          onClick={() => approveUser(user)}
-                          className="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-50"
-                          title="Approve"
-                        >
-                          <CheckCircle className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      {user.status !== 'pending' && (
-                        <button
-                          type="button"
-                          onClick={() => toggleStatus(user)}
-                          className={cn(
-                            'p-1.5 rounded-md transition-colors',
-                            user.status === 'active'
-                              ? 'text-zinc-500 hover:bg-red-50 hover:text-red-600'
-                              : 'text-zinc-500 hover:bg-emerald-50 hover:text-emerald-600',
-                          )}
-                          title={user.status === 'active' ? 'Suspend' : 'Activate'}
-                        >
-                          {user.status === 'active'
-                            ? <Pause className="w-3.5 h-3.5" />
-                            : <Play className="w-3.5 h-3.5" />}
-                        </button>
-                      )}
-                    </div>
+                    <RowActionsMenu
+                      label={`Actions for ${user.username}`}
+                      items={[
+                        { icon: Pencil, label: 'Edit', onClick: () => openEdit(user) },
+                        user.status === 'pending' && {
+                          icon: CheckCircle,
+                          label: 'Approve',
+                          onClick: () => approveUser(user),
+                        },
+                        user.status !== 'pending' && (
+                          user.status === 'active'
+                            ? { icon: Pause, label: 'Suspend', danger: true, onClick: () => toggleStatus(user) }
+                            : { icon: Play, label: 'Activate', onClick: () => toggleStatus(user) }
+                        ),
+                      ].filter(Boolean)}
+                    />
                   </td>
                 </tr>
               ))}

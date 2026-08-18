@@ -1,14 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Download, KeyRound, Pencil, Trash2, RefreshCw, Info, MoreHorizontal, CheckCircle, Clock } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Plus, Download, KeyRound, Pencil, Trash2, RefreshCw, Info, CheckCircle, Clock } from 'lucide-react';
 
 import Button from '../components/Button';
+import RowActionsMenu from '../components/RowActionsMenu';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import { useToast } from '../components/Toast';
 import { confirm } from '../components/ConfirmDialog';
 import {
-  consoleIconButtonClass,
-  consoleMenuDropdownZClass,
   consoleAdminPageClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
@@ -92,135 +91,6 @@ function LifecycleInfoDot({ lifecycle }) {
         <span className="mt-0.5 block text-zinc-400">{when}</span>
       </span>
     </span>
-  );
-}
-
-function AgentActionsMenu({
-  agent,
-  loadingAction,
-  onViewDetails,
-  onEdit,
-  onInstall,
-  onCheckUpdate,
-  onUninstall,
-  onConfigure,
-}) {
-  const [open, setOpen] = useState(false);
-  const [dropUp, setDropUp] = useState(false);
-  const rootRef = useRef(null);
-  const installLoading = loadingAction === `${agent.id}:install`;
-  const updateLoading = loadingAction === `${agent.id}:update`;
-  const uninstallLoading = loadingAction === `${agent.id}:uninstall`;
-  const busy = Boolean(loadingAction?.startsWith(`${agent.id}:`));
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onPointerDown = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) {
-        setOpen(false);
-      }
-    };
-    const onKeyDown = (e) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
-
-  const handleToggle = () => {
-    if (!open && rootRef.current) {
-      const rect = rootRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-      setDropUp(spaceBelow < 260);
-    }
-    setOpen((v) => !v);
-  };
-
-  const run = (fn) => () => {
-    setOpen(false);
-    fn();
-  };
-
-  const itemClass = (danger = false) => (
-    `w-full flex items-center gap-2 px-3 py-2 text-sm disabled:opacity-40 disabled:pointer-events-none ${
-      danger
-        ? 'text-red-600 hover:bg-red-50 hover:text-red-700'
-        : 'text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900'
-    }`
-  );
-
-  return (
-    <div ref={rootRef} className="relative flex justify-end">
-      <button
-        type="button"
-        onClick={() => handleToggle()}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label={`Actions for ${agent.name}`}
-        className={`${consoleIconButtonClass} ${open ? 'bg-zinc-100 text-zinc-900' : ''}`}
-      >
-        <MoreHorizontal className="w-4 h-4" />
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className={`absolute right-0 ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'} w-52 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg shadow-zinc-200/50 ${consoleMenuDropdownZClass}`}
-        >
-          <button type="button" role="menuitem" onClick={run(onViewDetails)} className={itemClass()}>
-            <Info className="w-4 h-4 shrink-0" />
-            View details
-          </button>
-          <button type="button" role="menuitem" onClick={run(onEdit)} className={itemClass()} disabled={busy}>
-            <Pencil className="w-4 h-4 shrink-0" />
-            Edit executable
-          </button>
-          <button type="button" role="menuitem" onClick={run(onConfigure)} className={itemClass()} disabled={busy}>
-            <KeyRound className="w-4 h-4 shrink-0" />
-            Configure
-          </button>
-          <div className="my-1 border-t border-zinc-100" role="separator" />
-          {!agent.installed ? (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={run(onInstall)}
-              className={itemClass()}
-              disabled={installLoading}
-            >
-              <Download className="w-4 h-4 shrink-0" />
-              {installLoading ? 'Installing...' : 'Install on server'}
-            </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={run(onCheckUpdate)}
-                className={itemClass()}
-                disabled={updateLoading}
-              >
-                <RefreshCw className={`w-4 h-4 shrink-0 ${updateLoading ? 'animate-spin' : ''}`} />
-                {updateLoading ? 'Updating...' : 'Check and update'}
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={run(onUninstall)}
-                className={itemClass(true)}
-                disabled={uninstallLoading}
-              >
-                <Trash2 className="w-4 h-4 shrink-0" />
-                {uninstallLoading ? 'Removing...' : 'Uninstall'}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -427,7 +297,7 @@ export default function AgentsAdmin() {
                 <th className={consoleTableHeadCellClass}>Version</th>
                 <th className={consoleTableHeadCellClass}>Executable</th>
                 <th className={consoleTableHeadCellClass}>Auth</th>
-                <th className={`${consoleTableHeadCellClass} w-12 text-right`}>Actions</th>
+                <th className={`${consoleTableHeadCellClass} w-16 text-right`}>Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
@@ -487,16 +357,21 @@ export default function AgentsAdmin() {
                         </span>
                       </span>
                     </td>
-                    <td className={`${consoleTableBodyCellClass} w-12`}>
-                      <AgentActionsMenu
-                        agent={agent}
-                        loadingAction={actionLoading}
-                        onViewDetails={() => setDetailsAgent(agent)}
-                        onEdit={() => setEditAgent(agent)}
-                        onInstall={() => handleInstall(agent)}
-                        onCheckUpdate={() => handleCheckAndUpdate(agent)}
-                        onUninstall={() => handleUninstall(agent)}
-                        onConfigure={() => setKeysAgent(agent)}
+                    <td className={`${consoleTableBodyCellClass} w-16`}>
+                      <RowActionsMenu
+                        label={`Actions for ${agent.name}`}
+                        items={[
+                          { icon: Info, label: 'View details', onClick: () => setDetailsAgent(agent) },
+                          { icon: Pencil, label: 'Edit executable', onClick: () => setEditAgent(agent), disabled: Boolean(actionLoading?.startsWith(`${agent.id}:`)) },
+                          { icon: KeyRound, label: 'Configure', onClick: () => setKeysAgent(agent), disabled: Boolean(actionLoading?.startsWith(`${agent.id}:`)) },
+                          { separator: true },
+                          ...(!agent.installed
+                            ? [{ icon: Download, label: 'Install on server', onClick: () => handleInstall(agent), busy: actionLoading === `${agent.id}:install`, busyLabel: 'Installing…' }]
+                            : [
+                                { icon: RefreshCw, label: 'Check and update', onClick: () => handleCheckAndUpdate(agent), busy: actionLoading === `${agent.id}:update`, busyLabel: 'Updating…' },
+                                { icon: Trash2, label: 'Uninstall', danger: true, onClick: () => handleUninstall(agent), busy: actionLoading === `${agent.id}:uninstall`, busyLabel: 'Removing…' },
+                              ]),
+                        ]}
                       />
                     </td>
                   </tr>
