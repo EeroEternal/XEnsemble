@@ -679,18 +679,65 @@ function AgentConsole({
               // visible flickering.  Keep only the last block (full-screen
               // redraws overwrite each other).  A 100ms timer lets blocks
               // from subsequent animation frames accumulate before the write.
+              if (syncTermPending) {
+                // We have a buffered incomplete sync-term block.
+                // New data is a continuation of that block (or a new
+                // ?2026h within it). Append to the buffer instead of
+                // writing directly — xterm.js would otherwise execute
+                // internal cursor/space-fill commands without the
+                // ?2026h/?2026l wrapper, corrupting the display.
+                syncTermPending += remaining;
+                if (syncTermPending.includes('\x1b[?2026l')) {
+                  // Block is now complete — set the coalesce timer.
+                  if (coalesceTimer) return;
+                  coalesceTimer = setTimeout(() => {
+                    coalesceTimer = null;
+                    if (disposed) return;
+                    const data = syncTermPending;
+                    syncTermPending = '';
+                    if (!data) return;
+                    const lastCompleteEnd = data.lastIndexOf('\x1b[?2026l');
+                    if (lastCompleteEnd === -1) {
+                      syncTermPending = data;
+                      return;
+                    }
+                    const lastCompleteStart = data.lastIndexOf('\x1b[?2026h', lastCompleteEnd);
+                    const blockEnd = lastCompleteEnd + '\x1b[?2026l'.length;
+                    const afterBlock = data.slice(blockEnd);
+                    if (afterBlock.includes('\x1b[?2026h')) {
+                      syncTermPending = afterBlock.slice(afterBlock.indexOf('\x1b[?2026h'));
+                    }
+                    let nonSync = '';
+                    let pos = 0;
+                    while (pos < data.length) {
+                      const h = data.indexOf('\x1b[?2026h', pos);
+                      if (h === -1) { nonSync += data.slice(pos); break; }
+                      nonSync += data.slice(pos, h);
+                      const l = data.indexOf('\x1b[?2026l', h);
+                      if (l === -1) break;
+                      pos = l + '\x1b[?2026l'.length;
+                    }
+                    writeTerminalData(
+                      nonSync
+                      + data.slice(lastCompleteStart, blockEnd)
+                      + '\x1b[?25l'
+                    );
+                  }, 100);
+                }
+                return;
+              }
               if (remaining.includes('\x1b[?2026h')) {
                 const syncEnd = remaining.indexOf('\x1b[?2026l');
                 if (syncEnd === -1) {
                   const syncStart = remaining.indexOf('\x1b[?2026h');
                   const before = remaining.slice(0, syncStart);
-                  syncTermPending = remaining.slice(syncStart);
+                  syncTermPending += remaining.slice(syncStart);
                   if (before) writeTerminalData(before);
                 } else {
                   // Complete block(s) found.  Buffer and coalesce with a
                   // timer so blocks arriving in subsequent animation frames
                   // are accumulated before the final write.
-                  syncTermPending = remaining;
+                  syncTermPending += remaining;
                   if (coalesceTimer) return;
                   coalesceTimer = setTimeout(() => {
                     coalesceTimer = null;
