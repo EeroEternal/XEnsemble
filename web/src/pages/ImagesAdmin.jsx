@@ -272,7 +272,7 @@ export function ImagesAdminContent() {
     return (
         <div className={cn('flex flex-col h-full min-h-0', bgContainer)}>
             {/* Toolbar */}
-            <div className={cn('flex items-center justify-between gap-6 px-1 shrink-0')}>
+            <div className={cn('flex items-center justify-between gap-6 px-1 shrink-0 mb-4')}>
                 <div className="flex items-center gap-2 min-w-0">
                     <span className={cn('text-xs shrink-0', textSecondary)}>Agent</span>
                     <SelectMenu
