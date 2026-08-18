@@ -180,7 +180,7 @@ export default function OnboardingWizard({
   const showBack = step === 2 && !isSession;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-zinc-50">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-zinc-100">
       {/* Top bar: XEnsemble far-left, stepper center, close far-right */}
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-4">
         <div className="flex items-center gap-2">
@@ -206,8 +206,11 @@ export default function OnboardingWizard({
       </div>
 
       {/* Centered card */}
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto py-16 px-6">
-        <div className="w-full max-w-xl rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-y-auto py-16 px-6">
+        {/* Ambient corner glows (mock-inspired, project-tinted) */}
+        <div className="pointer-events-none absolute -top-24 -left-24 h-80 w-80 rounded-full bg-black/5 blur-3xl" aria-hidden />
+        <div className="pointer-events-none absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-black/5 blur-3xl" aria-hidden />
+        <div className="relative z-10 w-full max-w-xl rounded-lg border border-zinc-200 bg-white shadow-xl ring-1 ring-black/5">
           {/* Card header */}
           <div className="shrink-0 border-b border-zinc-200 px-6 pt-5 pb-4">
             <h2 className="text-lg font-bold text-zinc-900">
