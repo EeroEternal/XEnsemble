@@ -4,7 +4,6 @@ import { Loader2, Plus, RefreshCw, RotateCw, ScrollText, Search, Trash2 } from '
 import Button from '../components/Button';
 import BuildLogDialog from '../components/BuildLogDialog';
 import Input from '../components/Input';
-import PageHeader from '../components/PageHeader';
 import SelectMenu from '../components/SelectMenu';
 import StatusBadge from '../components/StatusBadge';
 import {
@@ -256,23 +255,6 @@ export function CustomImagesContent() {
 
   return (
     <>
-      <PageHeader
-        title="Custom Images"
-        description="Combine components into a pre-installed sandbox image."
-        actions={
-          <div className="flex items-center gap-2">
-            <Button onClick={loadAll} disabled={loading} size="md" variant="secondary">
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              Refresh
-            </Button>
-            <Button onClick={openCreate} disabled={!enabled || imageQuota.count >= imageQuota.max} size="md">
-              <Plus className="w-4 h-4" />
-              New Image
-            </Button>
-          </div>
-        }
-      />
-
       {!enabled && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           Custom image builds are currently disabled. Set <code className="bg-amber-100 px-1 rounded">CUSTOM_IMAGE_BUILDS_ENABLED=true</code> and ensure Docker is available.
@@ -286,14 +268,24 @@ export function CustomImagesContent() {
             <span className="text-amber-600 font-medium">(limit reached)</span>
           )}
         </div>
-        <div className="relative w-64 shrink-0">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
-          <Input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search images…"
-            className="w-full pl-8"
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative w-64">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search images…"
+              className="w-full pl-8"
+            />
+          </div>
+          <Button onClick={loadAll} disabled={loading} size="md" variant="secondary">
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            Refresh
+          </Button>
+          <Button onClick={openCreate} disabled={!enabled || imageQuota.count >= imageQuota.max} size="md">
+            <Plus className="w-4 h-4" />
+            New Image
+          </Button>
         </div>
       </div>
 

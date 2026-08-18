@@ -2,6 +2,7 @@ import { useContext, useEffect } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 
 import { AuthContext } from '../App';
+import PageHeader from '../components/PageHeader';
 import { ImagesAdminContent } from './ImagesAdmin';
 import { CustomImagesContent } from './CustomImages';
 import { consoleAdminPageClass, consoleButtonFocusClass } from '../lib/consoleTokens';
@@ -13,6 +14,11 @@ const TAB_AGENT = 'agent';
 const TAB_LABELS = {
   [TAB_CUSTOM]: 'Custom Images',
   [TAB_AGENT]: 'Agent Images',
+};
+
+const TAB_DESCRIPTIONS = {
+  [TAB_CUSTOM]: 'Combine components into a pre-installed sandbox image.',
+  [TAB_AGENT]: 'Rebuild agent sandbox images and manage which version is active.',
 };
 
 export default function ImagesManager() {
@@ -46,8 +52,13 @@ export default function ImagesManager() {
 
   return (
     <div className={consoleAdminPageClass}>
+      <PageHeader
+        title="Images"
+        description={TAB_DESCRIPTIONS[activeTab]}
+      />
+
       {tabs.length > 1 && (
-        <div className="mb-5 flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1 w-fit">
+        <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1 w-fit -mt-3">
           {tabs.map((tab) => (
             <button
               key={tab}
