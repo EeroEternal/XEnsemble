@@ -720,7 +720,6 @@ function AgentConsole({
                     writeTerminalData(
                       nonSync
                       + data.slice(lastCompleteStart, blockEnd)
-                      + '\x1b[?25l'
                     );
                   }, 100);
                 }
@@ -745,35 +744,17 @@ function AgentConsole({
                     const data = syncTermPending;
                     syncTermPending = '';
                     if (!data) return;
-                    // Find the last COMPLETE sync-term block (has both
-                    // ?2026h and ?2026l).  Use lastIndexOf('?2026l') to
-                    // find the last block end, then locate its matching
-                    // '?2026h'.  This correctly handles trailing incomplete
-                    // blocks (a ?2026h without a matching ?2026l) which
-                    // occur when the server's flush splits a block across
-                    // WS messages.  Previously, a trailing incomplete block
-                    // caused ALL complete blocks to be discarded (the code
-                    // only emitted data before the FIRST ?2026h), leaving
-                    // the screen frozen in 98.6% of timer fires.
                     const lastCompleteEnd = data.lastIndexOf('\x1b[?2026l');
                     if (lastCompleteEnd === -1) {
-                      // No complete block yet; keep buffering everything.
                       syncTermPending = data;
                       return;
                     }
                     const lastCompleteStart = data.lastIndexOf('\x1b[?2026h', lastCompleteEnd);
                     const blockEnd = lastCompleteEnd + '\x1b[?2026l'.length;
-                    // Save any trailing incomplete block (data after the
-                    // last complete block) for the next coalesce cycle.
                     const afterBlock = data.slice(blockEnd);
                     if (afterBlock.includes('\x1b[?2026h')) {
                       syncTermPending = afterBlock.slice(afterBlock.indexOf('\x1b[?2026h'));
                     }
-                    // Extract all non-sync-term data (content outside
-                    // ?2026h...?2026l blocks), stopping before any trailing
-                    // incomplete block.  This preserves terminal-state
-                    // sequences while discarding intermediate full-screen
-                    // redraws.
                     let nonSync = '';
                     let pos = 0;
                     while (pos < data.length) {
@@ -787,7 +768,6 @@ function AgentConsole({
                     writeTerminalData(
                       nonSync
                       + data.slice(lastCompleteStart, blockEnd)
-                      + '\x1b[?25l'
                     );
                   }, 100);
                 }
