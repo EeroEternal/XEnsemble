@@ -676,7 +676,7 @@ function AgentConsole({
                   // timer so blocks arriving in subsequent animation frames
                   // are accumulated before the final write.
                   syncTermPending = remaining;
-                  if (coalesceTimer) clearTimeout(coalesceTimer);
+                  if (coalesceTimer) return;
                   coalesceTimer = setTimeout(() => {
                     coalesceTimer = null;
                     if (disposed) return;
