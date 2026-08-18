@@ -1,5 +1,6 @@
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
+const path = require('path');
 
 function resolveOpencodeBin() {
     if (process.env.OPENCODE_BIN && fs.existsSync(process.env.OPENCODE_BIN)) return process.env.OPENCODE_BIN;
@@ -29,6 +30,7 @@ function buildPrompt(workspacePath) {
         '2. If there are native deps that need building (node-pty, sqlite3, bcrypt, sharp, prisma), the FIRST prepare step should be `apt-get update && apt-get install -y python3 build-essential`.',
         '3. The serve step must bring up the full app. Prefer root scripts (npm run dev / turbo run dev / nx run-many / pnpm -r dev). Use $PORT for the web port. Do not suffix with & or nohup.',
         '4. CRITICAL: commands run in ONE persistent bash. NEVER repeat `cd <dir>` across steps (working dir persists). Use `cd X && cmd` in ONE step, or --prefix.',
+        '5. opencode.json in the project root is a tool config file — ignore it, do not analyze it or include it in configFiles.',
         '',
         `Project workspace: ${workspacePath}`,
         '',
@@ -41,6 +43,31 @@ function buildPrompt(workspacePath) {
         }, null, 2),
         MARKER_END,
     ].join('\n');
+}
+
+// opencode 1.18.x ignores OPENAI_BASE_URL / OPENAI_MODEL env. The reliable way to point it at an
+// OpenAI-compatible endpoint with a chosen model is a project-root opencode.json provider +
+// `--model <provider>/<model>`. We generate that file here (restoring any pre-existing file after).
+function buildOpencodeConfig() {
+    const baseURL = process.env.LLM_ANALYZE_API_URL || process.env.OPENAI_BASE_URL;
+    const apiKey = process.env.LLM_ANALYZE_API_KEY || process.env.OPENAI_API_KEY;
+    const model = process.env.LLM_ANALYZE_MODEL || process.env.OPENAI_MODEL || 'deepseek-chat';
+    if (!baseURL || !apiKey || !model) return null;
+    const base = baseURL.replace(/\/chat\/completions\/?$/, '').replace(/\/+$/, '');
+    const models = {};
+    for (const m of new Set([model, process.env.LLM_VERIFY_MODEL, process.env.OPENAI_MODEL].filter(Boolean))) {
+        models[m] = { name: m };
+    }
+    return {
+        provider: {
+            xensemble: {
+                npm: '@ai-sdk/openai-compatible',
+                name: 'XEnsemble OpenAI-compatible',
+                options: { baseURL: base, apiKey },
+                models,
+            },
+        },
+    };
 }
 
 function stripAnsi(s) {
@@ -87,25 +114,41 @@ function parsePlan(raw) {
 
 async function analyzeProjectWithOpencode(workspacePath) {
     if (!workspacePath) return null;
+    const cfg = buildOpencodeConfig();
+    if (!cfg) {
+        return { ok: false, warning: 'opencode LLM config missing (need LLM_ANALYZE_API_URL + LLM_ANALYZE_API_KEY + LLM_ANALYZE_MODEL)' };
+    }
+    const modelName = process.env.LLM_ANALYZE_MODEL || process.env.OPENAI_MODEL || 'deepseek-chat';
+    const cfgPath = path.join(workspacePath, 'opencode.json');
+    let prevCfg = null;
+    let cfgWritten = false;
+    try {
+        if (fs.existsSync(cfgPath)) prevCfg = fs.readFileSync(cfgPath, 'utf8');
+        fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+        cfgWritten = true;
+    } catch (e) {
+        return { ok: false, warning: `could not write opencode config: ${e.message}` };
+    }
+    const cleanup = () => {
+        if (!cfgWritten) return;
+        try {
+            if (prevCfg != null) fs.writeFileSync(cfgPath, prevCfg);
+            else fs.rmSync(cfgPath, { force: true });
+        } catch { /* ignore */ }
+    };
     const env = {
         ...process.env,
-        OPENAI_BASE_URL: process.env.LLM_ANALYZE_API_URL || process.env.OPENAI_BASE_URL,
-        OPENAI_API_KEY: process.env.LLM_ANALYZE_API_KEY || process.env.OPENAI_API_KEY,
-        OPENAI_MODEL: process.env.LLM_ANALYZE_MODEL || process.env.OPENAI_MODEL,
-        // opencode 是 node 实现的，给它大堆避免探索大项目时 V8 OOM
+        // opencode is node-based; give it lots of heap so V8 does not OOM exploring big repos
         NODE_OPTIONS: (process.env.NODE_OPTIONS || '') + ' --max-old-space-size=6144',
         NO_COLOR: '1',
         TERM: 'dumb',
     };
-    if (!env.OPENAI_BASE_URL || !env.OPENAI_API_KEY) {
-        return { ok: false, warning: 'opencode LLM env not configured' };
-    }
     const prompt = buildPrompt(workspacePath);
     return new Promise((resolve) => {
         let stdout = '';
         let stderr = '';
         let resolved = false;
-        const child = spawn(OPENCODE_BIN, ['run', '--auto', prompt], {
+        const child = spawn(OPENCODE_BIN, ['run', '--auto', '--model', `xensemble/${modelName}`, prompt], {
             cwd: workspacePath,
             env,
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -113,6 +156,7 @@ async function analyzeProjectWithOpencode(workspacePath) {
         const timer = setTimeout(() => {
             if (resolved) return;
             resolved = true;
+            cleanup();
             child.kill('SIGTERM');
             resolve({ ok: false, warning: 'opencode run timeout' });
         }, PROMPT_TIMEOUT_MS);
@@ -126,12 +170,14 @@ async function analyzeProjectWithOpencode(workspacePath) {
             if (resolved) return;
             resolved = true;
             clearTimeout(timer);
+            cleanup();
             resolve({ ok: false, warning: `opencode spawn failed: ${err.message}` });
         });
         child.on('exit', (code) => {
             if (resolved) return;
             resolved = true;
             clearTimeout(timer);
+            cleanup();
             const raw = extractPlan(stdout) || extractPlan(stderr);
             if (!raw) {
                 return resolve({ ok: false, warning: `opencode exit ${code}, no markers in output (stdout tail: ${stdout.slice(-200)}, stderr tail: ${stderr.slice(-200)})` });

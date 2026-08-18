@@ -12,6 +12,8 @@ const crypto = require('crypto');
 const policy = require('../auth/PolicyService');
 const { sendPublicError, sanitizePublicError } = require('../http/publicError');
 const { RuntimeError } = require('../runtime/interfaces');
+const auth = require('../auth');
+const { injectSecretsIntoTemplate } = require('../deployments/injectSecrets');
 
 const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -182,6 +184,50 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
             request.log.error(err);
             return sendPublicError(reply, err, 'Tunnel preview failed', err instanceof RuntimeError ? err.statusCode : 502);
         }
+    });
+
+    // 一键部署：从用户 vault（schema.secrets）注入真实值到 configFile template。
+    // 不写盘——前端拿到新 template 后用现有的 PUT /api/v1/workspace/file 写入。
+    fastify.post('/api/v1/projects/:projectId/deploy/inject-secrets', { preValidation: [fastify.authenticate, fastify.requireActive] }, async (request, reply) => {
+        const project = await getProjectForUser(request.user.id, request.params.projectId);
+        if (!project) return reply.code(404).send({ error: 'Project not found' });
+
+        const configFile = request.body?.configFile;
+        if (!configFile || typeof configFile.template !== 'string') {
+            return reply.code(400).send({ error: 'configFile.template is required' });
+        }
+        const keys = Array.isArray(configFile.keys) ? configFile.keys : [];
+
+        let secretMap = {};
+        try {
+            const rows = await db.select().from(schema.secrets).where(eq(schema.secrets.userId, request.user.id));
+            if (rows.length > 0) {
+                try {
+                    secretMap = auth.decryptSecrets(rows[0].encryptedData) || {};
+                } catch (_) {
+                    secretMap = {};
+                }
+            }
+        } catch (_) {
+            secretMap = {};
+        }
+
+        const { template, injected } = injectSecretsIntoTemplate(configFile.template, keys, secretMap);
+        return {
+            path: configFile.path,
+            template,
+            injected,
+            missing: keys.filter((k) => !secretMap[k] || String(secretMap[k]).trim() === ''),
+        };
+    });
+
+    // 一键部署：中止当前部署——停掉 tunnel（deploying 中的预览隧道）并返回 ok。
+    // 前端配合 sendInput('\u0003') (Ctrl+C) 中断当前前台命令 + AbortController 停止等待。
+    fastify.post('/api/v1/projects/:projectId/deploy/cancel', { preValidation: [fastify.authenticate, fastify.requireActive] }, async (request, reply) => {
+        const project = await getProjectForUser(request.user.id, request.params.projectId);
+        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        try { stopByProjectId(project.id); } catch (_) { /* ignore */ }
+        return { ok: true };
     });
 }
 

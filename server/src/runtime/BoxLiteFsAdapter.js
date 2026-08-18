@@ -1,6 +1,5 @@
 const { FsAdapter, RuntimeError } = require('./interfaces');
 const BoxLiteClient = require('./BoxLiteClient');
-const { buildSessionStateDirRef } = require('../session/stateDirRef');
 const { isHiddenWorkspacePath } = require('../workspace/hiddenPaths');
 
 function safeRel(p) {
@@ -95,15 +94,16 @@ class BoxLiteFsAdapter extends FsAdapter {
     }
 
     resolveStateDir(workspaceRoot, sessionId) {
-        const stateDirRef = buildSessionStateDirRef(sessionId);
-        const root = String(workspaceRoot || '/workspace').replace(/\/$/, '');
-        const rel = stateDirRef.replace(/\\/g, '/');
-        const stateDirPath = `${root}/${rel}`;
-        return { stateDirRef, stateDirPath };
+        const stateDirRef = `/var/lib/xensemble/state/${sessionId}`;
+        return { stateDirRef, stateDirPath: stateDirRef };
     }
 
     boxTarget(rootDir, relativePath) {
-        const rel = safeRel(relativePath);
+        const raw = String(relativePath || '');
+        if (raw.startsWith('/')) {
+            return raw;
+        }
+        const rel = safeRel(raw);
         const cwd = '/workspace';
         if (rel.startsWith('/')) {
             return rel;

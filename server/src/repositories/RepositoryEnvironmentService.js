@@ -277,36 +277,28 @@ function scaffoldXEnsemble(projectDir, opts = {}) {
     return { baseDir };
 }
 
-async function scaffoldXEnsembleWithFs(fsAdapter, workspaceRoot, opts = {}) {
-    const runtimeRef = opts.runtimeRef;
-    const fsOptions = runtimeRef ? { runtimeRef } : {};
+async function scaffoldXEnsembleWithFs(workspaceRoot, opts = {}) {
+    const baseDir = path.join(workspaceRoot, '.xensemble');
     const subdirs = ['rules', 'memory', 'prompts', 'workflows', 'cache'];
     for (const sub of subdirs) {
-        await fsAdapter.mkdirp(workspaceRoot, `.xensemble/${sub}`, fsOptions);
+        fs.mkdirSync(path.join(baseDir, sub), { recursive: true });
     }
 
-    if (!await fsAdapter.exists(workspaceRoot, '.xensemble/.gitignore', fsOptions)) {
-        await fsAdapter.fsWrite(
-            workspaceRoot,
-            '.xensemble/.gitignore',
-            '# XEnsemble workspace metadata — do not commit\n*\n!.gitignore\n',
-            fsOptions,
-        );
+    const gitignorePath = path.join(baseDir, '.gitignore');
+    if (!fs.existsSync(gitignorePath)) {
+        fs.writeFileSync(gitignorePath, '# XEnsemble workspace metadata — do not commit\n*\n!.gitignore\n', 'utf8');
     }
 
+    const configPath = path.join(baseDir, 'config.json');
     const config = {
         version: 1,
         auto_commit_on_exit: opts.autoCommitOnExit !== false,
         base_branch: opts.baseBranch || 'main',
         default_work_branch_prefix: 'xensemble/',
     };
-    await fsAdapter.fsWrite(
-        workspaceRoot,
-        '.xensemble/config.json',
-        `${JSON.stringify(config, null, 2)}\n`,
-        fsOptions,
-    );
-    return { baseDir: '.xensemble' };
+    fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+
+    return { baseDir };
 }
 
 module.exports = {

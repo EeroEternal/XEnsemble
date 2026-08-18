@@ -349,10 +349,9 @@ function registerGitRoutes(fastify) {
                     branchSha = createResult.sha;
                 }
 
-                await scaffoldXEnsembleWithFs(runtime.fs, ready.workspacePath, {
+                await scaffoldXEnsembleWithFs(ready.hostWorkspacePath || ready.workspacePath, {
                     baseBranch,
                     autoCommitOnExit: true,
-                    runtimeRef: ready.runtime?.runtimeRef,
                 });
 
                 await db.update(schema.projects)
