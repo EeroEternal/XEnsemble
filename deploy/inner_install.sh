@@ -138,16 +138,15 @@ if command -v psql >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Run the upstream installer (build + migrate). Its systemd/nginx section
-#    targets the upstream machine (xinference user / xensemble.dev HTTPS), so
-#    failures there are tolerated — this script re-installs both below.
+# 4. Run the upstream installer (build + migrate only). SKIP_SERVICES=1 makes
+#    install.sh skip its systemd/nginx tail (which targets the upstream
+#    machine: xinference user / xensemble.dev HTTPS / sites-available layout)
+#    so this script can re-install both with the intranet config below.
+#    Errors from build/migrate are propagated (set -euo pipefail is active),
+#    so a failed build/migrate now fails the CI job instead of being masked.
 # ---------------------------------------------------------------------------
-echo "==> [inner] Running upstream install.sh (systemd/nginx section may fail here)"
-set +e
-bash "$APP_ROOT/deploy/install.sh"
-INSTALL_RC=$?
-set -e
-echo "==> [inner] upstream install.sh finished rc=$INSTALL_RC (ignored)"
+echo "==> [inner] Running upstream install.sh (build + migrate; services skipped)"
+SKIP_SERVICES=1 bash "$APP_ROOT/deploy/install.sh"
 
 # ---------------------------------------------------------------------------
 # 5. Overwrite systemd unit for THIS intranet host (root + this path).

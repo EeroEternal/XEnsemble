@@ -72,6 +72,12 @@ else
   (cd server && npm run db:migrate)
 fi
 
+if [ "${SKIP_SERVICES:-0}" = "1" ]; then
+  echo "==> SKIP_SERVICES=1; skipping systemd/nginx (caller sets them up)"
+  echo "==> Done (build + migrate only). Check: curl -sI http://127.0.0.1:3888/api/v1/llm/health"
+  exit 0
+fi
+
 if ! command -v systemctl >/dev/null 2>&1; then
   echo "==> No systemd on this host; skipping systemd/nginx. Start manually:"
   echo "    set -a && source deploy/xensemble.env && set +a && node server/src/server.js"
