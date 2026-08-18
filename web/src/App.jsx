@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
 import Login from './pages/Login';
 import Sessions from './pages/Sessions';
 import AgentsAdmin from './pages/AgentsAdmin';
@@ -13,7 +14,7 @@ import ConfirmDialog from './components/ConfirmDialog';
 import { useWorkspaces } from './hooks/useWorkspaces';
 import { cn } from './lib/utils';
 import { APP_SHELL_ADMIN_CLASS } from './lib/appShellLayout';
-import { bgCanvas } from './lib/consoleTokens';
+import { bgCanvas, consoleButtonFocusClass } from './lib/consoleTokens';
 import { getAccessToken, setTokens, clearTokens, apiFetch, isStoredAuthStale, setAuthExpiredHandler } from './lib/api';
 import { TerminalThemeProvider } from './hooks/useTerminalTheme.jsx';
 
@@ -58,6 +59,12 @@ function AuthenticatedLayout({
   const isCustomImages = location.pathname === '/custom-images';
   const isImagesManager = isCustomImages || isImagesAdmin;
 
+  const isSettingsRoute = isAgentsAdmin || isUsersAdmin || isGatewayAdmin || isImagesManager;
+  const settingsTitle = isImagesManager ? 'Images'
+    : isAgentsAdmin ? 'Agents'
+    : isUsersAdmin ? 'Users'
+    : isGatewayAdmin ? 'Gateway' : '';
+
   const offRouteClass = 'pointer-events-none invisible absolute inset-0 z-0 [&_*]:pointer-events-none';
 
   const onSelectSession = useCallback((session) => {
@@ -88,11 +95,26 @@ function AuthenticatedLayout({
       >
         <BrandMark className="h-7 w-7 shrink-0" iconClassName="h-3.5 w-3.5" />
         <span className="text-sm font-bold text-zinc-900 shrink-0">XEnsemble</span>
-        <div id="xe-topbar-dynamic" className="flex-1 min-w-0 flex items-center justify-between gap-3" />
+        {isSettingsRoute ? (
+          <div className="flex-1 min-w-0 flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-zinc-500 truncate">{settingsTitle}</span>
+            <button
+              type="button"
+              onClick={() => navigate('/sessions')}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 ${consoleButtonFocusClass}`}
+              title="Back to workspace"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" strokeWidth={1.75} />
+              Back to workspace
+            </button>
+          </div>
+        ) : (
+          <div id="xe-topbar-dynamic" className="flex-1 min-w-0 flex items-center justify-between gap-3" />
+        )}
       </div>
 
       <div className="flex flex-1 min-h-0">
-      {!wizardActive && (
+      {!wizardActive && !isSettingsRoute && (
       <AppSidebar
         agents={agents}
         sessions={sessions}
