@@ -131,7 +131,7 @@ function AgentConsole({
   // eslint-disable-next-line no-unused-vars
   const [ended, setEnded] = useState(!shouldConnect && !shouldReplayIdle);
   // First-use guide card: shown only for a fresh live session with no output yet.
-  const [guideVisible, setGuideVisible] = useState(shouldConnect && !shouldReplayIdle);
+  const [guideVisible, setGuideVisible] = useState(false);
   const guideVisibleRef = useRef(guideVisible);
   guideVisibleRef.current = guideVisible;
 
