@@ -7,7 +7,6 @@ import {
   ChevronLeft,
   Loader2,
   X,
-  GitBranch,
   Plus,
 } from 'lucide-react';
 import RepoImportDialog from './git/RepoImportDialog';
@@ -34,16 +33,14 @@ function StepDot({ n, label, active, done }) {
     <div className="flex items-center gap-2">
       <span
         className={`flex h-7 w-7 items-center justify-center rounded-full border text-sm font-semibold transition-colors ${
-          active
-            ? 'border-black bg-black text-white'
-            : done
-              ? 'border-zinc-900 bg-zinc-900 text-white'
-              : 'border-zinc-300 bg-white text-zinc-400'
+          active || done
+            ? 'border-white bg-white text-zinc-900'
+            : 'border-zinc-600 bg-zinc-800 text-zinc-500'
         }`}
       >
         {done ? <Check className="h-4 w-4" /> : n}
       </span>
-      <span className={`text-sm font-medium ${active ? 'text-zinc-900' : 'text-zinc-400'}`}>{label}</span>
+      <span className={`text-sm font-medium ${active ? 'text-zinc-100' : done ? 'text-zinc-400' : 'text-zinc-500'}`}>{label}</span>
     </div>
   );
 }
@@ -180,18 +177,18 @@ export default function OnboardingWizard({
   const showBack = step === 2 && !isSession;
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-zinc-100">
-      {/* Top bar: XEnsemble far-left, stepper center, close far-right */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-4">
-        <div className="flex items-center gap-2">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-zinc-900">
+      {/* Top bar: dark chrome - XEnsemble far-left, stepper centered, close far-right */}
+      <div className="grid h-12 shrink-0 grid-cols-3 items-center border-b border-zinc-800 bg-zinc-900 px-4">
+        <div className="flex items-center gap-2 justify-self-start">
           <BrandMark className="h-7 w-7" iconClassName="h-3.5 w-3.5" />
-          <span className="text-sm font-bold text-zinc-900">XEnsemble</span>
+          <span className="text-sm font-bold text-zinc-100">XEnsemble</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-center gap-2 justify-self-center">
           {stepper.map((s, i) => (
             <Fragment key={s.n}>
               <StepDot n={s.n} label={s.label} active={s.active} done={s.done} />
-              {i < stepper.length - 1 && <ChevronRight className="h-3.5 w-3.5 text-zinc-300" />}
+              {i < stepper.length - 1 && <ChevronRight className="h-3.5 w-3.5 text-zinc-600" />}
             </Fragment>
           ))}
         </div>
@@ -199,28 +196,23 @@ export default function OnboardingWizard({
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className={`shrink-0 rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 ${consoleButtonFocusClass}`}
+          className={`shrink-0 justify-self-end rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 ${consoleButtonFocusClass}`}
         >
           <X className="h-4 w-4" />
         </button>
       </div>
 
-      {/* Centered card */}
+      {/* Centered card (prominent white dialog on dark backdrop, settings-style) */}
       <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-y-auto py-16 px-6">
-        {/* Ambient corner glows (mock-inspired, project-tinted) */}
-        <div className="pointer-events-none absolute -top-24 -left-24 h-80 w-80 rounded-full bg-black/5 blur-3xl" aria-hidden />
-        <div className="pointer-events-none absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-black/5 blur-3xl" aria-hidden />
-        <div className="relative z-10 w-full max-w-xl rounded-lg border border-zinc-200 bg-white shadow-xl ring-1 ring-black/5">
-          {/* Card header */}
+        {/* Ambient corner glows (subtle on dark) */}
+        <div className="pointer-events-none absolute -top-24 -left-24 h-80 w-80 rounded-full bg-white/5 blur-3xl" aria-hidden />
+        <div className="pointer-events-none absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-white/5 blur-3xl" aria-hidden />
+        <div className="relative z-10 w-full max-w-xl overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-2xl ring-1 ring-black/20">
+          {/* Card header (no subtitle) */}
           <div className="shrink-0 border-b border-zinc-200 px-6 pt-5 pb-4">
             <h2 className="text-lg font-bold text-zinc-900">
               {isSession ? 'Start a new agent session' : 'Create your workspace'}
             </h2>
-            <p className="mt-0.5 text-xs text-zinc-500">
-              {isSession
-                ? 'Pick an agent to launch a new session in this workspace.'
-                : 'Set up a workspace and launch your first agent in two steps.'}
-            </p>
           </div>
 
           {/* Card body */}
@@ -242,9 +234,6 @@ export default function OnboardingWizard({
                       <Github className="h-5 w-5" />
                     </span>
                     <span className="text-sm font-semibold text-zinc-900">Import from Git</span>
-                    <span className="text-[11px] leading-relaxed text-zinc-500">
-                      Clone a GitHub / GitLab / Gitea repository with its branch history.
-                    </span>
                   </button>
 
                   <button
@@ -260,9 +249,6 @@ export default function OnboardingWizard({
                       <Sparkles className="h-5 w-5" />
                     </span>
                     <span className="text-sm font-semibold text-zinc-900">Start from blank</span>
-                    <span className="text-[11px] leading-relaxed text-zinc-500">
-                      Create an empty workspace and begin from scratch.
-                    </span>
                   </button>
                 </div>
 
@@ -298,10 +284,6 @@ export default function OnboardingWizard({
                             </button>
                           ))}
                         </div>
-                        <p className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-                          <GitBranch className="h-3 w-3" />
-                          Select a provider to connect and import a repository.
-                        </p>
                         {gitProvider === 'gitea' && (
                           <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">
                             Gitea OAuth is not configured. Please ask an administrator to set it up.
@@ -326,9 +308,6 @@ export default function OnboardingWizard({
                       autoFocus
                       className={consoleInputClass}
                     />
-                    <p className="text-[11px] text-zinc-500">
-                      A workspace is an isolated environment that stores your project files and session history.
-                    </p>
                   </div>
                 )}
               </>
@@ -337,9 +316,6 @@ export default function OnboardingWizard({
                 {/* Step 2: agent selection */}
                 <div>
                   <h3 className="text-sm font-semibold text-zinc-900">Select an agent</h3>
-                  <p className="mt-0.5 text-xs text-zinc-500">
-                    You can create or switch agents anytime after entering the workspace.
-                  </p>
                 </div>
 
                 {/* Built-in | Custom toggle */}
