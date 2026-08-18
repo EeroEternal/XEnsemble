@@ -16,6 +16,8 @@
 4. **执行面三层 Provider**：执行面统一通过 `RuntimeProvider` 抽象管理生命周期，按部署成熟度分为 Local Process、BoxLite Managed Sandbox、K8s Production Runtime 三层；控制面 API、Session、Deployment、Workspace 逻辑不得绑定具体底层。
 5. **生产就绪默认**：强制安全密钥、Refresh Token、进程级隔离、Secrets 不落地。Local 层服务于开发/PC/单机早期部署；BoxLite 层服务于托管 sandbox 隔离；K8s 层服务于多机、多用户、弹性伸缩的生产运维部署。
 
+用户可见概念（Workspace / Session / Agent / Image / Environment / Gateway）与 Console 主路径见 **[`Concepts.md`](./Concepts.md)**。
+
 ---
 
 ## 2. 核心约束

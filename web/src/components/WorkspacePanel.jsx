@@ -37,7 +37,7 @@ const PINNED_TABS = [
 
 const ADDABLE_TABS = [
   { key: 'pullrequests', label: 'Pull Requests', icon: GitPullRequest },
-  { key: 'terminal', label: 'Terminal', icon: Terminal },
+  { key: 'terminal', label: 'Workspace shell', icon: Terminal },
   { key: 'preview', label: 'Preview', icon: Monitor },
   { key: 'browser', label: 'Browser', icon: Globe },
   { key: 'deploy', label: 'Deploy', icon: Rocket },
@@ -647,7 +647,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
             {shellContent || (
               <div className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-400 h-full">
                 <Terminal className="h-12 w-12" />
-                <p className="text-sm">Terminal</p>
+                <p className="text-sm">Workspace shell</p>
               </div>
             )}
           </div>

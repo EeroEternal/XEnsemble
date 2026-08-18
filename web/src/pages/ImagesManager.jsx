@@ -47,7 +47,7 @@ export default function ImagesManager() {
   return (
     <div className={consoleAdminPageClass}>
       {tabs.length > 1 && (
-        <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1 w-fit">
+        <div className="mb-5 flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1 w-fit">
           {tabs.map((tab) => (
             <button
               key={tab}
@@ -68,7 +68,7 @@ export default function ImagesManager() {
       )}
 
       {activeTab === TAB_AGENT
-        ? <ImagesAdminContent />
+        ? <div className="flex min-h-0 flex-1 flex-col"><ImagesAdminContent /></div>
         : <CustomImagesContent />}
     </div>
   );

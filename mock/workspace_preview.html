@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XEnsemble - Workspace 交互原型</title>
+  <!-- Tailwind CSS CDN for rich styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    /* Custom scrollbars */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #18181b; }
+    ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+    
+    /* Code diff styling */
+    .diff-add { background-color: rgba(34, 197, 94, 0.15); color: #86efac; }
+    .diff-del { background-color: rgba(239, 68, 68, 0.15); color: #fca5a5; }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 h-screen flex flex-col font-sans select-none overflow-hidden" onclick="handleGlobalClick(event)">
+
+  <!-- ================= TOP STATUS BAR (Clean, Non-Redundant & Unified) ================= -->
+  <header class="h-12 border-b border-zinc-800 bg-zinc-900 px-4 flex items-center justify-between z-30 shrink-0">
+    
+    <!-- Left: Brand & Workspace Switcher Menu -->
+    <div class="flex items-center space-x-3 relative">
+      <div class="flex items-center space-x-2 font-bold tracking-wider text-sm bg-zinc-800 px-2.5 py-1 rounded-md border border-zinc-700">
+        <i data-lucide="layers" class="w-4 h-4 text-emerald-400"></i>
+        <span>XEnsemble</span>
+      </div>
+      <span class="text-zinc-600">/</span>
+
+      <!-- WORKSPACE SWITCHER DROPDOWN TRIGGER (SelectMenu Component) -->
+      <div class="relative">
+        <button id="ws-switcher-trigger" onclick="toggleWorkspaceDropdown(event)" class="flex items-center space-x-2 text-xs font-medium text-zinc-100 bg-zinc-950 hover:bg-zinc-850 px-3 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 shadow-sm transition">
+          <i data-lucide="box" class="w-3.5 h-3.5 text-emerald-400"></i>
+          <span id="current-ws-name" class="font-bold tracking-wide">ecommerce-checkout</span>
+          <span class="px-1.5 py-0.2 text-[9px] bg-emerald-950 text-emerald-400 border border-emerald-800/60 rounded">Running</span>
+          <i data-lucide="chevrons-up-down" class="w-3.5 h-3.5 text-zinc-400"></i>
+        </button>
+
+        <!-- WORKSPACE SWITCHER DROPDOWN POPOVER -->
+        <div id="ws-switcher-dropdown" class="hidden absolute left-0 top-full mt-1.5 w-80 bg-zinc-900 border border-zinc-700/80 rounded-xl shadow-2xl z-50 p-2 space-y-2 text-xs backdrop-blur-lg">
+          <div class="px-2 py-1 flex items-center justify-between border-b border-zinc-800">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-zinc-400">切换工作空间 (Workspaces)</span>
+            <span class="text-[10px] text-zinc-500">共 3 个</span>
+          </div>
+
+          <div class="relative px-1">
+            <i data-lucide="search" class="w-3 h-3 text-zinc-500 absolute left-3 top-2.5"></i>
+            <input type="text" placeholder="搜索 Workspace..." class="w-full bg-zinc-950 border border-zinc-800 rounded-md pl-7 pr-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-emerald-500">
+          </div>
+
+          <div class="space-y-1 max-h-56 overflow-y-auto px-1">
+            <div onclick="switchWorkspace('ecommerce-checkout', 'feature/stripe-payment', 'Node 20 Sandbox', '3 files modified')" class="p-2 rounded-lg bg-zinc-800/90 border border-emerald-500/50 cursor-pointer flex items-center justify-between hover:bg-zinc-750 transition">
+              <div class="space-y-0.5 truncate">
+                <div class="flex items-center space-x-1.5 font-semibold text-zinc-100 truncate">
+                  <i data-lucide="box" class="w-3.5 h-3.5 text-emerald-400 shrink-0"></i>
+                  <span class="truncate">ecommerce-checkout</span>
+                </div>
+                <div class="text-[10px] text-zinc-400 flex items-center space-x-2 font-mono">
+                  <span>🌿 feature/stripe-payment</span>
+                  <span>● 3 改动</span>
+                </div>
+              </div>
+              <i data-lucide="check" class="w-4 h-4 text-emerald-400 shrink-0"></i>
+            </div>
+
+            <div onclick="switchWorkspace('ai-gateway-proxy', 'main', 'Go 1.22 Runtime', 'Clean')" class="p-2 rounded-lg hover:bg-zinc-800/60 border border-transparent hover:border-zinc-700 cursor-pointer flex items-center justify-between text-zinc-300 transition">
+              <div class="space-y-0.5 truncate">
+                <div class="flex items-center space-x-1.5 font-medium truncate">
+                  <i data-lucide="box" class="w-3.5 h-3.5 text-zinc-400 shrink-0"></i>
+                  <span class="truncate">ai-gateway-proxy</span>
+                </div>
+                <div class="text-[10px] text-zinc-500 flex items-center space-x-2 font-mono">
+                  <span>🌿 main</span>
+                  <span>● 同步就绪</span>
+                </div>
+              </div>
+            </div>
+
+            <div onclick="switchWorkspace('docs-portal-v2', 'docs/agent-ux', 'Next.js 14', '1 file modified')" class="p-2 rounded-lg hover:bg-zinc-800/60 border border-transparent hover:border-zinc-700 cursor-pointer flex items-center justify-between text-zinc-300 transition">
+              <div class="space-y-0.5 truncate">
+                <div class="flex items-center space-x-1.5 font-medium truncate">
+                  <i data-lucide="box" class="w-3.5 h-3.5 text-zinc-400 shrink-0"></i>
+                  <span class="truncate">docs-portal-v2</span>
+                </div>
+                <div class="text-[10px] text-zinc-500 flex items-center space-x-2 font-mono">
+                  <span>🌿 docs/agent-ux</span>
+                  <span>● 1 改动</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-1.5 border-t border-zinc-800">
+            <button onclick="window.location.href='onboarding_flow.html'" class="w-full p-2 bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/40 text-emerald-300 rounded-lg text-xs font-semibold flex items-center justify-center space-x-1.5 transition">
+              <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+              <span>创建新的 Workspace...</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Center: Minimalist Active Branch Badge (No redundant PR or sync buttons) -->
+    <div class="flex items-center space-x-2 bg-zinc-950 px-3 py-1 rounded-full border border-zinc-800 text-xs">
+      <i data-lucide="git-branch" class="w-3.5 h-3.5 text-emerald-400"></i>
+      <span id="top-branch-label" class="font-mono text-zinc-200">feature/stripe-payment</span>
+    </div>
+
+    <!-- Right: COMPACT PREVIEW TOGGLE & Clean Controls -->
+    <div class="flex items-center space-x-3 text-xs">
+      
+      <!-- COMPACT INTEGRATED PREVIEW BUTTON WITH AUTO-TOGGLE SWITCH -->
+      <div class="flex items-center bg-zinc-950 rounded-lg border border-zinc-800 p-0.5 shadow-sm">
+        <button onclick="switchWorkstationTab('preview')" class="flex items-center space-x-1.5 px-2.5 py-1 text-zinc-200 hover:text-white rounded-md hover:bg-zinc-850 font-medium transition" title="点击立即查看实时网页预览 (:3000)">
+          <i data-lucide="play-circle" class="w-3.5 h-3.5 text-blue-400"></i>
+          <span>Preview</span>
+        </button>
+
+        <span class="text-zinc-700 select-none">|</span>
+
+        <button onclick="togglePreviewAutoSwitch()" id="preview-toggle-btn" class="flex items-center space-x-1 px-2 py-1 rounded-md text-[10px] text-emerald-400 font-semibold bg-emerald-950/60 border border-emerald-800/60 ml-0.5 transition" title="点击切换：开启/关闭 Auto Live 自动切屏">
+          <span id="preview-toggle-dot" class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span id="preview-toggle-text">Auto</span>
+        </button>
+      </div>
+
+      <!-- Icon Actions -->
+      <div class="flex items-center space-x-1 pl-1 border-l border-zinc-800">
+        <a href="agent_image_builder.html" title="进入 Agent 镜像中心" class="p-1.5 text-zinc-400 hover:text-purple-300 hover:bg-zinc-800 rounded-lg transition">
+          <i data-lucide="disc" class="w-4 h-4"></i>
+        </a>
+        <a href="onboarding_flow.html" title="新建 Workspace" class="p-1.5 text-zinc-400 hover:text-emerald-300 hover:bg-zinc-800 rounded-lg transition">
+          <i data-lucide="plus" class="w-4 h-4"></i>
+        </a>
+        <div class="w-7 h-7 rounded-full bg-gradient-to-tr from-purple-500 to-emerald-500 flex items-center justify-center font-bold text-white text-xs ring-1 ring-zinc-700 ml-1">
+          U
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ================= MAIN WORKSPACE BODY ================= -->
+  <div class="flex-1 flex overflow-hidden">
+
+    <!-- 1. LEFT SIDEBAR: PURE AGENT SESSIONS HUB -->
+    <aside class="w-64 border-r border-zinc-800 bg-zinc-900/90 flex flex-col shrink-0">
+      <div class="p-3.5 border-b border-zinc-800 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <i data-lucide="bot" class="w-4 h-4 text-emerald-400"></i>
+          <span class="text-xs font-bold text-zinc-100 uppercase tracking-wider">Agent 会话中心</span>
+        </div>
+        <button onclick="openNewSessionModal()" class="px-2.5 py-1 text-zinc-200 hover:text-white bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 rounded-md text-[11px] font-medium flex items-center space-x-1 transition shadow-sm">
+          <i data-lucide="plus" class="w-3 h-3"></i>
+          <span>新建</span>
+        </button>
+      </div>
+
+      <!-- Session List -->
+      <div class="flex-1 p-3 overflow-y-auto space-y-2" id="session-list-container">
+        
+        <!-- Active Session: Claude 3.7 -->
+        <div onclick="switchSession('claude')" id="session-item-claude" class="p-3 rounded-xl bg-zinc-800/90 border-2 border-emerald-500/80 text-xs cursor-pointer shadow-sm transition">
+          <div class="flex items-center justify-between mb-1.5">
+            <div class="flex items-center space-x-2 font-bold text-zinc-100">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>Claude 3.7 Sonnet</span>
+            </div>
+            <span id="session-badge-claude" class="text-[10px] text-emerald-300 bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-800/60 font-semibold">Active</span>
+          </div>
+          <p class="text-[11px] text-zinc-300 leading-snug">接入 Stripe Webhook 签名校验与折扣...</p>
+          <div class="mt-2 text-[10px] text-zinc-400 flex items-center justify-between font-mono border-t border-zinc-700/50 pt-1.5">
+            <span class="text-purple-300 flex items-center space-x-1"><i data-lucide="disc" class="w-2.5 h-2.5"></i><span>fullstack-arch:v2</span></span>
+            <span>刚刚活跃</span>
+          </div>
+        </div>
+
+        <!-- Inactive Session: Kimi 2.0 -->
+        <div onclick="switchSession('kimi')" id="session-item-kimi" class="p-3 rounded-xl bg-zinc-950/70 hover:bg-zinc-800/50 border border-zinc-800 hover:border-zinc-700 text-xs cursor-pointer transition">
+          <div class="flex items-center justify-between mb-1.5">
+            <div class="flex items-center space-x-2 font-semibold text-zinc-300">
+              <span class="w-2 h-2 rounded-full bg-zinc-600"></span>
+              <span>Kimi 2.0 (Long Context)</span>
+            </div>
+            <span id="session-badge-kimi" class="text-[10px] text-zinc-500">2h ago</span>
+          </div>
+          <p class="text-[11px] text-zinc-400 leading-snug">重构用户权限与多租户隔离方案...</p>
+          <div class="mt-2 text-[10px] text-zinc-500 flex items-center justify-between font-mono border-t border-zinc-800/50 pt-1.5">
+            <span class="flex items-center space-x-1"><i data-lucide="disc" class="w-2.5 h-2.5"></i><span>kimi-doc-analyst:v1.5</span></span>
+            <span>已休眠</span>
+          </div>
+        </div>
+
+        <!-- Inactive Session: DeepSeek -->
+        <div onclick="switchSession('codex')" id="session-item-codex" class="p-3 rounded-xl bg-zinc-950/70 hover:bg-zinc-800/50 border border-zinc-800 hover:border-zinc-700 text-xs cursor-pointer transition">
+          <div class="flex items-center justify-between mb-1.5">
+            <div class="flex items-center space-x-2 font-semibold text-zinc-300">
+              <span class="w-2 h-2 rounded-full bg-zinc-600"></span>
+              <span>DeepSeek-V3 / Codex</span>
+            </div>
+            <span id="session-badge-codex" class="text-[10px] text-zinc-500">Yesterday</span>
+          </div>
+          <p class="text-[11px] text-zinc-400 leading-snug">编写结算流程 Jest 单元测试用例...</p>
+          <div class="mt-2 text-[10px] text-zinc-500 flex items-center justify-between font-mono border-t border-zinc-800/50 pt-1.5">
+            <span class="flex items-center space-x-1"><i data-lucide="disc" class="w-2.5 h-2.5"></i><span>qa-unit-tester:latest</span></span>
+            <span>已休眠</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Left Bottom Status & Registry Portal -->
+      <div class="p-3 border-t border-zinc-800 bg-zinc-950/60 text-[11px] text-zinc-400 flex items-center justify-between">
+        <a href="agent_image_builder.html" class="flex items-center space-x-1.5 text-purple-400 hover:text-purple-300 transition">
+          <i data-lucide="disc" class="w-3.5 h-3.5"></i>
+          <span>管理 Agent 镜像 (Registry) ➔</span>
+        </a>
+      </div>
+    </aside>
+
+    <!-- 2. CENTER: Agent Chat Flow -->
+    <main class="w-[42%] border-r border-zinc-800 flex flex-col bg-zinc-900/30 shrink-0">
+      
+      <!-- Top Chat Title Bar -->
+      <div class="h-10 border-b border-zinc-800 bg-zinc-900/50 px-3 flex items-center justify-between shrink-0">
+        <div class="flex items-center space-x-2">
+          <div class="w-2 h-2 rounded-full bg-emerald-400"></div>
+          <span class="text-xs font-semibold text-zinc-100" id="chat-header-title">Claude 3.7 会话协同</span>
+          <span class="text-[10px] text-purple-300 bg-purple-950/60 border border-purple-800/50 px-1.5 py-0.2 rounded font-mono">fullstack-architect:v2</span>
+        </div>
+        <div class="text-[11px] text-zinc-500">
+          模型: <span class="text-zinc-300 font-mono">claude-3-7-sonnet</span>
+        </div>
+      </div>
+
+      <!-- Chat Message Flow -->
+      <div id="chat-messages-container" class="flex-1 p-4 overflow-y-auto space-y-4 text-xs">
+        <div class="flex items-start space-x-2.5 justify-end">
+          <div class="bg-zinc-800 text-zinc-100 p-3 rounded-xl rounded-tr-none max-w-[85%] border border-zinc-700 shadow-sm">
+            <p id="chat-user-text">帮我给结算页面加一个优惠码折扣输入框，并在右侧实时预览效果。</p>
+          </div>
+          <div class="w-6 h-6 rounded-full bg-purple-600 flex items-center justify-center text-[10px] font-bold">U</div>
+        </div>
+
+        <div class="flex items-start space-x-2.5">
+          <div id="chat-agent-avatar" class="w-6 h-6 rounded-full bg-emerald-600 flex items-center justify-center text-[10px] font-bold text-white shrink-0">AI</div>
+          <div class="space-y-2 max-w-[90%]">
+            <div class="bg-zinc-900 border border-zinc-800 p-3 rounded-xl rounded-tl-none space-y-2">
+              <p id="chat-agent-text" class="text-zinc-300 leading-relaxed">
+                好的！已为您更新了前端结算组件（新增优惠码校验并已自动触发 Vite HMR 热重载）。
+              </p>
+              
+              <div class="bg-zinc-950 p-2 rounded border border-zinc-800/80 font-mono text-[11px] text-zinc-400 space-y-1">
+                <div class="flex items-center space-x-1.5 text-emerald-400 font-medium">
+                  <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i>
+                  <span>修改已就绪 · Vite 热重载完成</span>
+                </div>
+                <div class="text-[10px] text-zinc-500 pl-5">
+                  • <code class="text-zinc-300">src/api/checkout.ts</code>: 新增折扣逻辑<br>
+                  • 右侧工作台可直接查看运行效果与 Diff 代码
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Prompt Input -->
+      <div class="p-3 border-t border-zinc-800 bg-zinc-900/80">
+        <div class="relative flex items-center">
+          <input type="text" placeholder="输入需求或指令，按 Enter 键发送给 Agent..." class="w-full bg-zinc-950 text-xs text-zinc-100 placeholder-zinc-500 rounded-lg px-3.5 py-2.5 pr-20 border border-zinc-700 focus:outline-none focus:border-emerald-500 transition">
+          <div class="absolute right-2 flex items-center space-x-1">
+            <button class="p-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md transition shadow-sm">
+              <i data-lucide="send" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- 3. RIGHT MAIN VIEWPORT: Multi-Tab Workstation (Tabs Lifted Up to Top Row) -->
+    <section class="flex-1 flex flex-col min-w-0 bg-zinc-950">
+      
+      <!-- LIFTED UP TABS BAR (Clean, High Density, Spanning Directly from Top) -->
+      <div class="h-10 border-b border-zinc-800 bg-zinc-900/70 px-3 flex items-center justify-between shrink-0">
+        <div class="flex items-center space-x-1 overflow-x-auto" id="workspace-tabs-bar">
+          
+          <!-- TAB 1: WEB LIVE PREVIEW (DEFAULT ACTIVE) -->
+          <button onclick="switchWorkstationTab('preview')" id="wtab-preview" class="px-3.5 py-1.5 rounded-t text-xs font-semibold bg-zinc-800 text-zinc-100 border-t-2 border-blue-500 flex items-center space-x-1.5 shrink-0">
+            <i data-lucide="play-circle" class="w-3.5 h-3.5 text-blue-400"></i>
+            <span>Web 实时预览</span>
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          </button>
+
+          <!-- TAB 2: Diff & Code Inspector -->
+          <button onclick="switchWorkstationTab('diff')" id="wtab-diff" class="px-3.5 py-1.5 rounded-t text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40 flex items-center space-x-1.5 shrink-0 transition">
+            <i data-lucide="file-code" class="w-3.5 h-3.5 text-emerald-400"></i>
+            <span id="tab-title-diff">checkout.ts (Diff)</span>
+          </button>
+
+          <!-- TAB 3: Workspace File Explorer (Contains Modified Badges) -->
+          <button onclick="switchWorkstationTab('explorer')" id="wtab-explorer" class="px-3.5 py-1.5 rounded-t text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40 flex items-center space-x-1.5 shrink-0 transition">
+            <i data-lucide="folder-tree" class="w-3.5 h-3.5 text-emerald-400"></i>
+            <span>文件目录树</span>
+            <span id="explorer-tab-badge" class="px-1.5 py-0.2 text-[9px] bg-amber-950 text-amber-300 border border-amber-800/60 rounded-full font-mono">3 改动</span>
+          </button>
+
+          <!-- TAB 4: Git Pipeline (The ONLY dedicated PR / Commit Workstation) -->
+          <button onclick="switchWorkstationTab('git')" id="wtab-git" class="px-3.5 py-1.5 rounded-t text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40 flex items-center space-x-1.5 shrink-0 transition">
+            <i data-lucide="git-commit" class="w-3.5 h-3.5 text-amber-400"></i>
+            <span>Git 交付 & PR</span>
+          </button>
+
+          <!-- TAB 5: Terminal Sandbox -->
+          <button onclick="switchWorkstationTab('terminal')" id="wtab-terminal" class="px-3.5 py-1.5 rounded-t text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40 flex items-center space-x-1.5 shrink-0 transition">
+            <i data-lucide="terminal" class="w-3.5 h-3.5 text-zinc-400"></i>
+            <span>沙盒 Terminal</span>
+          </button>
+
+          <!-- TAB 6: Deployment -->
+          <button onclick="switchWorkstationTab('deploy')" id="wtab-deploy" class="px-3.5 py-1.5 rounded-t text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40 flex items-center space-x-1.5 shrink-0 transition">
+            <i data-lucide="cloud-upload" class="w-3.5 h-3.5 text-purple-400"></i>
+            <span>云端部署</span>
+          </button>
+
+          <!-- Add New Tab Button -->
+          <button onclick="addNewCustomTab()" title="新增自定义操作 Tab" class="p-1 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 rounded transition">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+
+        <!-- Right Quick Device Mode & Refresh Controls -->
+        <div class="flex items-center space-x-2 text-xs">
+          <div class="flex items-center space-x-1 bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800 text-zinc-400">
+            <button onclick="setPreviewDevice('desktop')" id="btn-dev-desktop" title="桌面端宽屏" class="p-1 text-blue-400 hover:text-white rounded">
+              <i data-lucide="monitor" class="w-3 h-3"></i>
+            </button>
+            <button onclick="setPreviewDevice('mobile')" id="btn-dev-mobile" title="移动端手机视图" class="p-1 text-zinc-500 hover:text-white rounded">
+              <i data-lucide="smartphone" class="w-3 h-3"></i>
+            </button>
+          </div>
+          <button onclick="reloadPreview()" title="重新加载页面" class="p-1 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded">
+            <i id="preview-reload-icon" data-lucide="rotate-cw" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- VIEWPORT 1: LIVE WEB PREVIEW (ACTIVE BY DEFAULT) -->
+      <div id="view-preview" class="flex-1 flex flex-col overflow-hidden bg-zinc-950">
+        <!-- Mock Browser Address Bar -->
+        <div class="h-9 bg-zinc-900 border-b border-zinc-800 px-3 flex items-center space-x-2 text-xs shrink-0">
+          <div class="flex items-center space-x-1 text-zinc-500">
+            <i data-lucide="arrow-left" class="w-3.5 h-3.5 cursor-pointer hover:text-zinc-300"></i>
+            <i data-lucide="arrow-right" class="w-3.5 h-3.5 cursor-pointer hover:text-zinc-300"></i>
+            <i data-lucide="rotate-cw" onclick="reloadPreview()" class="w-3.5 h-3.5 cursor-pointer hover:text-zinc-300 ml-1"></i>
+          </div>
+          <div class="flex-1 bg-zinc-950 rounded-md px-3 py-1 text-zinc-300 font-mono text-[11px] flex items-center justify-between border border-zinc-800">
+            <span>http://localhost:3000/checkout</span>
+            <span class="text-[10px] px-1.5 py-0.2 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded">200 OK · Vite HMR Connected</span>
+          </div>
+          <button onclick="window.open('#', '_blank'); showToast('已在新窗口打开独立全屏预览页面')" title="在独立新标签页打开" class="text-zinc-400 hover:text-zinc-200 p-1 rounded hover:bg-zinc-800 transition">
+            <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+
+        <!-- Rendered Web Content Canvas -->
+        <div class="flex-1 p-6 overflow-y-auto flex items-center justify-center bg-zinc-950/60" id="preview-canvas-wrap">
+          <div id="preview-frame-container" class="w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl space-y-5 transition-all duration-300">
+            
+            <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div>
+                <span class="font-bold text-zinc-100 text-sm">订单收银台 (Checkout)</span>
+                <p class="text-[11px] text-zinc-500">测试环境实时渲染沙盒</p>
+              </div>
+              <span class="text-emerald-400 font-bold font-mono text-base" id="preview-total-price">$99.00</span>
+            </div>
+
+            <!-- Item summary -->
+            <div class="space-y-2 text-xs text-zinc-400">
+              <div class="flex justify-between"><span>商品：Pro Mechanical Keyboard</span><span>$129.00</span></div>
+              <div class="flex justify-between text-emerald-400 font-medium"><span>优惠码折扣 (PROMO30)：</span><span>-$30.00</span></div>
+              <div class="flex justify-between"><span>物流：国际极速专递</span><span>免费</span></div>
+            </div>
+
+            <!-- Newly Added Promo Code Input by Agent -->
+            <div class="p-3 bg-zinc-950 rounded-xl border border-zinc-800 space-y-2">
+              <label class="block text-[11px] font-semibold text-zinc-400">优惠码 (Promo Code)</label>
+              <div class="flex items-center space-x-2">
+                <input type="text" value="PROMO30" class="flex-1 bg-zinc-900 border border-emerald-500/60 rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 font-mono focus:outline-none">
+                <button onclick="showToast('优惠码验证成功，已立减 $30！')" class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-medium border border-zinc-700">已应用</button>
+              </div>
+            </div>
+
+            <div class="p-3 bg-emerald-950/20 border border-emerald-500/30 rounded-xl text-xs flex items-center space-x-2 text-emerald-300">
+              <i data-lucide="shield-check" class="w-4 h-4 text-emerald-400"></i>
+              <span>已启用 Stripe 安全异步支付签名校验</span>
+            </div>
+
+            <button onclick="showToast('🎉 模拟支付成功！订单状态已更新。')" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs shadow-lg transition">
+              立即支付 $99.00 (Stripe) ➔
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- VIEWPORT 2: CODE & DIFF INSPECTOR -->
+      <div id="view-diff" class="flex-1 flex flex-col overflow-hidden hidden bg-zinc-950">
+        <div class="h-9 border-b border-zinc-800 bg-zinc-900/40 px-3 flex items-center justify-between text-xs">
+          <span class="font-mono text-zinc-300 flex items-center space-x-1.5">
+            <i data-lucide="file-code" id="editor-file-icon" class="w-3.5 h-3.5 text-emerald-400"></i>
+            <span id="editor-file-title">src/api/checkout.ts (Diff 对比视图)</span>
+          </span>
+          <div class="flex items-center space-x-2 text-[11px] text-zinc-400">
+            <span id="editor-lines-badge" class="text-emerald-400 font-mono">+18 / -6</span>
+          </div>
+        </div>
+
+        <div id="editor-content-container" class="flex-1 p-4 overflow-y-auto font-mono text-[11px] leading-5 space-y-0.5 bg-zinc-950">
+          <div class="text-zinc-500 select-none">@@ -15,7 +15,12 @@ export async function handlePayment() {</div>
+          <div class="text-zinc-400 pl-2">   const cart = await getCart();</div>
+          <div class="diff-del pl-2">-  const result = await processDirectCharge(cart);</div>
+          <div class="diff-del pl-2">-  return { status: result.success ? 'paid' : 'failed' };</div>
+          <div class="diff-add pl-2">+  // 改造为 Stripe Checkout Session 异步流程</div>
+          <div class="diff-add pl-2">+  const session = await stripe.checkout.sessions.create({</div>
+          <div class="diff-add pl-2">+    line_items: formatLineItems(cart),</div>
+          <div class="diff-add pl-2">+    mode: 'payment',</div>
+          <div class="diff-add pl-2">+    success_url: `${HOST}/success?session_id={CHECKOUT_SESSION_ID}`,</div>
+          <div class="diff-add pl-2">+  });</div>
+          <div class="diff-add pl-2">+  return { redirectUrl: session.url };</div>
+          <div class="text-zinc-400 pl-2"> }</div>
+        </div>
+      </div>
+
+      <!-- VIEWPORT 3: FULL WORKSPACE FILE EXPLORER TAB (With Direct Modified Indicators) -->
+      <div id="view-explorer" class="flex-1 flex flex-col overflow-hidden hidden bg-zinc-950">
+        <div class="p-3 border-b border-zinc-800 bg-zinc-900/40 flex items-center justify-between text-xs">
+          <div class="flex items-center space-x-2">
+            <i data-lucide="folder-tree" class="w-4 h-4 text-emerald-400"></i>
+            <span class="font-bold text-zinc-200">Workspace 完整文件目录树 (Files)</span>
+          </div>
+          <span class="text-[11px] text-zinc-500">点击文件即可在 Diff / 代码编辑器中打开</span>
+        </div>
+
+        <div class="flex-1 p-4 overflow-y-auto font-mono text-xs space-y-1">
+          <div class="flex items-center space-x-2 text-zinc-200 py-1 px-2 rounded hover:bg-zinc-850 cursor-pointer">
+            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-zinc-500"></i>
+            <i data-lucide="folder-open" class="w-4 h-4 text-amber-500"></i>
+            <span class="font-bold">src/</span>
+          </div>
+
+          <div class="pl-5 space-y-1">
+            <div class="flex items-center space-x-2 text-zinc-300 py-1 px-2 rounded hover:bg-zinc-850 cursor-pointer">
+              <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-zinc-500"></i>
+              <i data-lucide="folder-open" class="w-4 h-4 text-amber-500"></i>
+              <span>api/</span>
+            </div>
+            
+            <div onclick="selectWorkspaceFile('src/api/checkout.ts', 'checkout-diff')" class="pl-6 flex items-center justify-between py-1.5 px-2 rounded bg-zinc-800/80 text-emerald-400 border border-emerald-500/40 cursor-pointer hover:bg-zinc-750">
+              <div class="flex items-center space-x-2 truncate">
+                <i data-lucide="file-code" class="w-4 h-4 text-emerald-400"></i>
+                <span class="font-medium">checkout.ts</span>
+                <span class="text-[10px] text-zinc-500 font-sans">(支付核心逻辑)</span>
+              </div>
+              <span class="text-[10px] px-2 py-0.5 bg-amber-950 text-amber-300 border border-amber-800/50 rounded font-sans font-bold">● 已修改 (M)</span>
+            </div>
+
+            <div onclick="selectWorkspaceFile('src/api/auth.ts', 'auth-code')" class="pl-6 flex items-center justify-between py-1.5 px-2 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 cursor-pointer transition">
+              <div class="flex items-center space-x-2 truncate">
+                <i data-lucide="file-code" class="w-4 h-4 text-zinc-500"></i>
+                <span>auth.ts</span>
+              </div>
+            </div>
+
+            <div onclick="selectWorkspaceFile('src/api/products.ts', 'products-code')" class="pl-6 flex items-center justify-between py-1.5 px-2 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 cursor-pointer transition">
+              <div class="flex items-center space-x-2 truncate">
+                <i data-lucide="file-code" class="w-4 h-4 text-zinc-500"></i>
+                <span>products.ts</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pl-5 space-y-1">
+            <div class="flex items-center space-x-2 text-zinc-300 py-1 px-2 rounded hover:bg-zinc-850 cursor-pointer">
+              <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-zinc-500"></i>
+              <i data-lucide="folder-open" class="w-4 h-4 text-amber-500"></i>
+              <span>services/</span>
+            </div>
+
+            <div onclick="selectWorkspaceFile('src/services/stripe.ts', 'stripe-code')" class="pl-6 flex items-center justify-between py-1.5 px-2 rounded text-zinc-200 hover:bg-zinc-850 cursor-pointer transition">
+              <div class="flex items-center space-x-2 truncate">
+                <i data-lucide="file-code" class="w-4 h-4 text-emerald-400"></i>
+                <span>stripe.ts</span>
+              </div>
+              <span class="text-[10px] px-2 py-0.5 bg-emerald-950 text-emerald-300 border border-emerald-800/50 rounded font-sans font-bold">● 新建 (A)</span>
+            </div>
+          </div>
+
+          <div onclick="selectWorkspaceFile('package.json', 'pkg-code')" class="flex items-center justify-between py-1.5 px-2 rounded text-zinc-200 hover:bg-zinc-850 cursor-pointer transition">
+            <div class="flex items-center space-x-2 truncate">
+              <i data-lucide="file-json" class="w-4 h-4 text-amber-400"></i>
+              <span>package.json</span>
+            </div>
+            <span class="text-[10px] px-2 py-0.5 bg-amber-950 text-amber-300 border border-amber-800/50 rounded font-sans font-bold">● 已修改 (M)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- VIEWPORT 4: DEDICATED GIT PIPELINE VIEW (Single Source of Truth for Commit & PR) -->
+      <div id="view-git" class="flex-1 p-6 overflow-y-auto space-y-6 hidden bg-zinc-950">
+        <div class="flex items-center justify-between border-b border-zinc-800 pb-4">
+          <div>
+            <h3 class="text-base font-bold text-zinc-100 flex items-center space-x-2">
+              <i data-lucide="git-commit" class="w-5 h-5 text-emerald-400"></i>
+              <span>Git 变更提审与交付流水线</span>
+            </h3>
+            <p class="text-xs text-zinc-400 mt-1">审查 Agent 产生的代码变更，一键完成本地 Commit、远程 Sync 及 GitHub PR 提审</p>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button onclick="triggerCommitAndSync()" id="git-tab-commit-btn" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg text-xs shadow transition flex items-center space-x-1.5">
+              <i data-lucide="check" class="w-3.5 h-3.5"></i>
+              <span>保存并同步 (Commit & Push)</span>
+            </button>
+            <button onclick="openPRModal()" class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium rounded-lg text-xs border border-zinc-700 transition flex items-center space-x-1.5">
+              <i data-lucide="git-pull-request" class="w-3.5 h-3.5 text-emerald-400"></i>
+              <span>一键发起 PR</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-2">
+          <div class="flex items-center space-x-2 text-zinc-200 font-bold text-xs">
+            <i data-lucide="sparkles" class="w-4 h-4 text-purple-400"></i>
+            <span>AI 自动生成的变更说明</span>
+          </div>
+          <p class="text-xs text-zinc-400 leading-relaxed">
+            重构支付逻辑为 Stripe Webhook 异步回调，新增了安全签名校验服务 (<code class="text-zinc-200">stripe.ts</code>)，并在收银台新增优惠码折扣功能。
+          </p>
+        </div>
+      </div>
+
+      <!-- VIEWPORT 5: INTEGRATED TERMINAL -->
+      <div id="view-terminal" class="flex-1 flex flex-col overflow-hidden hidden bg-black font-mono text-xs">
+        <div class="h-8 bg-zinc-900 border-b border-zinc-800 px-3 flex items-center justify-between text-zinc-400 text-[11px]">
+          <span class="flex items-center space-x-1.5">
+            <i data-lucide="terminal" class="w-3.5 h-3.5 text-emerald-400"></i>
+            <span>bash — node 20.11 sandbox (tty0)</span>
+          </span>
+          <div class="flex items-center space-x-2">
+            <button onclick="clearTerm()" class="hover:text-zinc-200">Clear</button>
+            <span class="text-zinc-700">|</span>
+            <span class="text-emerald-400">● Connected</span>
+          </div>
+        </div>
+        
+        <div class="flex-1 p-3 overflow-y-auto text-zinc-300 space-y-1.5" id="terminal-content">
+          <div class="text-zinc-500">Welcome to XEnsemble Execution Runtime Sandbox</div>
+          <div><span class="text-emerald-400">workspace@sandbox:~/app$</span> npm run dev</div>
+          <div class="text-zinc-400">> vite dev --port 3000</div>
+          <div class="text-emerald-400">➜ Local: http://localhost:3000/ (Ready in 280ms)</div>
+        </div>
+      </div>
+
+      <!-- VIEWPORT 6: CLOUD DEPLOYMENT MANAGEMENT -->
+      <div id="view-deploy" class="flex-1 p-6 overflow-y-auto space-y-6 hidden bg-zinc-950">
+        <div class="flex items-center justify-between border-b border-zinc-800 pb-4">
+          <div>
+            <h3 class="text-base font-bold text-zinc-100 flex items-center space-x-2">
+              <i data-lucide="cloud-upload" class="w-5 h-5 text-purple-400"></i>
+              <span>一键云端部署 (Cloud Deploy)</span>
+            </h3>
+            <p class="text-xs text-zinc-400 mt-1">将当前 Workspace 自动化打包并发布至独立云端 Serverless / 容器集群</p>
+          </div>
+          <button onclick="triggerDeploy()" id="deploy-btn" class="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-lg text-xs shadow-lg flex items-center space-x-2 transition">
+            <i data-lucide="rocket" class="w-3.5 h-3.5"></i>
+            <span>发布到生产环境 (Deploy)</span>
+          </button>
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <!-- ================= MODAL: NEW AGENT SESSION ================= -->
+  <div id="modal-new-session" class="fixed inset-0 bg-black/60 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-xl shadow-2xl p-6 space-y-5">
+      <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+            <i data-lucide="bot" class="w-4 h-4 text-emerald-400"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-zinc-100">新建 Agent 会话 (Session)</h3>
+            <p class="text-[11px] text-zinc-400">选择预封装的 Agent 镜像模版，秒级拉起独立执行会话</p>
+          </div>
+        </div>
+        <button onclick="closeModal('modal-new-session')" class="text-zinc-400 hover:text-zinc-100 p-1 rounded-md hover:bg-zinc-800 transition">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="space-y-2.5">
+        <div class="flex items-center justify-between">
+          <label class="block text-xs font-semibold uppercase tracking-wider text-zinc-400">1. 选择 Agent 镜像模版 (Image)</label>
+          <a href="agent_image_builder.html" class="text-[11px] text-purple-400 hover:text-purple-300 flex items-center space-x-1 transition">
+            <i data-lucide="plus" class="w-3 h-3"></i>
+            <span>制作新镜像...</span>
+          </a>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2.5 text-xs">
+          <div onclick="selectModalImage('fullstack-architect:v2', 'Claude 3.7 Sonnet', 'claude')" id="modal-img-claude" class="p-3.5 rounded-xl bg-zinc-950 border-2 border-emerald-500 cursor-pointer space-y-1.5 transition">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-zinc-100 truncate">fullstack-arch:v2</span>
+              <span class="text-[9px] text-emerald-400 bg-emerald-950/80 px-1 py-0.2 rounded border border-emerald-800 shrink-0">官方</span>
+            </div>
+            <p class="text-[11px] text-zinc-400 leading-snug">Base: Claude 3.7<br>全栈重构、多语言工具链</p>
+          </div>
+
+          <div onclick="selectModalImage('kimi-doc-analyst:v1.5', 'Kimi 2.0 (Long Context)', 'kimi')" id="modal-img-kimi" class="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 hover:border-zinc-700 cursor-pointer space-y-1.5 transition">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-zinc-300 truncate">kimi-doc:v1.5</span>
+            </div>
+            <p class="text-[11px] text-zinc-500 leading-snug">Base: Kimi 2.0<br>百万字检索、文档梳理</p>
+          </div>
+
+          <div onclick="selectModalImage('qa-unit-tester:latest', 'DeepSeek-V3 / Codex', 'codex')" id="modal-img-codex" class="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 hover:border-zinc-700 cursor-pointer space-y-1.5 transition">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-zinc-300 truncate">qa-tester:latest</span>
+            </div>
+            <p class="text-[11px] text-zinc-500 leading-snug">Base: DeepSeek-V3<br>自动化单测编写与覆盖率</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-zinc-300 font-medium mb-1">会话任务目标 (Session Goal - 自动聚焦)</label>
+          <input type="text" id="session-name-input" autofocus placeholder="例如：编写结算单测、数据库索引调优、修复跨域报错..." class="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 focus:outline-none focus:border-emerald-500">
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end space-x-2 pt-2 border-t border-zinc-800">
+        <button onclick="closeModal('modal-new-session')" class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs transition">取消</button>
+        <button onclick="createNewSessionSubmit()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg text-xs shadow-lg flex items-center space-x-1.5 transition">
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+          <span>基于所选镜像启动会话</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= TOAST NOTIFICATION CONTAINER ================= -->
+  <div id="toast-container" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center space-y-2 pointer-events-none"></div>
+
+  <!-- Lucide Icons & Scripts -->
+  <script>
+    lucide.createIcons();
+
+    let isAutoLivePreview = true;
+    let selectedImageTag = 'fullstack-architect:v2';
+    let selectedModel = 'Claude 3.7 Sonnet';
+    let selectedAgentKey = 'claude';
+
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `px-4 py-2 rounded-lg text-xs font-medium shadow-xl flex items-center space-x-2 pointer-events-auto transition-all transform duration-300 ${
+        type === 'success' ? 'bg-zinc-900 border border-emerald-500/50 text-emerald-300' : 'bg-zinc-900 border border-red-500/50 text-red-300'
+      }`;
+      toast.innerHTML = `<i data-lucide="${type === 'success' ? 'check-circle' : 'alert-circle'}" class="w-4 h-4"></i><span>${message}</span>`;
+      container.appendChild(toast);
+      lucide.createIcons();
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    // ================= DYNAMIC WORKSTATION TAB SWITCHING =================
+    const workstationTabs = ['preview', 'diff', 'explorer', 'git', 'terminal', 'deploy'];
+
+    function switchWorkstationTab(tabId) {
+      workstationTabs.forEach(t => {
+        const btn = document.getElementById(`wtab-${t}`);
+        const view = document.getElementById(`view-${t}`);
+        if (btn) {
+          if (t === tabId) {
+            btn.className = 'px-3.5 py-1.5 rounded-t text-xs font-semibold bg-zinc-800 text-zinc-100 border-t-2 border-blue-500 flex items-center space-x-1.5 shrink-0';
+          } else {
+            btn.className = 'px-3.5 py-1.5 rounded-t text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40 flex items-center space-x-1.5 shrink-0 transition';
+          }
+        }
+        if (view) {
+          if (t === tabId) {
+            view.classList.remove('hidden');
+          } else {
+            view.classList.add('hidden');
+          }
+        }
+      });
+      showToast(`已切换至右侧视口：${tabId.toUpperCase()}`);
+    }
+
+    function togglePreviewAutoSwitch() {
+      isAutoLivePreview = !isAutoLivePreview;
+      const btn = document.getElementById('preview-toggle-btn');
+      const dot = document.getElementById('preview-toggle-dot');
+      const text = document.getElementById('preview-toggle-text');
+
+      if (isAutoLivePreview) {
+        btn.className = 'flex items-center space-x-1 px-2 py-1 rounded-md text-[10px] text-emerald-400 font-semibold bg-emerald-950/60 border border-emerald-800/60 ml-0.5 transition';
+        dot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse';
+        text.innerText = 'Auto';
+        switchWorkstationTab('preview');
+        showToast('已开启【自动 Preview 模式】：Agent 每次改完代码自动刷新并切屏展示');
+      } else {
+        btn.className = 'flex items-center space-x-1 px-2 py-1 rounded-md text-[10px] text-zinc-400 font-normal bg-zinc-900 border border-zinc-800 ml-0.5 transition';
+        dot.className = 'w-1.5 h-1.5 rounded-full bg-zinc-500';
+        text.innerText = 'Manual';
+        showToast('已切换至【手动模式】：Agent 改完代码不自动切屏，由您主动点击 Preview');
+      }
+    }
+
+    function reloadPreview() {
+      const icon = document.getElementById('preview-reload-icon');
+      if (icon) icon.classList.add('animate-spin');
+      setTimeout(() => {
+        if (icon) icon.classList.remove('animate-spin');
+        showToast('Web 实时预览已完成热重载 (Hot Reload)！');
+      }, 800);
+    }
+
+    function setPreviewDevice(mode) {
+      const frame = document.getElementById('preview-frame-container');
+      const btnDesk = document.getElementById('btn-dev-desktop');
+      const btnMob = document.getElementById('btn-dev-mobile');
+
+      if (mode === 'mobile') {
+        frame.className = 'w-full max-w-xs bg-zinc-900 border-2 border-zinc-700 rounded-3xl p-5 shadow-2xl space-y-4 transition-all duration-300 ring-4 ring-zinc-800';
+        btnMob.className = 'p-1 text-blue-400 hover:text-white rounded';
+        btnDesk.className = 'p-1 text-zinc-500 hover:text-white rounded';
+        showToast('已切换至手机端 (Mobile 375px) 预览');
+      } else {
+        frame.className = 'w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl space-y-5 transition-all duration-300';
+        btnDesk.className = 'p-1 text-blue-400 hover:text-white rounded';
+        btnMob.className = 'p-1 text-zinc-500 hover:text-white rounded';
+        showToast('已切换至桌面端 (Desktop) 预览');
+      }
+    }
+
+    function selectModalImage(tag, modelName, key) {
+      selectedImageTag = tag;
+      selectedModel = modelName;
+      selectedAgentKey = key;
+
+      ['claude', 'kimi', 'codex'].forEach(k => {
+        const el = document.getElementById(`modal-img-${k}`);
+        if (k === key) {
+          el.className = 'p-3.5 rounded-xl bg-zinc-950 border-2 border-emerald-500 cursor-pointer space-y-1.5 transition';
+        } else {
+          el.className = 'p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 hover:border-zinc-700 cursor-pointer space-y-1.5 transition';
+        }
+      });
+    }
+
+    function createNewSessionSubmit() {
+      const input = document.getElementById('session-name-input');
+      const sessionTitle = input.value.trim() || `${selectedModel} 新任务`;
+      
+      closeModal('modal-new-session');
+      showToast(`已基于镜像「${selectedImageTag}」成功启动新 Session:「${sessionTitle}」`);
+      
+      const container = document.getElementById('session-list-container');
+      const newCard = document.createElement('div');
+      newCard.className = 'p-3 rounded-xl bg-zinc-800/90 border-2 border-emerald-500/80 text-xs cursor-pointer shadow-sm transition animate-pulse';
+      newCard.innerHTML = `
+        <div class="flex items-center justify-between mb-1.5">
+          <div class="flex items-center space-x-2 font-bold text-zinc-100">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+            <span>${selectedModel}</span>
+          </div>
+          <span class="text-[10px] text-emerald-300 bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-800/60 font-semibold">Active</span>
+        </div>
+        <p class="text-[11px] text-zinc-300 leading-snug">${sessionTitle}</p>
+        <div class="mt-2 text-[10px] text-purple-300 flex items-center justify-between font-mono border-t border-zinc-700/50 pt-1.5">
+          <span class="flex items-center space-x-1"><i data-lucide="disc" class="w-2.5 h-2.5"></i><span>${selectedImageTag}</span></span>
+          <span class="text-zinc-500">刚刚启动</span>
+        </div>
+      `;
+      container.prepend(newCard);
+      lucide.createIcons();
+      document.getElementById('chat-header-title').innerText = `${selectedModel} 会话协同`;
+      input.value = '';
+    }
+
+    function selectWorkspaceFile(filePath, contentKey) {
+      document.getElementById('editor-file-title').innerText = `${filePath} (代码查看)`;
+      document.getElementById('tab-title-diff').innerText = filePath.split('/').pop();
+      switchWorkstationTab('diff');
+      showToast(`已在代码编辑器中打开：${filePath}`);
+    }
+
+    function toggleWorkspaceDropdown(e) {
+      e.stopPropagation();
+      document.getElementById('ws-switcher-dropdown').classList.toggle('hidden');
+    }
+
+    function handleGlobalClick(e) {
+      const dropdown = document.getElementById('ws-switcher-dropdown');
+      const trigger = document.getElementById('ws-switcher-trigger');
+      if (dropdown && !dropdown.contains(e.target) && !trigger.contains(e.target)) {
+        dropdown.classList.add('hidden');
+      }
+    }
+
+    function switchWorkspace(name, branch, runtime, gitState) {
+      document.getElementById('ws-switcher-dropdown').classList.add('hidden');
+      document.getElementById('current-ws-name').innerText = name;
+      document.getElementById('top-branch-label').innerText = branch;
+      showToast(`已成功切换到工作空间：${name}`);
+    }
+
+    function triggerCommitAndSync() {
+      const btn = document.getElementById('git-tab-commit-btn');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i><span>正在提交与推送...</span>`;
+        lucide.createIcons();
+      }
+      setTimeout(() => {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>保存并同步 (Commit & Push)</span>`;
+          lucide.createIcons();
+        }
+        showToast('代码已成功提交 (Commit: feat: add discount promo checkout) 并推送到远端！');
+      }, 1500);
+    }
+
+    function openPRModal() {
+      showToast('已唤起 GitHub PR 创建流程，准备提交提审请求！');
+    }
+
+    function openNewSessionModal() {
+      document.getElementById('modal-new-session').classList.remove('hidden');
+      setTimeout(() => {
+        document.getElementById('session-name-input').focus();
+      }, 100);
+    }
+
+    function switchSession(type) {
+      ['claude', 'kimi', 'codex'].forEach(t => {
+        const item = document.getElementById(`session-item-${t}`);
+        const badge = document.getElementById(`session-badge-${t}`);
+        if (t === type) {
+          item.className = 'p-3 rounded-xl bg-zinc-800/90 border-2 border-emerald-500/80 text-xs cursor-pointer shadow-sm transition';
+          badge.className = 'text-[10px] text-emerald-300 bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-800/60 font-semibold';
+          badge.innerText = 'Active';
+        } else {
+          item.className = 'p-3 rounded-xl bg-zinc-950/70 hover:bg-zinc-800/50 border border-zinc-800 hover:border-zinc-700 text-xs cursor-pointer transition';
+          badge.className = 'text-[10px] text-zinc-500';
+          badge.innerText = 'Idle';
+        }
+      });
+
+      if (type === 'kimi') {
+        document.getElementById('chat-header-title').innerText = 'Kimi 2.0 会话协同';
+        document.getElementById('chat-user-text').innerText = '帮我扫描项目权限模块，并给出多租户隔离重构建议。';
+        document.getElementById('chat-agent-text').innerText = '我已经完整读取了当前 Workspace 的 18 个核心文件，分析出 3 处权限漏洞，正为您生成隔离补丁...';
+        showToast('已切换至 Kimi 会话');
+      } else if (type === 'codex') {
+        document.getElementById('chat-header-title').innerText = 'DeepSeek / Codex 会话协同';
+        document.getElementById('chat-user-text').innerText = '为 checkout.ts 补充 5 个支付失败与重试场景的单元测试用例。';
+        document.getElementById('chat-agent-text').innerText = '正在使用 Jest 编写测试用例，已自动生成 checkout.test.ts...';
+        showToast('已切换至 DeepSeek 会话');
+      } else {
+        document.getElementById('chat-header-title').innerText = 'Claude 3.7 会话协同';
+        document.getElementById('chat-user-text').innerText = '帮我给结算页面加一个优惠码折扣输入框，并在右侧实时预览效果。';
+        document.getElementById('chat-agent-text').innerText = '好的！已为您更新了前端结算组件...';
+        showToast('已切换至 Claude 3.7 会话');
+      }
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).classList.add('hidden');
+    }
+  </script>
+</body>
+</html>

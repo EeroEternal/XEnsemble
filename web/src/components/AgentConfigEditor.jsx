@@ -113,9 +113,12 @@ export default function AgentConfigEditor({
       )}
 
       <div>
-        <label className={`block text-xs font-semibold uppercase tracking-wider ${textPlaceholder} mb-2`}>
-          Environment Variables
+        <label className={`block text-xs font-semibold uppercase tracking-wider ${textPlaceholder} mb-1`}>
+          Agent variables
         </label>
+        <p className={`text-xs ${textPlaceholder} mb-2`}>
+          Environment variables and secrets passed to the agent process at startup.
+        </p>
         <div className="space-y-2">
           {envVars.map((pair, idx) => (
             <div key={idx} className="flex gap-2 items-start">

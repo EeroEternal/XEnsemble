@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XEnsemble - Agent 镜像制作与管理中心</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #18181b; }
+    ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col font-sans antialiased select-none">
+
+  <!-- ================= TOP NAV ================= -->
+  <header class="h-14 border-b border-zinc-800 bg-zinc-900/80 backdrop-blur px-6 flex items-center justify-between sticky top-0 z-30">
+    <div class="flex items-center space-x-4">
+      <div class="flex items-center space-x-2 font-bold tracking-wider text-sm bg-zinc-800 px-2.5 py-1 rounded-md border border-zinc-700">
+        <i data-lucide="layers" class="w-4 h-4 text-emerald-400"></i>
+        <span>XEnsemble</span>
+      </div>
+      <span class="text-zinc-600">/</span>
+      <div class="flex items-center space-x-2 text-xs font-semibold text-zinc-200">
+        <i data-lucide="disc" class="w-4 h-4 text-purple-400"></i>
+        <span>Agent 镜像中心 (Images Registry)</span>
+      </div>
+    </div>
+
+    <div class="flex items-center space-x-3 text-xs">
+      <a href="workspace_preview.html" class="flex items-center space-x-1 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 px-3 py-1.5 rounded-lg border border-transparent hover:border-zinc-700 transition">
+        <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
+        <span>返回 Workspace</span>
+      </a>
+      <button onclick="openCreateImageModal()" class="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-lg shadow flex items-center space-x-1.5 transition">
+        <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+        <span>制作新 Agent 镜像</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ================= MAIN CONTENT ================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
+    
+    <!-- Hero / Concept Clarification Banner -->
+    <div class="p-6 rounded-2xl bg-gradient-to-r from-purple-950/40 via-zinc-900 to-zinc-900 border border-purple-800/30 flex items-center justify-between shadow-xl">
+      <div class="space-y-1.5 max-w-2xl">
+        <div class="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-purple-500/10 border border-purple-500/30 text-purple-300 text-xs font-medium">
+          <i data-lucide="sparkles" class="w-3 h-3"></i>
+          <span>什么是 Agent 镜像？</span>
+        </div>
+        <h2 class="text-lg font-bold text-zinc-100">预封装「底座模型 + 系统提示词 + 预装 CLI/依赖 + MCP 工具」的标准模版</h2>
+        <p class="text-xs text-zinc-400 leading-relaxed">
+          制作好的镜像可在任意 Workspace 中<strong>一键秒级生成 Agent Session</strong>，实现团队标准化环境分发与专家角色复用。
+        </p>
+      </div>
+      <button onclick="openCreateImageModal()" class="px-5 py-2.5 bg-zinc-100 hover:bg-white text-zinc-950 font-bold rounded-xl text-xs shadow-lg flex items-center space-x-2 shrink-0 transition">
+        <i data-lucide="wand-2" class="w-4 h-4 text-purple-600"></i>
+        <span>向导式制作镜像</span>
+      </button>
+    </div>
+
+    <!-- Image List Filter Tabs -->
+    <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
+      <div class="flex items-center space-x-2 text-xs font-medium">
+        <button class="px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-100 border border-zinc-700">全部镜像 (4)</button>
+        <button class="px-3 py-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 transition">官方预置 (3)</button>
+        <button class="px-3 py-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 transition">自定义制作 (1)</button>
+      </div>
+      <div class="flex items-center space-x-2">
+        <div class="relative">
+          <i data-lucide="search" class="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-2.5"></i>
+          <input type="text" placeholder="搜索镜像或标签..." class="bg-zinc-900 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-purple-500">
+        </div>
+      </div>
+    </div>
+
+    <!-- Images Grid -->
+    <div class="grid grid-cols-3 gap-5" id="images-grid">
+      
+      <!-- IMAGE 1: Full-Stack Architect (Claude) -->
+      <div class="p-5 rounded-2xl bg-zinc-900/90 border border-zinc-800 hover:border-purple-500/60 flex flex-col justify-between space-y-4 shadow transition hover:shadow-purple-950/20 group">
+        <div class="space-y-3">
+          <div class="flex items-start justify-between">
+            <div class="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
+              <i data-lucide="cpu" class="w-5 h-5"></i>
+            </div>
+            <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800/60">官方认证</span>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-zinc-100 group-hover:text-purple-300 transition">fullstack-architect:v2</h3>
+            <p class="text-xs text-zinc-400 mt-1 leading-relaxed">全栈应用重构与架构治理专家，内置 Node/Rust/Python 多语言工具链。</p>
+          </div>
+          <div class="p-2.5 rounded-lg bg-zinc-950/80 border border-zinc-800/80 text-[11px] font-mono space-y-1 text-zinc-400">
+            <div class="flex justify-between"><span>Base Model:</span><span class="text-zinc-200">Claude 3.7 Sonnet</span></div>
+            <div class="flex justify-between"><span>Pre-installed:</span><span class="text-zinc-300">Node 20, pnpm, tsc</span></div>
+            <div class="flex justify-between"><span>MCP Tools:</span><span class="text-purple-300">Git, FS, PostgreSQL</span></div>
+          </div>
+        </div>
+        <div class="pt-2 border-t border-zinc-800 flex items-center justify-between text-xs">
+          <span class="text-[10px] text-zinc-500 font-mono">1.8 GB · 1.2k Sessions</span>
+          <button onclick="launchSessionFromImage('fullstack-architect:v2')" class="px-3 py-1.5 bg-zinc-800 hover:bg-purple-600 text-zinc-200 hover:text-white rounded-lg transition font-medium flex items-center space-x-1">
+            <i data-lucide="play" class="w-3 h-3"></i>
+            <span>基于此启动 Session</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- IMAGE 2: QA & Unit Test Expert (DeepSeek) -->
+      <div class="p-5 rounded-2xl bg-zinc-900/90 border border-zinc-800 hover:border-purple-500/60 flex flex-col justify-between space-y-4 shadow transition hover:shadow-purple-950/20 group">
+        <div class="space-y-3">
+          <div class="flex items-start justify-between">
+            <div class="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400">
+              <i data-lucide="check-square" class="w-5 h-5"></i>
+            </div>
+            <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800/60">官方认证</span>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-zinc-100 group-hover:text-blue-300 transition">qa-unit-tester:latest</h3>
+            <p class="text-xs text-zinc-400 mt-1 leading-relaxed">自动化编写 Jest/PyTest/Go Test 并校验测试覆盖率与边界条件。</p>
+          </div>
+          <div class="p-2.5 rounded-lg bg-zinc-950/80 border border-zinc-800/80 text-[11px] font-mono space-y-1 text-zinc-400">
+            <div class="flex justify-between"><span>Base Model:</span><span class="text-zinc-200">DeepSeek-V3 / Codex</span></div>
+            <div class="flex justify-between"><span>Pre-installed:</span><span class="text-zinc-300">Jest, Pytest, Go-sdk</span></div>
+            <div class="flex justify-between"><span>MCP Tools:</span><span class="text-purple-300">Coverage Reporter, Diff</span></div>
+          </div>
+        </div>
+        <div class="pt-2 border-t border-zinc-800 flex items-center justify-between text-xs">
+          <span class="text-[10px] text-zinc-500 font-mono">1.1 GB · 890 Sessions</span>
+          <button onclick="launchSessionFromImage('qa-unit-tester:latest')" class="px-3 py-1.5 bg-zinc-800 hover:bg-blue-600 text-zinc-200 hover:text-white rounded-lg transition font-medium flex items-center space-x-1">
+            <i data-lucide="play" class="w-3 h-3"></i>
+            <span>基于此启动 Session</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- IMAGE 3: Long Context Doc Specialist (Kimi) -->
+      <div class="p-5 rounded-2xl bg-zinc-900/90 border border-zinc-800 hover:border-purple-500/60 flex flex-col justify-between space-y-4 shadow transition hover:shadow-purple-950/20 group">
+        <div class="space-y-3">
+          <div class="flex items-start justify-between">
+            <div class="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+              <i data-lucide="file-text" class="w-5 h-5"></i>
+            </div>
+            <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800/60">官方认证</span>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-zinc-100 group-hover:text-amber-300 transition">kimi-doc-analyst:v1.5</h3>
+            <p class="text-xs text-zinc-400 mt-1 leading-relaxed">百万字超长上下文检索，专注于需求规格梳理、多租户设计与合规审计。</p>
+          </div>
+          <div class="p-2.5 rounded-lg bg-zinc-950/80 border border-zinc-800/80 text-[11px] font-mono space-y-1 text-zinc-400">
+            <div class="flex justify-between"><span>Base Model:</span><span class="text-zinc-200">Kimi 2.0 Moonshot</span></div>
+            <div class="flex justify-between"><span>Pre-installed:</span><span class="text-zinc-300">ripgrep, ast-grep</span></div>
+            <div class="flex justify-between"><span>MCP Tools:</span><span class="text-purple-300">Semantic Search, PDF</span></div>
+          </div>
+        </div>
+        <div class="pt-2 border-t border-zinc-800 flex items-center justify-between text-xs">
+          <span class="text-[10px] text-zinc-500 font-mono">980 MB · 640 Sessions</span>
+          <button onclick="launchSessionFromImage('kimi-doc-analyst:v1.5')" class="px-3 py-1.5 bg-zinc-800 hover:bg-amber-600 text-zinc-200 hover:text-white rounded-lg transition font-medium flex items-center space-x-1">
+            <i data-lucide="play" class="w-3 h-3"></i>
+            <span>基于此启动 Session</span>
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ================= MODAL: 4-STEP AGENT IMAGE BUILDER ================= -->
+  <div id="modal-build-image" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl shadow-2xl p-6 space-y-6">
+      
+      <!-- Modal Header & Step Indicator -->
+      <div class="flex items-center justify-between border-b border-zinc-800 pb-4">
+        <div>
+          <h3 class="text-base font-bold text-zinc-100 flex items-center space-x-2">
+            <i data-lucide="disc" class="w-4 h-4 text-purple-400"></i>
+            <span>制作自定义 Agent 镜像 (Image Builder)</span>
+          </h3>
+          <p class="text-xs text-zinc-400 mt-0.5">将特定的 AI 模型、Prompt 与工具链固化为可复用的镜像</p>
+        </div>
+        <button onclick="closeModal('modal-build-image')" class="text-zinc-400 hover:text-zinc-100 p-1 rounded-md hover:bg-zinc-800 transition">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <!-- Stepper Badges -->
+      <div class="grid grid-cols-4 gap-2 text-xs font-medium">
+        <div id="bstep-1" class="p-2 rounded-lg bg-purple-950/60 border border-purple-500 text-purple-300 text-center">1. 基础信息与模型</div>
+        <div id="bstep-2" class="p-2 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-500 text-center">2. 系统设定 Prompt</div>
+        <div id="bstep-3" class="p-2 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-500 text-center">3. 工具与 MCP 插件</div>
+        <div id="bstep-4" class="p-2 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-500 text-center">4. 构建与发布</div>
+      </div>
+
+      <!-- TAB 1: BASE INFO & MODEL -->
+      <div id="build-tab-1" class="space-y-4 text-xs">
+        <div>
+          <label class="block text-zinc-300 font-medium mb-1">镜像名称与 Tag (Name:Tag)</label>
+          <input type="text" id="img-name-input" value="custom-stripe-specialist:v1" class="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 font-mono focus:outline-none focus:border-purple-500">
+        </div>
+        <div>
+          <label class="block text-zinc-300 font-medium mb-1">选择底座大模型 (Base LLM)</label>
+          <div class="grid grid-cols-3 gap-2.5">
+            <div class="p-3 rounded-xl bg-zinc-950 border-2 border-purple-500 cursor-pointer space-y-1">
+              <div class="font-bold text-zinc-100">Claude 3.7 Sonnet</div>
+              <div class="text-[10px] text-zinc-400">Anthropic 强推理</div>
+            </div>
+            <div class="p-3 rounded-xl bg-zinc-950 border border-zinc-800 hover:border-zinc-700 cursor-pointer space-y-1">
+              <div class="font-bold text-zinc-300">Kimi 2.0</div>
+              <div class="text-[10px] text-zinc-500">Moonshot 长文本</div>
+            </div>
+            <div class="p-3 rounded-xl bg-zinc-950 border border-zinc-800 hover:border-zinc-700 cursor-pointer space-y-1">
+              <div class="font-bold text-zinc-300">DeepSeek-V3</div>
+              <div class="text-[10px] text-zinc-500">超高性价比单测编码</div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <label class="block text-zinc-300 font-medium mb-1">镜像简介 (Description)</label>
+          <input type="text" id="img-desc-input" value="专精于支付网关对接与防重放签名校验的专属 Agent 模版" class="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 focus:outline-none focus:border-purple-500">
+        </div>
+      </div>
+
+      <!-- TAB 2: SYSTEM PROMPT -->
+      <div id="build-tab-2" class="space-y-3 text-xs hidden">
+        <label class="block text-zinc-300 font-medium">固化系统提示词 (System Prompt & Persona)</label>
+        <textarea rows="7" class="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-3 text-zinc-200 font-mono text-xs focus:outline-none focus:border-purple-500 leading-relaxed">你是一名资深金融支付与 Webhook 架构师。
+职责：
+1. 编写 Stripe / PayPal 异步回调时，必须严格验证签名、防重放攻击。
+2. 强制使用 TypeScript 强类型定义，并在关键支付流程补充 100% 覆盖的单测。
+3. 产出代码后主动归纳变更摘要。</textarea>
+      </div>
+
+      <!-- TAB 3: TOOLS & MCP -->
+      <div id="build-tab-3" class="space-y-3 text-xs hidden">
+        <label class="block text-zinc-300 font-medium">勾选预装环境与 MCP 工具能力</label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="p-3 rounded-xl bg-zinc-950 border border-purple-500/80 flex items-center space-x-3 cursor-pointer">
+            <input type="checkbox" checked class="w-4 h-4 rounded text-purple-600 accent-purple-500">
+            <div>
+              <div class="font-bold text-zinc-200">Git & Filesystem MCP</div>
+              <div class="text-[10px] text-zinc-500">允许 Agent 读写文件、自动发起 commit 与 PR</div>
+            </div>
+          </label>
+          <label class="p-3 rounded-xl bg-zinc-950 border border-purple-500/80 flex items-center space-x-3 cursor-pointer">
+            <input type="checkbox" checked class="w-4 h-4 rounded text-purple-600 accent-purple-500">
+            <div>
+              <div class="font-bold text-zinc-200">Terminal PTY Sandbox</div>
+              <div class="text-[10px] text-zinc-500">允许在隔离容器内执行 npm/yarn/pytest 命令</div>
+            </div>
+          </label>
+          <label class="p-3 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center space-x-3 cursor-pointer hover:border-zinc-700">
+            <input type="checkbox" class="w-4 h-4 rounded text-purple-600 accent-purple-500">
+            <div>
+              <div class="font-bold text-zinc-300">PostgreSQL Database Tool</div>
+              <div class="text-[10px] text-zinc-500">直接查询测试库 Schema 并生成迁移脚本</div>
+            </div>
+          </label>
+          <label class="p-3 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center space-x-3 cursor-pointer hover:border-zinc-700">
+            <input type="checkbox" class="w-4 h-4 rounded text-purple-600 accent-purple-500">
+            <div>
+              <div class="font-bold text-zinc-300">API Testing / Postman MCP</div>
+              <div class="text-[10px] text-zinc-500">自动发送 mock HTTP 请求检验接口返回值</div>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <!-- TAB 4: BUILDING & PUBLISH SIMULATION -->
+      <div id="build-tab-4" class="space-y-4 text-xs hidden">
+        <div class="text-center space-y-1">
+          <div class="w-10 h-10 rounded-full bg-purple-500/10 border border-purple-500/30 flex items-center justify-center mx-auto text-purple-400">
+            <i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i>
+          </div>
+          <h4 class="font-bold text-zinc-100">正在打包并固化 Agent 镜像...</h4>
+          <p class="text-[11px] text-zinc-400">正在组装 Layer、配置 MCP 运行时并推送到 XEnsemble 镜像仓库</p>
+        </div>
+
+        <div class="bg-black/90 p-3 rounded-xl border border-zinc-800 font-mono text-[10px] text-zinc-300 space-y-1 h-28 overflow-y-auto" id="build-log-terminal">
+          <div class="text-zinc-500">[Builder] Initializing Dockerfile/Agentfile generator...</div>
+          <div>[Layer 1] Pulling base model config: anthropic/claude-3-7-sonnet</div>
+          <div>[Layer 2] Compiling System Prompt & Persona embeddings...</div>
+          <div>[Layer 3] Mounting MCP Tools: git-fs, terminal-pty, stripe-sdk</div>
+          <div class="text-emerald-400">[Registry] Image built successfully: custom-stripe-specialist:v1 (1.4 GB)</div>
+        </div>
+      </div>
+
+      <!-- Footer Buttons -->
+      <div class="flex items-center justify-between border-t border-zinc-800 pt-3">
+        <button id="btn-builder-prev" onclick="changeBuildStep(-1)" class="px-4 py-2 text-zinc-400 hover:text-zinc-200 text-xs hidden transition">上一步</button>
+        <div class="flex items-center space-x-2 ml-auto">
+          <button onclick="closeModal('modal-build-image')" class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs transition">取消</button>
+          <button id="btn-builder-next" onclick="changeBuildStep(1)" class="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-lg text-xs shadow flex items-center space-x-1.5 transition">
+            <span>下一步</span>
+            <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ================= TOAST NOTIFICATION CONTAINER ================= -->
+  <div id="toast-container" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center space-y-2 pointer-events-none"></div>
+
+  <!-- Scripts -->
+  <script>
+    lucide.createIcons();
+
+    let currentStep = 1;
+
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `px-4 py-2 rounded-lg text-xs font-medium shadow-xl flex items-center space-x-2 pointer-events-auto transition-all transform duration-300 ${
+        type === 'success' ? 'bg-zinc-900 border border-purple-500/50 text-purple-300' : 'bg-zinc-900 border border-red-500/50 text-red-300'
+      }`;
+      toast.innerHTML = `<i data-lucide="${type === 'success' ? 'check-circle' : 'alert-circle'}" class="w-4 h-4"></i><span>${message}</span>`;
+      container.appendChild(toast);
+      lucide.createIcons();
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    function openCreateImageModal() {
+      currentStep = 1;
+      updateStepUI();
+      document.getElementById('modal-build-image').classList.remove('hidden');
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).classList.add('hidden');
+    }
+
+    function changeBuildStep(delta) {
+      currentStep += delta;
+      if (currentStep > 4) {
+        // Finalized
+        closeModal('modal-build-image');
+        showToast('🎉 新镜像「custom-stripe-specialist:v1」制作成功并推送到 Registry！');
+        
+        // Add to grid dynamically
+        const grid = document.getElementById('images-grid');
+        const card = document.createElement('div');
+        card.className = 'p-5 rounded-2xl bg-zinc-900 border-2 border-purple-500/80 flex flex-col justify-between space-y-4 shadow transition animate-pulse';
+        card.innerHTML = `
+          <div class="space-y-3">
+            <div class="flex items-start justify-between">
+              <div class="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300">
+                <i data-lucide="sparkles" class="w-5 h-5"></i>
+              </div>
+              <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-950 text-purple-300 border border-purple-800/60">我的镜像</span>
+            </div>
+            <div>
+              <h3 class="text-sm font-bold text-zinc-100">custom-stripe-specialist:v1</h3>
+              <p class="text-xs text-zinc-400 mt-1 leading-relaxed">专精于支付网关对接与防重放签名校验的专属 Agent 模版</p>
+            </div>
+            <div class="p-2.5 rounded-lg bg-zinc-950/80 border border-zinc-800/80 text-[11px] font-mono space-y-1 text-zinc-400">
+              <div class="flex justify-between"><span>Base Model:</span><span class="text-zinc-200">Claude 3.7 Sonnet</span></div>
+              <div class="flex justify-between"><span>MCP Tools:</span><span class="text-purple-300">Git-FS, Terminal, Stripe</span></div>
+            </div>
+          </div>
+          <div class="pt-2 border-t border-zinc-800 flex items-center justify-between text-xs">
+            <span class="text-[10px] text-zinc-500 font-mono">1.4 GB · 刚刚创建</span>
+            <button onclick="launchSessionFromImage('custom-stripe-specialist:v1')" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition font-medium flex items-center space-x-1">
+              <i data-lucide="play" class="w-3 h-3"></i>
+              <span>基于此启动 Session</span>
+            </button>
+          </div>
+        `;
+        grid.prepend(card);
+        lucide.createIcons();
+        return;
+      }
+      updateStepUI();
+    }
+
+    function updateStepUI() {
+      [1, 2, 3, 4].forEach(s => {
+        const tab = document.getElementById(`build-tab-${s}`);
+        const badge = document.getElementById(`bstep-${s}`);
+        if (tab) {
+          if (s === currentStep) {
+            tab.classList.remove('hidden');
+            badge.className = 'p-2 rounded-lg bg-purple-950/60 border border-purple-500 text-purple-300 text-center font-bold';
+          } else if (s < currentStep) {
+            tab.classList.add('hidden');
+            badge.className = 'p-2 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-300 text-center';
+          } else {
+            tab.classList.add('hidden');
+            badge.className = 'p-2 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-600 text-center';
+          }
+        }
+      });
+
+      const prevBtn = document.getElementById('btn-builder-prev');
+      const nextBtn = document.getElementById('btn-builder-next');
+
+      if (currentStep > 1) {
+        prevBtn.classList.remove('hidden');
+      } else {
+        prevBtn.classList.add('hidden');
+      }
+
+      if (currentStep === 4) {
+        nextBtn.innerHTML = `<span>完成并发布镜像</span><i data-lucide="check" class="w-3.5 h-3.5"></i>`;
+      } else {
+        nextBtn.innerHTML = `<span>下一步</span><i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>`;
+      }
+      lucide.createIcons();
+    }
+
+    function launchSessionFromImage(imageTag) {
+      showToast(`已在当前 Workspace 中基于镜像「${imageTag}」拉起新 Agent Session！即将跳转...`);
+      setTimeout(() => {
+        window.location.href = 'workspace_preview.html';
+      }, 1200);
+    }
+  </script>
+</body>
+</html>

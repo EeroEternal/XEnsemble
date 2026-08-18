@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XEnsemble - 小白用户极简导入与创建全流程演示</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @keyframes pulse-slow {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.85; transform: scale(0.98); }
+    }
+    .pulse-anim { animation: pulse-slow 3s infinite ease-in-out; }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col font-sans antialiased select-none">
+
+  <!-- ================= TOP NAV ================= -->
+  <header class="h-14 border-b border-zinc-800/80 bg-zinc-900/60 backdrop-blur px-6 flex items-center justify-between">
+    <div class="flex items-center space-x-2.5">
+      <div class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+        <i data-lucide="layers" class="w-4 h-4 text-emerald-400"></i>
+      </div>
+      <span class="font-bold text-sm tracking-wide">XEnsemble</span>
+      <span class="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700">新手引导模式</span>
+    </div>
+
+    <!-- Stepper indicator -->
+    <div class="flex items-center space-x-2 text-xs font-medium">
+      <div id="step-indicator-1" class="flex items-center space-x-1.5 text-emerald-400">
+        <span class="w-5 h-5 rounded-full bg-emerald-500/20 border border-emerald-500 flex items-center justify-center text-[10px]">1</span>
+        <span>选择代码来源</span>
+      </div>
+      <i data-lucide="chevron-right" class="w-3.5 h-3.5 text-zinc-600"></i>
+      <div id="step-indicator-2" class="flex items-center space-x-1.5 text-zinc-500">
+        <span class="w-5 h-5 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[10px]">2</span>
+        <span>配置与 Agent</span>
+      </div>
+      <i data-lucide="chevron-right" class="w-3.5 h-3.5 text-zinc-600"></i>
+      <div id="step-indicator-3" class="flex items-center space-x-1.5 text-zinc-500">
+        <span class="w-5 h-5 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[10px]">3</span>
+        <span>启动 Workspace</span>
+      </div>
+    </div>
+
+    <div class="flex items-center space-x-3 text-xs text-zinc-400">
+      <button onclick="resetFlow()" class="hover:text-zinc-200 flex items-center space-x-1">
+        <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+        <span>重置演示</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ================= MAIN CONTAINER ================= -->
+  <main class="flex-1 flex items-center justify-center p-6 relative overflow-hidden">
+    <!-- Subtle Background Glow -->
+    <div class="absolute w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl -top-20 -left-20 pointer-events-none"></div>
+    <div class="absolute w-96 h-96 bg-purple-500/5 rounded-full blur-3xl -bottom-20 -right-20 pointer-events-none"></div>
+
+    <!-- ================= STAGE 1: CHOOSE SOURCE ================= -->
+    <div id="stage-1" class="w-full max-w-2xl bg-zinc-900/90 border border-zinc-800 rounded-2xl p-8 shadow-2xl space-y-6 transition-all duration-300">
+      <div class="text-center space-y-2">
+        <h2 class="text-2xl font-bold text-zinc-100">欢迎来到 XEnsemble</h2>
+        <p class="text-sm text-zinc-400">只需几秒钟，我们将为您创建一个包含完整执行环境与 AI 助手的 Workspace。</p>
+      </div>
+
+      <div class="grid grid-cols-3 gap-4 pt-2">
+        <!-- Option 1: GitHub -->
+        <button onclick="selectSource('github')" id="opt-github" class="group p-5 rounded-xl bg-zinc-950/60 border-2 border-emerald-500/80 hover:border-emerald-400 flex flex-col items-center text-center space-y-3 transition transform hover:-translate-y-0.5">
+          <div class="w-12 h-12 rounded-xl bg-zinc-800 border border-zinc-700 flex items-center justify-center text-white group-hover:scale-110 transition">
+            <i data-lucide="github" class="w-6 h-6"></i>
+          </div>
+          <div>
+            <div class="text-sm font-bold text-zinc-100">从 GitHub 导入</div>
+            <div class="text-[11px] text-zinc-400 mt-1 leading-relaxed">克隆已有公开或私有仓库，自动拉取分支</div>
+          </div>
+          <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">推荐</span>
+        </button>
+
+        <!-- Option 2: Local Folder -->
+        <button onclick="selectSource('local')" id="opt-local" class="group p-5 rounded-xl bg-zinc-950/60 border border-zinc-800 hover:border-zinc-700 flex flex-col items-center text-center space-y-3 transition transform hover:-translate-y-0.5">
+          <div class="w-12 h-12 rounded-xl bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-300 group-hover:scale-110 transition">
+            <i data-lucide="folder-up" class="w-6 h-6"></i>
+          </div>
+          <div>
+            <div class="text-sm font-bold text-zinc-100">导入本地文件夹</div>
+            <div class="text-[11px] text-zinc-400 mt-1 leading-relaxed">选取电脑已有项目代码，自动识别 Git</div>
+          </div>
+          <span class="text-[10px] text-zinc-500 px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-800">零配置</span>
+        </button>
+
+        <!-- Option 3: Blank Template -->
+        <button onclick="selectSource('blank')" id="opt-blank" class="group p-5 rounded-xl bg-zinc-950/60 border border-zinc-800 hover:border-zinc-700 flex flex-col items-center text-center space-y-3 transition transform hover:-translate-y-0.5">
+          <div class="w-12 h-12 rounded-xl bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-300 group-hover:scale-110 transition">
+            <i data-lucide="sparkles" class="w-6 h-6 text-purple-400"></i>
+          </div>
+          <div>
+            <div class="text-sm font-bold text-zinc-100">空白起步模版</div>
+            <div class="text-[11px] text-zinc-400 mt-1 leading-relaxed">从零创建，自带 Node / Python / React 脚手架</div>
+          </div>
+          <span class="text-[10px] text-zinc-500 px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-800">新手推荐</span>
+        </button>
+      </div>
+
+      <div class="pt-4 flex justify-end">
+        <button onclick="goToStage(2)" class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg text-xs shadow-lg flex items-center space-x-2 transition">
+          <span>下一步：配置 Workspace</span>
+          <i data-lucide="arrow-right" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- ================= STAGE 2: CONFIGURE & PICK AGENT ================= -->
+    <div id="stage-2" class="w-full max-w-2xl bg-zinc-900/90 border border-zinc-800 rounded-2xl p-8 shadow-2xl space-y-6 hidden transition-all duration-300">
+      <div class="space-y-1">
+        <h2 class="text-xl font-bold text-zinc-100">配置您的 Workspace 与首个 Agent</h2>
+        <p class="text-xs text-zinc-400">我们已为您自动预设最佳运行参数，您可以按需微调或直接启动。</p>
+      </div>
+
+      <!-- Source Config Panel (Dynamic based on choice) -->
+      <div class="bg-zinc-950 p-4 rounded-xl border border-zinc-800 space-y-3 text-xs">
+        <div id="source-detail-github">
+          <label class="block text-zinc-300 font-medium mb-1.5">GitHub 仓库地址 (Repository URL)</label>
+          <div class="relative flex items-center">
+            <i data-lucide="link" class="w-3.5 h-3.5 absolute left-3 text-zinc-500"></i>
+            <input type="text" id="repo-input" value="https://github.com/facebook/react" class="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-9 pr-3 py-2 text-zinc-100 font-mono focus:outline-none focus:border-emerald-500">
+          </div>
+          <p class="text-[11px] text-zinc-500 mt-1.5 flex items-center space-x-1">
+            <i data-lucide="info" class="w-3 h-3 text-emerald-400"></i>
+            <span>系统将自动检测主分支（main）并创建代码沙盒环境。</span>
+          </p>
+        </div>
+
+        <div id="source-detail-local" class="hidden">
+          <label class="block text-zinc-300 font-medium mb-1.5">本地项目路径</label>
+          <div class="flex items-center space-x-2">
+            <input type="text" readonly value="/Users/admin/projects/my-node-app" class="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-300 font-mono">
+            <button class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg border border-zinc-700">更改目录</button>
+          </div>
+          <!-- Non-git fallback hint -->
+          <div class="mt-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] flex items-center space-x-2">
+            <i data-lucide="git-fork" class="w-4 h-4 text-amber-400 shrink-0"></i>
+            <span>若该目录未包含 Git，进入后可一键启用版本管理与云端同步。</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent Selection Panel -->
+      <div class="space-y-3 text-xs">
+        <label class="block text-zinc-300 font-medium">选择首个协同 Agent <span class="text-zinc-500 font-normal">(进入后可随时新建或切换其他 Agent Session)</span></label>
+        
+        <div class="grid grid-cols-3 gap-3">
+          <!-- Agent 1: Claude -->
+          <div onclick="selectAgent('claude')" id="agent-claude" class="p-3.5 rounded-xl bg-zinc-950 border-2 border-emerald-500 cursor-pointer space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-zinc-100 flex items-center space-x-1.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                <span>Claude 3.7</span>
+              </span>
+              <span class="text-[10px] text-emerald-400 font-medium bg-emerald-950/60 px-1.5 py-0.2 rounded border border-emerald-800">推荐</span>
+            </div>
+            <p class="text-[11px] text-zinc-400 leading-snug">擅长全栈架构分析、代码重构与多文件复杂协同。</p>
+          </div>
+
+          <!-- Agent 2: Kimi -->
+          <div onclick="selectAgent('kimi')" id="agent-kimi" class="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 hover:border-zinc-700 cursor-pointer space-y-2 transition">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-zinc-300 flex items-center space-x-1.5">
+                <span class="w-2 h-2 rounded-full bg-zinc-500"></span>
+                <span>Kimi</span>
+              </span>
+            </div>
+            <p class="text-[11px] text-zinc-500 leading-snug">超长上下文检索与中文文档/需求梳理。</p>
+          </div>
+
+          <!-- Agent 3: Codex / DeepSeek -->
+          <div onclick="selectAgent('codex')" id="agent-codex" class="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 hover:border-zinc-700 cursor-pointer space-y-2 transition">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-zinc-300 flex items-center space-x-1.5">
+                <span class="w-2 h-2 rounded-full bg-zinc-500"></span>
+                <span>DeepSeek</span>
+              </span>
+            </div>
+            <p class="text-[11px] text-zinc-500 leading-snug">单点函数编写、极速单元测试生成。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="pt-4 flex items-center justify-between border-t border-zinc-800">
+        <button onclick="goToStage(1)" class="px-4 py-2 text-zinc-400 hover:text-zinc-200 text-xs transition">上一步</button>
+        <button onclick="startProvisioning()" class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg text-xs shadow-lg flex items-center space-x-2 transition">
+          <i data-lucide="play" class="w-3.5 h-3.5"></i>
+          <span>一键构建并进入 Workspace</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ================= STAGE 3: AUTOMATED PROVISIONING (CHECKLIST ANIMATION) ================= -->
+    <div id="stage-3" class="w-full max-w-xl bg-zinc-900/90 border border-zinc-800 rounded-2xl p-8 shadow-2xl space-y-6 hidden transition-all duration-300">
+      <div class="text-center space-y-2">
+        <div class="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto pulse-anim">
+          <i data-lucide="loader-2" class="w-6 h-6 text-emerald-400 animate-spin"></i>
+        </div>
+        <h2 class="text-xl font-bold text-zinc-100">正在为您准备 Workspace 环境...</h2>
+        <p class="text-xs text-zinc-400">正在隔离容器中拉取代码、准备运行环境并挂载 Agent 运行时。</p>
+      </div>
+
+      <!-- Checklist steps -->
+      <div class="bg-zinc-950 p-5 rounded-xl border border-zinc-800 space-y-3.5 text-xs font-mono">
+        
+        <!-- Step A: Repo Clone -->
+        <div id="prov-step-1" class="flex items-center justify-between text-zinc-500">
+          <div class="flex items-center space-x-2.5">
+            <i id="prov-icon-1" data-lucide="circle-dashed" class="w-4 h-4 text-zinc-600 animate-spin"></i>
+            <span id="prov-text-1">正在克隆仓库与检出分支 (origin/main)...</span>
+          </div>
+          <span id="prov-status-1" class="text-[10px] text-zinc-500">进行中</span>
+        </div>
+
+        <!-- Step B: Runtime Environment -->
+        <div id="prov-step-2" class="flex items-center justify-between text-zinc-600">
+          <div class="flex items-center space-x-2.5">
+            <i id="prov-icon-2" data-lucide="circle" class="w-4 h-4 text-zinc-700"></i>
+            <span id="prov-text-2">分配执行沙盒与挂载依赖环境...</span>
+          </div>
+          <span id="prov-status-2" class="text-[10px] text-zinc-600">等待中</span>
+        </div>
+
+        <!-- Step C: Git & Upstream Setup -->
+        <div id="prov-step-3" class="flex items-center justify-between text-zinc-600">
+          <div class="flex items-center space-x-2.5">
+            <i id="prov-icon-3" data-lucide="circle" class="w-4 h-4 text-zinc-700"></i>
+            <span id="prov-text-3">绑定 Git 追踪与一等交付流水线...</span>
+          </div>
+          <span id="prov-status-3" class="text-[10px] text-zinc-600">等待中</span>
+        </div>
+
+        <!-- Step D: Agent Session Init -->
+        <div id="prov-step-4" class="flex items-center justify-between text-zinc-600">
+          <div class="flex items-center space-x-2.5">
+            <i id="prov-icon-4" data-lucide="circle" class="w-4 h-4 text-zinc-700"></i>
+            <span id="prov-text-4">启动 Claude 3.7 首个 Agent 会话...</span>
+          </div>
+          <span id="prov-status-4" class="text-[10px] text-zinc-600">等待中</span>
+        </div>
+
+      </div>
+
+      <!-- Live Terminal Progress Output -->
+      <div class="bg-black/80 rounded-lg p-3 border border-zinc-800/80 font-mono text-[10px] text-zinc-400 space-y-1 h-24 overflow-y-auto" id="prov-terminal">
+        <div>[System] Initializing workspace workspace-e89f2a...</div>
+      </div>
+
+      <div class="pt-2 text-center text-xs text-zinc-500">
+        构建完成后将自动进入主工作台界面...
+      </div>
+    </div>
+
+    <!-- ================= STAGE 4: SUCCESS READY ================= -->
+    <div id="stage-4" class="w-full max-w-lg bg-zinc-900/90 border border-zinc-800 rounded-2xl p-8 shadow-2xl text-center space-y-6 hidden transition-all duration-300">
+      <div class="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center mx-auto text-emerald-400">
+        <i data-lucide="check" class="w-8 h-8"></i>
+      </div>
+      
+      <div class="space-y-1.5">
+        <h2 class="text-xl font-bold text-zinc-100">Workspace 准备就绪！</h2>
+        <p class="text-xs text-zinc-400">代码、沙盒环境、Git 追踪以及 Claude 助手均已就位。</p>
+      </div>
+
+      <div class="bg-zinc-950 p-4 rounded-xl border border-zinc-800 text-left text-xs space-y-2">
+        <div class="flex items-center justify-between text-zinc-300">
+          <span class="text-zinc-500">工作空间名称:</span>
+          <span class="font-mono font-medium">ecommerce-checkout</span>
+        </div>
+        <div class="flex items-center justify-between text-zinc-300">
+          <span class="text-zinc-500">当前分支:</span>
+          <span class="font-mono text-emerald-400">origin/main</span>
+        </div>
+        <div class="flex items-center justify-between text-zinc-300">
+          <span class="text-zinc-500">激活 Agent:</span>
+          <span class="text-zinc-200">Claude 3.7 Sonnet (Session #1)</span>
+        </div>
+      </div>
+
+      <button onclick="window.location.href='workspace_preview.html'" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg text-xs shadow-lg flex items-center justify-center space-x-2 transition">
+        <span>立即进入开发工作台</span>
+        <i data-lucide="arrow-right" class="w-4 h-4"></i>
+      </button>
+    </div>
+
+  </main>
+
+  <script>
+    lucide.createIcons();
+
+    let currentSource = 'github';
+    let currentAgent = 'claude';
+
+    function selectSource(source) {
+      currentSource = source;
+      ['github', 'local', 'blank'].forEach(s => {
+        const el = document.getElementById(`opt-${s}`);
+        if (s === source) {
+          el.className = 'group p-5 rounded-xl bg-zinc-950/60 border-2 border-emerald-500/80 hover:border-emerald-400 flex flex-col items-center text-center space-y-3 transition transform hover:-translate-y-0.5';
+        } else {
+          el.className = 'group p-5 rounded-xl bg-zinc-950/60 border border-zinc-800 hover:border-zinc-700 flex flex-col items-center text-center space-y-3 transition transform hover:-translate-y-0.5';
+        }
+      });
+
+      if (source === 'github') {
+        document.getElementById('source-detail-github').classList.remove('hidden');
+        document.getElementById('source-detail-local').classList.add('hidden');
+      } else if (source === 'local') {
+        document.getElementById('source-detail-github').classList.add('hidden');
+        document.getElementById('source-detail-local').classList.remove('hidden');
+      } else {
+        document.getElementById('source-detail-github').classList.add('hidden');
+        document.getElementById('source-detail-local').classList.add('hidden');
+      }
+    }
+
+    function selectAgent(agent) {
+      currentAgent = agent;
+      ['claude', 'kimi', 'codex'].forEach(a => {
+        const el = document.getElementById(`agent-${a}`);
+        if (a === agent) {
+          el.className = 'p-3.5 rounded-xl bg-zinc-950 border-2 border-emerald-500 cursor-pointer space-y-2';
+        } else {
+          el.className = 'p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 hover:border-zinc-700 cursor-pointer space-y-2 transition';
+        }
+      });
+    }
+
+    function goToStage(stageNum) {
+      [1, 2, 3, 4].forEach(s => {
+        const stageEl = document.getElementById(`stage-${s}`);
+        if (stageEl) stageEl.classList.add('hidden');
+      });
+      document.getElementById(`stage-${stageNum}`).classList.remove('hidden');
+
+      // Update stepper
+      [1, 2, 3].forEach(s => {
+        const indicator = document.getElementById(`step-indicator-${s}`);
+        if (indicator) {
+          if (s === stageNum || (stageNum === 4 && s === 3)) {
+            indicator.className = 'flex items-center space-x-1.5 text-emerald-400';
+            indicator.querySelector('span:first-child').className = 'w-5 h-5 rounded-full bg-emerald-500/20 border border-emerald-500 flex items-center justify-center text-[10px]';
+          } else if (s < stageNum) {
+            indicator.className = 'flex items-center space-x-1.5 text-zinc-300';
+            indicator.querySelector('span:first-child').className = 'w-5 h-5 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[10px]';
+          } else {
+            indicator.className = 'flex items-center space-x-1.5 text-zinc-500';
+            indicator.querySelector('span:first-child').className = 'w-5 h-5 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[10px]';
+          }
+        }
+      });
+    }
+
+    function resetFlow() {
+      goToStage(1);
+    }
+
+    function appendTerm(msg) {
+      const term = document.getElementById('prov-terminal');
+      const div = document.createElement('div');
+      div.innerText = msg;
+      term.appendChild(div);
+      term.scrollTop = term.scrollHeight;
+    }
+
+    function startProvisioning() {
+      goToStage(3);
+      const term = document.getElementById('prov-terminal');
+      term.innerHTML = '<div>[System] Initializing workspace workspace-e89f2a...</div>';
+
+      // Step 1
+      setTimeout(() => {
+        appendTerm('[Git] Cloning from remote: https://github.com/facebook/react.git...');
+        appendTerm('[Git] Checkout branch: main (commit 4b9a1c)');
+        setStepDone(1, '已就绪 (main)');
+        setStepRunning(2);
+      }, 1000);
+
+      // Step 2
+      setTimeout(() => {
+        appendTerm('[Sandbox] Creating isolated container runtime...');
+        appendTerm('[Sandbox] Mounted Node 20 runtime environment successfully.');
+        setStepDone(2, '已分配');
+        setStepRunning(3);
+      }, 2200);
+
+      // Step 3
+      setTimeout(() => {
+        appendTerm('[Git] Initializing status tracker & upstream watch...');
+        setStepDone(3, '已同步');
+        setStepRunning(4);
+      }, 3200);
+
+      // Step 4
+      setTimeout(() => {
+        appendTerm('[Agent] Starting Claude 3.7 Sonnet agent session...');
+        appendTerm('[System] Workspace fully operational!');
+        setStepDone(4, '会话已就绪');
+        setTimeout(() => {
+          goToStage(4);
+        }, 800);
+      }, 4200);
+    }
+
+    function setStepRunning(num) {
+      const item = document.getElementById(`prov-step-${num}`);
+      const icon = document.getElementById(`prov-icon-${num}`);
+      const status = document.getElementById(`prov-status-${num}`);
+      item.className = 'flex items-center justify-between text-zinc-200';
+      icon.outerHTML = `<i id="prov-icon-${num}" data-lucide="loader-2" class="w-4 h-4 text-emerald-400 animate-spin"></i>`;
+      status.className = 'text-[10px] text-amber-400';
+      status.innerText = '配置中...';
+      lucide.createIcons();
+    }
+
+    function setStepDone(num, statusText) {
+      const item = document.getElementById(`prov-step-${num}`);
+      const icon = document.getElementById(`prov-icon-${num}`);
+      const status = document.getElementById(`prov-status-${num}`);
+      item.className = 'flex items-center justify-between text-emerald-300';
+      icon.outerHTML = `<i id="prov-icon-${num}" data-lucide="check-circle-2" class="w-4 h-4 text-emerald-400"></i>`;
+      status.className = 'text-[10px] text-emerald-400 font-medium';
+      status.innerText = statusText;
+      lucide.createIcons();
+    }
+  </script>
+</body>
+</html>
