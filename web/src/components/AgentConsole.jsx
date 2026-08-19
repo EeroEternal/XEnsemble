@@ -204,12 +204,10 @@ function AgentConsole({
     };
     const hideOverlay = () => {
       if (overlayTimer) { clearTimeout(overlayTimer); overlayTimer = null; }
-      requestAnimationFrame(() => {
-        if (disposed) return;
-        if (hostRef.current) hostRef.current.style.opacity = '1';
-        if (overlayRef.current) overlayRef.current.style.display = 'none';
-        terminal.scrollToBottom();
-      });
+      if (disposed) return;
+      if (hostRef.current) hostRef.current.style.opacity = '1';
+      if (overlayRef.current) overlayRef.current.style.display = 'none';
+      try { terminal.scrollToBottom(); } catch (_) {}
     };
 
     let disposed = false;
