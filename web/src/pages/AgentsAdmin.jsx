@@ -260,11 +260,6 @@ export default function AgentsAdmin() {
     <div className={consoleAdminPageClass}>
       <PageHeader
         title="Agents"
-        description={
-          refreshing
-            ? 'Refreshing agent status...'
-            : 'Install agents on the server, configure platform API keys, and manage the registry.'
-        }
         actions={(
           <div className="flex items-center gap-2">
             <div className="relative w-64 shrink-0">

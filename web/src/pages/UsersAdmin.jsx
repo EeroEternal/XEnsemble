@@ -265,7 +265,6 @@ export default function UsersAdmin() {
     <div className={consoleAdminPageClass}>
       <PageHeader
         title="Users"
-        description="Manage accounts, quotas, and agent access."
         actions={(
           <div className="flex items-center gap-2">
             <div className="relative w-64 shrink-0">
