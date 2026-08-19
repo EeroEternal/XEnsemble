@@ -186,9 +186,12 @@ function AgentConsole({
     terminal.unicode.activeVersion = '11';
     host.replaceChildren();
     terminal.open(host);
-    // Fit terminal to container BEFORE creating WebSocket so transcript
-    // replay doesn't wrap at the wrong width.
     try { fitAddon.fit(); } catch (_) {}
+    // Re-fit after flex layout settles; the first fit() may run when
+    // the host element has partial width (before layout completes).
+    setTimeout(() => { if (!disposed) { try { fitAddon.fit(); } catch (_) {} } }, 150);
+    setTimeout(() => { if (!disposed) { try { fitAddon.fit(); } catch (_) {} } }, 500);
+    setTimeout(() => { if (!disposed) { try { fitAddon.fit(); } catch (_) {} } }, 1500);
     // WebGL renderer is disabled: on context loss xterm.js disposes the
     // addon but does NOT fall back to the Canvas2D renderer, leaving the
     // terminal with no renderer at all (blank screen).  The Canvas2D
@@ -931,6 +934,7 @@ function AgentConsole({
           Loading history…
         </div>
       </div>
+      <style>{`.xterm{width:100%!important;height:100%!important}.xterm-screen{width:100%!important;height:100%!important}.xterm-viewport{width:100%!important}`}</style>
       <div ref={hostRef} className="min-h-0 w-full flex-1" />
       {guideVisible && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-6">
