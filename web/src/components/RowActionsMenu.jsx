@@ -1,22 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Loader2, MoreHorizontal } from 'lucide-react';
 import { cn } from '../lib/utils';
-import {
-  consoleIconButtonClass,
-  consoleMenuDropdownZClass,
-} from '../lib/consoleTokens';
+import { consoleMenuDropdownZClass } from '../lib/consoleTokens';
 
 const DROPDOWN_MIN_SPACE = 260;
+const DROPDOWN_GAP = 4;
 
 export default function RowActionsMenu({ label = 'Actions', items, className }) {
   const [open, setOpen] = useState(false);
-  const [dropUp, setDropUp] = useState(false);
+  const [pos, setPos] = useState(null);
   const rootRef = useRef(null);
+  const menuRef = useRef(null);
 
   useEffect(() => {
     if (!open) return undefined;
     const onPointerDown = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) {
+      const target = e.target;
+      const insideRoot = rootRef.current && rootRef.current.contains(target);
+      const insideMenu = menuRef.current && menuRef.current.contains(target);
+      if (!insideRoot && !insideMenu) {
         setOpen(false);
       }
     };
@@ -31,10 +34,27 @@ export default function RowActionsMenu({ label = 'Actions', items, className }) 
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return undefined;
+    const onScroll = () => setOpen(false);
+    const onResize = () => setOpen(false);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [open]);
+
   const handleToggle = () => {
     if (!open && rootRef.current) {
       const rect = rootRef.current.getBoundingClientRect();
-      setDropUp(window.innerHeight - rect.bottom < DROPDOWN_MIN_SPACE);
+      const spaceBelow = window.innerHeight - rect.bottom;
+      setPos({
+        top: rect.bottom,
+        bottom: rect.top,
+        dropUp: spaceBelow < DROPDOWN_MIN_SPACE,
+      });
     }
     setOpen((v) => !v);
   };
@@ -42,24 +62,36 @@ export default function RowActionsMenu({ label = 'Actions', items, className }) 
   const visible = items.filter((item) => item && item.visible !== false);
 
   return (
-    <div ref={rootRef} className={cn('relative flex justify-end', className)}>
-      <button
-        type="button"
-        onClick={handleToggle}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label={label}
-        className={cn(consoleIconButtonClass, open && 'bg-zinc-100 text-zinc-900')}
-      >
-        <MoreHorizontal className="h-4 w-4" />
-      </button>
-      {open && (
+    <>
+      <div ref={rootRef} className={cn('relative flex justify-end', className)}>
+        <button
+          type="button"
+          onClick={handleToggle}
+          aria-expanded={open}
+          aria-haspopup="menu"
+          aria-label={label}
+          className={cn('inline-flex items-center justify-center rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-40 disabled:pointer-events-none focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0', open && 'bg-zinc-100 text-zinc-900')}
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+      </div>
+      {open && pos && createPortal(
         <div
+          ref={menuRef}
           role="menu"
+          style={{
+            position: 'fixed',
+            left: 'auto',
+            right: window.innerWidth - pos.right > 208
+              ? window.innerWidth - pos.right
+              : 8,
+            ...(pos.dropUp
+              ? { bottom: window.innerHeight - pos.bottom + DROPDOWN_GAP }
+              : { top: pos.top + DROPDOWN_GAP }),
+          }}
           className={cn(
-            'absolute right-0 w-52 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg shadow-zinc-200/50',
+            'w-52 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg shadow-zinc-200/50',
             consoleMenuDropdownZClass,
-            dropUp ? 'bottom-full mb-1' : 'top-full mt-1',
           )}
         >
           {visible.map((item, i) => (
@@ -87,8 +119,9 @@ export default function RowActionsMenu({ label = 'Actions', items, className }) 
               </button>
             )
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
-    </div>
+    </>
   );
 }
