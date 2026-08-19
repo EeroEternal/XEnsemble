@@ -935,7 +935,7 @@ export default function GatewaySettingsPanel() {
                         <td className={`${consoleTableBodyCellClass} align-middle`}>
                           <ProviderStatusBadge health={providerHealth[p.name]} />
                         </td>
-                        <td className={`${consoleTableBodyCellClass} text-right pl-1 pr-3`}>
+                        <td className={consoleTableBodyCellClass}>
                           <RowActionsMenu
                             label={`Actions for ${p.name}`}
                             items={[
