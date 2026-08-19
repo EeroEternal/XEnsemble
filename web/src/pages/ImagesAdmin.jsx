@@ -340,11 +340,6 @@ export function ImagesAdminContent() {
                                 <CheckCircle className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
                                 Active version is used for new agent sessions. Build a new version, then activate it to switch.
                             </p>
-                        ) : selectedAgent.default_image_ref ? (
-                            <p className={cn('mt-3 pt-3 border-t text-xs flex items-center gap-1.5', borderHairline, textSecondary)}>
-                                <Clock className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
-                                No active version — the default image is used for new agent sessions.
-                            </p>
                         ) : null}
                     </div>
 

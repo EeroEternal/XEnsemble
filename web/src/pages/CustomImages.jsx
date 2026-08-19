@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Plus, RefreshCw, RotateCw, ScrollText, Search, Trash2, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Loader2, Plus, RefreshCw, RotateCw, ScrollText, Search, Trash2, X } from 'lucide-react';
 
 import Button from '../components/Button';
 import BuildLogDialog from '../components/BuildLogDialog';
@@ -16,6 +16,7 @@ import {
 import { useToast } from '../components/Toast';
 import {
   consoleAdminPageClass,
+  consoleButtonFocusClass,
   consoleDialogPanelClass,
   consoleIconButtonClass,
   consoleSectionLabelClass,
@@ -85,6 +86,7 @@ export function CustomImagesContent() {
   const [showCreate, setShowCreate] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [componentSearch, setComponentSearch] = useState('');
+  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
   const [logImage, setLogImage] = useState(null);
   const [rebuildingId, setRebuildingId] = useState(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -170,6 +172,15 @@ export function CustomImagesContent() {
     setComponentVersions({});
     setImageName('');
     setShowCreate(false);
+  }
+
+  function toggleGroup(category) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
   }
 
   function openCreate() {
@@ -359,10 +370,22 @@ export function CustomImagesContent() {
                           }
                           return CATEGORY_ORDER.filter((cat) => grouped[cat]?.length > 0).map((cat) => (
                             <div key={cat}>
-                              <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-zinc-500 bg-zinc-50 border-b border-zinc-100">
-                                {CATEGORY_LABELS[cat] || cat}
-                              </div>
-                              {grouped[cat].map((comp) => {
+                              <button
+                                type="button"
+                                onClick={() => toggleGroup(cat)}
+                                className={cn(
+                                  'w-full flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-zinc-500 bg-zinc-50 border-b border-zinc-100 hover:bg-zinc-100 transition-colors',
+                                  consoleButtonFocusClass,
+                                )}
+                                aria-expanded={!collapsedGroups.has(cat)}
+                              >
+                                {collapsedGroups.has(cat)
+                                  ? <ChevronRight className="h-3 w-3 shrink-0" />
+                                  : <ChevronDown className="h-3 w-3 shrink-0" />}
+                                <span className="flex-1 text-left">{CATEGORY_LABELS[cat] || cat}</span>
+                                <span className="font-normal normal-case text-zinc-400">{grouped[cat].length}</span>
+                              </button>
+                              {!collapsedGroups.has(cat) && grouped[cat].map((comp) => {
                                 const checked = selectedComponentIds.includes(comp.id);
                                 const isAgent = comp.category === 'agent';
                                 const agentAlreadySelected = selectedComponentIds.some(
