@@ -102,6 +102,10 @@ export default function ProjectSourceSelect({
     return list;
   }, [reposByProvider, gh.connection, gl.connection, gt.connection]);
 
+  const isLoading = PROVIDERS.some((p) =>
+    providers[p].connection && loadingRepos[p] && !reposByProvider[p]
+  );
+
   const filteredRepos = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return allRepos;
@@ -165,30 +169,43 @@ export default function ProjectSourceSelect({
           {/* Unified scroll: repos + divider + connect links */}
           <div className="flex-1 min-h-0 overflow-y-auto">
             {/* Upper tier: repos from connected providers */}
-            {allRepos.length === 0 ? (
+            {isLoading && allRepos.length === 0 ? (
+              <div className="flex items-center gap-2 px-3 py-3 text-xs text-zinc-400">
+                <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
+                Loading repositories…
+              </div>
+            ) : allRepos.length === 0 ? (
               filteredRepos.length === 0 ? null : (
                 <p className="px-3 py-3 text-xs text-zinc-400">No matches.</p>
               )
             ) : filteredRepos.length === 0 ? (
               <p className="px-3 py-3 text-xs text-zinc-400">No matches.</p>
             ) : (
-              filteredRepos.map((r) => {
-                const key = repoKey(r.provider, r.full_name);
-                const isSelected = importedProject && importedProject.name === r.name;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => handleSelectRepo(r)}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-zinc-50"
-                  >
-                    <GitBranch className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
-                    <span className="min-w-0 flex-1 truncate text-zinc-700">{r.full_name}</span>
-                    <span className="shrink-0 text-[10px] text-zinc-400">{getProviderLabel(r.provider)}</span>
-                    {isSelected && <Check className="w-3.5 h-3.5 shrink-0 text-zinc-900" />}
-                  </button>
-                );
-              })
+              <>
+                {filteredRepos.map((r) => {
+                  const key = repoKey(r.provider, r.full_name);
+                  const isSelected = importedProject && importedProject.name === r.name;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => handleSelectRepo(r)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-zinc-50"
+                    >
+                      <GitBranch className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
+                      <span className="min-w-0 flex-1 truncate text-zinc-700">{r.full_name}</span>
+                      <span className="shrink-0 text-[10px] text-zinc-400">{getProviderLabel(r.provider)}</span>
+                      {isSelected && <Check className="w-3.5 h-3.5 shrink-0 text-zinc-900" />}
+                    </button>
+                  );
+                })}
+                {isLoading && (
+                  <div className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-400">
+                    <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
+                    Loading more…
+                  </div>
+                )}
+              </>
             )}
 
             {/* Divider */}
