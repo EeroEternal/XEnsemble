@@ -5,7 +5,6 @@ import SelectMenu from './SelectMenu';
 import ProjectSourceSelect from './git/ProjectSourceSelect';
 import {
   consoleButtonFocusClass,
-  consoleDialogLgClass,
   consoleFormLabelClass,
 } from '../lib/consoleTokens';
 import { buttonClass } from '../lib/buttonStyles';
@@ -92,7 +91,7 @@ export default function OnboardingWizard({
   return (
     <ConsoleDialogShell
       onClose={onClose}
-      panelClassName={`${consoleDialogLgClass} max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden`}
+      panelClassName="w-[840px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden"
     >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-3 shrink-0">
