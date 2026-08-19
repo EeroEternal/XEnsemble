@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { NavLink } from 'react-router-dom';
 import {
   Trash2,
   RotateCw,
@@ -133,24 +132,44 @@ function SidebarAccountMenu({ user, onOpenSettings, onLogout, adminLinkClass, co
           {user.email}
         </p>
       )}
-      <NavLink to="/custom-images" className={adminLinkClass} onClick={close}>
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => { close(); onOpenSettings?.('images'); }}
+        className={adminLinkClass()}
+      >
         <Container className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
         Images
-      </NavLink>
+      </button>
       {isAdmin && (
         <>
-          <NavLink to="/admin/users" className={adminLinkClass} onClick={close}>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { close(); onOpenSettings?.('users'); }}
+            className={adminLinkClass()}
+          >
             <Users className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
             Users
-          </NavLink>
-          <NavLink to="/admin/agents" className={adminLinkClass} onClick={close}>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { close(); onOpenSettings?.('agents'); }}
+            className={adminLinkClass()}
+          >
             <Bot className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
             Agents
-          </NavLink>
-          <NavLink to="/admin/gateway" className={adminLinkClass} onClick={close}>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { close(); onOpenSettings?.('gateway'); }}
+            className={adminLinkClass()}
+          >
             <Globe className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
             Gateway
-          </NavLink>
+          </button>
           <div className="my-1 border-t border-zinc-200" />
         </>
       )}

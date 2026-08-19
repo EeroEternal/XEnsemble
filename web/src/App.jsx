@@ -119,7 +119,7 @@ function AuthenticatedLayout({
         onRequestDeleteSession={(session, ws) => sessionsRef.current?.requestDeleteSession?.(session, ws)}
         onRestartSession={(session) => sessionsRef.current?.restartSession?.(session)}
         user={user}
-        onOpenSettings={() => setShowSettingsModal(true)}
+        onOpenSettings={(section) => setShowSettingsModal(section || 'general')}
         onLogout={logout}
       />
       )}
@@ -197,7 +197,7 @@ function AuthenticatedLayout({
       </main>
       </div>
       {showSettingsModal && (
-        <SettingsModal onClose={() => setShowSettingsModal(false)} />
+        <SettingsModal section={showSettingsModal} onClose={() => setShowSettingsModal(null)} />
       )}
       <ConfirmDialog />
     </div>
@@ -208,7 +208,16 @@ function App() {
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(null);
+
+  const openSettings = useCallback((section) => {
+    setShowSettingsModal(section || 'general');
+  }, []);
+
+  React.useEffect(() => {
+    window.addEventListener('xe:open-settings', () => openSettings('general'));
+    return () => window.removeEventListener('xe:open-settings', () => openSettings('general'));
+  }, [openSettings]);
   const navigate = useNavigate();
 
   const {
@@ -235,12 +244,6 @@ function App() {
     });
     return () => setAuthExpiredHandler(null);
   }, [navigate]);
-
-  React.useEffect(() => {
-    const openSettings = () => setShowSettingsModal(true);
-    window.addEventListener('xe:open-settings', openSettings);
-    return () => window.removeEventListener('xe:open-settings', openSettings);
-  }, []);
 
   React.useEffect(() => {
     (async () => {
