@@ -1,8 +1,8 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   GitCommit, GitPullRequest, RefreshCw, PanelLeftClose,
-  Plus, Minus, Loader2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, FileText,
+  Loader2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Folder,
   Upload, Download, AlertTriangle, RotateCcw, User, Sparkles,
 } from 'lucide-react';
 import {
@@ -62,7 +62,6 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   const [expandedFiles, setExpandedFiles] = useState(new Set());
   const [fileDiffs, setFileDiffs] = useState({});
   const [loadingDiff, setLoadingDiff] = useState(null);
-  const [showFileList, setShowFileList] = useState(false);
   const [resolvedPaths, setResolvedPaths] = useState(new Set());
   const authorNameRef = useRef(null);
   const commitMsgRef = useRef(null);
@@ -140,46 +139,6 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     gitChanges?.fetchStatus?.({ silent: true });
   }, [gitChanges]);
 
-  const handleStageAll = useCallback(async () => {
-    const paths = gitUnstagedFiles.map((f) => f.path);
-    if (paths.length === 0) return;
-    setFileDiffs({});
-    await gitChanges?.stage(paths);
-  }, [gitUnstagedFiles, gitChanges]);
-
-  const handleUnstageAll = useCallback(async () => {
-    const paths = gitStagedFiles.map((f) => f.path);
-    if (paths.length === 0) return;
-    setFileDiffs({});
-    await gitChanges?.unstage(paths);
-  }, [gitStagedFiles, gitChanges]);
-
-  const handleStageFile = useCallback(async (path) => {
-    setFileDiffs((prev) => { const next = { ...prev }; delete next[path]; return next; });
-    await gitChanges?.stage([path]);
-    if (expandedFiles.has(path)) {
-      try {
-        const data = await getGitFileDiff(projectId, path);
-        const diff = data && typeof data === 'object' && !Array.isArray(data)
-          ? (typeof data.diff === 'string' ? data.diff : '') : (typeof data === 'string' ? data : '');
-        setFileDiffs((prev) => ({ ...prev, [path]: { diff, binary: false, truncated: false } }));
-      } catch (_) {}
-    }
-  }, [gitChanges, expandedFiles, projectId]);
-
-  const handleUnstageFile = useCallback(async (path) => {
-    setFileDiffs((prev) => { const next = { ...prev }; delete next[path]; return next; });
-    await gitChanges?.unstage([path]);
-    if (expandedFiles.has(path)) {
-      try {
-        const data = await getGitFileDiff(projectId, path);
-        const diff = data && typeof data === 'object' && !Array.isArray(data)
-          ? (typeof data.diff === 'string' ? data.diff : '') : (typeof data === 'string' ? data : '');
-        setFileDiffs((prev) => ({ ...prev, [path]: { diff, binary: false, truncated: false } }));
-      } catch (_) {}
-    }
-  }, [gitChanges, expandedFiles, projectId]);
-
   const [discarding, setDiscarding] = useState(false);
   const [discardConfirm, setDiscardConfirm] = useState(null);
 
@@ -242,12 +201,11 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     if (!commitMessage.trim()) return;
     setCommitting(true);
     try {
-      // Auto-stage all unstaged files when nothing is staged yet (VS Code-like UX)
-      if (gitStagedFiles.length === 0 && gitUnstagedFiles.length > 0) {
-        const paths = gitUnstagedFiles.map((f) => f.path).filter(Boolean);
-        if (paths.length > 0) {
-          await gitChanges?.stage(paths);
-        }
+      // Stage and commit in one action: stage every changed (unstaged) file,
+      // then commit the resulting index.
+      const unstagedPaths = gitUnstagedFiles.map((f) => f.path).filter(Boolean);
+      if (unstagedPaths.length > 0) {
+        await gitChanges?.stage(unstagedPaths);
       }
       const author = authorName && authorEmail ? { name: authorName, email: authorEmail } : undefined;
       await gitChanges?.commit(commitMessage.trim(), author);
@@ -262,7 +220,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     } finally {
       setCommitting(false);
     }
-  }, [commitMessage, gitChanges, authorName, authorEmail, gitStagedFiles, gitUnstagedFiles]);
+  }, [commitMessage, gitChanges, authorName, authorEmail, gitUnstagedFiles]);
 
   const handleGenerateMessage = useCallback(async () => {
     setGeneratingMsg(true);
@@ -373,7 +331,13 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     }
   }, [expandedFiles, fileDiffs, projectId, normalizeDiffEntry]);
 
-  const allFiles = [...gitStagedFiles, ...gitUnstagedFiles];
+  const allFiles = useMemo(() => {
+    const map = new Map();
+    for (const f of [...gitStagedFiles, ...gitUnstagedFiles]) {
+      if (f?.path && !map.has(f.path)) map.set(f.path, f);
+    }
+    return [...map.values()];
+  }, [gitStagedFiles, gitUnstagedFiles]);
   const allExpanded = allFiles.length > 0 && allFiles.every((f) => expandedFiles.has(f.path));
 
   const toggleExpandAll = useCallback(async () => {
@@ -402,61 +366,65 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     }
   }, [allExpanded, allFiles, fileDiffs, projectId, normalizeDiffEntry]);
 
-  const renderGitFile = (f, stageAction) => {
+  // Build a directory tree from the deduped changed files.
+  const changesTree = useMemo(() => {
+    const root = { dirs: {}, files: [] };
+    for (const f of allFiles) {
+      const parts = f.path.split('/');
+      let node = root;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const part = parts[i];
+        node.dirs[part] = node.dirs[part] || { dirs: {}, files: [] };
+        node = node.dirs[part];
+      }
+      node.files.push(f);
+    }
+    return root;
+  }, [allFiles]);
+
+  const [collapsedDirs, setCollapsedDirs] = useState(() => new Set());
+  const toggleDir = useCallback((dirPath) => {
+    setCollapsedDirs((prev) => {
+      const next = new Set(prev);
+      if (next.has(dirPath)) next.delete(dirPath); else next.add(dirPath);
+      return next;
+    });
+  }, []);
+
+  const renderFileRow = (f, depth) => {
     const label = GIT_STATUS_LABELS[f.status] || f.status;
     const colorCls = GIT_STATUS_COLORS[f.status] || 'text-zinc-400';
     const desc = GIT_STATUS_DESC[f.status] || '';
-    const fileName = f.path.split('/').pop();
-    const dirPath = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '';
     const isExpanded = expandedFiles.has(f.path);
     const diffEntry = fileDiffs[f.path];
     const diffText = typeof diffEntry === 'string' ? diffEntry : diffEntry?.diff;
     const diffBinary = Boolean(diffEntry && typeof diffEntry === 'object' && diffEntry.binary);
     const diffTruncated = Boolean(diffEntry && typeof diffEntry === 'object' && diffEntry.truncated);
     const isLoading = loadingDiff === f.path;
-
     return (
       <div key={f.path}>
-        <div className="flex items-center group hover:bg-zinc-200">
+        <div className="flex items-center group hover:bg-zinc-50" style={{ paddingLeft: depth * 12 }}>
           <button
             onClick={() => toggleFileExpand(f.path)}
             className="shrink-0 p-0.5 text-zinc-400 hover:text-zinc-600"
+            title={isExpanded ? 'Collapse diff' : 'Expand diff'}
           >
-            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           </button>
           <button
             onClick={() => toggleFileExpand(f.path)}
-            className={`flex items-center gap-2 flex-1 min-w-0 px-2 py-1.5 text-left transition-colors ${consoleButtonFocusClass}`}
+            onDoubleClick={() => onJumpToFile?.(f.path)}
+            className={`flex items-center gap-2 flex-1 min-w-0 px-1.5 py-1.5 text-left ${consoleButtonFocusClass}`}
+            title={f.path}
           >
-            <span
-              className={`w-4 text-center font-mono text-[11px] font-semibold ${colorCls} shrink-0`}
-              title={desc || f.status}
-            >
-              {label}
-            </span>
-            <span className="truncate text-zinc-900 text-xs">{fileName}</span>
-            {dirPath && (
-              <span className="truncate text-zinc-400 text-[10px]">{dirPath}</span>
-            )}
-            <span className="ml-auto text-zinc-400 text-[10px] shrink-0">{desc}</span>
+            <span className={`w-3.5 text-center font-mono text-[11px] font-semibold ${colorCls} shrink-0`} title={desc || f.status}>{label}</span>
+            <span className="truncate text-zinc-900 text-xs">{f.path.split('/').pop()}</span>
+            <span className="truncate text-zinc-400 text-[10px]">{f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : ''}</span>
           </button>
-          {stageAction && (
-            <button
-              onClick={() => stageAction(f.path)}
-              title={stageAction === handleStageFile ? 'Stage' : 'Unstage'}
-              className={`shrink-0 p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-300 transition-opacity ${consoleButtonFocusClass}`}
-            >
-              {stageAction === handleStageFile ? (
-                <Plus className="h-3 w-3" />
-              ) : (
-                <Minus className="h-3 w-3" />
-              )}
-            </button>
-          )}
           <button
             onClick={() => requestDiscardFile(f.path)}
             title="Discard changes"
-            className={`shrink-0 p-1 rounded text-zinc-400 hover:text-red-600 hover:bg-zinc-300 transition-opacity ${consoleButtonFocusClass}`}
+            className={`shrink-0 p-1 rounded text-zinc-400 hover:text-red-600 hover:bg-zinc-200 opacity-0 group-hover:opacity-100 focus:opacity-100 ${consoleButtonFocusClass}`}
           >
             <RotateCcw className="h-3 w-3" />
           </button>
@@ -490,9 +458,45 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     );
   };
 
+  const renderNodes = (node, depth, parentPath) => {
+    const dirs = Object.entries(node.dirs).sort(([a], [b]) => a.localeCompare(b));
+    const files = node.files.slice().sort((a, b) => a.path.localeCompare(b.path));
+    return (
+      <>
+        {dirs.map(([name, child]) => {
+          const dirPath = parentPath ? `${parentPath}/${name}` : name;
+          const collapsed = collapsedDirs.has(dirPath);
+          return (
+            <div key={'dir-' + dirPath}>
+              <button
+                onClick={() => toggleDir(dirPath)}
+                className={`flex items-center gap-1 w-full px-1.5 py-1 text-left hover:bg-zinc-50 ${consoleButtonFocusClass}`}
+                style={{ paddingLeft: depth * 12 }}
+              >
+                {collapsed ? <ChevronRight className="h-3.5 w-3.5 text-zinc-400" /> : <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />}
+                <Folder className="h-3.5 w-3.5 text-amber-500" />
+                <span className="text-xs font-medium text-zinc-700 truncate">{name}</span>
+              </button>
+              {!collapsed && renderNodes(child, depth + 1, dirPath)}
+            </div>
+          );
+        })}
+        {files.map((f) => renderFileRow(f, depth))}
+      </>
+    );
+  };
+
   return (
     <div className="flex flex-col h-full min-h-0 w-full relative">
-      <div className="flex items-center justify-end gap-2 border-b border-zinc-200 px-3 py-1.5 shrink-0">
+      <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-1.5 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          {(gitChanges?.ahead > 0) && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-[11px] font-medium text-amber-700" title={`${gitChanges.ahead} committed but not pushed`}>
+              <Upload className="h-3 w-3" />
+              {gitChanges.ahead} unpushed
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-0.5 shrink-0">
           <div className="flex items-stretch shrink-0 rounded-md border border-zinc-200 overflow-hidden">
             {gitHasChanges ? (
@@ -500,7 +504,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 type="button"
                 onClick={() => setShowCommitDialog(true)}
                 disabled={committing || gitChanges?.operation === 'commit'}
-                title="Commit changes"
+                title="Stage all changes and commit"
                 className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`}
               >
                 {committing || gitChanges?.operation === 'commit' ? (
@@ -548,15 +552,6 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               {allExpanded ? <ChevronsDownUp className="h-3.5 w-3.5" /> : <ChevronsUpDown className="h-3.5 w-3.5" />}
             </button>
           )}
-          {gitHasChanges && (
-            <button
-              title="File list"
-              onClick={() => setShowFileList((v) => !v)}
-              className={`p-1 rounded ${showFileList ? 'text-zinc-900 bg-zinc-200' : 'text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200'} ${consoleButtonFocusClass}`}
-            >
-              <FileText className="h-3.5 w-3.5" />
-            </button>
-          )}
           <button
             title="Refresh"
             onClick={() => gitChanges?.fetchStatus()}
@@ -578,53 +573,6 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
 
       <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
         <div className="flex flex-col h-full min-h-0 relative">
-          {showFileList && (
-            <div className="absolute right-2 top-1 z-20 w-56 max-h-64 overflow-y-auto console-scroll-hidden bg-white border border-zinc-200 rounded-lg shadow-lg">
-              <div className="px-3 py-2 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 sticky top-0 bg-white">
-                Files ({gitStagedFiles.length + gitUnstagedFiles.length})
-              </div>
-              <div className="py-1">
-                {gitStagedFiles.length > 0 && (
-                  <div className="text-[9px] text-zinc-400 px-3 py-0.5">Staged</div>
-                )}
-                {gitStagedFiles.map((f) => {
-                  const name = f.path.split('/').pop();
-                  const label = GIT_STATUS_LABELS[f.status] || f.status;
-                  return (
-                    <button
-                      key={'list-' + f.path}
-                      onClick={() => { toggleFileExpand(f.path); setShowFileList(false); onJumpToFile?.(f.path); }}
-                      className={`w-full text-left px-3 py-1 text-xs truncate hover:bg-zinc-100 ${consoleButtonFocusClass}`}
-                    >
-                      <span className={`font-mono text-[9px] mr-1.5 ${GIT_STATUS_COLORS[f.status] || 'text-zinc-400'}`}>
-                        {label}
-                      </span>
-                      {name}
-                    </button>
-                  );
-                })}
-                {gitUnstagedFiles.length > 0 && (
-                  <div className="text-[9px] text-zinc-400 px-3 py-0.5 mt-0.5">Changes</div>
-                )}
-                {gitUnstagedFiles.map((f) => {
-                  const name = f.path.split('/').pop();
-                  const label = GIT_STATUS_LABELS[f.status] || f.status;
-                  return (
-                    <button
-                      key={'list-' + f.path}
-                      onClick={() => { toggleFileExpand(f.path); setShowFileList(false); onJumpToFile?.(f.path); }}
-                      className={`w-full text-left px-3 py-1 text-xs truncate hover:bg-zinc-100 ${consoleButtonFocusClass}`}
-                    >
-                      <span className={`font-mono text-[9px] mr-1.5 ${GIT_STATUS_COLORS[f.status] || 'text-zinc-400'}`}>
-                        {label}
-                      </span>
-                      {name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
           <div className="flex-1 min-h-0 overflow-y-auto console-scroll-hidden">
             {conflictFiles.length > 0 && (
               <div className="border-b border-zinc-200">
@@ -654,40 +602,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               </div>
             ) : (
               <div className="flex flex-col">
-                {gitStagedFiles.length > 0 && (
-                  <>
-                    <div className="flex items-center justify-between px-3 py-1.5 border-b border-zinc-200">
-                      <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider" title="Files staged and ready to commit">
-                        Ready to commit ({gitStagedFiles.length})
-                      </span>
-                      <button
-                        onClick={handleUnstageAll}
-                        title="Unstage all"
-                        className={`text-[10px] text-zinc-400 hover:text-zinc-600 ${consoleButtonFocusClass}`}
-                      >
-                        <Minus className="h-3 w-3" />
-                      </button>
-                    </div>
-                    {gitStagedFiles.map((f) => renderGitFile(f, handleUnstageFile))}
-                  </>
-                )}
-                {gitUnstagedFiles.length > 0 && (
-                  <>
-                    <div className="flex items-center justify-between px-3 py-1.5 border-b border-zinc-200">
-                      <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider" title="Edited but not yet staged">
-                        Not staged ({gitUnstagedFiles.length})
-                      </span>
-                      <button
-                        onClick={handleStageAll}
-                        title="Stage all"
-                        className={`text-[10px] text-zinc-400 hover:text-zinc-600 ${consoleButtonFocusClass}`}
-                      >
-                        <Plus className="h-3 w-3" />
-                      </button>
-                    </div>
-                    {gitUnstagedFiles.map((f) => renderGitFile(f, handleStageFile))}
-                  </>
-                )}
+                {renderNodes(changesTree, 0, '')}
               </div>
             )}
           </div>
@@ -783,7 +698,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       {showCommitDialog && (
         <ConsoleDialogShell onClose={() => setShowCommitDialog(false)} panelClassName={consoleDialogSmClass}>
           <div className="px-5 pt-5 pb-2 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-zinc-900">Commit changes</h3>
+            <h3 className="text-sm font-semibold text-zinc-900">Stage & commit changes</h3>
             <button
               type="button"
               onClick={handleGenerateMessage}
@@ -844,7 +759,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               disabled={!commitMessage.trim() || committing}
               className={buttonClass('primary', 'sm')}
             >
-              {committing ? 'Committing…' : 'Commit'}
+              {committing ? 'Committing…' : 'Stage & commit'}
             </button>
           </div>
         </ConsoleDialogShell>
