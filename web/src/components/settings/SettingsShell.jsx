@@ -15,6 +15,8 @@ export default function SettingsShell({ section = 'general' }) {
     <div className={consoleSettingsPanelScrollClass}>
       {section === 'general' && <GeneralSettingsPanel />}
       {section === 'api-keys' && <ApiKeysSettingsPanel />}
+      {section === 'git' && isAdmin && <GitProvidersSettingsPanel />}
+      {section === 'git' && !isAdmin && <GitHubSettingsPanel />}
       {section === 'git-providers' && isAdmin && <GitProvidersSettingsPanel />}
       {section === 'github' && !isAdmin && <GitHubSettingsPanel />}
       {section === 'quota' && <QuotaSettingsPanel />}
