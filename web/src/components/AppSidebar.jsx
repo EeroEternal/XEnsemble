@@ -235,6 +235,7 @@ export default function AppSidebar({
   user,
   onOpenSettings,
   onLogout,
+  minimal = false,
 }) {
   const [sidebarPrefs, setSidebarPrefs] = useState(() => loadSidebarPrefs());
   const [collapsed, setCollapsed] = useState(() => {
@@ -447,6 +448,23 @@ export default function AppSidebar({
 
   const sidebarNavItemClass =
     `flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-zinc-700 ${hoverBgTertiary} ${transitionBase}`;
+
+  if (minimal) {
+    return (
+      <aside className={`h-full w-14 ${bgSecondary} border-r border-zinc-200 flex flex-col flex-shrink-0 select-none`}>
+        <div className="flex-1 min-h-0" />
+        <div className="shrink-0 border-t border-zinc-200 px-1.5 py-2">
+          <SidebarAccountMenu
+            user={user}
+            onOpenSettings={onOpenSettings}
+            onLogout={onLogout}
+            adminLinkClass={adminLinkClass}
+            collapsed
+          />
+        </div>
+      </aside>
+    );
+  }
 
   if (collapsed) {
     return (

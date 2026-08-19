@@ -59,10 +59,6 @@ function AuthenticatedLayout({
   const isImagesManager = isCustomImages || isImagesAdmin;
 
   const isSettingsRoute = isAgentsAdmin || isUsersAdmin || isGatewayAdmin || isImagesManager;
-  const settingsTitle = isImagesManager ? 'Images'
-    : isAgentsAdmin ? 'Agents'
-    : isUsersAdmin ? 'Users'
-    : isGatewayAdmin ? 'Gateway' : '';
 
   const offRouteClass = 'pointer-events-none invisible absolute inset-0 z-0 [&_*]:pointer-events-none';
 
@@ -98,7 +94,6 @@ function AuthenticatedLayout({
               <ArrowLeft className="w-3.5 h-3.5" strokeWidth={1.75} />
               Back to workspace
             </button>
-            <span className="text-sm font-medium text-zinc-500 truncate">{settingsTitle}</span>
           </div>
         ) : (
           <div id="xe-topbar-dynamic" className="flex-1 min-w-0 flex items-center justify-between gap-3" />
@@ -121,6 +116,7 @@ function AuthenticatedLayout({
         user={user}
         onOpenSettings={() => setShowSettingsModal(true)}
         onLogout={logout}
+        minimal={isSettingsRoute}
       />
       )}
       <main
