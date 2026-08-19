@@ -3,8 +3,6 @@ import { createPortal } from 'react-dom';
 import { NavLink } from 'react-router-dom';
 import {
   Trash2,
-  RotateCw,
-  Play,
   LogOut,
   Settings2,
   Search,
@@ -26,7 +24,6 @@ import {
   isArchivedSession,
   selectActiveSession,
 } from '../lib/sidebarPrefs';
-import { useToast } from '../components/Toast';
 import BrandMark from './BrandMark';
 import {
   textPrimary,
@@ -228,10 +225,8 @@ export default function AppSidebar({
   activeWorkspaceId,
   activeWorkspaceName,
   onSelectSession,
-  fetchWorkspaces,
   onNewSession,
   onRequestDeleteSession,
-  onRestartSession,
   user,
   onOpenSettings,
   onLogout,
@@ -257,9 +252,7 @@ export default function AppSidebar({
     }
   }, []);
 
-  const [resumingSessionId, setResumingSessionId] = useState(null);
   const [customImageMap, setCustomImageMap] = useState({});
-  const { showToast } = useToast();
 
   useEffect(() => {
     apiFetch('/api/v1/custom-images').then((res) => res.json()).then((data) => {
@@ -293,40 +286,6 @@ export default function AppSidebar({
     onSelectSession({ ...s, projectName });
   }, [onSelectSession, refreshSidebarPrefs, activeWorkspaceName]);
 
-  const handleResumeSession = useCallback(async (session) => {
-    if (!session?.id || resumingSessionId) return;
-    setResumingSessionId(session.id);
-    try {
-      const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(session.id)}/resume`, {
-        method: 'POST',
-      });
-      let data = {};
-      try {
-        data = await res.json();
-      } catch {
-        data = {};
-      }
-      if (!res.ok) {
-        const errorMessage = data.error || 'Failed to resume session';
-        if (res.status === 409) {
-          showToast('error', errorMessage);
-          return;
-        }
-        throw new Error(errorMessage);
-      }
-
-      await fetchWorkspaces?.();
-      onSelectSession?.({
-        ...session,
-        projectName: session.projectName || activeWorkspaceName || null,
-      });
-    } catch (err) {
-      showToast('error', err.message || 'Failed to resume session');
-    } finally {
-      setResumingSessionId(null);
-    }
-  }, [fetchWorkspaces, onSelectSession, resumingSessionId, showToast, activeWorkspaceName]);
-
   const sessionMatchesQuery = useCallback((s) => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return true;
@@ -339,8 +298,6 @@ export default function AppSidebar({
     const isLive = s.alive === true;
     const isPending = s.status === 'pending';
     const isFailed = s.status === 'failed';
-    const canResume = !isLive && !isPending && !isFailed && s.recoverable === true;
-    const isResuming = resumingSessionId === s.id;
     const label = s.title?.trim() || getAgentLabel(s.agentId);
     const timestamp = s.createdAt ? formatRelativeTime(s.createdAt) : '';
     const imageName = s.customImageId ? customImageMap[s.customImageId] : null;
@@ -381,33 +338,6 @@ export default function AppSidebar({
           )}
         </button>
         <div className="flex items-center shrink-0 opacity-0 group-hover/session:opacity-100 focus-within:opacity-100">
-          {canResume && (
-            <button
-              type="button"
-              title={isResuming ? 'Resuming…' : 'Resume'}
-              aria-label={isResuming ? 'Resuming session' : 'Resume session'}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleResumeSession(s);
-              }}
-              disabled={Boolean(resumingSessionId)}
-              className={`p-1 rounded-md ${textPlaceholder} ${hoverTextPrimary} hover:bg-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed`}
-            >
-              {isResuming ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
-            </button>
-          )}
-          <button
-            type="button"
-            title="Restart"
-            aria-label="Restart session"
-            onClick={(e) => {
-              e.stopPropagation();
-              onRestartSession?.(s);
-            }}
-            className={`p-1 rounded-md ${textPlaceholder} ${hoverTextPrimary} hover:bg-zinc-200`}
-          >
-            <RotateCw className="w-3 h-3" />
-          </button>
           <button
             type="button"
             title={isLive ? 'Stop and remove' : 'Remove'}

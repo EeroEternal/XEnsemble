@@ -25,6 +25,7 @@ import DeployPanel from '../components/DeployPanel';
 import {
   TerminalSquare,
   Play,
+  RotateCw,
   Settings2,
   X,
   Power,
@@ -1229,8 +1230,22 @@ export default React.forwardRef(function Sessions({
                           )}
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => handleRestartSession()}
+                        disabled={sessionControlPending}
+                        className={`${consoleIconButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
+                        title={restartingSession ? 'Restarting…' : 'Restart session'}
+                        aria-label="Restart session"
+                      >
+                        {restartingSession ? (
+                          <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.75} />
+                        ) : (
+                          <RotateCw className="w-4 h-4" strokeWidth={1.75} />
+                        )}
+                      </button>
                     </>
-                  )}
+                    )}
                   {activeSession.projectId ? (
                     <>
                       <div className="mx-0.5 h-5 w-px bg-zinc-200" />

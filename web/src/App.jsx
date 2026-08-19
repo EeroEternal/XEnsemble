@@ -114,10 +114,8 @@ function AuthenticatedLayout({
         activeWorkspaceId={activeWorkspaceId}
         activeWorkspaceName={activeWorkspaceName}
         onSelectSession={onSelectSession}
-        fetchWorkspaces={fetchWorkspaces}
         onNewSession={() => { setLaunchPanelOpen(true); sessionsRef.current?.openLaunchModal?.('session'); }}
         onRequestDeleteSession={(session, ws) => sessionsRef.current?.requestDeleteSession?.(session, ws)}
-        onRestartSession={(session) => sessionsRef.current?.restartSession?.(session)}
         user={user}
         onOpenSettings={() => navigate('/settings')}
         onLogout={logout}
