@@ -91,7 +91,7 @@ export default function OnboardingWizard({
   return (
     <ConsoleDialogShell
       onClose={onClose}
-      panelClassName="w-[840px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden"
+      panelClassName="w-[420px] max-w-[calc(100vw-2rem)] min-h-[640px] max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden"
     >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-3 shrink-0">
