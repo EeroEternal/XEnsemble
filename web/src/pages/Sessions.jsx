@@ -301,21 +301,7 @@ export default React.forwardRef(function Sessions({
     [configRequiredKeys, savedConfigKeys],
   );
 
-  const ensureAgentSecrets = async (agent) => {
-    const required = agent?.env_required || [];
-    if (required.length === 0 || agent?.llm_auth_mode === 'gateway') return true;
-    try {
-      const res = await apiFetch('/api/v1/secrets');
-      const data = await res.json();
-      if (!res.ok) return true;
-      const missing = required.filter((k) => !data[k]);
-      if (missing.length === 0) return true;
-      showToast('warning', `${agent.name} requires API keys. Configure them in Settings > API Keys.`);
-      return true;
-    } catch {
-      return true;
-    }
-  };
+  const ensureAgentSecrets = async () => true;
 
   const handleCreateProject = async (nameOverride) => {
     const name = (nameOverride ?? newProjectName).trim() || defaultWorkspaceName();
