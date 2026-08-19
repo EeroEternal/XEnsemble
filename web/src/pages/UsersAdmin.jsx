@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Pencil, Pause, Play, CheckCircle, Clock, KeyRound } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Plus, Pencil, Pause, Play, CheckCircle, Clock, KeyRound, Loader2, RefreshCw, Search } from 'lucide-react';
 
 import Button from '../components/Button';
 import Input from '../components/Input';
@@ -14,6 +14,7 @@ import {
   consoleCardClass,
   consoleDialogMdClass,
   consoleAdminPageClass,
+  consoleIconButtonClass,
   consoleSectionLabelClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
@@ -54,21 +55,26 @@ export default function UsersAdmin() {
   const [users, setUsers] = useState([]);
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [dialogMode, setDialogMode] = useState(null);
   const [editingUser, setEditingUser] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [resetPassword, setResetPassword] = useState('');
   const pendingCreateAgentDefaults = useRef(false);
 
-  
-
-  const fetchUsers = useCallback(() => {
-    apiFetch('/api/v1/admin/users')
+  const fetchUsers = useCallback(({ silent = false } = {}) => {
+    if (!silent) setRefreshing(true);
+    return apiFetch('/api/v1/admin/users')
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data)) setUsers(data);
       })
-      .finally(() => setLoading(false));
+      .catch(() => {})
+      .finally(() => {
+        setLoading(false);
+        setRefreshing(false);
+      });
   }, []);
 
   const fetchAgents = useCallback(() => {
@@ -253,22 +259,57 @@ export default function UsersAdmin() {
 
   const agentOptions = agents.map((a) => ({ value: a.id, label: a.name }));
 
+  const filteredUsers = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter((u) => (u.username || '').toLowerCase().includes(q));
+  }, [users, searchQuery]);
+
   return (
     <div className={consoleAdminPageClass}>
       <PageHeader
         title="Users"
         description="Manage accounts, quotas, and agent access."
         actions={(
-          <Button type="button" onClick={openCreate} size="md" className="shrink-0">
-            <Plus className="w-4 h-4" />
-            Add User
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="relative w-64 shrink-0">
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search users…"
+                className="w-full pl-8"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => fetchUsers()}
+              disabled={refreshing}
+              className={consoleIconButtonClass}
+              title="Refresh"
+            >
+              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            </button>
+            <Button type="button" onClick={openCreate} size="md" className="shrink-0">
+              <Plus className="w-4 h-4" />
+              Add User
+            </Button>
+          </div>
         )}
       />
 
       <div className={consoleTableShellClass}>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm whitespace-nowrap">
+          <table className="w-full min-w-[720px] table-fixed text-left text-sm">
+            <colgroup>
+              <col className="w-auto" />
+              <col className="w-32" />
+              <col className="w-36" />
+              <col className="w-24" />
+              <col className="w-28" />
+              <col className="w-36" />
+              <col className="w-20" />
+            </colgroup>
             <thead className="border-b border-zinc-200 bg-white">
               <tr>
                 <th className={consoleTableHeadCellClass}>User</th>
@@ -285,7 +326,13 @@ export default function UsersAdmin() {
                 <tr>
                   <td colSpan={7} className={`${consoleTableBodyCellClass} text-zinc-400`}>Loading…</td>
                 </tr>
-              ) : users.map((user) => (
+              ) : filteredUsers.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>
+                    {users.length === 0 ? 'No users yet.' : 'No users match your search.'}
+                  </td>
+                </tr>
+              ) : filteredUsers.map((user) => (
                 <tr key={user.id} className="hover:bg-zinc-50/50">
                   <td className={consoleTableBodyCellClass}>
                     <div className="font-medium text-zinc-900">{user.username}</div>

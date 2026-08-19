@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Plus, Download, KeyRound, Pencil, Trash2, RefreshCw, Info, CheckCircle, Clock } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Plus, Download, KeyRound, Pencil, Trash2, RefreshCw, Info, CheckCircle, Clock, Loader2, Search } from 'lucide-react';
 
 import Button from '../components/Button';
+import Input from '../components/Input';
 import RowActionsMenu from '../components/RowActionsMenu';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
@@ -9,6 +10,7 @@ import { useToast } from '../components/Toast';
 import { confirm } from '../components/ConfirmDialog';
 import {
   consoleAdminPageClass,
+  consoleIconButtonClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
   consoleTableShellClass,
@@ -107,6 +109,7 @@ export default function AgentsAdmin() {
   const [gatewayProviders, setGatewayProviders] = useState([]);
   const [loading, setLoading] = useState(() => loadAdminAgentsCache().length === 0);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [registerOpen, setRegisterOpen] = useState(false);
   const [keysAgent, setKeysAgent] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
@@ -124,11 +127,18 @@ export default function AgentsAdmin() {
           saveAdminAgentsCache(data);
         }
       })
+      .catch(() => {})
       .finally(() => {
         setLoading(false);
         setRefreshing(false);
       });
   }, []);
+
+  const filteredAgents = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return agents;
+    return agents.filter((a) => (a.name || '').toLowerCase().includes(q));
+  }, [agents, searchQuery]);
 
   useEffect(() => {
     fetchAgents({ silent: agents.length > 0 });
@@ -256,10 +266,30 @@ export default function AgentsAdmin() {
             : 'Install agents on the server, configure platform API keys, and manage the registry.'
         }
         actions={(
-          <Button type="button" onClick={() => setRegisterOpen(true)} size="md" className="shrink-0">
-            <Plus className="w-4 h-4" />
-            Add Agent
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="relative w-64 shrink-0">
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search agents…"
+                className="w-full pl-8"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => fetchAgents({ silent: true })}
+              disabled={refreshing}
+              className={consoleIconButtonClass}
+              title="Refresh"
+            >
+              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            </button>
+            <Button type="button" onClick={() => setRegisterOpen(true)} size="md" className="shrink-0">
+              <Plus className="w-4 h-4" />
+              Add Agent
+            </Button>
+          </div>
         )}
       />
 
@@ -289,7 +319,15 @@ export default function AgentsAdmin() {
 
       <div className={consoleTableShellClass}>
         <div className="overflow-auto max-h-[calc(100vh-200px)]">
-          <table className="w-full text-left text-sm">
+          <table className="w-full min-w-[760px] table-fixed text-left text-sm">
+            <colgroup>
+              <col className="w-auto" />
+              <col className="w-36" />
+              <col className="w-24" />
+              <col className="w-auto" />
+              <col className="w-40" />
+              <col className="w-16" />
+            </colgroup>
             <thead className="border-b border-zinc-200 bg-white">
               <tr>
                 <th className={consoleTableHeadCellClass}>Name</th>
@@ -307,13 +345,13 @@ export default function AgentsAdmin() {
                     Loading...
                   </td>
                 </tr>
-              ) : agents.length === 0 ? (
+              ) : filteredAgents.length === 0 ? (
                 <tr>
                   <td colSpan={6} className={`${consoleTableBodyCellClass} text-zinc-500`}>
-                    No agents registered yet.
+                    {agents.length === 0 ? 'No agents registered yet.' : 'No agents match your search.'}
                   </td>
                 </tr>
-              ) : agents.map((agent) => {
+              ) : filteredAgents.map((agent) => {
                 const authSummary = getAuthSummary(agent);
                 const executable = [agent.cmd, ...(agent.args || [])].filter(Boolean).join(' ');
                 return (

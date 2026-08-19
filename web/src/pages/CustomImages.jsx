@@ -16,6 +16,7 @@ import {
 import { useToast } from '../components/Toast';
 import {
   consoleAdminPageClass,
+  consoleIconButtonClass,
   consoleSectionLabelClass,
   consoleStructuredDialogPanelClass,
   consoleAdminTableShellClass,
@@ -278,10 +279,15 @@ export function CustomImagesContent() {
               className="w-full pl-8"
             />
           </div>
-          <Button onClick={loadAll} disabled={loading} size="md" variant="secondary">
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-            Refresh
-          </Button>
+          <button
+            type="button"
+            onClick={loadAll}
+            disabled={loading}
+            className={consoleIconButtonClass}
+            title="Refresh"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          </button>
           <Button onClick={openCreate} disabled={!enabled || imageQuota.count >= imageQuota.max} size="md">
             <Plus className="w-4 h-4" />
             New Image

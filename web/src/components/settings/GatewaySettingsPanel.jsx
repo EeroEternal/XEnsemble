@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Plus, Settings2, Play, Square, RefreshCw, Loader2, Pencil, Trash2, Activity, List, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Plus, Settings2, Play, Square, RefreshCw, Loader2, Pencil, Trash2, Activity, List, CheckCircle, XCircle, Clock, Search } from 'lucide-react';
 import Button from '../Button';
 import Input, { FormLabel, Textarea } from '../Input';
 import MaskedApiKeyInput from '../MaskedApiKeyInput';
@@ -294,6 +294,7 @@ export default function GatewaySettingsPanel() {
   });
   const [envBindLocked, setEnvBindLocked] = useState(false);
   const [providers, setProviders] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [processSaving, setProcessSaving] = useState(false);
@@ -359,6 +360,12 @@ export default function GatewaySettingsPanel() {
       setLoading(false);
     }
   }, []);
+
+  const filteredProviders = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return providers;
+    return providers.filter((p) => (p.name || '').toLowerCase().includes(q));
+  }, [providers, searchQuery]);
 
   const runProviderTest = useCallback(async (name, { silent = false } = {}) => {
     if (!name) return null;
@@ -869,21 +876,32 @@ export default function GatewaySettingsPanel() {
         </div>
 
         <div>
-          <div className="flex justify-end mb-2">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <div className="relative w-64 shrink-0">
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search providers…"
+                className="w-full pl-8"
+              />
+            </div>
             <Button type="button" size="md" onClick={openAddProviderDialog}>
               <Plus className="w-4 h-4" />
               Add Provider
             </Button>
           </div>
-          {providers.length === 0 ? (
-            <p className="text-sm text-zinc-500">No providers yet.</p>
+          {filteredProviders.length === 0 ? (
+            <p className="text-sm text-zinc-500">
+              {providers.length === 0 ? 'No providers yet.' : 'No providers match your search.'}
+            </p>
           ) : (
             <div className={consoleTableShellClass}>
-              <table className="w-full border-collapse text-left">
+              <table className="w-full table-fixed border-collapse text-left">
                 <colgroup>
-                  <col />
-                  <col style={{ width: '6.5rem' }} />
-                  <col style={{ width: '6.75rem' }} />
+                  <col className="w-auto" />
+                  <col className="w-40" />
+                  <col className="w-20" />
                 </colgroup>
                 <thead>
                   <tr className={consoleTableHeadRowClass}>
@@ -893,7 +911,7 @@ export default function GatewaySettingsPanel() {
                   </tr>
                 </thead>
                 <tbody className={consoleTableBodyDivideClass}>
-                  {providers.map((p) => {
+                  {filteredProviders.map((p) => {
                     const detailTitle = [
                       p.base_url,
                       p.models?.length ? `Models: ${p.models.join(', ')}` : null,
