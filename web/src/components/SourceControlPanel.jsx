@@ -514,6 +514,21 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 )}
                 Commit
               </button>
+            ) : gitChanges?.ahead > 0 ? (
+              <button
+                type="button"
+                onClick={handlePush}
+                disabled={pushing || gitChanges?.operation === 'push'}
+                title={`Push ${gitChanges.ahead} commit(s) to remote`}
+                className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`}
+              >
+                {pushing || gitChanges?.operation === 'push' ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Upload className="h-3.5 w-3.5" />
+                )}
+                Push{gitChanges.ahead > 1 ? ` (${gitChanges.ahead})` : ''}
+              </button>
             ) : (
               <button
                 type="button"
