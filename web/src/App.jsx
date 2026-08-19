@@ -14,6 +14,7 @@ import SettingsTabSidebar from './components/SettingsTabSidebar';
 import SettingsShell from './components/settings/SettingsShell';
 import { useWorkspaces } from './hooks/useWorkspaces';
 import { cn } from './lib/utils';
+import { APP_SHELL_MAIN_PY_CLASS, APP_SHELL_PAD_CLASS } from './lib/appShellLayout';
 import { bgCanvas, consoleButtonFocusClass } from './lib/consoleTokens';
 import { getAccessToken, setTokens, clearTokens, apiFetch, isStoredAuthStale, setAuthExpiredHandler } from './lib/api';
 import { TerminalThemeProvider } from './hooks/useTerminalTheme.jsx';
@@ -156,7 +157,7 @@ function AuthenticatedLayout({
               )}
             >
               <SettingsTabSidebar activeTab="agents" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
-              <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
+              <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
                 <AgentsAdmin />
               </div>
             </div>
@@ -169,7 +170,7 @@ function AuthenticatedLayout({
               )}
             >
               <SettingsTabSidebar activeTab="users" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
-              <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
+              <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
                 <UsersAdmin />
               </div>
             </div>
@@ -182,7 +183,7 @@ function AuthenticatedLayout({
               )}
             >
               <SettingsTabSidebar activeTab="gateway" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
-              <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
+              <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
                 <GatewayAdmin />
               </div>
             </div>
@@ -195,7 +196,7 @@ function AuthenticatedLayout({
               )}
             >
               <SettingsTabSidebar activeTab="images" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
-              <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
+              <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
                 <ImagesManager />
               </div>
             </div>
