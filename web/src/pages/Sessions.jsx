@@ -1321,6 +1321,8 @@ export default React.forwardRef(function Sessions({
                     onDeleteDir={handleDeleteDir}
                     onRenameFile={handleRenameFile}
                     onCopyPath={handleCopyPath}
+                    panelOpen={panelOpen}
+                    onTogglePanel={() => setPanelOpen((p) => !p)}
                   />
                 </div>
                 </>
