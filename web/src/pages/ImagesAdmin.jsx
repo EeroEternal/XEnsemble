@@ -84,7 +84,7 @@ function versionBadge(version) {
         : { tone: 'neutral', icon: null, label: 'Ready' };
 }
 
-export function ImagesAdminContent() {
+export function ImagesAdminContent({ initialAgentId = null }) {
     const { showToast } = useToast();
     const [catalog, setCatalog] = useState(null);
     const [selectedAgentId, setSelectedAgentId] = useState(null);
@@ -151,6 +151,12 @@ export function ImagesAdminContent() {
             loadBuilds(selectedAgentId);
         }
     }, [pollIds, selectedAgentId, loadBuilds]);
+
+    useEffect(() => {
+        if (initialAgentId && catalog?.agents?.some((a) => a.agent_id === initialAgentId)) {
+            setSelectedAgentId(initialAgentId);
+        }
+    }, [initialAgentId, catalog]);
 
     const selectedAgent = useMemo(
         () => (catalog?.agents || []).find((a) => a.agent_id === selectedAgentId),
