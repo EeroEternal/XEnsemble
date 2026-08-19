@@ -1,5 +1,5 @@
 export const TERMINAL_AUTH_CLOSE_CODE = 4401;
-export const DEFAULT_MAX_RECONNECTS = 5;
+export const DEFAULT_MAX_RECONNECTS = 20;
 
 const AUTH_FAILURE_PATTERN = /\b(?:401|invalid access token|access_token is required)\b/i;
 
@@ -15,7 +15,7 @@ export function isTerminalAuthFailure(failure) {
 export function createTerminalReconnectState({
   maxAttempts = DEFAULT_MAX_RECONNECTS,
   baseDelayMs = 500,
-  maxDelayMs = 3000,
+  maxDelayMs = 5000,
 } = {}) {
   let attempts = 0;
   let authenticated = false;

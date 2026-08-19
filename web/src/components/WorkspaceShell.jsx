@@ -138,7 +138,7 @@ const WorkspaceShell = forwardRef(function WorkspaceShell({ projectId, onOutput 
     let serverEnded = false;
     const reconnectState = createTerminalReconnectState();
     let reconnectTimer = null;
-    const MAX_RECONNECTS = 5;
+    const MAX_RECONNECTS = 20;
 
     const copyToClipboard = (text) => {
       const textarea = document.createElement('textarea');

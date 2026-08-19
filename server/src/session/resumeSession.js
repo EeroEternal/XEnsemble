@@ -211,7 +211,9 @@ async function resumeSession({
         // and start fresh (e.g. claude-code --continue fails with "no conversation found"
         // when the sessions/ subdirectory is empty).
         let canResume = true;
-        if (resumeSpec.resumeCheckSubdir && stateDirPath) {
+        if (!stateExists) {
+            canResume = false;
+        } else if (resumeSpec.resumeCheckSubdir && stateDirPath) {
             try {
                 const checkDir = `${stateDirPath}/${resumeSpec.resumeCheckSubdir}`;
                 const result = await runtime.exec.exec(

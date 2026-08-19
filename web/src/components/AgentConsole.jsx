@@ -404,7 +404,7 @@ function AgentConsole({
       })();
     } else {
       const reconnectState = createTerminalReconnectState();
-      const MAX_RECONNECTS = 5;
+      const MAX_RECONNECTS = 20;
 
       const scheduleReconnect = (reason) => {
         if (disposed || serverEnded) return;
@@ -602,12 +602,10 @@ function AgentConsole({
 
           const flushWriteBuffer = () => {
             writeRafId = null;
-            if (disposed) return;
             if (pendingSeq != null) {
               setCachedSeq(sessionId, pendingSeq);
               pendingSeq = null;
             }
-            if (!writeBuffer && !syncTermPending) return;
 
             let remaining = syncTermPending + (writeBuffer || '');
             syncTermPending = '';
@@ -664,112 +662,14 @@ function AgentConsole({
             }
 
             if (inAltScreen) {
-              // Buffer incomplete sync-term blocks even in alt screen.
-              // xterm.js ignores ?2026h/l wrappers but executes internal
-              // content (cursor positioning, space-fill). If a block is
-              // split across flushes, the first fragment clears/overwrites
-              // rows whose full content hasn't arrived yet, leaving blank
-              // gaps. Buffer until the matching ?2026l arrives.
-              //
-              // Coalesce multiple complete blocks across animation frames:
-              // agents like qwen-code emit full-screen redraws at 96% gaps
-              // < 100ms.  Writing every intermediate block causes xterm.js
-              // to process 5+ full-screen redraws per second, producing
-              // visible flickering.  Keep only the last block (full-screen
-              // redraws overwrite each other).  A 100ms timer lets blocks
-              // from subsequent animation frames accumulate before the write.
+              // In alt screen mode, write all data directly to terminal.
+              // The previous sync-term buffering caused data loss when
+              // WebSocket messages split sync-term blocks across reconnects:
+              // incomplete blocks were stuck in syncTermPending and lost
+              // when a new connect() created a fresh syncTermPending.
               if (syncTermPending) {
-                // We have a buffered incomplete sync-term block.
-                // New data is a continuation of that block (or a new
-                // ?2026h within it). Append to the buffer instead of
-                // writing directly — xterm.js would otherwise execute
-                // internal cursor/space-fill commands without the
-                // ?2026h/?2026l wrapper, corrupting the display.
-                syncTermPending += remaining;
-                if (syncTermPending.includes('\x1b[?2026l')) {
-                  // Block is now complete — set the coalesce timer.
-                  if (coalesceTimer) return;
-                  coalesceTimer = setTimeout(() => {
-                    coalesceTimer = null;
-                    if (disposed) return;
-                    const data = syncTermPending;
-                    syncTermPending = '';
-                    if (!data) return;
-                    const lastCompleteEnd = data.lastIndexOf('\x1b[?2026l');
-                    if (lastCompleteEnd === -1) {
-                      syncTermPending = data;
-                      return;
-                    }
-                    const lastCompleteStart = data.lastIndexOf('\x1b[?2026h', lastCompleteEnd);
-                    const blockEnd = lastCompleteEnd + '\x1b[?2026l'.length;
-                    const afterBlock = data.slice(blockEnd);
-                    if (afterBlock.includes('\x1b[?2026h')) {
-                      syncTermPending = afterBlock.slice(afterBlock.indexOf('\x1b[?2026h'));
-                    }
-                    let nonSync = '';
-                    let pos = 0;
-                    while (pos < data.length) {
-                      const h = data.indexOf('\x1b[?2026h', pos);
-                      if (h === -1) { nonSync += data.slice(pos); break; }
-                      nonSync += data.slice(pos, h);
-                      const l = data.indexOf('\x1b[?2026l', h);
-                      if (l === -1) break;
-                      pos = l + '\x1b[?2026l'.length;
-                    }
-                    writeTerminalData(
-                      nonSync
-                      + data.slice(lastCompleteStart, blockEnd)
-                    );
-                  }, 100);
-                }
-                return;
-              }
-              if (remaining.includes('\x1b[?2026h')) {
-                const syncEnd = remaining.indexOf('\x1b[?2026l');
-                if (syncEnd === -1) {
-                  const syncStart = remaining.indexOf('\x1b[?2026h');
-                  const before = remaining.slice(0, syncStart);
-                  syncTermPending += remaining.slice(syncStart);
-                  if (before) writeTerminalData(before);
-                } else {
-                  // Complete block(s) found.  Buffer and coalesce with a
-                  // timer so blocks arriving in subsequent animation frames
-                  // are accumulated before the final write.
-                  syncTermPending += remaining;
-                  if (coalesceTimer) return;
-                  coalesceTimer = setTimeout(() => {
-                    coalesceTimer = null;
-                    if (disposed) return;
-                    const data = syncTermPending;
-                    syncTermPending = '';
-                    if (!data) return;
-                    const lastCompleteEnd = data.lastIndexOf('\x1b[?2026l');
-                    if (lastCompleteEnd === -1) {
-                      syncTermPending = data;
-                      return;
-                    }
-                    const lastCompleteStart = data.lastIndexOf('\x1b[?2026h', lastCompleteEnd);
-                    const blockEnd = lastCompleteEnd + '\x1b[?2026l'.length;
-                    const afterBlock = data.slice(blockEnd);
-                    if (afterBlock.includes('\x1b[?2026h')) {
-                      syncTermPending = afterBlock.slice(afterBlock.indexOf('\x1b[?2026h'));
-                    }
-                    let nonSync = '';
-                    let pos = 0;
-                    while (pos < data.length) {
-                      const h = data.indexOf('\x1b[?2026h', pos);
-                      if (h === -1) { nonSync += data.slice(pos); break; }
-                      nonSync += data.slice(pos, h);
-                      const l = data.indexOf('\x1b[?2026l', h);
-                      if (l === -1) break;
-                      pos = l + '\x1b[?2026l'.length;
-                    }
-                    writeTerminalData(
-                      nonSync
-                      + data.slice(lastCompleteStart, blockEnd)
-                    );
-                  }, 100);
-                }
+                writeTerminalData(syncTermPending + remaining);
+                syncTermPending = '';
               } else {
                 writeTerminalData(remaining);
               }
@@ -834,12 +734,12 @@ function AgentConsole({
               if (msg.seq != null) pendingSeq = msg.seq;
               writeBuffer += msg.data;
               if (writeRafId === null) {
-                writeRafId = requestAnimationFrame(flushWriteBuffer);
+                writeRafId = setTimeout(flushWriteBuffer, 16);
               }
               return;
             }
             if (msg.type === 'error') {
-              if (writeRafId !== null) { cancelAnimationFrame(writeRafId); clearTimeout(writeRafId); writeRafId = null; }
+              if (writeRafId !== null) { clearTimeout(writeRafId); writeRafId = null; }
               if (coalesceTimer) { clearTimeout(coalesceTimer); coalesceTimer = null; }
               flushWriteBuffer();
               hideOverlay();
@@ -850,7 +750,7 @@ function AgentConsole({
               return;
             }
             if (msg.type === 'exit') {
-              if (writeRafId !== null) { cancelAnimationFrame(writeRafId); clearTimeout(writeRafId); writeRafId = null; }
+              if (writeRafId !== null) { clearTimeout(writeRafId); writeRafId = null; }
               if (coalesceTimer) { clearTimeout(coalesceTimer); coalesceTimer = null; }
               flushWriteBuffer();
               hideOverlay();
@@ -881,7 +781,7 @@ function AgentConsole({
               void handleConnectionFailure(event.reason || 'Invalid access token', failure);
               return;
             }
-            if (event.wasClean) return;
+            if (event.wasClean && event.code === 1000) return;
             void handleConnectionFailure(wasConnected ? 'disconnected' : 'connection failed', failure);
           };
         } catch (error) {
@@ -901,7 +801,7 @@ function AgentConsole({
 
     return () => {
       disposed = true;
-      if (writeRafId !== null) { cancelAnimationFrame(writeRafId); clearTimeout(writeRafId); }
+      if (writeRafId !== null) { clearTimeout(writeRafId); }
       if (coalesceTimer) { clearTimeout(coalesceTimer); coalesceTimer = null; }
       if (reconnectTimer) clearTimeout(reconnectTimer);
       resizeTimers.forEach((t) => clearTimeout(t));
