@@ -484,7 +484,7 @@ export function CustomImagesContent() {
 
       {/* Image List */}
       <div className={cn(consoleTableShellClass, 'overflow-x-auto')}>
-        <table className="w-fit min-w-[640px] border-collapse text-left">
+        <table className="w-full min-w-[640px] table-fixed border-collapse text-left">
           <colgroup>
             <col className="w-auto" />
             <col className="w-36" />
