@@ -426,13 +426,11 @@ function generateQoder(values) {
                     apiKey: apiKey,
                     displayName: 'Custom',
                     model: model,
-                    contextWindow: 64000,
                     maxOutputTokens: 8192,
                     models: [
                         {
                             model: model,
                             displayName: model,
-                            contextWindow: 64000,
                             maxOutputTokens: 8192,
                         },
                     ],
@@ -472,9 +470,6 @@ function generateQwenCode(values) {
                         id: model,
                         baseUrl: baseUrl,
                         envKey: 'CUSTOM_API_KEY',
-                        generationConfig: {
-                            contextWindowSize: 64000,
-                        },
                     },
                 ],
             },
@@ -522,7 +517,6 @@ function generatePi(values) {
                         {
                             id: model,
                             name: model,
-                            contextWindow: 64000,
                         },
                     ],
                 },
@@ -644,7 +638,6 @@ function generateCodebuddy(values) {
                 vendor: 'custom',
                 apiKey: apiKey,
                 url: baseUrl,
-                maxInputTokens: 64000,
                 maxOutputTokens: 8192,
             }], null, 2),
         });

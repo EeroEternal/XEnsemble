@@ -268,13 +268,11 @@ const DEFAULT_AGENTS = [
                             apiKey: 'sk-xxxx',
                             displayName: 'OpenAI',
                             model: 'gpt-4o',
-                            contextWindow: 64000,
                             maxOutputTokens: 8192,
                             models: [
                                 {
                                     model: 'gpt-4o',
                                     displayName: 'GPT-4o',
-                                    contextWindow: 64000,
                                     maxOutputTokens: 8192,
                                 },
                             ],
@@ -314,9 +312,6 @@ const DEFAULT_AGENTS = [
                                 id: 'gpt-4o',
                                 baseUrl: 'https://api.openai.com/v1',
                                 envKey: 'DEEPSEEK_API_KEY',
-                                generationConfig: {
-                                    contextWindowSize: 64000,
-                                },
                             },
                         ],
                     },
@@ -369,7 +364,6 @@ const DEFAULT_AGENTS = [
                                 {
                                     id: 'gpt-4o',
                                     name: 'GPT-4o',
-                                    contextWindow: 64000,
                                 },
                             ],
                         },
