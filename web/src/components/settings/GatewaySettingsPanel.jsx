@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, Settings2, Play, Square, RefreshCw, Loader2, Pencil, Trash2, Activity, List, CheckCircle, XCircle, Clock, Search } from 'lucide-react';
+import { Plus, Settings2, Play, Square, Power, RefreshCw, Loader2, Pencil, Trash2, Activity, List, CheckCircle, XCircle, Clock, Search } from 'lucide-react';
 import Button from '../Button';
 import Input, { FormLabel, Textarea } from '../Input';
 import MaskedApiKeyInput from '../MaskedApiKeyInput';
@@ -882,7 +882,7 @@ export default function GatewaySettingsPanel() {
                 {processAction === 'restart' ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  <RefreshCw className="w-4 h-4" />
+                  <Power className="w-4 h-4" />
                 )}
               </button>
             </div>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Plus, RefreshCw, RotateCw, ScrollText, Search, Trash2 } from 'lucide-react';
+import { Loader2, Plus, RefreshCw, RotateCw, ScrollText, Search, Trash2, X } from 'lucide-react';
 
 import Button from '../components/Button';
 import BuildLogDialog from '../components/BuildLogDialog';
@@ -16,6 +16,7 @@ import {
 import { useToast } from '../components/Toast';
 import {
   consoleAdminPageClass,
+  consoleDialogPanelClass,
   consoleIconButtonClass,
   consoleSectionLabelClass,
   consoleStructuredDialogPanelClass,
@@ -45,6 +46,13 @@ function componentIds(components) {
     ? components.map((c) => (c.component_id || '').replace(/^(agent:|lang:|tool:)/, ''))
     : [];
 }
+
+const CATEGORY_ORDER = ['agent', 'language', 'database', 'devops', 'package-manager', 'shell-tool'];
+
+const CATEGORY_LABELS = {
+  agent: 'Agents', language: 'Languages', database: 'Databases',
+  devops: 'DevOps', 'package-manager': 'Package Managers', 'shell-tool': 'Shell Tools',
+};
 
 async function fetchCatalog() {
   const res = await apiFetch('/api/v1/custom-images/catalog');
@@ -76,6 +84,7 @@ export function CustomImagesContent() {
   const [pollIds, setPollIds] = useState(new Set());
   const [showCreate, setShowCreate] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [componentSearch, setComponentSearch] = useState('');
   const [logImage, setLogImage] = useState(null);
   const [rebuildingId, setRebuildingId] = useState(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -98,6 +107,12 @@ export function CustomImagesContent() {
       return haystack.includes(q);
     });
   }, [images, searchQuery]);
+
+  const filteredComponents = useMemo(() => {
+    const q = componentSearch.trim().toLowerCase();
+    if (!q) return catalog?.components || [];
+    return (catalog?.components || []).filter((c) => (c.name || '').toLowerCase().includes(q));
+  }, [catalog, componentSearch]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -299,7 +314,7 @@ export function CustomImagesContent() {
       {showCreate && (
       <ConsoleDialogShell onClose={resetForm} fitContent>
         <form onSubmit={handleCreate}>
-          <div className={cn(consoleStructuredDialogPanelClass, 'min-w-[420px] max-w-xl')}>
+          <div className={cn(consoleDialogPanelClass, 'w-[680px] max-w-[calc(100vw-2rem)] max-h-[90vh]')}>
             <ConsoleStructuredDialogHeader
               title="New Custom Image"
               subtitle="Select components and versions to build your image"
@@ -318,112 +333,174 @@ export function CustomImagesContent() {
                   />
                 </div>
 
-                <div>
-                  <div className={consoleSectionLabelClass}>Components</div>
-                  <div className="border border-zinc-200 rounded-lg max-h-64 overflow-y-auto console-scroll-hidden">
-                    {!catalog?.components?.length ? (
-                      <p className="px-3 py-4 text-xs text-zinc-400">No components available.</p>
-                    ) : (
-                      (() => {
-                        const CATEGORY_ORDER = ['agent', 'language', 'database', 'devops', 'package-manager', 'shell-tool'];
-                        const CATEGORY_LABELS = {
-                          agent: 'Agents', language: 'Languages', database: 'Databases',
-                          devops: 'DevOps', 'package-manager': 'Package Managers', 'shell-tool': 'Shell Tools',
-                        };
-                        const grouped = {};
-                        for (const comp of catalog.components) {
-                          (grouped[comp.category] || (grouped[comp.category] = [])).push(comp);
-                        }
-                        return CATEGORY_ORDER.filter((cat) => grouped[cat]?.length > 0).map((cat) => (
-                          <div key={cat}>
-                            <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-zinc-500 bg-zinc-50 border-b border-zinc-100">
-                              {CATEGORY_LABELS[cat] || cat}
-                            </div>
-                            {grouped[cat].map((comp) => {
-                              const checked = selectedComponentIds.includes(comp.id);
-                              const isAgent = comp.category === 'agent';
-                              const agentAlreadySelected = selectedComponentIds.some(
-                                (id) => componentMap[id]?.category === 'agent',
-                              );
-                              const disabled = isAgent && agentAlreadySelected && !checked;
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Component library */}
+                  <div className="min-w-0">
+                    <div className={consoleSectionLabelClass}>Components</div>
+                    <div className="relative mt-1.5">
+                      <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+                      <Input
+                        value={componentSearch}
+                        onChange={(e) => setComponentSearch(e.target.value)}
+                        placeholder="Search components…"
+                        className="w-full pl-8"
+                      />
+                    </div>
+                    <div className="mt-1.5 border border-zinc-200 rounded-lg max-h-56 overflow-y-auto console-scroll-hidden">
+                      {!filteredComponents.length ? (
+                        <p className="px-3 py-4 text-xs text-zinc-400">
+                          {catalog?.components?.length ? 'No components match your search.' : 'No components available.'}
+                        </p>
+                      ) : (
+                        (() => {
+                          const grouped = {};
+                          for (const comp of filteredComponents) {
+                            (grouped[comp.category] || (grouped[comp.category] = [])).push(comp);
+                          }
+                          return CATEGORY_ORDER.filter((cat) => grouped[cat]?.length > 0).map((cat) => (
+                            <div key={cat}>
+                              <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-zinc-500 bg-zinc-50 border-b border-zinc-100">
+                                {CATEGORY_LABELS[cat] || cat}
+                              </div>
+                              {grouped[cat].map((comp) => {
+                                const checked = selectedComponentIds.includes(comp.id);
+                                const isAgent = comp.category === 'agent';
+                                const agentAlreadySelected = selectedComponentIds.some(
+                                  (id) => componentMap[id]?.category === 'agent',
+                                );
+                                const disabled = isAgent && agentAlreadySelected && !checked;
 
-                              return (
-                                <label
-                                  key={comp.id}
-                                  className={cn(
-                                    'flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-zinc-50 transition-colors',
-                                    disabled && 'opacity-40 cursor-not-allowed hover:bg-transparent',
-                                  )}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    disabled={creating || disabled}
-                                    onChange={() => {
-                                      if (creating || disabled) return;
-                                      if (checked) {
-                                        setSelectedComponentIds((prev) => prev.filter((id) => id !== comp.id));
-                                        setComponentVersions((prev) => {
-                                          const next = { ...prev };
-                                          delete next[comp.id];
-                                          return next;
-                                        });
-                                      } else {
-                                        if (isAgent && agentAlreadySelected) {
-                                          const existingAgent = selectedComponentIds.find(
-                                            (id) => componentMap[id]?.category === 'agent',
-                                          );
-                                          setSelectedComponentIds((prev) =>
-                                            prev.filter((id) => id !== existingAgent).concat(comp.id),
-                                          );
+                                return (
+                                  <label
+                                    key={comp.id}
+                                    className={cn(
+                                      'flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-zinc-50 transition-colors',
+                                      disabled && 'opacity-40 cursor-not-allowed hover:bg-transparent',
+                                    )}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      disabled={creating || disabled}
+                                      onChange={() => {
+                                        if (creating || disabled) return;
+                                        if (checked) {
+                                          setSelectedComponentIds((prev) => prev.filter((id) => id !== comp.id));
                                           setComponentVersions((prev) => {
                                             const next = { ...prev };
-                                            delete next[existingAgent];
-                                            next[comp.id] = comp.defaultVersion;
+                                            delete next[comp.id];
                                             return next;
                                           });
                                         } else {
-                                          setSelectedComponentIds((prev) => [...prev, comp.id]);
-                                          setComponentVersions((prev) => ({
-                                            ...prev,
-                                            [comp.id]: comp.defaultVersion,
-                                          }));
+                                          if (isAgent && agentAlreadySelected) {
+                                            const existingAgent = selectedComponentIds.find(
+                                              (id) => componentMap[id]?.category === 'agent',
+                                            );
+                                            setSelectedComponentIds((prev) =>
+                                              prev.filter((id) => id !== existingAgent).concat(comp.id),
+                                            );
+                                            setComponentVersions((prev) => {
+                                              const next = { ...prev };
+                                              delete next[existingAgent];
+                                              next[comp.id] = comp.defaultVersion;
+                                              return next;
+                                            });
+                                          } else {
+                                            setSelectedComponentIds((prev) => [...prev, comp.id]);
+                                            setComponentVersions((prev) => ({
+                                              ...prev,
+                                              [comp.id]: comp.defaultVersion,
+                                            }));
+                                          }
                                         }
-                                      }
-                                    }}
-                                    className="h-4 w-4 shrink-0 rounded border-zinc-300 text-zinc-900 focus:ring-black"
-                                  />
-                                  <span className="flex-1 min-w-0 truncate text-sm text-zinc-800">
-                                    {comp.name}
-                                  </span>
-                                  {checked && comp.versions && comp.versions.length > 0 && (
-                                    <SelectMenu
-                                      value={componentVersions[comp.id] || comp.defaultVersion || ''}
-                                      onChange={(v) => {
-                                        setComponentVersions((prev) => ({ ...prev, [comp.id]: v }));
                                       }}
-                                      options={comp.versions.map((v) => ({ value: v.version, label: v.version }))}
-                                      disabled={creating}
-                                      className="w-24 shrink-0"
+                                      className="h-4 w-4 shrink-0 rounded border-zinc-300 text-zinc-900 focus:ring-black"
                                     />
-                                  )}
-                                </label>
-                              );
-                            })}
-                          </div>
-                        ));
-                      })()
+                                    <span className="flex-1 min-w-0 truncate text-sm text-zinc-800">
+                                      {comp.name}
+                                    </span>
+                                    {comp.versions?.length > 0 && (
+                                      <span className="shrink-0 text-[11px] text-zinc-400">
+                                        {comp.versions.length} versions
+                                      </span>
+                                    )}
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          ));
+                        })()
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Selected summary */}
+                  <div className="min-w-0">
+                    <div className={consoleSectionLabelClass}>Selected ({selectedComponentIds.length})</div>
+                    <div className="mt-1.5 border border-zinc-200 rounded-lg max-h-56 overflow-y-auto console-scroll-hidden">
+                      {selectedComponentIds.length === 0 ? (
+                        <p className="px-3 py-4 text-xs text-zinc-400">
+                          No components selected yet. Pick from the list to add.
+                        </p>
+                      ) : (
+                        selectedComponentIds.map((id) => {
+                          const comp = componentMap[id];
+                          if (!comp) return null;
+                          return (
+                            <div
+                              key={id}
+                              className="flex items-center gap-2 px-3 py-2 border-b border-zinc-100 last:border-b-0"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <span className="block truncate text-sm text-zinc-800">{comp.name}</span>
+                                <span className="text-[11px] text-zinc-400">
+                                  {CATEGORY_LABELS[comp.category] || comp.category}
+                                </span>
+                              </div>
+                              {comp.versions?.length > 0 ? (
+                                <SelectMenu
+                                  value={componentVersions[id] || comp.defaultVersion || ''}
+                                  onChange={(v) => {
+                                    setComponentVersions((prev) => ({ ...prev, [id]: v }));
+                                  }}
+                                  options={comp.versions.map((v) => ({ value: v.version, label: v.version }))}
+                                  disabled={creating}
+                                  className="w-24 shrink-0"
+                                />
+                              ) : (
+                                <span className="shrink-0 font-mono text-xs text-zinc-400">
+                                  {componentVersions[id] || comp.defaultVersion || 'latest'}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedComponentIds((prev) => prev.filter((sid) => sid !== id));
+                                  setComponentVersions((prev) => {
+                                    const next = { ...prev };
+                                    delete next[id];
+                                    return next;
+                                  });
+                                }}
+                                disabled={creating}
+                                className="p-1 shrink-0 rounded text-zinc-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                                title={`Remove ${comp.name}`}
+                                aria-label={`Remove ${comp.name}`}
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                    {selectedComponentIds.includes('lang:rust') && !selectedComponentIds.includes('lang:cpp') && (
+                      <p className="text-xs text-amber-600 mt-1">Tip: select <b>C/C++</b> with Rust to enable <code>cargo build</code> (gcc required for native compilation).</p>
+                    )}
+                    {selectedComponentIds.length > 0 && !agentSelected && (
+                      <p className="text-xs text-zinc-400 mt-1">Select an agent to enable build.</p>
                     )}
                   </div>
-                  {selectedComponentIds.includes('lang:rust') && !selectedComponentIds.includes('lang:cpp') && (
-                    <p className="text-xs text-amber-600 mt-1">Tip: select <b>C/C++</b> with Rust to enable <code>cargo build</code> (gcc required for native compilation).</p>
-                  )}
-                  {selectedComponentIds.length > 0 && (
-                    <p className="text-xs text-zinc-400 mt-1">
-                      {selectedComponentIds.length} component{selectedComponentIds.length > 1 ? 's' : ''} selected
-                      {!agentSelected && ' — select an agent to enable build'}
-                    </p>
-                  )}
                 </div>
               </div>
             </ConsoleStructuredDialogBody>

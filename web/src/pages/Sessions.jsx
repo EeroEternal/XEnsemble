@@ -25,7 +25,7 @@ import {
   Play,
   Settings2,
   X,
-  RefreshCw,
+  Power,
   FileText,
   Loader2,
   Trash2,
@@ -1132,7 +1132,7 @@ export default React.forwardRef(function Sessions({
           panelClassName={`${consoleDialogPanelClass} w-full max-w-sm shadow-sm`}
         >
           <div className={`${consoleStructuredDialogHeaderClass} flex items-center gap-2.5`}>
-            <RefreshCw className={`w-4 h-4 shrink-0 ${textPlaceholder}`} />
+            <Power className={`w-4 h-4 shrink-0 ${textPlaceholder}`} />
             <h3 className={`font-semibold text-sm ${textPrimary}`}>Configuration Updated</h3>
           </div>
           <div className="p-4 space-y-2">
@@ -1153,7 +1153,7 @@ export default React.forwardRef(function Sessions({
               onClick={() => { setShowRestartPrompt(false); handleRestartSession(); }}
               className={`h-9 px-3 flex items-center justify-center gap-2 bg-black text-white rounded-md text-sm font-medium hover:bg-zinc-700 ${transitionBase}`}
             >
-              <RefreshCw className="w-4 h-4" /> Restart Now
+              <Power className="w-4 h-4" /> Restart Now
             </button>
           </div>
         </ConsoleInlineDialog>
