@@ -451,15 +451,14 @@ export default function AppSidebar({
 
   if (minimal) {
     return (
-      <aside className={`h-full w-14 ${bgSecondary} border-r border-zinc-200 flex flex-col flex-shrink-0 select-none`}>
+      <aside className={`h-full w-[272px] ${bgSecondary} border-r border-zinc-200 flex flex-col flex-shrink-0 select-none`}>
         <div className="flex-1 min-h-0" />
-        <div className="shrink-0 border-t border-zinc-200 px-1.5 py-2">
+        <div className="shrink-0 border-t border-zinc-200 px-2 py-2">
           <SidebarAccountMenu
             user={user}
             onOpenSettings={onOpenSettings}
             onLogout={onLogout}
             adminLinkClass={adminLinkClass}
-            collapsed
           />
         </div>
       </aside>
