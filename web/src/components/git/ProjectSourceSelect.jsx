@@ -125,7 +125,7 @@ export default function ProjectSourceSelect({
     await providers[provider].connect();
   };
 
-  const triggerLabel = importedProject ? importedProject.name : 'Select project source';
+  const triggerLabel = importedProject ? importedProject.name : 'Select repository';
 
   return (
     <div className="relative" ref={rootRef}>
@@ -227,7 +227,7 @@ export default function ProjectSourceSelect({
                 >
                   {connecting ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-zinc-400" /> : <Plus className="w-3.5 h-3.5 shrink-0 text-zinc-400" />}
                   <span className="flex-1 truncate">
-                    {conn ? `Switch ${getProviderLabel(p)} account` : `Import from ${getProviderLabel(p)}`}
+                    {getProviderLabel(p)}
                   </span>
                   {conn && <span className="shrink-0 text-[10px] text-emerald-600">Connected</span>}
                 </button>

@@ -109,7 +109,7 @@ export default function OnboardingWizard({
       <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 space-y-5">
         {!isSession && (
           <div className="space-y-1.5">
-            <label className={consoleFormLabelClass}>Project source</label>
+            <label className={consoleFormLabelClass}>Repository</label>
             <ProjectSourceSelect
               importedProject={importedProject}
               onImported={(pid) => { onRepoImported?.(pid); }}
