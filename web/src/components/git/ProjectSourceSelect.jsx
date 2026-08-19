@@ -125,43 +125,50 @@ export default function ProjectSourceSelect({
 
   return (
     <div className="relative" ref={rootRef}>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen((v) => !v)}
-        className={`w-full flex items-center justify-between gap-2 h-9 px-3 text-sm rounded-md border border-zinc-300 bg-white text-left transition-colors hover:bg-zinc-50 disabled:opacity-50 ${consoleButtonFocusClass}`}
-      >
-        <span className="flex items-center gap-2 min-w-0 truncate">
-          <GitBranch className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
-          <span className={`truncate ${importedProject ? 'text-zinc-900 font-medium' : 'text-zinc-400'}`}>{triggerLabel}</span>
-        </span>
-        <ChevronDown className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
-      </button>
+      {open ? (
+        <div className={`w-full flex items-center gap-2 h-9 px-3 rounded-md border border-zinc-300 bg-white ${consoleButtonFocusClass}`}>
+          <Search className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search repositories…"
+            autoFocus
+            className="flex-1 bg-transparent text-sm text-zinc-700 placeholder:text-zinc-400 outline-none"
+          />
+          <button
+            type="button"
+            onClick={() => { setOpen(false); setQuery(''); }}
+            aria-label="Close"
+            className="text-zinc-400 hover:text-zinc-600"
+          >
+            <ChevronDown className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setOpen(true)}
+          className={`w-full flex items-center justify-between gap-2 h-9 px-3 text-sm rounded-md border border-zinc-300 bg-white text-left transition-colors hover:bg-zinc-50 disabled:opacity-50 ${consoleButtonFocusClass}`}
+        >
+          <span className="flex items-center gap-2 min-w-0 truncate">
+            <GitBranch className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
+            <span className={`truncate ${importedProject ? 'text-zinc-900 font-medium' : 'text-zinc-400'}`}>{triggerLabel}</span>
+          </span>
+          <ChevronDown className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
+        </button>
+      )}
 
       {open && (
         <div className={`absolute left-0 right-0 top-full z-40 mt-1 ${consoleDropdownPanelClass} ${consoleMenuDropdownZClass} max-h-80 flex flex-col overflow-hidden shadow-lg`}>
-          {/* Search */}
-          <div className="relative border-b border-zinc-200 shrink-0">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search repositories…"
-              autoFocus
-              className="w-full bg-transparent py-2 pl-8 pr-3 text-sm text-zinc-700 placeholder:text-zinc-400 outline-none"
-            />
-          </div>
-
           {/* Unified scroll: repos + divider + connect links */}
           <div className="flex-1 min-h-0 overflow-y-auto">
             {/* Upper tier: repos from connected providers */}
             {allRepos.length === 0 ? (
-              <p className="px-3 py-3 text-xs text-zinc-400">
-                {Object.values(providers).some((p) => p.connection)
-                  ? 'No repositories found.'
-                  : 'Connect a Git provider below to list your repositories.'}
-              </p>
+              filteredRepos.length === 0 ? null : (
+                <p className="px-3 py-3 text-xs text-zinc-400">No matches.</p>
+              )
             ) : filteredRepos.length === 0 ? (
               <p className="px-3 py-3 text-xs text-zinc-400">No matches.</p>
             ) : (

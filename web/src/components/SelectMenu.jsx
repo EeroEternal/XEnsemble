@@ -65,10 +65,17 @@ export default function SelectMenu({
     const el = rootRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
+    const dialog = el.closest('[role="dialog"]');
+    let bottomBoundary = window.innerHeight;
+    if (dialog) {
+      bottomBoundary = dialog.getBoundingClientRect().bottom;
+    }
+    const availableHeight = bottomBoundary - rect.bottom - 8;
     setMenuRect({
       top: rect.bottom + 4,
       left: rect.left,
       width: rect.width,
+      maxHeight: Math.max(80, Math.min(availableHeight, maxHeight)),
     });
   };
 
@@ -232,7 +239,7 @@ export default function SelectMenu({
           id={listId}
           role="listbox"
           className="overflow-auto py-1"
-          style={{ maxHeight }}
+          style={{ maxHeight: menuRect?.maxHeight ?? maxHeight }}
         >
           {renderOptions()}
         </ul>
