@@ -42,6 +42,7 @@ function AuthenticatedLayout({
   const navigate = useNavigate();
   const sessionsRef = useRef(null);
   const [launchPanelOpen, setLaunchPanelOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState('general');
   const handleSettingsSectionChange = useCallback((section) => {
     setSettingsSection(section);
     if (location.pathname !== '/settings') navigate('/settings');
