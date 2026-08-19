@@ -3,7 +3,6 @@ import { ChevronDown, Search, Loader2, Check, GitBranch, Plus } from 'lucide-rea
 import { useGitProvider } from '../../hooks/useGitProvider';
 import { useToast } from '../Toast';
 import * as gitApi from '../../lib/gitApi';
-import * as githubApi from '../../lib/githubApi';
 import { getProviderLabel } from '../../lib/gitLabels';
 import {
   consoleButtonFocusClass,
@@ -12,8 +11,6 @@ import {
 } from '../../lib/consoleTokens';
 
 const PROVIDERS = ['github', 'gitlab', 'gitea'];
-const CLONE_POLL_MS = 2000;
-const CLONE_MAX_ATTEMPTS = 150;
 
 function repoKey(provider, fullName) {
   return `${provider}:${fullName}`;
@@ -35,7 +32,6 @@ export default function ProjectSourceSelect({
   const [oauthConfigured, setOauthConfigured] = useState({});
   const [reposByProvider, setReposByProvider] = useState({});
   const [loadingRepos, setLoadingRepos] = useState({});
-  const [importingKey, setImportingKey] = useState(null);
   const rootRef = useRef(null);
 
   // OAuth-configured status (per provider) - controls whether connect is allowed.
@@ -112,49 +108,9 @@ export default function ProjectSourceSelect({
     return allRepos.filter((r) => r.full_name?.toLowerCase().includes(q));
   }, [allRepos, query]);
 
-  const handleImportRepo = async (repo) => {
-    const key = repoKey(repo.provider, repo.full_name);
-    setImportingKey(key);
+  const handleSelectRepo = (repo) => {
+    onImported?.(repo);
     setOpen(false);
-    try {
-      const result = await gitApi.importRepo({
-        provider: repo.provider,
-        repo_full_name: repo.full_name,
-        name: repo.name,
-        branch: repo.default_branch,
-        auto_create_branch: true,
-        work_branch_name: `xensemble/${Date.now()}`,
-      });
-      // Poll clone status until ready/failed.
-      await new Promise((resolve, reject) => {
-        let attempts = 0;
-        const id = setInterval(async () => {
-          attempts += 1;
-          try {
-            const res = await githubApi.getCloneStatus(result.id);
-            if (res?.clone_status === 'ready') {
-              clearInterval(id);
-              showToast('success', 'Repository imported and ready.');
-              onImported?.(result.id);
-              resolve();
-            } else if (res?.clone_status === 'failed') {
-              clearInterval(id);
-              reject(new Error(res.clone_error || 'Clone failed.'));
-            }
-          } catch {
-            // keep polling
-          }
-          if (attempts >= CLONE_MAX_ATTEMPTS) {
-            clearInterval(id);
-            reject(new Error('Clone is taking longer than expected.'));
-          }
-        }, CLONE_POLL_MS);
-      });
-    } catch (err) {
-      showToast('error', err.message || 'Import failed.');
-    } finally {
-      setImportingKey(null);
-    }
   };
 
   const handleConnect = async (provider) => {
@@ -165,20 +121,18 @@ export default function ProjectSourceSelect({
     await providers[provider].connect();
   };
 
-  const triggerLabel = importingKey
-    ? 'Importing…'
-    : (importedProject ? importedProject.name : 'Select project source');
+  const triggerLabel = importedProject ? importedProject.name : 'Select project source';
 
   return (
     <div className="relative" ref={rootRef}>
       <button
         type="button"
-        disabled={disabled || importingKey}
+        disabled={disabled}
         onClick={() => setOpen((v) => !v)}
         className={`w-full flex items-center justify-between gap-2 h-9 px-3 text-sm rounded-md border border-zinc-300 bg-white text-left transition-colors hover:bg-zinc-50 disabled:opacity-50 ${consoleButtonFocusClass}`}
       >
         <span className="flex items-center gap-2 min-w-0 truncate">
-          {importingKey ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-zinc-400" /> : <GitBranch className="w-3.5 h-3.5 shrink-0 text-zinc-400" />}
+          <GitBranch className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
           <span className={`truncate ${importedProject ? 'text-zinc-900 font-medium' : 'text-zinc-400'}`}>{triggerLabel}</span>
         </span>
         <ChevronDown className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
@@ -213,17 +167,15 @@ export default function ProjectSourceSelect({
             ) : (
               filteredRepos.map((r) => {
                 const key = repoKey(r.provider, r.full_name);
-                const isImporting = importingKey === key;
                 const isSelected = importedProject && importedProject.name === r.name;
                 return (
                   <button
                     key={key}
                     type="button"
-                    onClick={() => handleImportRepo(r)}
-                    disabled={importingKey}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-zinc-50 disabled:opacity-50"
+                    onClick={() => handleSelectRepo(r)}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-zinc-50"
                   >
-                    {isImporting ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-zinc-400" /> : <GitBranch className="w-3.5 h-3.5 shrink-0 text-zinc-400" />}
+                    <GitBranch className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
                     <span className="min-w-0 flex-1 truncate text-zinc-700">{r.full_name}</span>
                     <span className="shrink-0 text-[10px] text-zinc-400">{getProviderLabel(r.provider)}</span>
                     {isSelected && <Check className="w-3.5 h-3.5 shrink-0 text-zinc-900" />}
@@ -245,7 +197,7 @@ export default function ProjectSourceSelect({
                   key={p}
                   type="button"
                   onClick={() => handleConnect(p)}
-                  disabled={connecting || !configured || importingKey}
+                  disabled={connecting || !configured}
                   title={configured ? `Connect ${getProviderLabel(p)}` : `${getProviderLabel(p)} OAuth not configured`}
                   className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
                 >

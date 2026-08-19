@@ -10,6 +10,7 @@ import OnboardingWizard from '../components/OnboardingWizard';
 import BranchSwitcher, { GIT_REPO_PROVIDERS } from '../components/git/BranchSwitcher';
 import { apiFetch } from '../lib/api';
 import * as githubApi from '../lib/githubApi';
+import * as gitApi from '../lib/gitApi';
 import {
   ConsoleDialogShell,
   ConsoleInlineDialog,
@@ -506,8 +507,39 @@ export default React.forwardRef(function Sessions({
     setLaunchingSession(true);
     let started = false;
     try {
-      if (importedProject) {
-        started = await handleStartSession(importedProject.id, importedProject.name, { closeLaunchModal: true });
+      if (importedProject?.repo) {
+        const repo = importedProject.repo;
+        const result = await gitApi.importRepo({
+          provider: repo.provider,
+          repo_full_name: repo.full_name,
+          name: repo.name,
+          branch: repo.default_branch,
+          auto_create_branch: true,
+          work_branch_name: `xensemble/${Date.now()}`,
+        });
+        await new Promise((resolve, reject) => {
+          let attempts = 0;
+          const pollId = setInterval(async () => {
+            attempts += 1;
+            try {
+              const res = await githubApi.getCloneStatus(result.id);
+              if (res?.clone_status === 'ready') {
+                clearInterval(pollId);
+                resolve();
+              } else if (res?.clone_status === 'failed') {
+                clearInterval(pollId);
+                reject(new Error(res.clone_error || 'Clone failed.'));
+              }
+            } catch {
+              /* keep polling */
+            }
+            if (attempts >= 150) {
+              clearInterval(pollId);
+              reject(new Error('Clone is taking longer than expected.'));
+            }
+          }, 2000);
+        });
+        started = await handleStartSession(result.id, repo.name, { closeLaunchModal: true });
         return;
       }
       if (launchModalMode === 'quickstart') {
@@ -560,20 +592,9 @@ export default React.forwardRef(function Sessions({
     }
   };
 
-  const handleRepoImported = useCallback((projectId) => {
-    fetchWorkspaces();
-    const ws = projects.find((p) => p.id === projectId);
-    setImportedProject({ id: projectId, name: ws?.name || projectId });
-    if (!ws) {
-      setTimeout(() => {
-        setProjects((prev) => {
-          const found = prev.find((p) => p.id === projectId);
-          if (found) setImportedProject({ id: projectId, name: found.name });
-          return prev;
-        });
-      }, 1000);
-    }
-  }, [fetchWorkspaces, projects, setProjects]);
+  const handleRepoImported = useCallback((repo) => {
+    setImportedProject({ name: repo.name, repo });
+  }, []);
 
   const closeOnboarding = useCallback(() => {
     setShowNewInstanceModal(false);
