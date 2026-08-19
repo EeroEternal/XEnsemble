@@ -260,8 +260,8 @@ export default React.forwardRef(function Sessions({
   );
 
   useEffect(() => {
-    if (activeSession) setLaunchingSession(false);
-  }, [activeSession]);
+    if (activeSession && !workspaceCreating) setLaunchingSession(false);
+  }, [activeSession, workspaceCreating]);
 
   useEffect(() => {
     if (!activeSession?.projectId) {
@@ -536,10 +536,11 @@ export default React.forwardRef(function Sessions({
         await handleStartSession(result.id, repo.full_name || repo.name, { closeLaunchModal: true });
       } catch (err) {
         setLaunchModalError(err.message || 'Import failed.');
-        setLaunchingSession(false);
       } finally {
+        await new Promise((r) => setTimeout(r, 800));
         setWorkspaceCreating(false);
         setCreationStep(null);
+        setLaunchingSession(false);
       }
       return;
     }
