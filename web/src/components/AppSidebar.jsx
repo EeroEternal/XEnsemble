@@ -61,7 +61,7 @@ function sortSessions(list, prefs) {
   });
 }
 
-function SidebarAccountMenu({ user, onOpenSettings, onLogout, adminLinkClass, collapsed = false }) {
+export function SidebarAccountMenu({ user, onOpenSettings, onLogout, adminLinkClass, collapsed = false }) {
   const [open, setOpen] = useState(false);
   const [menuRect, setMenuRect] = useState(null);
   const rootRef = useRef(null);

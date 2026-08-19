@@ -9,12 +9,11 @@ import UsersAdmin from './pages/UsersAdmin';
 import GatewayAdmin from './pages/GatewayAdmin';
 import AppSidebar from './components/AppSidebar';
 import BrandMark from './components/BrandMark';
-import SettingsModal from './components/SettingsModal';
-import SettingsTabSidebar from './components/SettingsTabSidebar';
 import ConfirmDialog from './components/ConfirmDialog';
+import SettingsTabSidebar from './components/SettingsTabSidebar';
+import SettingsShell from './components/settings/SettingsShell';
 import { useWorkspaces } from './hooks/useWorkspaces';
 import { cn } from './lib/utils';
-import { APP_SHELL_ADMIN_CLASS } from './lib/appShellLayout';
 import { bgCanvas, consoleButtonFocusClass } from './lib/consoleTokens';
 import { getAccessToken, setTokens, clearTokens, apiFetch, isStoredAuthStale, setAuthExpiredHandler } from './lib/api';
 import { TerminalThemeProvider } from './hooks/useTerminalTheme.jsx';
@@ -37,13 +36,12 @@ function AuthenticatedLayout({
   fetchWorkspaces,
   fetchAgents,
   logout,
-  showSettingsModal,
-  setShowSettingsModal,
 }) {
   const location = useLocation();
   const navigate = useNavigate();
   const sessionsRef = useRef(null);
   const [launchPanelOpen, setLaunchPanelOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState('general');
   const activeWorkspaceName = projects.find((p) => p.id === activeWorkspaceId)?.name || null;
 
   useEffect(() => {
@@ -58,8 +56,9 @@ function AuthenticatedLayout({
   const isImagesAdmin = location.pathname === '/admin/images';
   const isCustomImages = location.pathname === '/custom-images';
   const isImagesManager = isCustomImages || isImagesAdmin;
+  const isSettingsPage = location.pathname === '/settings';
 
-  const isSettingsRoute = isAgentsAdmin || isUsersAdmin || isGatewayAdmin || isImagesManager;
+  const isSettingsRoute = isAgentsAdmin || isUsersAdmin || isGatewayAdmin || isImagesManager || isSettingsPage;
 
   const offRouteClass = 'pointer-events-none invisible absolute inset-0 z-0 [&_*]:pointer-events-none';
 
@@ -102,7 +101,7 @@ function AuthenticatedLayout({
       </div>
 
       <div className="flex flex-1 min-h-0">
-      {(
+      {!isSettingsRoute && (
       <AppSidebar
         agents={agents}
         sessions={sessions}
@@ -115,9 +114,8 @@ function AuthenticatedLayout({
         onRequestDeleteSession={(session, ws) => sessionsRef.current?.requestDeleteSession?.(session, ws)}
         onRestartSession={(session) => sessionsRef.current?.restartSession?.(session)}
         user={user}
-        onOpenSettings={() => setShowSettingsModal(true)}
+        onOpenSettings={() => navigate('/settings')}
         onLogout={logout}
-        minimal={isSettingsRoute}
       />
       )}
       <main
@@ -154,7 +152,7 @@ function AuthenticatedLayout({
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab="agents" />
+              <SettingsTabSidebar activeTab="agents" user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
               <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
                 <AgentsAdmin />
               </div>
@@ -167,7 +165,7 @@ function AuthenticatedLayout({
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab="users" />
+              <SettingsTabSidebar activeTab="users" user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
               <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
                 <UsersAdmin />
               </div>
@@ -180,7 +178,7 @@ function AuthenticatedLayout({
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab="gateway" />
+              <SettingsTabSidebar activeTab="gateway" user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
               <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
                 <GatewayAdmin />
               </div>
@@ -193,17 +191,27 @@ function AuthenticatedLayout({
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab="images" />
+              <SettingsTabSidebar activeTab="images" user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
               <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
                 <ImagesManager />
               </div>
             </div>
         )}
+        {isSettingsPage && (
+            <div
+              className={cn(
+                'flex min-h-0 flex-1 flex-row overflow-hidden',
+                launchPanelOpen ? offRouteClass : 'relative z-10',
+              )}
+            >
+              <SettingsTabSidebar activeTab="general" activeSection={settingsSection} onSectionChange={setSettingsSection} user={user} onOpenSettings={null} onLogout={logout} />
+              <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
+                <SettingsShell section={settingsSection} onSectionChange={setSettingsSection} />
+              </div>
+            </div>
+        )}
       </main>
       </div>
-      {showSettingsModal && (
-        <SettingsModal onClose={() => setShowSettingsModal(false)} />
-      )}
       <ConfirmDialog />
     </div>
   );
@@ -213,14 +221,7 @@ function App() {
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const navigate = useNavigate();
-
-  React.useEffect(() => {
-    const openSettings = () => setShowSettingsModal(true);
-    window.addEventListener('xe:open-settings', openSettings);
-    return () => window.removeEventListener('xe:open-settings', openSettings);
-  }, []);
 
   const {
     agents,
@@ -348,8 +349,6 @@ function App() {
                     fetchWorkspaces={fetchWorkspaces}
                     fetchAgents={fetchAgents}
                     logout={logout}
-                    showSettingsModal={showSettingsModal}
-                    setShowSettingsModal={setShowSettingsModal}
                   />
                 ) : (
                   <Navigate to="/login" replace />
@@ -357,6 +356,7 @@ function App() {
               }
             >
               <Route path="/sessions" element={null} />
+              <Route path="/settings" element={null} />
               <Route path="/custom-images" element={null} />
               <Route path="/console" element={<Navigate to="/sessions" replace />} />
               <Route
@@ -377,7 +377,6 @@ function App() {
               />
             </Route>
 
-            <Route path="/settings" element={<Navigate to="/sessions" replace />} />
             <Route path="/admin/boxlite-images" element={<Navigate to="/admin/images" replace />} />
             <Route path="/admin/platform" element={<Navigate to="/sessions" replace />} />
             <Route path="/" element={<Navigate to={token ? '/sessions' : '/login'} replace />} />
