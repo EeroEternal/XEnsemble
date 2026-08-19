@@ -505,7 +505,7 @@ export default React.forwardRef(function Sessions({
           name: repo.name,
           branch: repo.default_branch,
           auto_create_branch: true,
-          work_branch_name: `xensemble/${Date.now()}`,
+          work_branch_name: `skyharness/${Date.now()}`,
         });
         await new Promise((resolve, reject) => {
           let attempts = 0;

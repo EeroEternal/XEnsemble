@@ -88,7 +88,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
 
   const [name, setName] = useState('');
   const [branch, setBranch] = useState('');
-  const [workBranchName, setWorkBranchName] = useState(`xensemble/${Date.now()}`);
+  const [workBranchName, setWorkBranchName] = useState(`skyharness/${Date.now()}`);
   const [autoCreateBranch, setAutoCreateBranch] = useState(true);
 
   const [importing, setImporting] = useState(false);
@@ -111,7 +111,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
     setUrlError(null);
     setName('');
     setBranch('');
-    setWorkBranchName(`xensemble/${Date.now()}`);
+    setWorkBranchName(`skyharness/${Date.now()}`);
     setAutoCreateBranch(true);
     setImporting(false);
     setImportedProjectId(null);
@@ -265,7 +265,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
         name: name.trim() || selectedRepo?.name,
         branch: branch.trim() || selectedRepo?.default_branch || 'main',
         auto_create_branch: autoCreateBranch,
-        work_branch_name: workBranchName.trim() || `xensemble/${Date.now()}`,
+        work_branch_name: workBranchName.trim() || `skyharness/${Date.now()}`,
       });
       setImportedProjectId(result.id);
       setCloneStatus(result.status || 'cloning');
@@ -547,7 +547,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
                     id="import-work-branch"
                     value={workBranchName}
                     onChange={(e) => setWorkBranchName(e.target.value)}
-                    placeholder="xensemble/dev"
+                    placeholder="skyharness/dev"
                     className="mt-1.5"
                   />
                 </div>

@@ -136,7 +136,7 @@ export default function DeployPanel({ projectId, onSuccess }) {
 
 function copyDiagnostics(result) {
     const lines = [
-        '== XEnsemble 部署诊断 ==',
+        '== SkyHarness 部署诊断 ==',
         `错误: ${result?.error || ''}`,
         `警告: ${result?.verify?.warning || ''}`,
         '',
