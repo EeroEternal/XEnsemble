@@ -14,6 +14,24 @@ async function resolveLiveSession(sessionId, options = {}) {
     }
 
     const sessionRecord = options.sessionRecord || session || null;
+
+    // If the session is still pending (being provisioned), wait for it
+    // to become alive. The frontend sets alive=true on session creation,
+    // but the server needs 30-60s to spawn the agent.
+    if (sessionRecord?.status === 'pending') {
+        const maxWaitMs = 120000;
+        const pollMs = 2000;
+        const start = Date.now();
+        while (Date.now() - start < maxWaitMs) {
+            await new Promise((r) => setTimeout(r, pollMs));
+            const polled = sessionManager.getSession(sessionId);
+            if (polled && sessionManager.isAlive(sessionId)) {
+                return { ok: true, session: polled, handle: polled.handle };
+            }
+        }
+        return { ok: false, error: 'Session is still starting. Please wait and try again.' };
+    }
+
     const canWake = typeof options.wakeSession === 'function';
     const recoverable = sessionRecord?.recoverable === true;
     // Wake when the session is idle OR when it's in memory but not alive
