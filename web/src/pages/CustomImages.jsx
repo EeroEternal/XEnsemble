@@ -86,7 +86,7 @@ export function CustomImagesContent() {
   const [showCreate, setShowCreate] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [componentSearch, setComponentSearch] = useState('');
-  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
+  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set(CATEGORY_ORDER));
   const [logImage, setLogImage] = useState(null);
   const [rebuildingId, setRebuildingId] = useState(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -327,7 +327,7 @@ export function CustomImagesContent() {
         <form onSubmit={handleCreate}>
           <div className={cn(consoleDialogPanelClass, 'w-[680px] max-w-[calc(100vw-2rem)] max-h-[90vh]')}>
             <ConsoleStructuredDialogHeader
-              title="New Custom Image"
+              title="New Image"
               subtitle="Select components and versions to build your image"
             />
             <ConsoleStructuredDialogBody>
@@ -368,7 +368,10 @@ export function CustomImagesContent() {
                           for (const comp of filteredComponents) {
                             (grouped[comp.category] || (grouped[comp.category] = [])).push(comp);
                           }
-                          return CATEGORY_ORDER.filter((cat) => grouped[cat]?.length > 0).map((cat) => (
+                          const searching = componentSearch.trim() !== '';
+                          return CATEGORY_ORDER.filter((cat) => grouped[cat]?.length > 0).map((cat) => {
+                            const expanded = !collapsedGroups.has(cat) || searching;
+                            return (
                             <div key={cat}>
                               <button
                                 type="button"
@@ -377,15 +380,18 @@ export function CustomImagesContent() {
                                   'w-full flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-zinc-500 bg-zinc-50 border-b border-zinc-100 hover:bg-zinc-100 transition-colors',
                                   consoleButtonFocusClass,
                                 )}
-                                aria-expanded={!collapsedGroups.has(cat)}
+                                aria-expanded={expanded}
                               >
-                                {collapsedGroups.has(cat)
-                                  ? <ChevronRight className="h-3 w-3 shrink-0" />
-                                  : <ChevronDown className="h-3 w-3 shrink-0" />}
-                                <span className="flex-1 text-left">{CATEGORY_LABELS[cat] || cat}</span>
+                                {expanded
+                                  ? <ChevronDown className="h-3 w-3 shrink-0" />
+                                  : <ChevronRight className="h-3 w-3 shrink-0" />}
+                                <span className="flex-1 text-left">
+                                  {CATEGORY_LABELS[cat] || cat}
+                                  {cat === 'agent' && <span className="text-red-500 ml-0.5">*</span>}
+                                </span>
                                 <span className="font-normal normal-case text-zinc-400">{grouped[cat].length}</span>
                               </button>
-                              {!collapsedGroups.has(cat) && grouped[cat].map((comp) => {
+                              {expanded && grouped[cat].map((comp) => {
                                 const checked = selectedComponentIds.includes(comp.id);
                                 const isAgent = comp.category === 'agent';
                                 const agentAlreadySelected = selectedComponentIds.some(
@@ -451,7 +457,8 @@ export function CustomImagesContent() {
                                 );
                               })}
                             </div>
-                          ));
+                            );
+                          });
                         })()
                       )}
                     </div>
@@ -519,9 +526,6 @@ export function CustomImagesContent() {
                     </div>
                     {selectedComponentIds.includes('lang:rust') && !selectedComponentIds.includes('lang:cpp') && (
                       <p className="text-xs text-amber-600 mt-1">Tip: select <b>C/C++</b> with Rust to enable <code>cargo build</code> (gcc required for native compilation).</p>
-                    )}
-                    {selectedComponentIds.length > 0 && !agentSelected && (
-                      <p className="text-xs text-zinc-400 mt-1">Select an agent to enable build.</p>
                     )}
                   </div>
                 </div>
@@ -667,10 +671,10 @@ export function CustomImagesContent() {
                       <RowActionsMenu
                         label={`Actions for ${img.name}`}
                         items={[
-                          { icon: ScrollText, label: 'View build log', onClick: () => setLogImage(img) },
+                          { icon: ScrollText, label: 'View logs', onClick: () => setLogImage(img) },
                           img.status === 'failed' && {
                             icon: RotateCw,
-                            label: 'Rebuild image',
+                            label: 'Rebuild',
                             onClick: () => handleRebuild(img),
                             busy: rebuildingId === img.id,
                             busyLabel: 'Rebuilding…',
@@ -678,7 +682,7 @@ export function CustomImagesContent() {
                           { separator: true },
                           {
                             icon: Trash2,
-                            label: 'Delete image',
+                            label: 'Delete',
                             danger: true,
                             onClick: () => setConfirmDelete(img),
                             busy: deletingId === img.id,
