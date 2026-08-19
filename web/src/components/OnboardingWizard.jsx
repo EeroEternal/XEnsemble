@@ -1,20 +1,12 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
-import {
-  Github,
-  Sparkles,
-  Check,
-  ChevronRight,
-  ChevronLeft,
-  Loader2,
-  X,
-  Plus,
-} from 'lucide-react';
-import RepoImportDialog from './git/RepoImportDialog';
-import BrandMark from './BrandMark';
+import { useMemo, useState } from 'react';
+import { Loader2, X, Plus } from 'lucide-react';
+import { ConsoleDialogShell } from './ConsoleDialog';
 import SelectMenu from './SelectMenu';
+import ProjectSourceSelect from './git/ProjectSourceSelect';
 import {
   consoleButtonFocusClass,
-  consoleInputClass,
+  consoleDialogLgClass,
+  consoleFormLabelClass,
 } from '../lib/consoleTokens';
 import { buttonClass } from '../lib/buttonStyles';
 import {
@@ -22,33 +14,9 @@ import {
   loadSidebarPrefs,
 } from '../lib/sidebarPrefs';
 
-const GIT_PROVIDERS = [
-  { id: 'github', label: 'GitHub' },
-  { id: 'gitlab', label: 'GitLab' },
-  { id: 'gitea', label: 'Gitea' },
-];
-
-function StepDot({ n, label, active, done }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span
-        className={`flex h-7 w-7 items-center justify-center rounded-full border text-sm font-semibold transition-colors ${
-          active || done
-            ? 'border-white bg-white text-zinc-900'
-            : 'border-zinc-600 bg-zinc-800 text-zinc-500'
-        }`}
-      >
-        {done ? <Check className="h-4 w-4" /> : n}
-      </span>
-      <span className={`text-sm font-medium ${active ? 'text-zinc-100' : done ? 'text-zinc-400' : 'text-zinc-500'}`}>{label}</span>
-    </div>
-  );
-}
-
 export default function OnboardingWizard({
   // flow config
-  mode = 'full', // 'full' = step 1 (source) + step 2 (agent); 'session' = step 2 only in current workspace
-  startStep = 1,
+  mode = 'full', // 'full' = project source + agent; 'session' = agent only in current workspace
   // agents
   agents,
   selectedAgentId,
@@ -57,16 +25,9 @@ export default function OnboardingWizard({
   customImages,
   customImageId,
   setCustomImageId,
-  // git import
-  gitProvider,
-  setGitProvider,
-  gitImportMode,
-  setGitImportMode,
+  // git import (full mode)
   importedProject,
-  setImportedProject,
   onRepoImported,
-  fetchWorkspaces,
-  // blank workspace
   newProjectName,
   setNewProjectName,
   // launch
@@ -77,365 +38,141 @@ export default function OnboardingWizard({
   launchError,
 }) {
   const isSession = mode === 'session';
-  const [step, setStep] = useState(startStep);
-  const [sourceChoice, setSourceChoice] = useState(null); // 'git' | 'blank'
+  const [sourceChoice, setSourceChoice] = useState(null); // 'git' | 'blank' | null
 
   const sortedAgents = useMemo(
     () => sortAgentsByRecentUsage(agents || [], loadSidebarPrefs()),
     [agents],
   );
 
-  // Auto-advance to step 2 once a repo import completes (full mode only).
-  useEffect(() => {
-    if (importedProject && step === 1 && !isSession) setStep(2);
-  }, [importedProject, step, isSession]);
-
-  const chooseSource = (choice) => {
-    setSourceChoice(choice);
-    if (choice === 'blank') {
-      setGitImportMode(false);
-      setGitProvider('');
-      setImportedProject(null);
-    } else {
-      setNewProjectName('');
-    }
-  };
-
-  const pickProvider = (p) => {
-    setGitProvider(p);
-    setGitImportMode(true);
-    setImportedProject(null);
-  };
-
-  // "Custom" toggle clicked: pick the first available custom image (or mark as
-  // custom-mode-without-images so the empty hint shows).
-  const handleSelectCustomImage = () => {
-    if ((customImages || []).length > 0) {
-      const img = customImages[0];
-      setCustomImageId(img.id);
-      const ac = (img.components || []).find((c) => (c.component_id || '').startsWith('agent:'));
-      const aid = ac ? ac.component_id.replace('agent:', '') : '';
-      if (aid && (agents || []).some((a) => a.id === aid)) onSelectAgent(aid);
-    } else {
-      setCustomImageId('__none__');
-      onSelectAgent('');
-    }
-  };
-
-  // SelectMenu passes the image id.
-  const selectCustomImageById = (id) => {
-    setCustomImageId(id);
-    const img = (customImages || []).find((c) => c.id === id);
-    if (img) {
-      const ac = (img.components || []).find((c) => (c.component_id || '').startsWith('agent:'));
-      const aid = ac ? ac.component_id.replace('agent:', '') : '';
-      if (aid && (agents || []).some((a) => a.id === aid)) onSelectAgent(aid);
-    }
-  };
-
-  const agentOptions = useMemo(
-    () => sortedAgents.map((a) => ({ value: a.id, label: a.name })),
-    [sortedAgents],
-  );
-  const customImageOptions = useMemo(
-    () => (customImages || []).map((img) => {
+  // Merged agent options: built-in agents + custom images in one dropdown.
+  const agentOptions = useMemo(() => {
+    const builtIn = sortedAgents.map((a) => ({ value: `agent:${a.id}`, label: a.name }));
+    const custom = (customImages || []).map((img) => {
       const ac = (img.components || []).find((c) => (c.component_id || '').startsWith('agent:'));
       const agentId = ac ? ac.component_id.replace('agent:', '') : '';
       const agent = (agents || []).find((a) => a.id === agentId);
-      return { value: img.id, label: `${img.name}${agent ? ` (${agent.name})` : ''}` };
-    }),
-    [customImages, agents],
-  );
+      return { value: `custom:${img.id}`, label: `${img.name}${agent ? ` (${agent.name})` : ' · Custom'}` };
+    });
+    return [...builtIn, ...custom];
+  }, [sortedAgents, customImages, agents]);
 
-  const canAdvanceStep1 = Boolean(
-    importedProject || (sourceChoice === 'blank' && newProjectName.trim()),
-  );
+  const agentValue = customImageId
+    ? `custom:${customImageId}`
+    : (selectedAgentId ? `agent:${selectedAgentId}` : '');
 
-  const handleNext = () => {
-    if (!canAdvanceStep1) return;
-    setStep(2);
+  const handleAgentChange = (v) => {
+    if (v.startsWith('agent:')) {
+      setCustomImageId('');
+      onSelectAgent(v.replace('agent:', ''));
+    } else if (v.startsWith('custom:')) {
+      const id = v.replace('custom:', '');
+      setCustomImageId(id);
+      const img = (customImages || []).find((c) => c.id === id);
+      if (img) {
+        const ac = (img.components || []).find((c) => (c.component_id || '').startsWith('agent:'));
+        const aid = ac ? ac.component_id.replace('agent:', '') : '';
+        if (aid && (agents || []).some((a) => a.id === aid)) onSelectAgent(aid);
+      }
+    }
   };
 
+  // full mode can start once a project source is resolved (imported repo or blank name) + agent selected.
+  // session mode only needs an agent.
+  const canStart = isSession
+    ? Boolean(selectedAgentId)
+    : Boolean(selectedAgentId && (importedProject || (sourceChoice === 'blank' && (newProjectName || '').trim())));
+
   const handleStart = () => {
-    if (!selectedAgentId) return;
+    if (!canStart) return;
     if (isSession) onLaunchSession?.();
     else onLaunch?.();
   };
 
-  // Stepper config
-  const stepper = isSession
-    ? [
-        { n: 1, label: 'Workspace', done: true, active: false },
-        { n: 2, label: 'Select agent', done: false, active: true },
-      ]
-    : [
-        { n: 1, label: 'Code source', done: step > 1, active: step === 1 },
-        { n: 2, label: 'Select agent', done: false, active: step === 2 },
-      ];
-
-  // Footer left button: full step2 -> Back; otherwise Cancel
-  const showBack = step === 2 && !isSession;
-
   return (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-zinc-900">
-      {/* Top bar: dark chrome - XEnsemble far-left, stepper centered, close far-right */}
-      <div className="grid h-12 shrink-0 grid-cols-3 items-center border-b border-zinc-800 bg-zinc-900 px-4">
-        <div className="flex items-center gap-2 justify-self-start">
-          <BrandMark className="h-7 w-7" iconClassName="h-3.5 w-3.5" />
-          <span className="text-sm font-bold text-zinc-100">XEnsemble</span>
-        </div>
-        <div className="flex items-center justify-center gap-2 justify-self-center">
-          {stepper.map((s, i) => (
-            <Fragment key={s.n}>
-              <StepDot n={s.n} label={s.label} active={s.active} done={s.done} />
-              {i < stepper.length - 1 && <ChevronRight className="h-3.5 w-3.5 text-zinc-600" />}
-            </Fragment>
-          ))}
-        </div>
+    <ConsoleDialogShell
+      onClose={onClose}
+      panelClassName={`${consoleDialogLgClass} max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden`}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-3 shrink-0">
+        <h2 className="font-bold text-lg text-zinc-900">
+          {isSession ? 'New agent session' : 'Create workspace'}
+        </h2>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className={`shrink-0 justify-self-end rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 ${consoleButtonFocusClass}`}
+          className={`flex items-center justify-center w-8 h-8 rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 transition-colors ${consoleButtonFocusClass}`}
         >
-          <X className="h-4 w-4" />
+          <X className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Centered card (prominent white dialog on dark backdrop, settings-style) */}
-      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-y-auto py-16 px-6">
-        {/* Ambient corner glows (subtle on dark) */}
-        <div className="pointer-events-none absolute -top-24 -left-24 h-80 w-80 rounded-full bg-white/5 blur-3xl" aria-hidden />
-        <div className="pointer-events-none absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-white/5 blur-3xl" aria-hidden />
-        <div className="relative z-10 w-full max-w-xl overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-2xl ring-1 ring-black/20">
-          {/* Card header (no subtitle) */}
-          <div className="shrink-0 border-b border-zinc-200 px-6 pt-5 pb-4">
-            <h2 className="text-lg font-bold text-zinc-900">
-              {isSession ? 'Start a new agent session' : 'Create your workspace'}
-            </h2>
+      {/* Body: two stacked dropdowns (single step) */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 space-y-5">
+        {!isSession && (
+          <div className="space-y-1.5">
+            <label className={consoleFormLabelClass}>Project source</label>
+            <ProjectSourceSelect
+              importedProject={importedProject}
+              onImported={(pid) => { setSourceChoice('git'); onRepoImported?.(pid); }}
+              blankName={newProjectName}
+              onBlankNameChange={setNewProjectName}
+              isBlank={sourceChoice === 'blank'}
+              onSelectBlank={() => { setSourceChoice('blank'); }}
+              disabled={launching}
+            />
           </div>
+        )}
 
-          {/* Card body */}
-          <div className="px-6 py-5 space-y-5">
-            {step === 1 && !isSession ? (
-              <>
-                {/* Source choice cards */}
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => chooseSource('git')}
-                    className={`flex flex-col items-center gap-2 rounded-lg border-2 p-5 text-center transition-colors ${consoleButtonFocusClass} ${
-                      sourceChoice === 'git'
-                        ? 'border-black bg-zinc-50'
-                        : 'border-zinc-200 hover:border-zinc-400 bg-white'
-                    }`}
-                  >
-                    <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 text-zinc-700">
-                      <Github className="h-5 w-5" />
-                    </span>
-                    <span className="text-sm font-semibold text-zinc-900">Import from Git</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => chooseSource('blank')}
-                    className={`flex flex-col items-center gap-2 rounded-lg border-2 p-5 text-center transition-colors ${consoleButtonFocusClass} ${
-                      sourceChoice === 'blank'
-                        ? 'border-black bg-zinc-50'
-                        : 'border-zinc-200 hover:border-zinc-400 bg-white'
-                    }`}
-                  >
-                    <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 text-zinc-700">
-                      <Sparkles className="h-5 w-5" />
-                    </span>
-                    <span className="text-sm font-semibold text-zinc-900">Start from blank</span>
-                  </button>
-                </div>
-
-                {/* Source-specific configuration */}
-                {sourceChoice === 'git' && (
-                  <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-4">
-                    {importedProject ? (
-                      <div className="flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm">
-                        <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                        <span className="truncate font-medium text-zinc-900">{importedProject.name}</span>
-                        <span className="ml-auto shrink-0 text-[10px] text-zinc-400">Imported</span>
-                      </div>
-                    ) : (
-                      <>
-                        <div>
-                          <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                            Git provider
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {GIT_PROVIDERS.map((p) => (
-                            <button
-                              key={p.id}
-                              type="button"
-                              onClick={() => pickProvider(p.id)}
-                              className={`flex-1 h-9 px-2 rounded-md border text-xs font-medium capitalize transition-colors ${consoleButtonFocusClass} ${
-                                gitProvider === p.id
-                                  ? 'bg-black text-white border-zinc-900'
-                                  : 'bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100'
-                              }`}
-                            >
-                              {p.label}
-                            </button>
-                          ))}
-                        </div>
-                        {gitProvider === 'gitea' && (
-                          <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">
-                            Gitea OAuth is not configured. Please ask an administrator to set it up.
-                          </p>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {sourceChoice === 'blank' && (
-                  <div className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50/60 p-4">
-                    <label htmlFor="onb-ws-name" className="block text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                      Workspace name
-                    </label>
-                    <input
-                      id="onb-ws-name"
-                      type="text"
-                      value={newProjectName}
-                      onChange={(e) => setNewProjectName(e.target.value)}
-                      placeholder="my-workspace"
-                      autoFocus
-                      className={consoleInputClass}
-                    />
-                  </div>
-                )}
-              </>
-            ) : (
-              <>
-                {/* Step 2: agent selection */}
-                <div>
-                  <h3 className="text-sm font-semibold text-zinc-900">Select an agent</h3>
-                </div>
-
-                {/* Built-in | Custom toggle */}
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => { setCustomImageId(''); onSelectAgent(''); }}
-                    className={`flex-1 h-9 px-3 text-xs font-medium rounded-md border transition-colors ${consoleButtonFocusClass} ${
-                      !customImageId ? 'bg-black text-white border-zinc-900' : 'bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100'
-                    }`}
-                  >
-                    Built-in
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSelectCustomImage}
-                    className={`flex-1 h-9 px-3 text-xs font-medium rounded-md border transition-colors ${consoleButtonFocusClass} ${
-                      customImageId ? 'bg-black text-white border-zinc-900' : 'bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100'
-                    }`}
-                  >
-                    Custom
-                  </button>
-                </div>
-
-                {/* Agent dropdown */}
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 min-w-0">
-                    {!customImageId && (
-                      <SelectMenu
-                        value={selectedAgentId}
-                        onChange={(v) => onSelectAgent(v)}
-                        options={agentOptions}
-                        placeholder="Select agent"
-                      />
-                    )}
-                    {customImageId && customImages && customImages.length > 0 && (
-                      <SelectMenu
-                        value={customImageId}
-                        onChange={selectCustomImageById}
-                        options={customImageOptions}
-                        placeholder="Select custom image"
-                      />
-                    )}
-                    {customImageId && (!customImages || customImages.length === 0) && (
-                      <div className="flex items-center gap-2 py-2">
-                        <p className="text-xs text-zinc-400">No custom images found.</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {launchError && (
-                  <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">
-                    {launchError}
-                  </p>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Card footer */}
-          <div className="shrink-0 border-t border-zinc-200 bg-zinc-50/80 px-6 py-3 flex items-center justify-between gap-2">
-            <button
-              type="button"
-              onClick={showBack ? () => setStep(1) : onClose}
-              className={`${buttonClass('secondary', 'sm')} ${consoleButtonFocusClass}`}
-            >
-              {showBack ? (
-                <>
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                  Back
-                </>
-              ) : 'Cancel'}
-            </button>
-
-            {step === 1 && !isSession ? (
-              <button
-                type="button"
-                onClick={handleNext}
-                disabled={!canAdvanceStep1}
-                className={`${buttonClass('primary', 'sm')} ${consoleButtonFocusClass}`}
-              >
-                Next
-                <ChevronRight className="h-3.5 w-3.5" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleStart}
-                disabled={launching || !selectedAgentId}
-                className={`${buttonClass('primary', 'sm')} ${consoleButtonFocusClass}`}
-              >
-                {launching ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Starting…
-                  </>
-                ) : (
-                  <>
-                    <Plus className="h-3.5 w-3.5" />
-                    Start agent
-                  </>
-                )}
-              </button>
-            )}
-          </div>
+        <div className="space-y-1.5">
+          <label className={consoleFormLabelClass}>Agent</label>
+          <SelectMenu
+            value={agentValue}
+            onChange={handleAgentChange}
+            options={agentOptions}
+            placeholder="Select agent"
+            searchable
+            searchPlaceholder="Search agents…"
+          />
         </div>
+
+        {launchError && (
+          <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">
+            {launchError}
+          </p>
+        )}
       </div>
 
-      {/* Nested RepoImportDialog (centered modal, reuses existing component) */}
-      {step === 1 && !isSession && gitImportMode && !importedProject && gitProvider && gitProvider !== 'gitea' && (
-        <RepoImportDialog
-          key={gitProvider}
-          open={true}
-          forceProvider={gitProvider}
-          onClose={() => { setGitImportMode(false); setGitProvider(''); }}
-          onImported={onRepoImported}
-          fetchWorkspaces={fetchWorkspaces}
-        />
-      )}
-    </div>
+      {/* Footer */}
+      <div className="border-t border-zinc-200 px-5 py-3 bg-zinc-50/80 flex justify-end gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={onClose}
+          className={`${buttonClass('secondary', 'sm')} ${consoleButtonFocusClass}`}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleStart}
+          disabled={launching || !canStart}
+          className={`${buttonClass('primary', 'sm')} ${consoleButtonFocusClass}`}
+        >
+          {launching ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Starting…
+            </>
+          ) : (
+            <>
+              <Plus className="h-3.5 w-3.5" />
+              {isSession ? 'Start agent' : 'Create workspace'}
+            </>
+          )}
+        </button>
+      </div>
+    </ConsoleDialogShell>
   );
 }

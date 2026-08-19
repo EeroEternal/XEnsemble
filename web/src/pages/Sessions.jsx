@@ -94,7 +94,6 @@ export default React.forwardRef(function Sessions({
   fetchAgents,
   launchPanelOpen,
   onLaunchPanelClose,
-  onWizardActiveChange,
   className,
 }, ref) {
   const navigate = useNavigate();
@@ -193,31 +192,22 @@ export default React.forwardRef(function Sessions({
   const [showNewInstanceModal, setShowNewInstanceModal] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
 
-  // Signal the wizard active state up to App so it can hide the sidebar and
-  // collapse the top bar slot (the wizard renders its own full-width header).
-  useEffect(() => {
-    onWizardActiveChange?.(showNewInstanceModal);
-  }, [showNewInstanceModal, onWizardActiveChange]);
-
   // Portal target for the session header (rendered into the full-width top bar
   // provided by App.jsx). Null until mounted; the portal renders once available.
   const isSessionsRoute = location.pathname === '/sessions';
-  const topbarVisible = (isSessionsRoute || launchPanelOpen) && !showNewInstanceModal;
+  const topbarVisible = isSessionsRoute || launchPanelOpen;
   const [topbarEl, setTopbarEl] = useState(null);
   useEffect(() => {
     if (!topbarVisible) { setTopbarEl(null); return; }
     const el = document.getElementById('xe-topbar-dynamic');
     if (el) setTopbarEl(el);
   }, [topbarVisible]);
-  const [gitImportMode, setGitImportMode] = useState(false);
-  const [gitProvider, setGitProvider] = useState('');
   const [importedProject, setImportedProject] = useState(null);
   const [createNewWorkspaceInline, setCreateNewWorkspaceInline] = useState(false);
   const [customImageId, setCustomImageId] = useState('');
   const [customImages, setCustomImages] = useState([]);
   // Onboarding wizard flow config
   const [wizardMode, setWizardMode] = useState('full'); // 'full' | 'session'
-  const [wizardStartStep, setWizardStartStep] = useState(1);
   const [wizardWorkspace, setWizardWorkspace] = useState(null);
 
   // Launch modal: agent config files
@@ -464,16 +454,13 @@ export default React.forwardRef(function Sessions({
     setLaunchModalError(null);
     setCreateNewWorkspaceInline(false);
     setCustomImageId('');
-    setGitImportMode(false);
-    setGitProvider('');
     setImportedProject(null);
     setNewProjectName('');
     fetchCustomImages();
     const freshAgents = await fetchAgents?.() || agents;
     // Decide wizard flow: 'full' = step1 source + step2 agent (create workspace);
-    // 'session' = step2 only, start a new agent session in the current workspace.
+    // 'session' = agent-only, start a new agent session in the current workspace.
     let nextMode = 'full';
-    let nextStartStep = 1;
     let nextWorkspace = null;
     if (mode === 'workspace' || projects.length === 0) {
       // New Workspace button or no workspaces -> full creation flow.
@@ -481,11 +468,10 @@ export default React.forwardRef(function Sessions({
       setStartSessionAfterCreate(true);
       setLaunchWorkspaceId('');
     } else {
-      // New Session -> step 2 (agent) in current workspace, if one is selected.
+      // New Session -> agent selection in current workspace, if one is selected.
       const ws = workspace || projects.find((p) => p.id === activeWorkspaceId) || null;
       if (ws) {
         nextMode = 'session';
-        nextStartStep = 2;
         nextWorkspace = ws;
         setLaunchModalMode('session');
         setStartSessionAfterCreate(true);
@@ -497,7 +483,6 @@ export default React.forwardRef(function Sessions({
       }
     }
     setWizardMode(nextMode);
-    setWizardStartStep(nextStartStep);
     setWizardWorkspace(nextWorkspace);
     const prefs = loadSidebarPrefs();
     const sorted = sortAgentsByRecentUsage(freshAgents, prefs);
@@ -597,12 +582,9 @@ export default React.forwardRef(function Sessions({
     setLaunchModalError(null);
     setCreateNewWorkspaceInline(false);
     setShowLaunchConfigModal(false);
-    setGitImportMode(false);
-    setGitProvider('');
     setImportedProject(null);
     setNewProjectName('');
     setWizardMode('full');
-    setWizardStartStep(1);
     setWizardWorkspace(null);
     onLaunchPanelClose?.();
   }, [onLaunchPanelClose]);
@@ -992,7 +974,6 @@ export default React.forwardRef(function Sessions({
     setLaunchModalError(null);
     setCreateNewWorkspaceInline(false);
     setShowLaunchConfigModal(false);
-    setGitImportMode(false);
     setImportedProject(null);
   }, []);
 
@@ -1181,35 +1162,7 @@ export default React.forwardRef(function Sessions({
       {/* Main area */}
       <div className="flex min-h-0 flex-1 w-full flex-row items-stretch bg-white">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
-          {showNewInstanceModal ? (
-            <OnboardingWizard
-              mode={wizardMode}
-              startStep={wizardStartStep}
-              workspace={wizardWorkspace}
-              agents={agents}
-              selectedAgentId={selectedAgentId}
-              onSelectAgent={(id) => { setSelectedAgentId(id); setShowLaunchConfigModal(false); }}
-              customImages={customImages}
-              customImageId={customImageId}
-              setCustomImageId={setCustomImageId}
-              gitProvider={gitProvider}
-              setGitProvider={setGitProvider}
-              gitImportMode={gitImportMode}
-              setGitImportMode={setGitImportMode}
-              importedProject={importedProject}
-              setImportedProject={setImportedProject}
-              onRepoImported={handleRepoImported}
-              fetchWorkspaces={fetchWorkspaces}
-              newProjectName={newProjectName}
-              setNewProjectName={setNewProjectName}
-              onClose={closeOnboarding}
-              onLaunch={handleLaunchFromModal}
-              onLaunchSession={handleLaunchSessionInWorkspace}
-              launching={launchingSession || isLoading || projectCreating}
-              launchError={launchModalError}
-            />
-          ) : (
-            <>
+          <>
           {topbarEl && createPortal(
             <>
               <div className="flex items-center gap-2 min-w-0">
@@ -1391,8 +1344,27 @@ export default React.forwardRef(function Sessions({
               </p>
             </div>
           )}
-            </>
+          {showNewInstanceModal && (
+            <OnboardingWizard
+              mode={wizardMode}
+              agents={agents}
+              selectedAgentId={selectedAgentId}
+              onSelectAgent={(id) => { setSelectedAgentId(id); setShowLaunchConfigModal(false); }}
+              customImages={customImages}
+              customImageId={customImageId}
+              setCustomImageId={setCustomImageId}
+              importedProject={importedProject}
+              onRepoImported={handleRepoImported}
+              newProjectName={newProjectName}
+              setNewProjectName={setNewProjectName}
+              onClose={closeOnboarding}
+              onLaunch={handleLaunchFromModal}
+              onLaunchSession={handleLaunchSessionInWorkspace}
+              launching={launchingSession || isLoading || projectCreating}
+              launchError={launchModalError}
+            />
           )}
+            </>
         </div>
       </div>
 

@@ -43,7 +43,6 @@ function AuthenticatedLayout({
   const navigate = useNavigate();
   const sessionsRef = useRef(null);
   const [launchPanelOpen, setLaunchPanelOpen] = useState(false);
-  const [wizardActive, setWizardActive] = useState(false);
   const activeWorkspaceName = projects.find((p) => p.id === activeWorkspaceId)?.name || null;
 
   useEffect(() => {
@@ -82,12 +81,9 @@ function AuthenticatedLayout({
 
   return (
     <div className={`h-full flex flex-col ${bgCanvas}`}>
-      {/* Full-width top bar (above the sidebar). Collapses when the onboarding
-          wizard is active — the wizard then renders its own full-width header. */}
+      {/* Full-width top bar (above the sidebar). */}
       <div
-        className={`shrink-0 border-b border-zinc-200 bg-white flex items-center px-4 gap-3 relative z-30 ${
-          wizardActive ? 'h-0 overflow-hidden border-0' : 'h-12'
-        }`}
+        className="shrink-0 h-12 border-b border-zinc-200 bg-white flex items-center px-4 gap-3 relative z-30"
       >
         <BrandMark className="h-7 w-7 shrink-0" iconClassName="h-3.5 w-3.5" />
         <span className="text-sm font-bold text-zinc-900 shrink-0">XEnsemble</span>
@@ -110,7 +106,7 @@ function AuthenticatedLayout({
       </div>
 
       <div className="flex flex-1 min-h-0">
-      {!wizardActive && !isSettingsRoute && (
+      {!isSettingsRoute && (
       <AppSidebar
         agents={agents}
         sessions={sessions}
@@ -148,7 +144,6 @@ function AuthenticatedLayout({
           fetchAgents={fetchAgents}
           launchPanelOpen={launchPanelOpen}
           onLaunchPanelClose={() => setLaunchPanelOpen(false)}
-          onWizardActiveChange={setWizardActive}
           className={cn(
             'flex h-full min-h-0 flex-1 flex-col',
             (isSessions || launchPanelOpen) ? 'relative z-20' : offRouteClass,

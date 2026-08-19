@@ -1,0 +1,292 @@
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { ChevronDown, Search, Loader2, Check, GitBranch, Plus, FileText } from 'lucide-react';
+import { useGitProvider } from '../../hooks/useGitProvider';
+import { useToast } from '../Toast';
+import * as gitApi from '../../lib/gitApi';
+import * as githubApi from '../../lib/githubApi';
+import { getProviderLabel } from '../../lib/gitLabels';
+import {
+  consoleButtonFocusClass,
+  consoleInputClass,
+  consoleDropdownPanelClass,
+  consoleMenuDropdownZClass,
+} from '../../lib/consoleTokens';
+
+const PROVIDERS = ['github', 'gitlab', 'gitea'];
+const CLONE_POLL_MS = 2000;
+const CLONE_MAX_ATTEMPTS = 150;
+
+function repoKey(provider, fullName) {
+  return `${provider}:${fullName}`;
+}
+
+export default function ProjectSourceSelect({
+  importedProject,
+  onImported,
+  blankName,
+  onBlankNameChange,
+  isBlank,
+  onSelectBlank,
+  disabled,
+}) {
+  const { showToast } = useToast();
+  const gh = useGitProvider('github');
+  const gl = useGitProvider('gitlab');
+  const gt = useGitProvider('gitea');
+  const providers = { github: gh, gitlab: gl, gitea: gt };
+
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [oauthConfigured, setOauthConfigured] = useState({});
+  const [reposByProvider, setReposByProvider] = useState({});
+  const [loadingRepos, setLoadingRepos] = useState({});
+  const [importingKey, setImportingKey] = useState(null);
+  const rootRef = useRef(null);
+
+  // OAuth-configured status (per provider) - controls whether connect is allowed.
+  useEffect(() => {
+    gitApi.listProviders()
+      .then((data) => {
+        const map = {};
+        for (const p of data.providers || []) {
+          map[p.name] = p.oauth_configured ?? p.oauthConfigured ?? false;
+        }
+        setOauthConfigured(map);
+      })
+      .catch(() => setOauthConfigured({}));
+  }, []);
+
+  // Fetch repos for a connected provider.
+  const fetchRepos = useCallback(async (provider) => {
+    setLoadingRepos((prev) => ({ ...prev, [provider]: true }));
+    try {
+      const data = await gitApi.listRepos(provider, { per_page: '100' });
+      const rows = data.repos || (Array.isArray(data) ? data : []);
+      setReposByProvider((prev) => ({ ...prev, [provider]: rows }));
+    } catch {
+      setReposByProvider((prev) => ({ ...prev, [provider]: [] }));
+    } finally {
+      setLoadingRepos((prev) => ({ ...prev, [provider]: false }));
+    }
+  }, []);
+
+  // When a provider becomes connected (or the popover opens), fetch its repos.
+  useEffect(() => {
+    if (!open) return;
+    for (const p of PROVIDERS) {
+      if (providers[p].connection && !reposByProvider[p] && !loadingRepos[p]) {
+        fetchRepos(p);
+      }
+    }
+  }, [open, gh.connection, gl.connection, gt.connection]);
+
+  // Close on outside click.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => {
+      if (rootRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  // Flatten connected providers' repos into a single list with provider label.
+  const allRepos = useMemo(() => {
+    const list = [];
+    for (const p of PROVIDERS) {
+      if (providers[p].connection) {
+        for (const r of reposByProvider[p] || []) {
+          list.push({
+            provider: p,
+            full_name: r.full_name || r.fullName,
+            name: r.name || (r.full_name || '').split('/').pop(),
+            default_branch: r.default_branch || r.defaultBranch || 'main',
+            private: r.private,
+            language: r.language,
+          });
+        }
+      }
+    }
+    return list;
+  }, [reposByProvider, gh.connection, gl.connection, gt.connection]);
+
+  const filteredRepos = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return allRepos;
+    return allRepos.filter((r) => r.full_name?.toLowerCase().includes(q));
+  }, [allRepos, query]);
+
+  const handleImportRepo = async (repo) => {
+    const key = repoKey(repo.provider, repo.full_name);
+    setImportingKey(key);
+    setOpen(false);
+    try {
+      const result = await gitApi.importRepo({
+        provider: repo.provider,
+        repo_full_name: repo.full_name,
+        name: repo.name,
+        branch: repo.default_branch,
+        auto_create_branch: true,
+        work_branch_name: `xensemble/${Date.now()}`,
+      });
+      // Poll clone status until ready/failed.
+      await new Promise((resolve, reject) => {
+        let attempts = 0;
+        const id = setInterval(async () => {
+          attempts += 1;
+          try {
+            const res = await githubApi.getCloneStatus(result.id);
+            if (res?.clone_status === 'ready') {
+              clearInterval(id);
+              showToast('success', 'Repository imported and ready.');
+              onImported?.(result.id);
+              resolve();
+            } else if (res?.clone_status === 'failed') {
+              clearInterval(id);
+              reject(new Error(res.clone_error || 'Clone failed.'));
+            }
+          } catch {
+            // keep polling
+          }
+          if (attempts >= CLONE_MAX_ATTEMPTS) {
+            clearInterval(id);
+            reject(new Error('Clone is taking longer than expected.'));
+          }
+        }, CLONE_POLL_MS);
+      });
+    } catch (err) {
+      showToast('error', err.message || 'Import failed.');
+    } finally {
+      setImportingKey(null);
+    }
+  };
+
+  const handleConnect = async (provider) => {
+    if (oauthConfigured[provider] === false) {
+      showToast('error', `${getProviderLabel(provider)} OAuth is not configured. Ask an admin.`);
+      return;
+    }
+    await providers[provider].connect();
+  };
+
+  const triggerLabel = importingKey
+    ? 'Importing…'
+    : (importedProject ? importedProject.name : (isBlank ? (blankName || 'New blank project') : 'Select project source'));
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        type="button"
+        disabled={disabled || importingKey}
+        onClick={() => setOpen((v) => !v)}
+        className={`w-full flex items-center justify-between gap-2 h-9 px-3 text-sm rounded-md border border-zinc-300 bg-white text-left transition-colors hover:bg-zinc-50 disabled:opacity-50 ${consoleButtonFocusClass}`}
+      >
+        <span className="flex items-center gap-2 min-w-0 truncate">
+          {importingKey ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-zinc-400" /> : <GitBranch className="w-3.5 h-3.5 shrink-0 text-zinc-400" />}
+          <span className={`truncate ${importedProject || isBlank ? 'text-zinc-900 font-medium' : 'text-zinc-400'}`}>{triggerLabel}</span>
+        </span>
+        <ChevronDown className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
+      </button>
+
+      {open && (
+        <div className={`absolute left-0 right-0 top-full z-40 mt-1 ${consoleDropdownPanelClass} ${consoleMenuDropdownZClass} max-h-80 flex flex-col overflow-hidden shadow-lg`}>
+          {/* Search */}
+          <div className="relative border-b border-zinc-200">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search repositories…"
+              autoFocus
+              className="w-full bg-transparent py-2 pl-8 pr-3 text-sm text-zinc-700 placeholder:text-zinc-400 outline-none"
+            />
+          </div>
+
+          {/* Upper tier: repos from connected providers */}
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {allRepos.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-zinc-400">
+                {Object.values(providers).some((p) => p.connection)
+                  ? 'No repositories found.'
+                  : 'Connect a Git provider below to list your repositories.'}
+              </p>
+            ) : filteredRepos.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-zinc-400">No matches.</p>
+            ) : (
+              filteredRepos.map((r) => {
+                const key = repoKey(r.provider, r.full_name);
+                const isImporting = importingKey === key;
+                const isSelected = importedProject && importedProject.name === r.name;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => handleImportRepo(r)}
+                    disabled={importingKey}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    {isImporting ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-zinc-400" /> : <GitBranch className="w-3.5 h-3.5 shrink-0 text-zinc-400" />}
+                    <span className="min-w-0 flex-1 truncate text-zinc-700">{r.full_name}</span>
+                    <span className="shrink-0 text-[10px] text-zinc-400">{getProviderLabel(r.provider)}</span>
+                    {isSelected && <Check className="w-3.5 h-3.5 shrink-0 text-zinc-900" />}
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          {/* Divider */}
+          <div className="h-px bg-zinc-200" />
+
+          {/* Lower tier: connect links + blank */}
+          <div className="shrink-0 py-1">
+            {PROVIDERS.map((p) => {
+              const conn = providers[p].connection;
+              const connecting = providers[p].loading;
+              const configured = oauthConfigured[p] !== false;
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => handleConnect(p)}
+                  disabled={connecting || !configured || importingKey}
+                  title={configured ? `Connect ${getProviderLabel(p)}` : `${getProviderLabel(p)} OAuth not configured`}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
+                >
+                  {connecting ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-zinc-400" /> : <Plus className="w-3.5 h-3.5 shrink-0 text-zinc-400" />}
+                  <span className="flex-1 truncate">
+                    {conn ? `Switch ${getProviderLabel(p)} account` : `Import from ${getProviderLabel(p)}`}
+                  </span>
+                  {conn && <span className="shrink-0 text-[10px] text-emerald-600">Connected</span>}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => { onSelectBlank?.(); setOpen(false); }}
+              disabled={importingKey}
+              className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+            >
+              <FileText className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
+              <span className="flex-1 truncate">New blank project</span>
+              {isBlank && <Check className="w-3.5 h-3.5 shrink-0 text-zinc-900" />}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Blank workspace name input (shown when blank selected) */}
+      {isBlank && (
+        <input
+          type="text"
+          value={blankName}
+          onChange={(e) => onBlankNameChange?.(e.target.value)}
+          placeholder="my-workspace"
+          className={`mt-2 ${consoleInputClass}`}
+        />
+      )}
+    </div>
+  );
+}
