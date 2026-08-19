@@ -19,9 +19,9 @@ import {
   consoleIconButtonClass,
   consoleSectionLabelClass,
   consoleStructuredDialogPanelClass,
-  consoleAdminTableShellClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
+  consoleTableShellClass,
 } from '../lib/consoleTokens';
 import { formatDuration, getBuildState } from '../lib/imageBuildStates';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
@@ -483,8 +483,8 @@ export function CustomImagesContent() {
       )}
 
       {/* Image List */}
-      <div className={cn(consoleAdminTableShellClass, '!overflow-auto')}>
-        <table className="w-full min-w-[640px] table-fixed border-collapse text-left">
+      <div className={cn(consoleTableShellClass, 'overflow-x-auto')}>
+        <table className="w-fit min-w-[640px] border-collapse text-left">
           <colgroup>
             <col className="w-auto" />
             <col className="w-36" />

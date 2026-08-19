@@ -53,6 +53,8 @@ export default function RowActionsMenu({ label = 'Actions', items, className }) 
       setPos({
         top: rect.bottom,
         bottom: rect.top,
+        left: rect.left,
+        right: rect.right,
         dropUp: spaceBelow < DROPDOWN_MIN_SPACE,
       });
     }
@@ -60,6 +62,14 @@ export default function RowActionsMenu({ label = 'Actions', items, className }) 
   };
 
   const visible = items.filter((item) => item && item.visible !== false);
+
+  const menuHorizontalStyle = pos ? (() => {
+    const viewportRight = window.innerWidth;
+    const distFromRight = viewportRight - pos.right;
+    if (distFromRight >= 208) return { right: distFromRight };
+    if (viewportRight - pos.left >= 208) return { left: pos.left };
+    return { right: 8 };
+  })() : {};
 
   return (
     <>
@@ -81,10 +91,7 @@ export default function RowActionsMenu({ label = 'Actions', items, className }) 
           role="menu"
           style={{
             position: 'fixed',
-            left: 'auto',
-            right: window.innerWidth - pos.right > 208
-              ? window.innerWidth - pos.right
-              : 8,
+            ...menuHorizontalStyle,
             ...(pos.dropUp
               ? { bottom: window.innerHeight - pos.bottom + DROPDOWN_GAP }
               : { top: pos.top + DROPDOWN_GAP }),
