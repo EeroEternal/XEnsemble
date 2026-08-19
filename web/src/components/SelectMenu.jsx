@@ -50,6 +50,7 @@ export default function SelectMenu({
   searchable = false,
   searchPlaceholder = 'Search…',
   recentValues = [],
+  maxHeight = 240,
 }) {
   const [open, setOpen] = useState(false);
   const [menuRect, setMenuRect] = useState(null);
@@ -230,7 +231,8 @@ export default function SelectMenu({
         <ul
           id={listId}
           role="listbox"
-          className="max-h-60 overflow-auto py-1"
+          className="overflow-auto py-1"
+          style={{ maxHeight }}
         >
           {renderOptions()}
         </ul>

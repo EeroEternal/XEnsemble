@@ -127,6 +127,7 @@ export default function OnboardingWizard({
             placeholder="Select agent"
             searchable
             searchPlaceholder="Search agents…"
+            maxHeight={200}
           />
         </div>
 
