@@ -132,10 +132,6 @@ export default function WorkspaceSwitcher({
       }}
       className={`${consoleMenuDropdownZClass} ${consoleDropdownPanelClass} py-1 shadow-md max-h-[60vh] flex flex-col`}
     >
-      <div className={`flex items-center justify-between px-3 py-1.5 border-b ${borderHairline}`}>
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Workspaces</span>
-        <span className="text-[10px] text-zinc-400">{projects.length}</span>
-      </div>
       <div className="px-2 py-1.5">
         <label className={`flex items-center gap-1.5 px-2 py-1 rounded-md ${bgSecondary}`}>
           <Search className="w-3 h-3 text-zinc-400 shrink-0" strokeWidth={1.75} />
