@@ -88,8 +88,7 @@ function AuthenticatedLayout({
         <BrandMark className="h-7 w-7 shrink-0" iconClassName="h-3.5 w-3.5" />
         <span className="text-sm font-bold text-zinc-900 shrink-0">XEnsemble</span>
         {isSettingsRoute ? (
-          <div className="flex-1 min-w-0 flex items-center justify-between gap-3">
-            <span className="text-sm font-medium text-zinc-500 truncate">{settingsTitle}</span>
+          <div className="flex-1 min-w-0 flex items-center gap-3">
             <button
               type="button"
               onClick={() => navigate('/sessions')}
@@ -99,6 +98,7 @@ function AuthenticatedLayout({
               <ArrowLeft className="w-3.5 h-3.5" strokeWidth={1.75} />
               Back to workspace
             </button>
+            <span className="text-sm font-medium text-zinc-500 truncate">{settingsTitle}</span>
           </div>
         ) : (
           <div id="xe-topbar-dynamic" className="flex-1 min-w-0 flex items-center justify-between gap-3" />
@@ -106,7 +106,7 @@ function AuthenticatedLayout({
       </div>
 
       <div className="flex flex-1 min-h-0">
-      {!isSettingsRoute && (
+      {(
       <AppSidebar
         agents={agents}
         sessions={sessions}
@@ -119,7 +119,7 @@ function AuthenticatedLayout({
         onRequestDeleteSession={(session, ws) => sessionsRef.current?.requestDeleteSession?.(session, ws)}
         onRestartSession={(session) => sessionsRef.current?.restartSession?.(session)}
         user={user}
-        onOpenSettings={(section) => setShowSettingsModal(section || 'general')}
+        onOpenSettings={() => setShowSettingsModal(true)}
         onLogout={logout}
       />
       )}
@@ -197,7 +197,7 @@ function AuthenticatedLayout({
       </main>
       </div>
       {showSettingsModal && (
-        <SettingsModal section={showSettingsModal} onClose={() => setShowSettingsModal(null)} />
+        <SettingsModal onClose={() => setShowSettingsModal(false)} />
       )}
       <ConfirmDialog />
     </div>
@@ -208,17 +208,14 @@ function App() {
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(null);
-
-  const openSettings = useCallback((section) => {
-    setShowSettingsModal(section || 'general');
-  }, []);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const navigate = useNavigate();
 
   React.useEffect(() => {
-    window.addEventListener('xe:open-settings', () => openSettings('general'));
-    return () => window.removeEventListener('xe:open-settings', () => openSettings('general'));
-  }, [openSettings]);
-  const navigate = useNavigate();
+    const openSettings = () => setShowSettingsModal(true);
+    window.addEventListener('xe:open-settings', openSettings);
+    return () => window.removeEventListener('xe:open-settings', openSettings);
+  }, []);
 
   const {
     agents,

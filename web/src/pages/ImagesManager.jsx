@@ -1,5 +1,5 @@
 import { useContext, useEffect } from 'react';
-import { useLocation, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 
 import { AuthContext } from '../App';
 import PageHeader from '../components/PageHeader';
@@ -25,6 +25,7 @@ export default function ImagesManager() {
   const { user } = useContext(AuthContext);
   const isAdmin = user?.role === 'admin';
   const location = useLocation();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const isAgentPath = location.pathname === '/admin/images';
@@ -39,9 +40,9 @@ export default function ImagesManager() {
 
   function switchTab(tab) {
     if (tab === TAB_AGENT) {
-      setSearchParams({ tab: TAB_AGENT }, { replace: true });
+      navigate('/custom-images?tab=agent', { replace: true });
     } else {
-      setSearchParams({}, { replace: true });
+      navigate('/custom-images', { replace: true });
     }
   }
 

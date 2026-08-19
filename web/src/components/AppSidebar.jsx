@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { NavLink } from 'react-router-dom';
 import {
   Trash2,
   RotateCw,
@@ -132,44 +133,24 @@ function SidebarAccountMenu({ user, onOpenSettings, onLogout, adminLinkClass, co
           {user.email}
         </p>
       )}
-      <button
-        type="button"
-        role="menuitem"
-        onClick={() => { close(); onOpenSettings?.('images'); }}
-        className={adminLinkClass()}
-      >
+      <NavLink to="/custom-images" className={adminLinkClass} onClick={close}>
         <Container className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
         Images
-      </button>
+      </NavLink>
       {isAdmin && (
         <>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => { close(); onOpenSettings?.('users'); }}
-            className={adminLinkClass()}
-          >
+          <NavLink to="/admin/users" className={adminLinkClass} onClick={close}>
             <Users className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
             Users
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => { close(); onOpenSettings?.('agents'); }}
-            className={adminLinkClass()}
-          >
+          </NavLink>
+          <NavLink to="/admin/agents" className={adminLinkClass} onClick={close}>
             <Bot className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
             Agents
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => { close(); onOpenSettings?.('gateway'); }}
-            className={adminLinkClass()}
-          >
+          </NavLink>
+          <NavLink to="/admin/gateway" className={adminLinkClass} onClick={close}>
             <Globe className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
             Gateway
-          </button>
+          </NavLink>
           <div className="my-1 border-t border-zinc-200" />
         </>
       )}
@@ -457,7 +438,7 @@ export default function AppSidebar({
     [visibleSessions, sessionMatchesQuery],
   );
 
-  const adminLinkClass = ({ isActive } = {}) =>
+  const adminLinkClass = ({ isActive }) =>
     `flex w-full items-center gap-2 px-3 py-2 text-xs font-medium transition-colors ${
       isActive
         ? 'bg-zinc-100 text-zinc-900'

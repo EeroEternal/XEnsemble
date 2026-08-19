@@ -3,7 +3,7 @@ import { ConsoleDialogShell } from './ConsoleDialog';
 import { consoleDialogPanelClass } from '../lib/consoleTokens';
 import SettingsShell from './settings/SettingsShell';
 
-export default function SettingsModal({ section, onClose }) {
+export default function SettingsModal({ onClose }) {
   return (
     <ConsoleDialogShell
       onClose={onClose}
@@ -24,7 +24,7 @@ export default function SettingsModal({ section, onClose }) {
         </button>
       </div>
       <div className="flex-1 min-h-0 px-5 py-3 overflow-hidden">
-        <SettingsShell initialSection={section} />
+        <SettingsShell />
       </div>
     </ConsoleDialogShell>
   );
