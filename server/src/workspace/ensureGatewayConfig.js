@@ -32,7 +32,6 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                             id: modelTarget,
                             baseUrl: `${routerUrl}/v1`,
                             envKey: 'OPENAI_API_KEY',
-                            generationConfig: { contextWindowSize: 64000 },
                         }],
                     },
                     providerProtocol: { gateway: 'openai' },
@@ -69,12 +68,10 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                             displayName: 'XEnsemble Gateway',
                             model: modelTarget,
                             type: 'openai-compatible',
-                            contextWindow: 64000,
                             maxOutputTokens: 8192,
                             models: [{
                                 model: modelTarget,
                                 displayName: modelTarget,
-                                contextWindow: 64000,
                                 maxOutputTokens: 8192,
                             }],
                         },
@@ -133,7 +130,6 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                             models: [{
                                 id: modelTarget,
                                 name: modelTarget,
-                                contextWindow: 64000,
                             }],
                         },
                     },
@@ -204,7 +200,6 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                     vendor: 'custom',
                     apiKey: sessionToken,
                     url: `${routerUrl}/v1/chat/completions`,
-                    maxInputTokens: 64000,
                     maxOutputTokens: 8192,
                 }], null, 2),
                 extraFiles: [{
