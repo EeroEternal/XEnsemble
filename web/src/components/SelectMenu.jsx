@@ -208,33 +208,6 @@ export default function SelectMenu({
         }}
         className={`${consoleMenuDropdownZClass} ${consoleDropdownPanelClass} shadow-md overflow-hidden`}
       >
-        {searchable && (
-          <div
-            className="sticky top-0 z-10 border-b border-zinc-100 bg-white p-2"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
-              <input
-                ref={searchRef}
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={searchPlaceholder}
-                className={cn(
-                  consoleToolbarInputClass,
-                  'w-full pl-8 pr-2 text-sm',
-                )}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    e.stopPropagation();
-                    setOpen(false);
-                  }
-                }}
-              />
-            </div>
-          </div>
-        )}
         <ul
           id={listId}
           role="listbox"
@@ -248,25 +221,58 @@ export default function SelectMenu({
 
   return (
     <div ref={rootRef} className={`relative ${className}`}>
-      <button
-        type="button"
-        disabled={disabled || options.length === 0}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={listId}
-        onClick={() => setOpen((v) => !v)}
-        className={cn(
-          consoleToolbarInputClass,
-          'relative w-full text-left pr-9 hover:bg-zinc-50 disabled:opacity-50 disabled:cursor-not-allowed',
-        )}
-      >
-        <span className={selected ? 'text-zinc-900' : 'text-zinc-400'}>
-          {selected?.label ?? placeholder}
-        </span>
-        <ChevronDown
-          className={`absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none transition-transform ${open ? 'rotate-180' : ''}`}
-        />
-      </button>
+      {open && searchable ? (
+        <div
+          className={cn(
+            consoleToolbarInputClass,
+            'relative w-full flex items-center',
+          )}
+        >
+          <Search className="absolute left-2.5 w-3.5 h-3.5 text-zinc-400 pointer-events-none" />
+          <input
+            ref={searchRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={searchPlaceholder}
+            className="w-full bg-transparent pl-8 pr-8 text-sm text-zinc-700 placeholder:text-zinc-400 outline-none"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation();
+                setOpen(false);
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => { setOpen(false); setQuery(''); }}
+            aria-label="Close"
+            className="absolute right-2.5 w-4 h-4 flex items-center justify-center text-zinc-400 hover:text-zinc-600"
+          >
+            <ChevronDown className="w-4 h-4" />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          disabled={disabled || options.length === 0}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-controls={listId}
+          onClick={() => setOpen((v) => !v)}
+          className={cn(
+            consoleToolbarInputClass,
+            'relative w-full text-left pr-9 hover:bg-zinc-50 disabled:opacity-50 disabled:cursor-not-allowed',
+          )}
+        >
+          <span className={selected ? 'text-zinc-900' : 'text-zinc-400'}>
+            {selected?.label ?? placeholder}
+          </span>
+          <ChevronDown
+            className={`absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none transition-transform ${open ? 'rotate-180' : ''}`}
+          />
+        </button>
+      )}
       {list && createPortal(list, document.body)}
     </div>
   );

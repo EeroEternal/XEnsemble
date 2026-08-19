@@ -263,7 +263,7 @@ export default React.forwardRef(function Sessions({
 
   useEffect(() => {
     if (!activeSession?.projectId) {
-      setPanelOpen(false);
+      setPanelOpen(true);
     }
     setViewingFile(null);
     setFileContent('');

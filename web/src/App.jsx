@@ -10,6 +10,7 @@ import GatewayAdmin from './pages/GatewayAdmin';
 import AppSidebar from './components/AppSidebar';
 import BrandMark from './components/BrandMark';
 import SettingsModal from './components/SettingsModal';
+import SettingsTabSidebar from './components/SettingsTabSidebar';
 import ConfirmDialog from './components/ConfirmDialog';
 import { useWorkspaces } from './hooks/useWorkspaces';
 import { cn } from './lib/utils';
@@ -149,45 +150,53 @@ function AuthenticatedLayout({
         {user?.role === 'admin' && isAgentsAdmin && (
             <div
               className={cn(
-                'flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden',
-                APP_SHELL_ADMIN_CLASS,
+                'flex min-h-0 flex-1 flex-row overflow-hidden',
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <AgentsAdmin />
+              <SettingsTabSidebar activeTab="agents" />
+              <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
+                <AgentsAdmin />
+              </div>
             </div>
         )}
         {user?.role === 'admin' && isUsersAdmin && (
             <div
               className={cn(
-                'flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden',
-                APP_SHELL_ADMIN_CLASS,
+                'flex min-h-0 flex-1 flex-row overflow-hidden',
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <UsersAdmin />
+              <SettingsTabSidebar activeTab="users" />
+              <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
+                <UsersAdmin />
+              </div>
             </div>
         )}
         {user?.role === 'admin' && isGatewayAdmin && (
             <div
               className={cn(
-                'flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden',
-                APP_SHELL_ADMIN_CLASS,
+                'flex min-h-0 flex-1 flex-row overflow-hidden',
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <GatewayAdmin />
+              <SettingsTabSidebar activeTab="gateway" />
+              <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
+                <GatewayAdmin />
+              </div>
             </div>
         )}
         {isImagesManager && (
             <div
               className={cn(
-                'flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden',
-                APP_SHELL_ADMIN_CLASS,
+                'flex min-h-0 flex-1 flex-row overflow-hidden',
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <ImagesManager />
+              <SettingsTabSidebar activeTab="images" />
+              <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
+                <ImagesManager />
+              </div>
             </div>
         )}
       </main>
