@@ -41,7 +41,10 @@ function AuthenticatedLayout({
   const navigate = useNavigate();
   const sessionsRef = useRef(null);
   const [launchPanelOpen, setLaunchPanelOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState('general');
+  const handleSettingsSectionChange = useCallback((section) => {
+    setSettingsSection(section);
+    if (location.pathname !== '/settings') navigate('/settings');
+  }, [navigate, location.pathname]);
   const activeWorkspaceName = projects.find((p) => p.id === activeWorkspaceId)?.name || null;
 
   useEffect(() => {
@@ -152,7 +155,7 @@ function AuthenticatedLayout({
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab="agents" user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
+              <SettingsTabSidebar activeTab="agents" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
               <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
                 <AgentsAdmin />
               </div>
@@ -165,7 +168,7 @@ function AuthenticatedLayout({
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab="users" user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
+              <SettingsTabSidebar activeTab="users" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
               <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
                 <UsersAdmin />
               </div>
@@ -178,7 +181,7 @@ function AuthenticatedLayout({
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab="gateway" user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
+              <SettingsTabSidebar activeTab="gateway" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
               <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
                 <GatewayAdmin />
               </div>
@@ -191,7 +194,7 @@ function AuthenticatedLayout({
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab="images" user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
+              <SettingsTabSidebar activeTab="images" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
               <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
                 <ImagesManager />
               </div>
@@ -204,9 +207,9 @@ function AuthenticatedLayout({
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab="general" activeSection={settingsSection} onSectionChange={setSettingsSection} user={user} onOpenSettings={null} onLogout={logout} />
+              <SettingsTabSidebar activeTab={settingsSection} onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
               <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
-                <SettingsShell section={settingsSection} onSectionChange={setSettingsSection} />
+                <SettingsShell section={settingsSection} />
               </div>
             </div>
         )}

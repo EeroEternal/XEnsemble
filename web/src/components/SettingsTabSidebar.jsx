@@ -27,7 +27,7 @@ const ALL_TABS = [
   { id: 'gateway', label: 'Gateway', icon: Globe, route: '/admin/gateway', adminOnly: true },
 ];
 
-export default function SettingsTabSidebar({ activeTab, activeSection, onSectionChange, user, onOpenSettings, onLogout }) {
+export default function SettingsTabSidebar({ activeTab, onSectionChange, user, onOpenSettings, onLogout }) {
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin';
 
@@ -45,7 +45,7 @@ export default function SettingsTabSidebar({ activeTab, activeSection, onSection
       <nav className="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-0.5">
         {visibleTabs.map((tab) => {
           const Icon = tab.icon;
-          const isActive = tab.id === activeTab || (activeSection && tab.id === activeSection);
+          const isActive = tab.id === activeTab;
           const handleClick = () => {
             if (tab.id === 'general' || tab.id === 'api-keys' || tab.id === 'git' || tab.id === 'quota') {
               onSectionChange?.(tab.id);
