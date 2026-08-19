@@ -1,5 +1,5 @@
 const fs = require('fs');
-const { eq, inArray } = require('drizzle-orm');
+const { eq, inArray, sql } = require('drizzle-orm');
 const { db } = require('../db/index');
 const schema = require('../db/schema');
 const sessionManager = require('../session/SessionManager');
