@@ -169,6 +169,9 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
             network: resolveBoxliteSessionNetwork(opts.network),
             resources: {
                 disk_size_gb: Number(process.env.BOXLITE_DISK_SIZE_GB || 20),
+                // 大前端（如 xensemble 自身）在默认 4GB 沙箱里 vite build 会 OOM；默认给 6GB。
+                memory_mib: Number(process.env.BOXLITE_MEMORY_MIB || 6144),
+                cpus: Number(process.env.BOXLITE_CPUS || 4),
                 ...(opts.resources || {}),
             },
         };

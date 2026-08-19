@@ -7,6 +7,9 @@
 //   On failure: returns the stage 2 finalStderr + plan for the front-end to show.
 
 const crypto = require('crypto');
+const { execSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 const { eq, and } = require('drizzle-orm');
 const { getRuntime } = require('../runtime/registry');
 const { ensureProjectRuntime } = require('../runtime/RuntimeService');
@@ -14,11 +17,35 @@ const { analyzeProjectDeploy } = require('./analyzeDeploy');
 const { analyzeProjectVerify } = require('./analyzeVerify');
 const { createTunnel, stopByProjectId } = require('../preview/tunnelServer');
 const deploymentService = require('./DeploymentService');
+const workspace = require('../workspace');
 const { db } = require('../db');
 const schema = require('../db/schema');
 
 const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 const VERIFY_STATE_TTL_MS = 30 * 60 * 1000;
+
+// 修复 host workspace 目录属主。
+// 背景：server 以 root 运行，新建/拉取 git 项目时目录可能被写成 root:root，
+// 而 guest 经 virtiofs 映射为非 root 用户（默认 uid 1000，同 test1 的 administrator:administrator），
+// 导致 guest 无法写入 /workspace（npm install、preview 写 .agents/tunnelClient.js 全部失败）。
+// 部署前把属主修正为映射用户，只改所有权不改内容，保证依赖安装与 preview 可写。
+function repairHostWorkspaceOwnership(hostPath) {
+    if (!hostPath || !fs.existsSync(hostPath)) return;
+    const uid = Number(process.env.XENSEMBLE_WORKSPACE_UID || 1000);
+    const gid = Number(process.env.XENSEMBLE_WORKSPACE_GID || 1000);
+    try {
+        const st = fs.statSync(hostPath);
+        const wrongTop = st.uid !== uid || st.gid !== gid;
+        const wrongDeep = wrongTop
+            ? hostPath
+            : execSync(`find ${JSON.stringify(hostPath)} -maxdepth 3 ! -user ${uid} -print -quit 2>/dev/null`).toString().trim();
+        if (!wrongDeep) return;
+        console.error(`[twoStage] fixing workspace ownership: ${hostPath} -> ${uid}:${gid}`);
+        execSync(`chown -R ${uid}:${gid} ${JSON.stringify(hostPath)}`, { stdio: 'ignore', timeout: 180000 });
+    } catch (e) {
+        console.error(`[twoStage] repairHostWorkspaceOwnership: ${e.message}`);
+    }
+}
 
 // —— 断点续修：verify 超轮数失败后把对话历史存库，resume 时接回继续修 ——
 async function loadVerifyState(projectId) {
@@ -102,6 +129,135 @@ function detectProjectType(hostWorkspacePath) {
     return { type: 'unknown', defaultPort: 3000, installCmd: null, buildCmd: null, startCmd: null };
 }
 
+// 在沙箱内探测一个空闲端口（避免 verify 残留进程占用默认端口导致聚合 EADDRINUSE）。
+async function getGuestFreePort(runtimeRef) {
+    const runtime = getRuntime();
+    try {
+        const r = await runtime.exec.exec('node', ['-e', 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})'], {}, { runtimeRef, cwd: '/workspace', timeoutMs: 10000 });
+        const p = Number((r.stdout || '').trim().split('\n')[0]);
+        return p > 0 && p < 65535 ? p : 0;
+    } catch { return 0; }
+}
+
+// 部署通过后，系统侧在沙箱内保持前后端服务，并起一个"单端口聚合服务器"
+// （静态 serve 前端 dist + 反代 /api 到后端），保证 preview 稳定可连且前后端都可用，
+// 不依赖 verify 期间 agent 起的短命进程。返回实际生效的端口（tunnel 连它）。
+// 用空闲端口 + spawn 后主动验证，避免残留进程占端口导致聚合没起来却被误判成功。
+async function ensureFrontendServed({ runtimeRef, workspacePath, port, onLog }) {
+    const runtime = getRuntime();
+    let dist = null;
+    try {
+        const probe = await runtime.exec.exec(
+            'sh',
+            ['-c', 'ls -d client/dist web/dist frontend/dist dist 2>/dev/null | head -1'],
+            {},
+            { runtimeRef, cwd: workspacePath, timeoutMs: 15000 },
+        );
+        dist = (probe.stdout || '').trim();
+    } catch { /* keep null */ }
+    if (!dist) {
+        if (onLog) onLog('no frontend build artifact found, keeping verify port');
+        return { ok: false, reason: 'no frontend build artifact (client/dist, web/dist, dist) found' };
+    }
+
+    // 用空闲端口（规避 verify 残留进程占用的 3000/5173/8080/9000 等）。
+    const listenPort = (await getGuestFreePort(runtimeRef)) || Number(port) || 3000;
+    const backendPort = (await getGuestFreePort(runtimeRef)) || 9000;
+    let backendOk = false;
+
+    // 1) 探测后端（server/ 目录 + 入口文件）。
+    let backendEntry = null;
+    try {
+        const probe = await runtime.exec.exec(
+            'sh',
+            ['-c', 'test -d server && (grep -m1 "\\"main\\"" server/package.json 2>/dev/null | grep -oE ": *\\"[^\\"]+\\"" | head -1 || echo index.js) || echo none'],
+            {},
+            { runtimeRef, cwd: workspacePath, timeoutMs: 15000 },
+        );
+        const raw = (probe.stdout || '').trim();
+        if (raw && raw !== 'none') {
+            const m = raw.match(/"([^"]+)"/);
+            backendEntry = m ? m[1] : raw;
+        }
+    } catch { /* ignore */ }
+
+    if (backendEntry) {
+        await runtime.exec.exec('sh', ['-c', `pkill -f "server/index.js" 2>/dev/null; sleep 1; true`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 }).catch(() => {});
+        try {
+            await runtime.exec.spawn(
+                'node',
+                [backendEntry],
+                { PORT: String(backendPort), NODE_ENV: 'production', HOME: process.env.HOME || '/root', PATH: process.env.PATH || '/usr/bin:/bin' },
+                { runtimeRef, cwd: `${workspacePath}/server` },
+            );
+            backendOk = true;
+            if (onLog) onLog(`backend spawned: server/${backendEntry} on :${backendPort}`);
+        } catch (e) {
+            if (onLog) onLog(`backend spawn failed (frontend only): ${e.message}`);
+        }
+    }
+
+    // 2) 把聚合服务器脚本写入沙箱。
+    let proxyPath = null;
+    try {
+        const script = require('fs').readFileSync(path.join(__dirname, '../preview/previewProxyServer.js'), 'utf8');
+        await runtime.fs.fsWrite(workspacePath, '.agents/previewProxyServer.js', script, { runtimeRef });
+        proxyPath = '.agents/previewProxyServer.js';
+    } catch (e) {
+        if (onLog) onLog(`write proxy script failed: ${e.message}`);
+    }
+
+    const distAbs = dist.startsWith('/') ? dist : `${workspacePath}/${dist}`;
+    let servedOk = false;
+    for (let attempt = 0; attempt < 2 && !servedOk; attempt++) {
+        await runtime.exec.exec('sh', ['-c', `pkill -f previewProxyServer 2>/dev/null; fuser -k ${listenPort}/tcp 2>/dev/null; sleep 1; true`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 }).catch(() => {});
+        try {
+            if (proxyPath) {
+                await runtime.exec.spawn(
+                    'node',
+                    [proxyPath, distAbs, String(listenPort), String(backendOk ? backendPort : 0)],
+                    { HOME: process.env.HOME || '/root', PATH: process.env.PATH || '/usr/bin:/bin' },
+                    { runtimeRef, cwd: workspacePath },
+                );
+            } else {
+                await runtime.exec.spawn(
+                    'npx',
+                    ['--yes', 'serve', distAbs, '-l', String(listenPort), '--no-clipboard'],
+                    { HOME: process.env.HOME || '/root', PATH: process.env.PATH || '/usr/bin:/bin' },
+                    { runtimeRef, cwd: workspacePath },
+                );
+            }
+        } catch (e) {
+            if (onLog) onLog(`spawn preview server failed: ${e.message}`);
+        }
+        // 验证端口确实由聚合服务响应（/ 返回前端 HTML；/api 不是 serve 的 404 页）。
+        for (let i = 0; i < 10; i++) {
+            await new Promise((r) => setTimeout(r, 600));
+            try {
+                const check = await runtime.exec.exec(
+                    'sh',
+                    ['-c', `curl -s -m 2 http://127.0.0.1:${listenPort}/ | head -c 120; echo; curl -s -m 2 http://127.0.0.1:${listenPort}/api/__xensemble_probe__ | head -c 200`],
+                    {},
+                    { runtimeRef, cwd: workspacePath, timeoutMs: 8000 },
+                );
+                const out = String(check.stdout || '');
+                // serve 的 /api 404 页含 "could not be found"；聚合是 "Backend unavailable" 或后端响应。
+                if (/<html|<head|<!doctype/i.test(out) && !/could not be found/i.test(out)) {
+                    servedOk = true;
+                    break;
+                }
+            } catch { /* retry */ }
+        }
+    }
+
+    if (!servedOk) {
+        if (onLog) onLog(`preview server did not come up on :${listenPort}`);
+        return { ok: false, reason: `preview server did not come up on :${listenPort}` };
+    }
+    if (onLog) onLog(`preview server on :${listenPort} (dist=${dist}${backendOk ? `, backend=:${backendPort}` : ''})`);
+    return { ok: true, port: listenPort, dist, backendOk, backendPort };
+}
+
 async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onProgress, resume }) {
     const project = await getProjectForUser(userId, projectId);
     if (!project) return { ok: false, error: 'Project not found' };
@@ -130,6 +286,12 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
     const runtimeId = ready.runtime ? ready.runtime.id : undefined;
     const hostWs = ready.hostWorkspacePath;
     const wsPath = ready.workspacePath;
+
+    // 部署前置：确保 host workspace 对 guest 可写（修复 root 属主导致的 write failed）。
+    // 注意：boxlite 下 ensureProjectRuntime 返回的 hostWorkspacePath 可能是 undefined，
+    // 必须用 workspace.projectDir(userId, projectId) 计算真实的 host 路径。
+    const hostPath = (hostWs && fs.existsSync(hostWs)) ? hostWs : workspace.projectDir(project.userId, project.id);
+    repairHostWorkspaceOwnership(hostPath);
 
     // 断点续修：resume=true 时优先复用上次保存的 plan + 对话，跳过阶段 1 重新分析。
     let plan = null;
@@ -195,7 +357,11 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
         try { stopByProjectId(project.id); } catch { /* ignore */ }
         const now = Date.now();
         const deploymentId = `dep_${crypto.randomBytes(8).toString('hex')}`;
-        const port = detected.defaultPort || 3000;
+        // 用 verify 探测到的真实应用端口（agent 可能在非默认端口上 serve），兜底回退 defaultPort。
+        let port = verify?.appPort || detected.defaultPort || 3000;
+        // 系统侧在前端产物上起一个持久静态服务，确保 preview 稳定可连（不依赖 verify 的短命进程）。
+        const served = await ensureFrontendServed({ runtimeRef: ref, workspacePath: wsPath, port, onLog: (m) => console.error(`[twoStage] ${m}`) });
+        if (served.ok) port = served.port;
         const tunnel = await createTunnel({ deploymentId, workspacePath: wsPath, runtimeRef: ref, vmPort: port, projectId: project.id });
         await db.insert(schema.deployments).values({
             id: deploymentId, userId, projectId: project.id, runtimeId,

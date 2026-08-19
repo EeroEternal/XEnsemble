@@ -163,6 +163,25 @@ async function handleDevConsole(request, reply) {
 }
 
 async function registerPreviewGateway(fastify) {
+    // 宿主根路径 + Referer/Origin 来自某个 preview 页面 → 转发到该 preview 的 tunnel。
+    // 兼容前端使用根相对 API 地址（baseURL=/api 等）在 /preview/<id>/ 子路径下部署的场景。
+    // 用 onRequest 钩子而非注册 '*' 路由，避免与已有通配路由冲突。
+    fastify.addHook('onRequest', async (request, reply) => {
+        if (request.url.startsWith('/preview/')) return;
+        const referer = request.headers.referer || request.headers.origin || '';
+        const m = referer.match(/\/preview\/([^/?#]+)/);
+        if (!m) return;
+        const deploymentId = m[1];
+        const entry = previewRegistry.get(deploymentId);
+        if (!entry) return;
+        const target = `http://127.0.0.1:${entry.port}`;
+        await new Promise((resolve, reject) => {
+            reply.hijack();
+            request.raw.headers.host = 'localhost';
+            proxy.web(request.raw, reply.raw, { target, changeOrigin: false }, (err) => (err ? reject(err) : resolve()));
+        });
+    });
+
     fastify.post('/preview/:deploymentId/__dev/console', handleDevConsole);
 
     const proxyOpts = {

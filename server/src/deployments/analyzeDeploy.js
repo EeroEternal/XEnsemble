@@ -275,30 +275,48 @@ function fallbackSteps(fileContentsText) {
     return steps;
 }
 
+// 对 LLM API 的瞬时故障（5xx / 429 / 网络错误）自动重试，避免一次网关抖动直接让部署失败。
 async function callLlm(messages) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
-    try {
-        const res = await fetch(API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
-            body: JSON.stringify({ model: MODEL, messages, max_tokens: 16000, temperature: 0.2, response_format: { type: 'json_object' } }),
-            signal: controller.signal,
-        });
-        if (!res.ok) {
-            const text = await res.text().catch(() => '');
-            return { ok: false, warning: `LLM error ${res.status}: ${text.slice(0, 120)}` };
+    const retries = 2;
+    let lastWarning = '';
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+        try {
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+                body: JSON.stringify({ model: MODEL, messages, max_tokens: 16000, temperature: 0.2, response_format: { type: 'json_object' } }),
+                signal: controller.signal,
+            });
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                lastWarning = `LLM error ${res.status}: ${text.slice(0, 120)}`;
+                if ((res.status >= 500 || res.status === 429) && attempt < retries) {
+                    console.error(`[analyzeDeploy] LLM error ${res.status}, retry ${attempt + 1}/${retries}`);
+                    await new Promise((r) => setTimeout(r, attempt === 0 ? 1500 : 4000));
+                    continue;
+                }
+                return { ok: false, warning: lastWarning };
+            }
+            const data = await res.json();
+            const choice = data.choices?.[0];
+            const content = choice?.message?.content;
+            console.error('[analyzeDeploy] finish_reason:', choice?.finish_reason, 'usage:', JSON.stringify(data.usage), 'content_len:', String(content || '').length, 'content:', String(content || '').slice(0, 500));
+            return { ok: true, content };
+        } catch (e) {
+            lastWarning = `LLM unavailable: ${e.message}`;
+            if (attempt < retries) {
+                console.error(`[analyzeDeploy] LLM unavailable (${e.message}), retry ${attempt + 1}/${retries}`);
+                await new Promise((r) => setTimeout(r, attempt === 0 ? 1500 : 4000));
+                continue;
+            }
+            return { ok: false, warning: lastWarning };
+        } finally {
+            clearTimeout(timer);
         }
-        const data = await res.json();
-        const choice = data.choices?.[0];
-        const content = choice?.message?.content;
-        console.error('[analyzeDeploy] finish_reason:', choice?.finish_reason, 'usage:', JSON.stringify(data.usage), 'content_len:', String(content || '').length, 'content:', String(content || '').slice(0, 500));
-        return { ok: true, content };
-    } catch (e) {
-        return { ok: false, warning: `LLM unavailable: ${e.message}` };
-    } finally {
-        clearTimeout(timer);
     }
+    return { ok: false, warning: lastWarning };
 }
 
 const MAX_AGENT_ROUNDS = 15;
