@@ -321,7 +321,7 @@ export default function AgentsAdmin() {
         <div className="overflow-auto max-h-[calc(100vh-200px)]">
           <table className="w-full min-w-[640px] table-fixed text-left text-sm">
             <colgroup>
-              <col className="w-auto" />
+              <col className="w-48" />
               <col className="w-36" />
               <col className="w-20" />
               <col className="w-44" />
