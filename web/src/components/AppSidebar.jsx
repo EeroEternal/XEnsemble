@@ -457,7 +457,7 @@ export default function AppSidebar({
     [visibleSessions, sessionMatchesQuery],
   );
 
-  const adminLinkClass = ({ isActive }) =>
+  const adminLinkClass = ({ isActive } = {}) =>
     `flex w-full items-center gap-2 px-3 py-2 text-xs font-medium transition-colors ${
       isActive
         ? 'bg-zinc-100 text-zinc-900'
