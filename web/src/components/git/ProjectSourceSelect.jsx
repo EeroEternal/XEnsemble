@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { ChevronDown, Search, Loader2, Check, GitBranch, Plus, FileText } from 'lucide-react';
+import { ChevronDown, Search, Loader2, Check, GitBranch, Plus } from 'lucide-react';
 import { useGitProvider } from '../../hooks/useGitProvider';
 import { useToast } from '../Toast';
 import * as gitApi from '../../lib/gitApi';
@@ -7,7 +7,6 @@ import * as githubApi from '../../lib/githubApi';
 import { getProviderLabel } from '../../lib/gitLabels';
 import {
   consoleButtonFocusClass,
-  consoleInputClass,
   consoleDropdownPanelClass,
   consoleMenuDropdownZClass,
 } from '../../lib/consoleTokens';
@@ -23,10 +22,6 @@ function repoKey(provider, fullName) {
 export default function ProjectSourceSelect({
   importedProject,
   onImported,
-  blankName,
-  onBlankNameChange,
-  isBlank,
-  onSelectBlank,
   disabled,
 }) {
   const { showToast } = useToast();
@@ -172,7 +167,7 @@ export default function ProjectSourceSelect({
 
   const triggerLabel = importingKey
     ? 'Importing…'
-    : (importedProject ? importedProject.name : (isBlank ? (blankName || 'New blank project') : 'Select project source'));
+    : (importedProject ? importedProject.name : 'Select project source');
 
   return (
     <div className="relative" ref={rootRef}>
@@ -184,7 +179,7 @@ export default function ProjectSourceSelect({
       >
         <span className="flex items-center gap-2 min-w-0 truncate">
           {importingKey ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-zinc-400" /> : <GitBranch className="w-3.5 h-3.5 shrink-0 text-zinc-400" />}
-          <span className={`truncate ${importedProject || isBlank ? 'text-zinc-900 font-medium' : 'text-zinc-400'}`}>{triggerLabel}</span>
+          <span className={`truncate ${importedProject ? 'text-zinc-900 font-medium' : 'text-zinc-400'}`}>{triggerLabel}</span>
         </span>
         <ChevronDown className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
       </button>
@@ -192,7 +187,7 @@ export default function ProjectSourceSelect({
       {open && (
         <div className={`absolute left-0 right-0 top-full z-40 mt-1 ${consoleDropdownPanelClass} ${consoleMenuDropdownZClass} max-h-80 flex flex-col overflow-hidden shadow-lg`}>
           {/* Search */}
-          <div className="relative border-b border-zinc-200">
+          <div className="relative border-b border-zinc-200 shrink-0">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
             <input
               type="search"
@@ -204,8 +199,9 @@ export default function ProjectSourceSelect({
             />
           </div>
 
-          {/* Upper tier: repos from connected providers */}
+          {/* Unified scroll: repos + divider + connect links */}
           <div className="flex-1 min-h-0 overflow-y-auto">
+            {/* Upper tier: repos from connected providers */}
             {allRepos.length === 0 ? (
               <p className="px-3 py-3 text-xs text-zinc-400">
                 {Object.values(providers).some((p) => p.connection)
@@ -235,13 +231,11 @@ export default function ProjectSourceSelect({
                 );
               })
             )}
-          </div>
 
-          {/* Divider */}
-          <div className="h-px bg-zinc-200" />
+            {/* Divider */}
+            <div className="h-px bg-zinc-200 my-1" />
 
-          {/* Lower tier: connect links + blank */}
-          <div className="shrink-0 py-1">
+            {/* Lower tier: connect links */}
             {PROVIDERS.map((p) => {
               const conn = providers[p].connection;
               const connecting = providers[p].loading;
@@ -263,29 +257,8 @@ export default function ProjectSourceSelect({
                 </button>
               );
             })}
-            <button
-              type="button"
-              onClick={() => { onSelectBlank?.(); setOpen(false); }}
-              disabled={importingKey}
-              className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-            >
-              <FileText className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
-              <span className="flex-1 truncate">New blank project</span>
-              {isBlank && <Check className="w-3.5 h-3.5 shrink-0 text-zinc-900" />}
-            </button>
           </div>
         </div>
-      )}
-
-      {/* Blank workspace name input (shown when blank selected) */}
-      {isBlank && (
-        <input
-          type="text"
-          value={blankName}
-          onChange={(e) => onBlankNameChange?.(e.target.value)}
-          placeholder="my-workspace"
-          className={`mt-2 ${consoleInputClass}`}
-        />
       )}
     </div>
   );

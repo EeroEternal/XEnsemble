@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Loader2, X, Plus } from 'lucide-react';
 import { ConsoleDialogShell } from './ConsoleDialog';
 import SelectMenu from './SelectMenu';
@@ -27,8 +27,6 @@ export default function OnboardingWizard({
   // git import (full mode)
   importedProject,
   onRepoImported,
-  newProjectName,
-  setNewProjectName,
   // launch
   onClose,
   onLaunch, // full mode: create workspace + start session
@@ -37,7 +35,6 @@ export default function OnboardingWizard({
   launchError,
 }) {
   const isSession = mode === 'session';
-  const [sourceChoice, setSourceChoice] = useState(null); // 'git' | 'blank' | null
 
   const sortedAgents = useMemo(
     () => sortAgentsByRecentUsage(agents || [], loadSidebarPrefs()),
@@ -76,11 +73,11 @@ export default function OnboardingWizard({
     }
   };
 
-  // full mode can start once a project source is resolved (imported repo or blank name) + agent selected.
+  // full mode can start once a project source is resolved (imported repo) + agent selected.
   // session mode only needs an agent.
   const canStart = isSession
     ? Boolean(selectedAgentId)
-    : Boolean(selectedAgentId && (importedProject || (sourceChoice === 'blank' && (newProjectName || '').trim())));
+    : Boolean(selectedAgentId && importedProject);
 
   const handleStart = () => {
     if (!canStart) return;
@@ -115,11 +112,7 @@ export default function OnboardingWizard({
             <label className={consoleFormLabelClass}>Project source</label>
             <ProjectSourceSelect
               importedProject={importedProject}
-              onImported={(pid) => { setSourceChoice('git'); onRepoImported?.(pid); }}
-              blankName={newProjectName}
-              onBlankNameChange={setNewProjectName}
-              isBlank={sourceChoice === 'blank'}
-              onSelectBlank={() => { setSourceChoice('blank'); }}
+              onImported={(pid) => { onRepoImported?.(pid); }}
               disabled={launching}
             />
           </div>

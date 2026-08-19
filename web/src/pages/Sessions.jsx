@@ -113,7 +113,7 @@ export default React.forwardRef(function Sessions({
   const [launchingSession, setLaunchingSession] = useState(false);
   // eslint-disable-next-line no-unused-vars
   const [_error, setError] = useState(null);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [panelWidth, setPanelWidth] = useState(() => {
     const maxW = typeof window !== 'undefined' ? Math.max(720, window.innerWidth - 240) : 800;
     return Math.min(Math.floor(maxW / 2), maxW);
@@ -1187,7 +1187,7 @@ export default React.forwardRef(function Sessions({
                       {!sessionAlive && (
                         <button
                           type="button"
-                          onClick={handleRestartSession}
+                          onClick={() => handleRestartSession()}
                           disabled={sessionControlPending}
                           className={`${consoleIconButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
                           title={restartingSession ? 'Starting…' : 'Start session'}
@@ -1355,8 +1355,6 @@ export default React.forwardRef(function Sessions({
               setCustomImageId={setCustomImageId}
               importedProject={importedProject}
               onRepoImported={handleRepoImported}
-              newProjectName={newProjectName}
-              setNewProjectName={setNewProjectName}
               onClose={closeOnboarding}
               onLaunch={handleLaunchFromModal}
               onLaunchSession={handleLaunchSessionInWorkspace}
