@@ -361,7 +361,15 @@ class GitOperationService {
                         aheadBehindCache.set(project.id, result);
                         return result;
                     } catch {
-                        return { ahead: 0, behind: 0 };
+                        try {
+                            const r2 = await this._execGit(project, ['rev-list', '--count', 'HEAD', '--not', '--remotes']);
+                            const ahead = Number(r2.stdout.trim()) || 0;
+                            const result = { ahead, behind: 0, expiresAt: Date.now() + AHEAD_BEHIND_TTL_MS };
+                            aheadBehindCache.set(project.id, result);
+                            return result;
+                        } catch {
+                            return { ahead: 0, behind: 0 };
+                        }
                     }
                 })(),
         ]);
