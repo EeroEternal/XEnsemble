@@ -7,6 +7,7 @@ import WorkspaceShell from '../components/WorkspaceShell';
 import WorkspacePanel from '../components/WorkspacePanel';
 import RepoImportDialog from '../components/git/RepoImportDialog';
 import OnboardingWizard from '../components/OnboardingWizard';
+import CreationProgress from '../components/CreationProgress';
 import BranchSwitcher, { GIT_REPO_PROVIDERS } from '../components/git/BranchSwitcher';
 import { apiFetch } from '../lib/api';
 import * as githubApi from '../lib/githubApi';
@@ -205,6 +206,7 @@ export default React.forwardRef(function Sessions({
   }, [topbarVisible]);
   const [importedProject, setImportedProject] = useState(null);
   const [workspaceCreating, setWorkspaceCreating] = useState(false);
+  const [creationStep, setCreationStep] = useState(null);
   const [createNewWorkspaceInline, setCreateNewWorkspaceInline] = useState(false);
   const [customImageId, setCustomImageId] = useState('');
   const [customImages, setCustomImages] = useState([]);
@@ -498,6 +500,7 @@ export default React.forwardRef(function Sessions({
       onLaunchPanelClose?.();
       setLaunchingSession(true);
       setWorkspaceCreating(true);
+      setCreationStep('import');
       try {
         const result = await gitApi.importRepo({
           provider: repo.provider,
@@ -529,12 +532,14 @@ export default React.forwardRef(function Sessions({
             }
           }, 2000);
         });
+        setCreationStep('session');
         await handleStartSession(result.id, repo.full_name || repo.name, { closeLaunchModal: true });
       } catch (err) {
         setLaunchModalError(err.message || 'Import failed.');
         setLaunchingSession(false);
       } finally {
         setWorkspaceCreating(false);
+        setCreationStep(null);
       }
       return;
     }
@@ -606,6 +611,7 @@ export default React.forwardRef(function Sessions({
     setWizardMode('full');
     setWizardWorkspace(null);
     setWorkspaceCreating(false);
+    setCreationStep(null);
     onLaunchPanelClose?.();
   }, [onLaunchPanelClose]);
 
@@ -1353,11 +1359,8 @@ export default React.forwardRef(function Sessions({
             )
           ) : launchingSession ? (
             <div className="flex-1 bg-white flex flex-col items-center justify-center">
-              {workspaceCreating ? (
-                <>
-                  <Loader2 className="w-8 h-8 text-zinc-400 animate-spin mb-4" strokeWidth={1.5} />
-                  <p className="text-sm text-zinc-500">Creating workspace…</p>
-                </>
+              {workspaceCreating && creationStep ? (
+                <CreationProgress currentStep={creationStep} hasError={Boolean(launchModalError)} />
               ) : null}
             </div>
           ) : (
