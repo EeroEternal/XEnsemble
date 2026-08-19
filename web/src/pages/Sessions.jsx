@@ -204,6 +204,7 @@ export default React.forwardRef(function Sessions({
     if (el) setTopbarEl(el);
   }, [topbarVisible]);
   const [importedProject, setImportedProject] = useState(null);
+  const [workspaceCreating, setWorkspaceCreating] = useState(false);
   const [createNewWorkspaceInline, setCreateNewWorkspaceInline] = useState(false);
   const [customImageId, setCustomImageId] = useState('');
   const [customImages, setCustomImages] = useState([]);
@@ -490,11 +491,14 @@ export default React.forwardRef(function Sessions({
 
   const handleLaunchFromModal = async () => {
     setLaunchModalError(null);
-    setLaunchingSession(true);
-    let started = false;
-    try {
-      if (importedProject?.repo) {
-        const repo = importedProject.repo;
+
+    if (importedProject?.repo) {
+      const repo = importedProject.repo;
+      setShowNewInstanceModal(false);
+      onLaunchPanelClose?.();
+      setLaunchingSession(true);
+      setWorkspaceCreating(true);
+      try {
         const result = await gitApi.importRepo({
           provider: repo.provider,
           repo_full_name: repo.full_name,
@@ -525,9 +529,19 @@ export default React.forwardRef(function Sessions({
             }
           }, 2000);
         });
-        started = await handleStartSession(result.id, repo.name, { closeLaunchModal: true });
-        return;
+        await handleStartSession(result.id, repo.full_name || repo.name, { closeLaunchModal: true });
+      } catch (err) {
+        setLaunchModalError(err.message || 'Import failed.');
+        setLaunchingSession(false);
+      } finally {
+        setWorkspaceCreating(false);
       }
+      return;
+    }
+
+    setLaunchingSession(true);
+    let started = false;
+    try {
       if (launchModalMode === 'quickstart') {
         const name = newProjectName.trim() || defaultWorkspaceName();
         const created = await handleCreateProject(name);
@@ -591,6 +605,7 @@ export default React.forwardRef(function Sessions({
     setNewProjectName('');
     setWizardMode('full');
     setWizardWorkspace(null);
+    setWorkspaceCreating(false);
     onLaunchPanelClose?.();
   }, [onLaunchPanelClose]);
 
@@ -1337,7 +1352,14 @@ export default React.forwardRef(function Sessions({
             </div>
             )
           ) : launchingSession ? (
-            <div className="flex-1 bg-white" />
+            <div className="flex-1 bg-white flex flex-col items-center justify-center">
+              {workspaceCreating ? (
+                <>
+                  <Loader2 className="w-8 h-8 text-zinc-400 animate-spin mb-4" strokeWidth={1.5} />
+                  <p className="text-sm text-zinc-500">Creating workspace…</p>
+                </>
+              ) : null}
+            </div>
           ) : (
             <div className="flex h-full flex-col items-center justify-center bg-white p-8 text-center">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-100 mb-5">

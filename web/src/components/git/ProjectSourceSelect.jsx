@@ -91,7 +91,7 @@ export default function ProjectSourceSelect({
           list.push({
             provider: p,
             full_name: r.full_name || r.fullName,
-            name: r.name || (r.full_name || '').split('/').pop(),
+            name: r.name || (r.full_name || r.fullName || '').split('/').pop(),
             default_branch: r.default_branch || r.defaultBranch || 'main',
             private: r.private,
             language: r.language,
