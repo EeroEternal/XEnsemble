@@ -258,35 +258,35 @@ export default function AgentsAdmin() {
 
   return (
     <div className={consoleAdminPageClass}>
-      <PageHeader
-        title="Agents"
-        actions={(
-          <div className="flex items-center gap-2">
-            <div className="relative w-64 shrink-0">
-              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
-              <Input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search agents…"
-                className="w-full pl-8"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => fetchAgents({ silent: true })}
-              disabled={refreshing}
-              className={consoleIconButtonClass}
-              title="Refresh"
-            >
-              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            </button>
-            <Button type="button" onClick={() => setRegisterOpen(true)} size="md" className="shrink-0">
-              <Plus className="w-4 h-4" />
-              Add Agent
-            </Button>
+      <PageHeader title="Agents" />
+
+      <div className="flex items-center justify-between gap-3 -mt-3">
+        <span className="text-xs text-zinc-500 shrink-0">{agents.length} agents</span>
+        <div className="flex items-center gap-2">
+          <div className="relative w-64 shrink-0">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search agents…"
+              className="w-full pl-8"
+            />
           </div>
-        )}
-      />
+          <button
+            type="button"
+            onClick={() => fetchAgents({ silent: true })}
+            disabled={refreshing}
+            className={consoleIconButtonClass}
+            title="Refresh"
+          >
+            {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          </button>
+          <Button type="button" onClick={() => setRegisterOpen(true)} size="md" className="shrink-0">
+            <Plus className="w-4 h-4" />
+            Add Agent
+          </Button>
+        </div>
+      </div>
 
       <AgentRegisterDialog
         open={registerOpen}
