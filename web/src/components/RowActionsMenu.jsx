@@ -73,7 +73,7 @@ export default function RowActionsMenu({ label = 'Actions', items, className }) 
 
   return (
     <>
-      <div ref={rootRef} className={cn('relative flex justify-end', className)}>
+      <div ref={rootRef} className={cn('relative flex', className)}>
         <button
           type="button"
           onClick={handleToggle}

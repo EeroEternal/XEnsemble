@@ -907,7 +907,7 @@ export default function GatewaySettingsPanel() {
                   <tr className={consoleTableHeadRowClass}>
                     <th className={consoleTableHeadCellClass}>Name</th>
                     <th className={consoleTableHeadCellClass}>Status</th>
-                    <th className={`${consoleTableHeadCellClass} text-right`}>Actions</th>
+                    <th className={`${consoleTableHeadCellClass}`}>Actions</th>
                   </tr>
                 </thead>
                 <tbody className={consoleTableBodyDivideClass}>

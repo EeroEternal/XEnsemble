@@ -335,7 +335,7 @@ export default function AgentsAdmin() {
                 <th className={consoleTableHeadCellClass}>Version</th>
                 <th className={consoleTableHeadCellClass}>Executable</th>
                 <th className={consoleTableHeadCellClass}>Auth</th>
-                <th className={`${consoleTableHeadCellClass} w-16 text-right`}>Actions</th>
+                <th className={`${consoleTableHeadCellClass} w-16`}>Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
