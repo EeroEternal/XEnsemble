@@ -187,27 +187,40 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
                 } catch (e) {
                     if (/already|exists/i.test(String(e))) {
                         // Session exists - check if it's actually healthy
+                        let statusInfo = null;
                         try {
-                            const info = await this.client.getSessionStatus(name);
-                            if (info && info.running && info.status === 'Running') {
-                                if (needRecreate) {
-                                    throw new RuntimeError(
-                                        `BoxLite ensureReady failed: session "${name}" still exists after delete - cannot recreate with image ${image}`,
-                                        502,
-                                    );
-                                }
-                                return { reused: true };
+                            statusInfo = await this.client.getSessionStatus(name);
+                        } catch (_) { /* status query failed - try openSession below */ }
+                        if (statusInfo && statusInfo.running && statusInfo.status === 'Running') {
+                            if (needRecreate) {
+                                throw new RuntimeError(
+                                    `BoxLite ensureReady failed: session "${name}" still exists after delete - cannot recreate with image ${image}`,
+                                    502,
+                                );
                             }
-                        } catch (statusErr) { /* fall through to delete+recreate */ }
-                        // VM is not running (Failed/Stopped/etc) - delete and recreate
-                        try { await this.client.deleteSession(name); } catch (_) {}
-                        await new Promise((r) => setTimeout(r, 500));
+                            return { reused: true };
+                        }
+                        // VM is not Running or status unknown.
+                        // Try openSession again - blink-server may resume a Stopped VM.
+                        // Only delete+recreate if openSession still fails.
                         try {
                             await this.client.openSession(name, image, warm, openOptions);
                             return { reused: false };
                         } catch (e2) {
                             if (!/already|exists/i.test(String(e2))) {
                                 throw new RuntimeError(`BoxLite ensureReady failed: ${e2.message}`, 502);
+                            }
+                        }
+                        // openSession still says "already exists" - VM is stuck.
+                        // Delete and recreate as last resort.
+                        try { await this.client.deleteSession(name); } catch (_) {}
+                        await new Promise((r) => setTimeout(r, 500));
+                        try {
+                            await this.client.openSession(name, image, warm, openOptions);
+                            return { reused: false };
+                        } catch (e3) {
+                            if (!/already|exists/i.test(String(e3))) {
+                                throw new RuntimeError(`BoxLite ensureReady failed: ${e3.message}`, 502);
                             }
                             throw new RuntimeError(
                                 `BoxLite ensureReady failed: session "${name}" still exists after delete - cannot recreate`,

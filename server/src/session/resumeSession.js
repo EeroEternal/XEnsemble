@@ -158,7 +158,10 @@ async function resumeSession({
 
         const runtimeReady = await ensureProjectRuntime(project, {
             runtimeId: session.runtimeId || undefined,
-            agentId: session.agentId || agentMeta.id,
+            // agentId intentionally omitted during resume: ensureProjectRuntime
+            // will use storedSpecs.image (the image the VM was created with),
+            // avoiding imageMismatch -> needRecreate -> VM deletion+recreation
+            // when the workspace was previously used with a different agent.
             ...(session.customImageId ? { image: await resolveCustomImageRef(session.customImageId, requestUser.id) } : {}),
         });
 
