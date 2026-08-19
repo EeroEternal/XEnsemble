@@ -26,6 +26,7 @@ import {
     accentRedBg,
 } from '../lib/consoleTokens';
 import { apiFetch } from '../lib/api';
+import { formatRelativeTime } from '../lib/formatRelativeTime';
 import { cn } from '../lib/utils';
 
 const API_BASE = '/api/v1/admin/agent-images';
@@ -486,9 +487,11 @@ export function ImagesAdminContent() {
                                                 <td className="px-4 py-2.5">
                                                     <StatusBadge tone={badge.tone} icon={badge.icon} label={badge.label} />
                                                 </td>
-                                                <td className={cn('px-4 py-2.5 text-xs', textPlaceholder)}>
-                                                    {formatTime(version.built_at || version.created_at)}
-                                                </td>
+                                                 <td className={cn('px-4 py-2.5 text-xs', textPlaceholder)}>
+                                                    <span title={formatTime(version.built_at || version.created_at)}>
+                                                        {formatRelativeTime(version.built_at || version.created_at) || '-'}
+                                                    </span>
+                                                 </td>
                                                  <td className="px-4 py-2.5">
                                                     <RowActionsMenu
                                                         label={`Actions for ${version.tag}`}

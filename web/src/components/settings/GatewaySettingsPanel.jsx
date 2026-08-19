@@ -295,6 +295,7 @@ export default function GatewaySettingsPanel() {
   const [envBindLocked, setEnvBindLocked] = useState(false);
   const [providers, setProviders] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [refreshingProviders, setRefreshingProviders] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [processSaving, setProcessSaving] = useState(false);
@@ -358,6 +359,19 @@ export default function GatewaySettingsPanel() {
       showToast('error', 'Failed to load gateway settings.');
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const refreshProviders = useCallback(async () => {
+    setRefreshingProviders(true);
+    try {
+      const providersRes = await apiFetch('/api/v1/admin/gateway/providers');
+      const providersData = providersRes.ok ? await providersRes.json() : null;
+      setProviders(providersData?.data || []);
+    } catch {
+      // silent — keep current list on refresh failure
+    } finally {
+      setRefreshingProviders(false);
     }
   }, []);
 
@@ -877,19 +891,33 @@ export default function GatewaySettingsPanel() {
 
         <div>
           <div className="flex items-center justify-between gap-3 mb-2">
-            <div className="relative w-64 shrink-0">
-              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
-              <Input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search providers…"
-                className="w-full pl-8"
-              />
+            <span className="text-xs text-zinc-500 shrink-0">
+              {providers.length} providers
+            </span>
+            <div className="flex items-center gap-2">
+              <div className="relative w-64 shrink-0">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+                <Input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search providers…"
+                  className="w-full pl-8"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={refreshProviders}
+                disabled={refreshingProviders}
+                className={consoleIconButtonClass}
+                title="Refresh"
+              >
+                {refreshingProviders ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </button>
+              <Button type="button" size="md" onClick={openAddProviderDialog}>
+                <Plus className="w-4 h-4" />
+                Add Provider
+              </Button>
             </div>
-            <Button type="button" size="md" onClick={openAddProviderDialog}>
-              <Plus className="w-4 h-4" />
-              Add Provider
-            </Button>
           </div>
           {filteredProviders.length === 0 ? (
             <p className="text-sm text-zinc-500">

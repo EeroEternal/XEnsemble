@@ -22,6 +22,7 @@ import {
 } from '../lib/consoleTokens';
 
 import { apiFetch } from '../lib/api';
+import { formatRelativeTime } from '../lib/formatRelativeTime';
 
 function statusBadge(status) {
   const map = {
@@ -30,11 +31,6 @@ function statusBadge(status) {
     suspended: { tone: 'danger', icon: Pause, label: 'Suspended' },
   };
   return map[status] || { tone: 'neutral', icon: null, label: status || 'Unknown' };
-}
-
-function formatLastLogin(ts) {
-  if (!ts) return '—';
-  return new Date(ts).toLocaleString();
 }
 
 const emptyForm = {
@@ -359,7 +355,9 @@ export default function UsersAdmin() {
                     </span>
                   </td>
                   <td className={consoleTableBodyCellClass}>
-                    <span className="text-xs text-zinc-500">{formatLastLogin(user.last_login_at)}</span>
+                    <span className="text-xs text-zinc-500" title={user.last_login_at ? new Date(user.last_login_at).toLocaleString() : undefined}>
+                      {formatRelativeTime(user.last_login_at) || '—'}
+                    </span>
                   </td>
                   <td className={consoleTableBodyCellClass}>
                     <RowActionsMenu
