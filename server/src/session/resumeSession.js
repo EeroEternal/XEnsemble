@@ -200,16 +200,9 @@ async function resumeSession({
             })(),
         ]);
 
-        if (!stateExists) {
-            const error = new Error('session not resumable - please start a new session');
-            error.statusCode = 409;
-            throw error;
-        }
-
         // Check if the state directory has conversation data (not just config files).
-        // If resumeCheckSubdir is set and the subdirectory is empty, skip resumeArgs
-        // and start fresh (e.g. claude-code --continue fails with "no conversation found"
-        // when the sessions/ subdirectory is empty).
+        // If state directory was lost (e.g. server restart recreated the VM), fall
+        // through to start fresh instead of failing with 409.
         let canResume = true;
         if (!stateExists) {
             canResume = false;
