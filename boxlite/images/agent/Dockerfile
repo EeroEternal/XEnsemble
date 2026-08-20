@@ -17,18 +17,10 @@ ENV PATH="/usr/local/bin:/root/.local/bin:${PATH}" \
     FACTORY_DROID_AUTO_UPDATE_ENABLED=false \
     OPENCLAW_NO_AUTO_UPDATE=1
 
-# Install the agent CLI, then strip everything that is not needed at runtime.
-# The VM root disk (vda) is tight (typically 639MB for agent images), so every
-# byte saved here is critical for session stability.
-# Source maps (*.map), test files, and docs are removed to reduce inode count
-# (mke2fs has a default inode ratio that large node_modules can exceed).
-# Preserved directories (runtime assets shipped by various agents):
-#   - bundled/   : command-code (dist/bundled/), qwen-code (bundled/)
-#                  SKILL.md, references/*.md, loop/*.ts loaded at runtime
-#   - bundle/    : qoder (bundle/builtin/*/SKILL.md, bundle/vendor/...)
-#   - templates/ : openclaw (docs/reference/templates/AGENTS.md, BOOT.md, ...)
-RUN bash -lc "${AGENT_INSTALL}" \
-    && rm -rf /root/.npm /root/.cache /tmp/* /var/tmp/* 2>/dev/null || true \
+# Install the agent CLI. AGENT_INSTALL failure must fail the build.
+RUN bash -lc "${AGENT_INSTALL}"
+# Strip everything that is not needed at runtime (best-effort, never fail the build).
+RUN rm -rf /root/.npm /root/.cache /tmp/* /var/tmp/* 2>/dev/null || true \
     && find /usr/lib/node_modules -path "*/prebuilds/win32-*" -prune -exec rm -rf {} + 2>/dev/null || true \
     && find /usr/lib/node_modules -path "*/prebuilds/darwin-*" -prune -exec rm -rf {} + 2>/dev/null || true \
     && find /usr/lib/node_modules -name "*.pdb" -delete 2>/dev/null || true \
