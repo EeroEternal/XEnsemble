@@ -18,6 +18,7 @@ ENV PATH="/usr/local/bin:/root/.local/bin:${PATH}" \
     OPENCLAW_NO_AUTO_UPDATE=1 \
     npm_config_registry=https://registry.npmmirror.com \
     PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Install the agent CLI. AGENT_INSTALL failure must fail the build.
