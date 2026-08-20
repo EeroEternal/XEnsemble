@@ -65,12 +65,15 @@ const AGENT_BOX_IMAGE_CATALOG = {
             'apt-get update',
             '&& apt-get install -y --no-install-recommends python3 python3-venv python3-pip ripgrep ffmpeg libatomic1',
             '&& rm -rf /var/lib/apt/lists/*',
-            '&& curl -LsSf https://astral.sh/uv/install.sh | sh',
-            '&& export PATH="/root/.local/bin:$PATH"',
+            // Node.js v26 + libatomic1: hermes requires Node >=26, base image has v22
             '&& curl -fsSL https://npmmirror.com/mirrors/node/v26.7.0/node-v26.7.0-linux-x64.tar.gz | tar -xzf - -C /usr/local --strip-components=1',
             '&& node --version',
+            // GitHub clone via ghfast.top proxy
             '&& git config --global url."https://ghfast.top/https://github.com/".insteadOf "https://github.com/"',
             '&& rm -rf "$HOME/.hermes/hermes-agent" "$HOME/.hermes"/hermes-agent.broken-* 2>/dev/null; true',
+            // npm_config_omit=dev: hermes-agent package.json only has devDependencies (eslint, typescript),
+            // not needed at runtime. Skip to avoid npm install failure/timeout.
+            '&& export npm_config_omit=dev',
             '&& (curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --skip-browser || true)',
             '&& test -x /usr/local/bin/hermes',
             // Strip non-runtime files to reduce image size (~400MB saved).
