@@ -170,13 +170,21 @@ function applyKimiCodeGatewayEnv(env) {
     };
 }
 
-function applyOpencodeGatewayEnv(env, modelTarget) {
+function applyOpencodeGatewayEnv(env, modelTargets, defaultTarget) {
     const routerUrl = env.LLM_ROUTER_URL?.trim();
     const routerKey = env.LLM_ROUTER_API_KEY?.trim();
-    if (!routerUrl || !routerKey || !modelTarget) return env;
+    const targets = (Array.isArray(modelTargets) ? modelTargets : [modelTargets])
+        .map((t) => (t ?? '').trim())
+        .filter(Boolean);
+    if (!routerUrl || !routerKey || targets.length === 0) return env;
+    const defaultModel = ((defaultTarget ?? targets[0]) ?? '').trim();
+    const models = {};
+    for (const target of targets) {
+        models[target] = { name: target };
+    }
     const config = {
         autoupdate: false,
-        model: `gateway/${modelTarget}`,
+        model: `gateway/${defaultModel}`,
         provider: {
             gateway: {
                 npm: '@ai-sdk/openai-compatible',
@@ -185,9 +193,7 @@ function applyOpencodeGatewayEnv(env, modelTarget) {
                     baseURL: routerUrl,
                     apiKey: routerKey,
                 },
-                models: {
-                    [modelTarget]: { name: modelTarget },
-                },
+                models,
             },
         },
     };
@@ -226,7 +232,9 @@ async function applyAgentGatewayModel(agentId, env) {
         return applyKimiCodeGatewayEnv(out);
     }
     if (OPENCODE_AGENT_IDS.has(agentId)) {
-        return applyOpencodeGatewayEnv(out, target);
+        const targets = agentGatewayConfig.allModels(cfg)
+            .map((m) => composeGatewayModelTarget(cfg.provider, m));
+        return applyOpencodeGatewayEnv(out, targets, target);
     }
     return out;
 }
@@ -343,8 +351,12 @@ async function buildGatewaySpawnEnv(agentId, envRequired, { draftModel, draftPro
         env = applyKimiCodeGatewayEnv(env);
     }
     if (OPENCODE_AGENT_IDS.has(agentId) && model) {
-        const target = composeGatewayModelTarget(provider, model);
-        env = applyOpencodeGatewayEnv(env, target);
+        const draftTarget = composeGatewayModelTarget(provider, model);
+        const targets = Array.from(new Set([
+            ...agentGatewayConfig.allModels(cfg).map((m) => composeGatewayModelTarget(provider, m)),
+            draftTarget,
+        ]));
+        env = applyOpencodeGatewayEnv(env, targets, draftTarget);
     }
 
     return { env, cfg, model, platform, defaults };
@@ -572,6 +584,7 @@ module.exports = {
     resolveTerminalThemeContext,
     mergeSpawnEnvLayers,
     applyGatewayAgentEnv,
+    applyOpencodeGatewayEnv,
     computeEffectiveRequired,
     isAgentKeysReady,
     findMissing,

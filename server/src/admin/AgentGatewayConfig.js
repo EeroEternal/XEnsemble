@@ -52,6 +52,15 @@ function primaryModel(cfg) {
     return String(cfg.model).trim();
 }
 
+function allModels(cfg) {
+    if (!cfg?.model) return [];
+    if (Array.isArray(cfg.model)) {
+        return cfg.model.map((m) => (m != null ? String(m).trim() : '')).filter(Boolean);
+    }
+    const m = String(cfg.model).trim();
+    return m ? [m] : [];
+}
+
 async function setForAgent(agentId, { llm_auth_mode, provider, model } = {}) {
     const all = await getAll();
     const next = { ...(all[agentId] || {}) };
@@ -116,4 +125,5 @@ module.exports = {
     getAgentAuthMode,
     setForAgent,
     primaryModel,
+    allModels,
 };
