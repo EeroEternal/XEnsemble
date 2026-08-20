@@ -124,6 +124,13 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   useEffect(() => {
     setSelectedMR(null);
   }, [projectId]);
+
+  // 进入（或切换）session 时默认切到文件界面，避免停留在上次的 tab（如 preview / deploy）
+  useEffect(() => {
+    if (!projectId) return;
+    setMainTab('files');
+  }, [projectId]);
+
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     const stored = sessionStorage.getItem('xe_sidebar_open');
     return stored !== null ? stored === 'true' : true;
@@ -651,9 +658,11 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
           </div>
         </div>
 
-        <div className={mainTab === 'deploy' ? 'flex-1 min-h-0 overflow-hidden' : 'hidden'}>
-          {deployContent || null}
-        </div>
+        {mainTab === 'deploy' && (
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {deployContent || null}
+          </div>
+        )}
 
         {mainTab === 'preview' && (
           <div className="flex-1 min-h-0 overflow-hidden">

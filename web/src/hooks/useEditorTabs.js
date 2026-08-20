@@ -1,5 +1,4 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { pickDefaultRootFile } from '../lib/workspaceFileTree';
 import { useWorkspaceFiles } from './useWorkspaceFiles';
 
 export function useEditorTabs(projectId) {
@@ -150,9 +149,12 @@ export function useEditorTabs(projectId) {
           autoOpenedForProject.current = projectId;
           return;
         }
-        const file = pickDefaultRootFile(entries);
+        // 只在存在 README 时打开它（并显示内容）；没有 README 不打开任何文件
+        const readme = (entries || []).find(
+          (f) => f.type === 'file' && /^readme(\.|$)/i.test(f.name || f.path),
+        );
         autoOpenedForProject.current = projectId;
-        if (file) await openFile(projectId, file);
+        if (readme) await openFile(projectId, readme);
       } catch {
         if (!cancelled) autoOpenedForProject.current = projectId;
       }
