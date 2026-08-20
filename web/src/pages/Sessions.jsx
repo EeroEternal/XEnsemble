@@ -1217,38 +1217,22 @@ export default React.forwardRef(function Sessions({
                   <>
                     <div className="mx-0.5 h-5 w-px bg-zinc-200" />
                     {!sessionPending && !sessionFailed && (
-                    <>
-                      {!sessionAlive && (
-                        <button
-                          type="button"
-                          onClick={() => handleRestartSession()}
-                          disabled={sessionControlPending}
-                          className={`${consoleIconButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
-                          title={restartingSession ? 'Starting…' : 'Start session'}
-                          aria-label={restartingSession ? 'Starting session' : 'Start session'}
-                        >
-                          {restartingSession ? (
-                            <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.75} />
-                          ) : (
-                            <Play className="w-4 h-4" strokeWidth={1.75} />
-                          )}
-                        </button>
-                      )}
                       <button
                         type="button"
                         onClick={() => handleRestartSession()}
                         disabled={sessionControlPending}
                         className={`${consoleIconButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
-                        title={restartingSession ? 'Restarting…' : 'Restart session'}
-                        aria-label="Restart session"
+                        title={restartingSession ? (sessionAlive ? 'Restarting…' : 'Starting…') : (sessionAlive ? 'Restart session' : 'Start session')}
+                        aria-label={restartingSession ? (sessionAlive ? 'Restarting session' : 'Starting session') : (sessionAlive ? 'Restart session' : 'Start session')}
                       >
                         {restartingSession ? (
                           <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.75} />
-                        ) : (
+                        ) : sessionAlive ? (
                           <RotateCw className="w-4 h-4" strokeWidth={1.75} />
+                        ) : (
+                          <Play className="w-4 h-4" strokeWidth={1.75} />
                         )}
                       </button>
-                    </>
                     )}
                   {activeSession.projectId ? (
                     <>
