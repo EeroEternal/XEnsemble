@@ -297,11 +297,11 @@ export default function UsersAdmin() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] table-fixed text-left text-sm">
             <colgroup>
-              <col className="w-auto" />
-              <col className="w-32" />
-              <col className="w-36" />
-              <col className="w-24" />
+              <col className="w-44" />
               <col className="w-28" />
+              <col className="w-40" />
+              <col className="w-20" />
+              <col className="w-24" />
               <col className="w-36" />
               <col className="w-20" />
             </colgroup>
@@ -309,7 +309,7 @@ export default function UsersAdmin() {
               <tr>
                 <th className={consoleTableHeadCellClass}>User</th>
                 <th className={consoleTableHeadCellClass}>Status</th>
-                <th className={consoleTableHeadCellClass} title="Workspaces / Sessions / Previews">Usage</th>
+                <th className={consoleTableHeadCellClass}>Usage</th>
                 <th className={consoleTableHeadCellClass} title="Resource tier — controls LLM request rate">Tier</th>
                 <th className={consoleTableHeadCellClass} title="Granted agent access">Agents</th>
                 <th className={consoleTableHeadCellClass}>Last login</th>
@@ -330,20 +330,18 @@ export default function UsersAdmin() {
               ) : filteredUsers.map((user) => (
                 <tr key={user.id} className="hover:bg-zinc-50/50">
                   <td className={consoleTableBodyCellClass}>
-                    <div className="font-medium text-zinc-900">{user.username}</div>
+                    <div className="font-medium text-zinc-900 truncate">{user.username}</div>
                     <div className="text-xs text-zinc-400">{user.role}</div>
                   </td>
                   <td className={consoleTableBodyCellClass}>
                     <StatusBadge tone={statusBadge(user.status).tone} icon={statusBadge(user.status).icon} label={statusBadge(user.status).label} />
                   </td>
                   <td className={consoleTableBodyCellClass}>
-                    <span className="font-mono text-xs text-zinc-600">
-                      <span title="Workspaces">W {user.projects_count}/{user.quotas?.max_projects ?? '—'}</span>
-                      {' · '}
-                      <span title="Sessions">S {user.active_sessions}/{user.quotas?.max_sessions ?? '—'}</span>
-                      {' · '}
-                      <span title="Previews">P {user.active_previews}/{user.quotas?.max_previews ?? '—'}</span>
-                    </span>
+                    <div className="flex flex-col gap-0.5 text-xs text-zinc-600">
+                      <span>Workspaces {user.projects_count}/{user.quotas?.max_projects ?? '-'}</span>
+                      <span>Sessions {user.active_sessions}/{user.quotas?.max_sessions ?? '-'}</span>
+                      <span>Previews {user.active_previews}/{user.quotas?.max_previews ?? '-'}</span>
+                    </div>
                   </td>
                   <td className={consoleTableBodyCellClass}>
                     <span className="text-xs text-zinc-500">{user.quotas?.resource_tier ?? 'basic'}</span>
