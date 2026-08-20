@@ -184,9 +184,6 @@ export default function WorkspaceSwitcher({
                   {isCloning && (
                     <Loader2 className={`w-3.5 h-3.5 shrink-0 animate-spin ${textPlaceholder}`} />
                   )}
-                  {live > 0 && (
-                    <span className={`shrink-0 text-[10px] font-medium ${accentGreen}`}>{live}</span>
-                  )}
                   {isActive && (
                     <Check className="w-3.5 h-3.5 shrink-0 text-zinc-900" strokeWidth={2} />
                   )}
