@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
 import { apiFetch } from '@/lib/api';
+import { withSessionId } from '@/lib/sessionContext';
 
 async function request(path, options = {}) {
-  const res = await apiFetch(path, options);
+  const res = await apiFetch(withSessionId(path), options);
   let data;
   try {
     data = await res.json();

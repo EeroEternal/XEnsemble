@@ -19,6 +19,7 @@ import { ConflictFileItem } from './git/ConflictResolutionPanel';
 import { DiffText } from './git/DiffText';
 import { getGitFileDiff } from '../lib/githubApi';
 import { apiFetch } from '../lib/api';
+import { withSessionId } from '../lib/sessionContext';
 import { useToast } from './Toast';
 
 const GIT_STATUS_LABELS = {
@@ -225,7 +226,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   const handleGenerateMessage = useCallback(async () => {
     setGeneratingMsg(true);
     try {
-      const res = await apiFetch(`/api/v1/projects/${encodeURIComponent(projectId)}/git/commit-message`, {
+      const res = await apiFetch(withSessionId(`/api/v1/projects/${encodeURIComponent(projectId)}/git/commit-message`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',

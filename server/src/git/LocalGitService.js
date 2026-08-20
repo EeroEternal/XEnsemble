@@ -87,9 +87,10 @@ function formatCheckpointMessage(meta = {}) {
 class LocalGitService {
     constructor(deps = {}) {
         this.exec = deps.exec ?? getRuntime().exec;
+        this._runtimeId = deps.runtimeId || null;
         const origEnsure = deps.ensureProjectRuntime ?? ensureProjectRuntime;
         this.ensureProjectRuntime = async (project) => {
-            const result = await origEnsure(project);
+            const result = await origEnsure(project, this._runtimeId ? { runtimeId: this._runtimeId } : {});
             if (result.runtime?.runtimeRef) {
                 this._lastRuntimeRef = result.runtime.runtimeRef;
             }

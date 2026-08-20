@@ -12,6 +12,28 @@ function newId(prefix) {
     return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
 }
 
+/**
+ * Resolve runtimeId from session_id query/body param.
+ * Returns null if no session_id provided (backward-compatible).
+ */
+async function resolveRuntimeId(userId, sessionId) {
+    if (!sessionId) return null;
+    const rows = await db.select().from(schema.sessions)
+        .where(and(
+            eq(schema.sessions.id, sessionId),
+            eq(schema.sessions.userId, userId),
+        ));
+    return rows[0]?.runtimeId || null;
+}
+
+/**
+ * Create a GitOperationService scoped to the session's runtime (if session_id provided).
+ */
+async function getGitService(request) {
+    const runtimeId = await resolveRuntimeId(request.user.id, request.query?.session_id || request.body?.session_id);
+    return new GitOperationService({ runtimeId });
+}
+
 // Generate a commit message from the working-tree diff using the configured
 // DeepSeek-compatible LLM (same env as session titleService).
 async function generateCommitMessage(project, gitOperationService) {
@@ -80,14 +102,14 @@ async function upsertProjectBranch(projectId, branchName, values = {}) {
     return id;
 }
 
-async function ensureLocalGitReady(project, log) {
+async function ensureLocalGitReady(project, log, runtimeId) {
     // Built-in workspace git should always be available for Changes. Backfill
     // projects where create-time initRepo failed (common on BoxLite).
     if (project.repoProvider && project.repoProvider !== 'none' && project.repoProvider !== 'local_git') {
         return project;
     }
     try {
-        const localGit = new LocalGitService();
+        const localGit = new LocalGitService({ runtimeId });
         await localGit.ensureGitInit(project);
         return (await getProjectForUser(project.userId, project.id)) || project;
     } catch (err) {
@@ -97,16 +119,17 @@ async function ensureLocalGitReady(project, log) {
 }
 
 function registerProjectGitRoutes(fastify) {
-    const gitOperationService = new GitOperationService();
-
 
     fastify.get('/api/v1/projects/:id/git/status', {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         let project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         try {
-            project = await ensureLocalGitReady(project, request.log);
+            const runtimeId = await resolveRuntimeId(request.user.id, request.query?.session_id);
+            project = await ensureLocalGitReady(project, request.log, runtimeId);
+            const gitOperationService = new GitOperationService({ runtimeId });
             const mode = request.query.mode === 'light' ? 'light' : 'full';
             const status = mode === 'light'
                 ? await gitOperationService.getStatusLight(project)
@@ -123,6 +146,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         const message = String(request.body?.message || '').trim();
         if (!message) return reply.code(400).send({ error: 'message is required' });
         const prefs = await userPreferences.getPreferences(request.user.id).catch(() => ({}));
@@ -151,6 +175,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         try {
             const result = await generateCommitMessage(project, gitOperationService);
             return result;
@@ -165,6 +190,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         const files = request.body?.files;
         if (!Array.isArray(files) || files.length === 0) {
             return reply.code(400).send({ error: 'files array is required' });
@@ -183,6 +209,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         const files = request.body?.files;
         if (!Array.isArray(files) || files.length === 0) {
             return reply.code(400).send({ error: 'files array is required' });
@@ -201,6 +228,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         const files = request.body?.files;
         if (!Array.isArray(files) || files.length === 0) {
             return reply.code(400).send({ error: 'files array is required' });
@@ -219,6 +247,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         const branchName = request.body?.branch || project.currentBranch;
         if (!branchName) return reply.code(400).send({ error: 'No current branch to push' });
         try {
@@ -236,6 +265,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         try {
             const result = await gitOperationService.getDiff(project, {
                 base: request.query?.base,
@@ -258,6 +288,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         const filePath = request.query?.path;
         if (!filePath) return reply.code(400).send({ error: 'path is required' });
         try {
@@ -279,6 +310,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         const filePath = request.query?.path;
         const ref = request.query?.ref || 'HEAD';
         if (!filePath) return reply.code(400).send({ error: 'path is required' });
@@ -296,6 +328,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         const filePath = request.query?.path;
         if (!filePath) return reply.code(400).send({ error: 'path is required' });
         try {
@@ -317,6 +350,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         try {
             await withProjectGitLock(project.id, async () => {
                 const { stdout: branch } = await gitOperationService._execGit(project, ['rev-parse', '--abbrev-ref', 'HEAD']);
@@ -354,6 +388,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         try {
             await withProjectGitLock(project.id, async () => {
                 await gitOperationService._execGit(project, ['fetch', 'origin']);
@@ -391,6 +426,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         try {
             const log = await gitOperationService.getLog(project, {
                 branch: request.query?.branch,
@@ -410,6 +446,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         try {
             const branches = await gitOperationService.listBranches(project);
             return { branches };
@@ -424,6 +461,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         const name = String(request.body?.name || '').trim();
         if (!name) return reply.code(400).send({ error: 'name is required' });
         const baseBranch = request.body?.base_branch || project.repoDefaultBranch || 'main';
@@ -446,6 +484,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         const name = String(request.body?.name || '').trim();
         if (!name) return reply.code(400).send({ error: 'name is required' });
         try {
@@ -473,6 +512,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         const name = request.params.name;
         if (project.currentBranch === name) {
             return reply.code(400).send({ error: 'Cannot delete the currently checked out branch' });
@@ -496,6 +536,7 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        const gitOperationService = await getGitService(request);
         const fromBranch = String(request.body?.from_branch || '').trim();
         const toBranch = String(request.body?.to_branch || project.currentBranch || '').trim();
         if (!fromBranch) return reply.code(400).send({ error: 'from_branch is required' });

@@ -35,7 +35,11 @@ class GitOperationService {
     constructor(deps = {}) {
         this.exec = deps.exec ?? getRuntime().exec;
         this.fs = deps.fs ?? getRuntime().fs;
-        this.ensureProjectRuntime = deps.ensureProjectRuntime ?? ensureProjectRuntime;
+        this._runtimeId = deps.runtimeId || null;
+        const origEnsure = deps.ensureProjectRuntime ?? ensureProjectRuntime;
+        this.ensureProjectRuntime = async (project, opts = {}) => {
+            return origEnsure(project, { ...(this._runtimeId ? { runtimeId: this._runtimeId } : {}), ...opts });
+        };
         this.getToken = deps.getToken ?? defaultGetToken;
         // local/boxlite：workspace 在宿主机（BoxLite virtiofs），Changes 用 host git，
         // 避免依赖 VM 内是否安装 git / runtime 是否 ready。
@@ -56,7 +60,15 @@ class GitOperationService {
     async _execGit(project, args, options = {}) {
         const needsToken = options.needsToken ?? REMOTE_GIT_COMMANDS.has(args[0]);
         const token = needsToken ? await this._resolveToken(project) : undefined;
-        const hostPath = workspace.projectDir(project.userId, project.id);
+        let hostPath = workspace.projectDir(project.userId, project.id);
+
+        // If a runtimeId is set (session-scoped), prefer the worktree path.
+        if (this._runtimeId) {
+            const wtPath = workspace.worktreeDir(project.userId, project.id, this._runtimeId);
+            if (fs.existsSync(path.join(wtPath, '.git'))) {
+                hostPath = wtPath;
+            }
+        }
 
         if (this.usesHostWorkspace()) {
             fs.mkdirSync(hostPath, { recursive: true });

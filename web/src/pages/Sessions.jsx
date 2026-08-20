@@ -13,6 +13,7 @@ import { apiFetch } from '../lib/api';
 import * as githubApi from '../lib/githubApi';
 import * as gitApi from '../lib/gitApi';
 import { generateWorkBranchName } from '../lib/gitApi';
+import { setSessionContext, withSessionId } from '../lib/sessionContext';
 import {
   ConsoleDialogShell,
   ConsoleInlineDialog,
@@ -155,6 +156,12 @@ export default React.forwardRef(function Sessions({
     [sessions, activeSession?.sessionId],
   );
   const sessionAlive = activeSessionMeta?.alive === true;
+
+  // Sync session context so all API calls (git, files, deploy) include session_id
+  // for correct runtime/worktree routing.
+  useEffect(() => {
+    setSessionContext(activeSession?.sessionId || null);
+  }, [activeSession?.sessionId]);
 
   const editorTabs = useEditorTabs(activeSession?.projectId);
   // Changes 与 Files 共用同一 workspace attach 路径；不能再按 sessionAlive 关掉，
@@ -685,7 +692,7 @@ export default React.forwardRef(function Sessions({
     try {
       const qs = new URLSearchParams({ project_id: activeSession.projectId });
       if (showHiddenFiles) qs.set('include_hidden', '1');
-      const res = await apiFetch(`/api/v1/workspace/files?${qs}`);
+      const res = await apiFetch(withSessionId(`/api/v1/workspace/files?${qs}`));
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || 'Failed to load workspace files');

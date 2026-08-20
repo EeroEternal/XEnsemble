@@ -67,6 +67,13 @@ const { buildResumeSessionContext } = require('./session/resumeSessionContext');
 const transcriptStore = require('./runtime/TranscriptStore');
 const activeWebSockets = new Set();
 
+async function resolveRuntimeIdFromSession(userId, sessionId) {
+    if (!sessionId) return null;
+    const rows = await db.select().from(schema.sessions)
+        .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, userId)));
+    return rows[0]?.runtimeId || null;
+}
+
 function trackWebSocket(ws) {
     if (!ws) return;
     activeWebSockets.add(ws);
@@ -466,7 +473,8 @@ fastify.post('/api/v1/projects', { preValidation: [fastify.authenticate] }, asyn
 
     // Initialize built-in Git repo (Layer 1) for the new project
     try {
-        const localGit = new LocalGitService();
+        const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
         const fullProject = { id: projectId, userId: request.user.id };
         await localGit.initRepo(fullProject);
     } catch (err) {
@@ -574,7 +582,8 @@ fastify.post('/api/v1/projects/:projectId/checkpoints', { preValidation: [fastif
     let checkpoint;
     if (project.workspaceMode === 'git') {
         try {
-            const localGit = new LocalGitService();
+            const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
             const meta = {
                 sessionId: sessionId || null,
                 trigger: request.body?.trigger || 'manual',
@@ -594,7 +603,9 @@ fastify.post('/api/v1/projects/:projectId/checkpoints', { preValidation: [fastif
     const PROVIDER_NOW = resolveRuntimeProvider();
     if (PROVIDER_NOW === 'boxlite') {
         try {
-            const ready = await ensureProjectRuntime(project);
+            const _sessionId = request.query?.session_id || request.body?.session_id;
+        const _runtimeId = _sessionId ? await resolveRuntimeIdFromSession(request.user.id, _sessionId) : null;
+        const ready = await ensureProjectRuntime(project, _runtimeId ? { runtimeId: _runtimeId } : {});
             const ref = ready.runtime && ready.runtime.runtimeRef;
             const rtNow = getRuntime();
             if (ref && typeof rtNow.provider.checkpoint === 'function') {
@@ -634,7 +645,9 @@ fastify.post('/api/v1/projects/:projectId/checkpoints/:checkpointId/restore', {
     const PROVIDER_NOW = resolveRuntimeProvider();
     if (PROVIDER_NOW === 'boxlite') {
         try {
-            const ready = await ensureProjectRuntime(project);
+            const _sessionId = request.query?.session_id || request.body?.session_id;
+        const _runtimeId = _sessionId ? await resolveRuntimeIdFromSession(request.user.id, _sessionId) : null;
+        const ready = await ensureProjectRuntime(project, _runtimeId ? { runtimeId: _runtimeId } : {});
             const ref = ready.runtime && ready.runtime.runtimeRef;
             const rtNow = getRuntime();
             let snap = ckId;
@@ -658,7 +671,8 @@ fastify.post('/api/v1/projects/:projectId/checkpoints/:checkpointId/restore', {
         }
     }
 
-    const localGit = new LocalGitService();
+    const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
     try {
         const result = await localGit.restoreCheckpoint(
             project,
@@ -679,7 +693,8 @@ fastify.get('/api/v1/projects/:projectId/repository/log', {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
     if (!project) return reply.code(404).send({ error: 'Project not found' });
 
-    const localGit = new LocalGitService();
+    const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
     try {
         const count = request.query?.count ? Number(request.query.count) : 20;
         const log = await localGit.getLog(project, { count });
@@ -707,7 +722,8 @@ fastify.get('/api/v1/projects/:projectId/checkpoints/:checkpointId/diff', {
     const checkpoint = rows[0];
     if (!checkpoint.gitSha) return reply.code(409).send({ error: 'Checkpoint has no git_sha' });
 
-    const localGit = new LocalGitService();
+    const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
     try {
         const full = request.query?.full === 'true';
         const result = await localGit.getDiff(project, checkpoint.gitSha, { full });
@@ -730,7 +746,8 @@ fastify.get('/api/v1/projects/:projectId/repository/blame', {
     const { path: filePath, ref, start_line, end_line } = request.query || {};
     if (!filePath) return reply.code(400).send({ error: 'path query parameter is required' });
 
-    const localGit = new LocalGitService();
+    const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
     try {
         const entries = await localGit.blame(project, filePath, {
             ref,
@@ -751,7 +768,8 @@ fastify.get('/api/v1/projects/:projectId/repository/log/detailed', {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
     if (!project) return reply.code(404).send({ error: 'Project not found' });
 
-    const localGit = new LocalGitService();
+    const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
     try {
         const count = request.query?.count ? Number(request.query.count) : 20;
         const filePath = request.query?.path || undefined;
@@ -770,7 +788,8 @@ fastify.get('/api/v1/projects/:projectId/repository/commit/:sha/files', {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
     if (!project) return reply.code(404).send({ error: 'Project not found' });
 
-    const localGit = new LocalGitService();
+    const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
     try {
         const files = await localGit.getCommitFiles(project, request.params.sha);
         return { files };
@@ -787,7 +806,8 @@ fastify.get('/api/v1/projects/:projectId/repository/files', {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
     if (!project) return reply.code(404).send({ error: 'Project not found' });
 
-    const localGit = new LocalGitService();
+    const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
     try {
         const files = await localGit.listTrackedFiles(project);
         return { files };
@@ -803,7 +823,8 @@ fastify.get('/api/v1/projects/:projectId/repository/log/graph', {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
     if (!project) return reply.code(404).send({ error: 'Project not found' });
 
-    const localGit = new LocalGitService();
+    const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
     try {
         const count = request.query?.count ? Number(request.query.count) : 20;
         const commits = await localGit.logGraph(project, { count });
@@ -822,7 +843,8 @@ fastify.get('/api/v1/projects/:projectId/repository/conflict-check', {
     if (!project) return reply.code(404).send({ error: 'Project not found' });
 
     const targetBranch = request.query?.target || project.repoDefaultBranch || 'main';
-    const localGit = new LocalGitService();
+    const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
     try {
         const result = await localGit.conflictCheck(project, targetBranch);
         return { target_branch: targetBranch, ...result };
@@ -839,7 +861,8 @@ fastify.get('/api/v1/projects/:projectId/repository/conflicts', {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
     if (!project) return reply.code(404).send({ error: 'Project not found' });
 
-    const localGit = new LocalGitService();
+    const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
     try {
         const conflicts = await localGit.listConflicts(project);
         return { conflicts };
@@ -862,7 +885,8 @@ fastify.post('/api/v1/projects/:projectId/repository/conflicts/resolve', {
         return reply.code(400).send({ error: 'strategy must be ours, theirs, or manual' });
     }
 
-    const localGit = new LocalGitService();
+    const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
     try {
         const result = await localGit.resolveConflict(project, filePath, strategy);
         return result;
@@ -882,7 +906,8 @@ fastify.get('/api/v1/projects/:projectId/repository/file', {
     const { path: filePath, ref } = request.query || {};
     if (!filePath) return reply.code(400).send({ error: 'path query parameter is required' });
 
-    const localGit = new LocalGitService();
+    const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
     try {
         const result = await localGit.showFile(project, filePath, ref || 'HEAD');
         return result;
@@ -1296,7 +1321,8 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
         }
 
         try {
-            const localGit = new LocalGitService();
+            const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
             await localGit.ensureGitInit(project);
         } catch (err) {
             request.log.warn({ err, projectId: project.id }, '[sessions] shell ensureGitInit failed (non-fatal)');
@@ -1449,7 +1475,8 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
 
         // Backfill built-in git if create-time initRepo failed (e.g. BoxLite).
         try {
-            const localGit = new LocalGitService();
+            const _localGitSid = request.query?.session_id || request.body?.session_id;
+    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
             await localGit.ensureGitInit(project);
         } catch (err) {
             fastify.log.warn({ err, sessionId, projectId: project.id }, '[sessions] ensureGitInit failed (non-fatal)');
@@ -2192,7 +2219,9 @@ fastify.get('/api/v1/workspace/files', { preValidation: [fastify.authenticate, f
         const relativePath = request.query.path || '';
         const includeHidden = request.query.include_hidden === '1' || request.query.include_hidden === 'true';
         const depth = request.query.depth === 'single' ? 'single' : 'recursive';
-        const ready = await ensureProjectRuntime(project);
+        const _sessionId = request.query?.session_id || request.body?.session_id;
+        const _runtimeId = _sessionId ? await resolveRuntimeIdFromSession(request.user.id, _sessionId) : null;
+        const ready = await ensureProjectRuntime(project, _runtimeId ? { runtimeId: _runtimeId } : {});
         const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
         const cacheKey = `${ref}:${relativePath}:${depth}:${includeHidden ? 1 : 0}`;
         const cached = fsListCache.get(cacheKey);
@@ -2236,7 +2265,9 @@ fastify.get('/api/v1/workspace/file', { preValidation: [fastify.authenticate, fa
     if (!project) return reply.code(404).send({ error: 'Project not found' });
 
     try {
-        const ready = await ensureProjectRuntime(project);
+        const _sessionId = request.query?.session_id || request.body?.session_id;
+        const _runtimeId = _sessionId ? await resolveRuntimeIdFromSession(request.user.id, _sessionId) : null;
+        const ready = await ensureProjectRuntime(project, _runtimeId ? { runtimeId: _runtimeId } : {});
         const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
         const isText = isTextFile(filePath);
         const encoding = isText ? 'utf8' : 'buffer';
@@ -2283,7 +2314,9 @@ fastify.put('/api/v1/workspace/file', { preValidation: [fastify.authenticate, fa
     }
 
     try {
-        const ready = await ensureProjectRuntime(project);
+        const _sessionId = request.query?.session_id || request.body?.session_id;
+        const _runtimeId = _sessionId ? await resolveRuntimeIdFromSession(request.user.id, _sessionId) : null;
+        const ready = await ensureProjectRuntime(project, _runtimeId ? { runtimeId: _runtimeId } : {});
         const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
 
         const ifUnmodifiedSince = request.headers['if-unmodified-since'];
@@ -2324,7 +2357,9 @@ fastify.delete('/api/v1/workspace/file', { preValidation: [fastify.authenticate,
     if (!project) return reply.code(404).send({ error: 'Project not found' });
 
     try {
-        const ready = await ensureProjectRuntime(project);
+        const _sessionId = request.query?.session_id || request.body?.session_id;
+        const _runtimeId = _sessionId ? await resolveRuntimeIdFromSession(request.user.id, _sessionId) : null;
+        const ready = await ensureProjectRuntime(project, _runtimeId ? { runtimeId: _runtimeId } : {});
         const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
         await runtime.fs.fsDelete(ready.workspacePath, filePath, { runtimeRef: ref });
         fsListCache.clear();
@@ -2348,7 +2383,9 @@ fastify.post('/api/v1/workspace/dir', { preValidation: [fastify.authenticate, fa
     if (!dirPath) return reply.code(400).send({ error: 'path is required' });
 
     try {
-        const ready = await ensureProjectRuntime(project);
+        const _sessionId = request.query?.session_id || request.body?.session_id;
+        const _runtimeId = _sessionId ? await resolveRuntimeIdFromSession(request.user.id, _sessionId) : null;
+        const ready = await ensureProjectRuntime(project, _runtimeId ? { runtimeId: _runtimeId } : {});
         const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
         await runtime.fs.mkdirp(ready.workspacePath, dirPath, { runtimeRef: ref });
         fsListCache.clear();
@@ -2371,7 +2408,9 @@ fastify.delete('/api/v1/workspace/dir', { preValidation: [fastify.authenticate, 
     if (!project) return reply.code(404).send({ error: 'Project not found' });
 
     try {
-        const ready = await ensureProjectRuntime(project);
+        const _sessionId = request.query?.session_id || request.body?.session_id;
+        const _runtimeId = _sessionId ? await resolveRuntimeIdFromSession(request.user.id, _sessionId) : null;
+        const ready = await ensureProjectRuntime(project, _runtimeId ? { runtimeId: _runtimeId } : {});
         const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
         await runtime.fs.fsRmdir(ready.workspacePath, dirPath, { runtimeRef: ref });
         fsListCache.clear();
@@ -2395,7 +2434,9 @@ fastify.post('/api/v1/workspace/move', { preValidation: [fastify.authenticate, f
     if (!from || !to) return reply.code(400).send({ error: 'from and to are required' });
 
     try {
-        const ready = await ensureProjectRuntime(project);
+        const _sessionId = request.query?.session_id || request.body?.session_id;
+        const _runtimeId = _sessionId ? await resolveRuntimeIdFromSession(request.user.id, _sessionId) : null;
+        const ready = await ensureProjectRuntime(project, _runtimeId ? { runtimeId: _runtimeId } : {});
         const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
         await runtime.fs.fsMove(ready.workspacePath, from, to, { runtimeRef: ref });
         fsListCache.clear();
