@@ -48,7 +48,10 @@ function AuthenticatedLayout({
     if (location.pathname !== '/settings') navigate('/settings');
   }, [navigate, location.pathname]);
   const isAdmin = user?.role === 'admin';
-  const effectiveSettingsSection = !isAdmin && (settingsSection === 'general' || settingsSection === 'api-keys') ? 'git' : settingsSection;
+  const effectiveSettingsSection =
+    settingsSection === 'api-keys' ? (isAdmin ? 'general' : 'git')
+    : (!isAdmin && settingsSection === 'general') ? 'git'
+    : settingsSection;
   const activeWorkspaceName = projects.find((p) => p.id === activeWorkspaceId)?.name || null;
 
   useEffect(() => {
@@ -210,7 +213,7 @@ function AuthenticatedLayout({
               )}
             >
               <SettingsTabSidebar activeTab={effectiveSettingsSection} onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
-              <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
+              <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
                 <SettingsShell section={effectiveSettingsSection} />
               </div>
             </div>

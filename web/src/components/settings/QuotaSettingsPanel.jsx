@@ -20,6 +20,7 @@ export default function QuotaSettingsPanel() {
 
   const q = me.quotas;
   const u = q.usage || {};
+  const isAdmin = me.role === 'admin';
 
   const rows = [
     { label: 'Workspaces', used: u.projects ?? 0, max: q.max_projects },
@@ -34,18 +35,24 @@ export default function QuotaSettingsPanel() {
           <div key={label}>
             <div className="flex justify-between text-sm mb-1">
               <span className="text-zinc-700">{label}</span>
-              <span className="font-mono text-zinc-900">
-                {used}
-                /
-                {max}
-              </span>
+              {isAdmin ? (
+                <span className="font-mono text-zinc-500">Unlimited</span>
+              ) : (
+                <span className="font-mono text-zinc-900">
+                  {used}
+                  /
+                  {max}
+                </span>
+              )}
             </div>
-            <div className="h-1.5 rounded-full bg-zinc-100 overflow-hidden">
-              <div
-                className="h-full bg-black rounded-full transition-all"
-                style={{ width: `${max > 0 ? Math.min(100, (used / max) * 100) : 0}%` }}
-              />
-            </div>
+            {!isAdmin && (
+              <div className="h-1.5 rounded-full bg-zinc-100 overflow-hidden">
+                <div
+                  className="h-full bg-black rounded-full transition-all"
+                  style={{ width: `${max > 0 ? Math.min(100, (used / max) * 100) : 0}%` }}
+                />
+              </div>
+            )}
           </div>
         ))}
       </div>

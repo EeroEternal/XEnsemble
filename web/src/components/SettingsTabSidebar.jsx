@@ -5,7 +5,6 @@ import {
   Users,
   Bot,
   Globe,
-  Key,
   GitBranch,
   Gauge,
 } from 'lucide-react';
@@ -18,7 +17,6 @@ import { SidebarAccountMenu } from './AppSidebar';
 
 const ALL_TABS = [
   { id: 'general', label: 'General', icon: Settings2, route: '/settings', adminOnly: true },
-  { id: 'api-keys', label: 'API Keys', icon: Key, route: '/settings', adminOnly: true },
   { id: 'git', label: 'Git', icon: GitBranch, route: '/settings', adminOnly: false },
   { id: 'quota', label: 'Quota', icon: Gauge, route: '/settings', adminOnly: false },
   { id: 'images', label: 'Images', icon: Container, route: '/custom-images', adminOnly: true },
@@ -40,7 +38,7 @@ export default function SettingsTabSidebar({ activeTab, onSectionChange, user, o
           const Icon = tab.icon;
           const isActive = tab.id === activeTab;
           const handleClick = () => {
-            if (tab.id === 'general' || tab.id === 'api-keys' || tab.id === 'git' || tab.id === 'quota') {
+            if (tab.id === 'general' || tab.id === 'git' || tab.id === 'quota') {
               onSectionChange?.(tab.id);
             } else if (tab.route) {
               navigate(tab.route);
