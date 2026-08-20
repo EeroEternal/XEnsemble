@@ -229,11 +229,6 @@ async function applyAgentGatewayModel(agentId, env) {
     if (agentId === 'hermes') {
         out.HERMES_MODEL = target;
     }
-    if (CLAUDE_CODE_AGENT_IDS.has(agentId)) {
-        // Enable gateway /v1/model discovery so /model lists the configured
-        // gateway models (served by the LLM proxy) instead of a single model.
-        out.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = '1';
-    }
     if (KIMI_CODE_AGENT_IDS.has(agentId)) {
         return applyKimiCodeGatewayEnv(out);
     }
