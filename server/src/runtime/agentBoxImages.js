@@ -65,16 +65,17 @@ const AGENT_BOX_IMAGE_CATALOG = {
             'apt-get update',
             '&& apt-get install -y --no-install-recommends python3 python3-venv python3-pip ripgrep ffmpeg libatomic1',
             '&& rm -rf /var/lib/apt/lists/*',
-            // Node.js v26 + libatomic1: hermes requires Node >=26, base image has v22
             '&& curl -fsSL https://npmmirror.com/mirrors/node/v26.7.0/node-v26.7.0-linux-x64.tar.gz | tar -xzf - -C /usr/local --strip-components=1',
             '&& node --version',
-            // GitHub clone via ghfast.top proxy
             '&& git config --global url."https://ghfast.top/https://github.com/".insteadOf "https://github.com/"',
             '&& rm -rf "$HOME/.hermes/hermes-agent" "$HOME/.hermes"/hermes-agent.broken-* 2>/dev/null; true',
-            // npm_config_omit=dev: hermes-agent package.json only has devDependencies (eslint, typescript),
-            // not needed at runtime. Skip to avoid npm install failure/timeout.
-            '&& export npm_config_omit=dev',
-            '&& (curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --skip-browser || true)',
+            // Install hermes via official installer. npm install for workspace deps
+            // (electron/react/esbuild) may timeout in Docker; hermes itself is Python.
+            // If the installer exits early (install_node_deps || return), setup_path
+            // doesn't run - we create the launcher shim manually in that case.
+            '&& curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o /tmp/hermes-install.sh',
+            '&& bash /tmp/hermes-install.sh --skip-setup --skip-browser; true',
+            '&& (test -x /usr/local/bin/hermes || printf \'#!/usr/bin/env bash\\nunset PYTHONPATH\\nunset PYTHONHOME\\nexec /usr/local/lib/hermes-agent/venv/bin/python /usr/local/lib/hermes-agent/hermes "$@"\\n\' > /usr/local/bin/hermes && chmod +x /usr/local/bin/hermes)',
             '&& test -x /usr/local/bin/hermes',
             // Strip non-runtime files to reduce image size (~400MB saved).
             '&& rm -rf /usr/local/lib/hermes-agent/.git',
