@@ -164,6 +164,8 @@ test('buildGatewayConfigSpec: kimi-code writes config.toml to stateDirPath (not 
     assert.match(toml, /\[models\.gateway-0\][\s\S]*model = "deepseek\/deepseek-v4-flash"/);
     assert.match(toml, /\[models\.gateway-1\][\s\S]*model = "zxs\/qwen-max"/);
     assert.doesNotMatch(toml, /HOME\/\.kimi/);
+    assert.ok(spec.extraFiles?.some((f) => f.filePath.endsWith('.skip-migration-from-kimi-cli')),
+        'must write .skip-migration-from-kimi-cli marker to suppress the kimi-cli migration prompt');
 });
 
 test('buildGatewayConfigSpec: kimi-code single target (back-compat) registers one model', () => {

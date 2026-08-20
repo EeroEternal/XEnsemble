@@ -227,6 +227,11 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             // (applyKimiCodeGatewayEnv) still synthesize the active model, but
             // kimi's applyEnvModelConfig MERGES (not replaces) config.toml
             // models, so every entry here stays selectable.
+            //
+            // The .skip-migration-from-kimi-cli marker is written alongside
+            // config.toml so kimi-code never prompts to migrate from a legacy
+            // ~/.kimi/ installation (which ensureKimiConfig in BYOK mode or a
+            // stale sandbox might leave behind).
             const defaultIndex = Math.max(0, targets.indexOf(def));
             const defaultAlias = `gateway-${defaultIndex}`;
             const sections = targets.map((t, i) => [
@@ -251,6 +256,11 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                     ...sections,
                     '',
                 ].join('\n') + '\n',
+                extraFiles: [{
+                    dirPath: stateDirPath,
+                    filePath: `${stateDirPath}/.skip-migration-from-kimi-cli`,
+                    content: '',
+                }],
             };
         }
 
