@@ -229,6 +229,20 @@ async function applyAgentGatewayModel(agentId, env) {
     if (agentId === 'hermes') {
         out.HERMES_MODEL = target;
     }
+    if (CLAUDE_CODE_AGENT_IDS.has(agentId)) {
+        // Enable gateway /v1/models discovery so /model lists the configured
+        // gateway models. The LLM proxy returns an Anthropic-compatible format
+        // that passes claude-code's validation.
+        out.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = '1';
+    }
+    if (agentId === 'qoder') {
+        // Qoder prioritizes QODER_PERSONAL_ACCESS_TOKEN for PAT auth over the
+        // settings.json gateway provider. The env_required check already passed
+        // (applyGatewaySynthesis set it to the session token); delete it here so
+        // qoder uses the gateway provider configured in settings.json instead of
+        // trying (and failing) PAT auth with the session token.
+        delete out.QODER_PERSONAL_ACCESS_TOKEN;
+    }
     if (KIMI_CODE_AGENT_IDS.has(agentId)) {
         return applyKimiCodeGatewayEnv(out);
     }

@@ -93,9 +93,20 @@ async function serveAgentModelsCatalog(claims, reply) {
     const models = agentGatewayConfig.allModels(cfg);
     if (models.length === 0) return false;
     const provider = (cfg?.provider ?? '').trim();
+    // Return a combined Anthropic+OpenAI format: claude-code validates the
+    // Anthropic shape (type/display_name/created_at), while OpenAI-compatible
+    // clients read object/created/owned_by. Including all fields satisfies both.
     const data = models.map((m) => {
         const id = provider ? `${provider}/${m}` : m;
-        return { id, object: 'model', created: 0, owned_by: provider || 'xensemble' };
+        return {
+            id,
+            type: 'model',
+            object: 'model',
+            display_name: id,
+            created: 0,
+            created_at: '2025-01-01T00:00:00Z',
+            owned_by: provider || 'xensemble',
+        };
     });
     reply.code(200).send({ object: 'list', data });
     return true;
