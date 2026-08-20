@@ -1262,7 +1262,7 @@ export default React.forwardRef(function Sessions({
             </>,
             topbarEl
           )}
-          {activeSession ? (
+          {activeSession && !workspaceCreating ? (
             sessionPending ? (
               <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-white p-8 text-center">
                 <Loader2 className="w-8 h-8 text-zinc-400 animate-spin mb-4" strokeWidth={1.5} />
