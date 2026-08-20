@@ -11,7 +11,6 @@ import {
 } from 'lucide-react';
 import { usePreview } from './PreviewPanel';
 import { consoleButtonFocusClass } from '@/lib/consoleTokens';
-import { buttonClass } from '@/lib/buttonStyles';
 import { useToast } from './Toast';
 
 function formatTtl(expiresAt) {
@@ -26,7 +25,7 @@ function formatTtl(expiresAt) {
 /** Deployed app preview (start/stop + embed). */
 export default function WorkspacePreviewPane({ projectId, deployInfo }) {
   const preview = usePreview(projectId, true);
-  const { status, previewUrl, isBusy, deployPreview, resolveEmbedUrl, openPreview } = preview;
+  const { status, previewUrl, isBusy, resolveEmbedUrl, openPreview } = preview;
   const { showToast } = useToast();
   const [embedUrl, setEmbedUrl] = useState(null);
   const [embedLoading, setEmbedLoading] = useState(false);
@@ -79,12 +78,12 @@ export default function WorkspacePreviewPane({ projectId, deployInfo }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="workspace-preview-pane">
-      <div className="flex items-center gap-2 border-b border-[#E8EAED] px-3 py-1.5 shrink-0">
-        <Monitor className="h-3.5 w-3.5 shrink-0 text-[#5F6368]" />
-        <span className="truncate text-xs text-[#5F6368] font-mono">
-          {previewUrl || 'Preview'}
-        </span>
-        {status === 'running' && (
+      {status === 'running' && (
+        <div className="flex items-center gap-2 border-b border-[#E8EAED] px-3 py-1.5 shrink-0">
+          <Monitor className="h-3.5 w-3.5 shrink-0 text-[#5F6368]" />
+          <span className="truncate text-xs text-[#5F6368] font-mono">
+            {previewUrl}
+          </span>
           <button
             type="button"
             onClick={() => setShowDetails((v) => !v)}
@@ -94,8 +93,8 @@ export default function WorkspacePreviewPane({ projectId, deployInfo }) {
             {showDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
             部署详情
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {showDetails && (
         <div className="shrink-0 border-b border-[#E8EAED] bg-[#FAFBFC] px-4 py-3 space-y-2 text-xs">
@@ -177,16 +176,6 @@ export default function WorkspacePreviewPane({ projectId, deployInfo }) {
           <div className="flex h-full flex-col items-center justify-center gap-3 text-zinc-400 px-6 text-center">
             <Monitor className="h-10 w-10" />
             <p className="text-sm">{embedError || 'Deploy a Preview to view your app here'}</p>
-            {status !== 'running' && (
-              <button
-                type="button"
-                disabled={isBusy}
-                onClick={deployPreview}
-                className={`${buttonClass('primary', 'sm')} ${consoleButtonFocusClass}`}
-              >
-                {isBusy ? 'Deploying…' : 'Deploy Preview'}
-              </button>
-            )}
           </div>
         )}
       </div>

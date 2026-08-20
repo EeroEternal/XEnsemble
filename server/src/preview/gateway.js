@@ -57,10 +57,24 @@ function extractToken(request) {
     if (previewHeader) return previewHeader;
     try {
         const url = new URL(request.url, 'http://localhost');
-        return url.searchParams.get('preview_token');
+        const q = url.searchParams.get('preview_token');
+        if (q) return q;
     } catch {
-        return null;
+        /* ignore */
     }
+    // preview iframe 内前端发起相对请求（如 /api/... 或 /products/...）不会带 query token，
+    // 但 Referer 是 preview 页面 URL（含 preview_token），可从中提取，避免网关 401。
+    const referer = request.headers.referer || '';
+    if (referer) {
+        try {
+            const refUrl = new URL(referer, 'http://localhost');
+            const rt = refUrl.searchParams.get('preview_token');
+            if (rt) return rt;
+        } catch {
+            /* ignore */
+        }
+    }
+    return null;
 }
 
 async function assertDeploymentUserActive(userId) {

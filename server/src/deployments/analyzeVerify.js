@@ -233,13 +233,16 @@ async function assertAppIsServed({ runtimeRef, workspacePath, preferredPort }) {
     const candidates = [...new Set([...base, ...listenPorts])].slice(0, 40);
     const errors = [];
     const boxDefaultPort = Number(process.env.BOXLITE_DEFAULT_PREVIEW_PORT || 3000);
+    const probeDetail = [];
     for (const port of candidates) {
         const res = await probePort({ runtimeRef, workspacePath, port, boxDefaultPort });
+        probeDetail.push(`${port}=${res.httpCode || (res.listen ? 'listen' : 'down')}${res.ok ? '(app)' : ''}`);
         if (res.ok) {
             return { ok: true, port, httpCode: res.httpCode, snippet: res.snippet };
         }
         if (res.listen) errors.push(res.reason);
     }
+    console.error(`[analyzeVerify] app port discovery failed. listenPorts=${JSON.stringify(listenPorts)} candidates=${JSON.stringify(candidates)} probes=${probeDetail.join(', ')} errors=${errors.join('; ')}`);
     return { ok: false, reason: errors.length ? `未发现真实应用端口（${errors.join('；')}）` : '未发现监听的应用端口' };
 }
 

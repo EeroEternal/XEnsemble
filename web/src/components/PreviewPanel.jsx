@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   AppWindow,
   Loader2,
-  Power,
+  RefreshCw,
   Rocket,
   Square,
 } from 'lucide-react';
@@ -295,7 +295,7 @@ export function PreviewActions({
           onClick={restartPreview}
           className={ICON_BTN}
         >
-          <Power className="w-3.5 h-3.5" />
+          <RefreshCw className="w-3.5 h-3.5" />
         </button>
         <button
           type="button"
