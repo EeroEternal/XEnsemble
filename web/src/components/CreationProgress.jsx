@@ -1,4 +1,4 @@
-import { Loader2, Check, GitBranch, Rocket } from 'lucide-react';
+import { Loader2, Check, GitBranch, Rocket, AlertCircle, ArrowLeft } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
   textPlaceholder,
@@ -6,14 +6,17 @@ import {
   accentGreen,
   accentGreenBg,
   borderHairline,
+  consoleButtonFocusClass,
 } from '../lib/consoleTokens';
+import { buttonClass } from '../lib/buttonStyles';
 
 const STEPS = [
   { id: 'import', label: 'Import repository', icon: GitBranch },
   { id: 'session', label: 'Start session', icon: Rocket },
 ];
 
-export default function CreationProgress({ currentStep, hasError }) {
+export default function CreationProgress({ currentStep, error, onDismiss }) {
+  const hasError = Boolean(error);
   const stepStatus = (stepId) => {
     const idx = STEPS.findIndex((s) => s.id === stepId);
     const currentIdx = STEPS.findIndex((s) => s.id === currentStep);
@@ -24,64 +27,79 @@ export default function CreationProgress({ currentStep, hasError }) {
   };
 
   return (
-    <div className="flex flex-col items-center w-full max-w-xs">
-      {STEPS.map((step, idx) => {
-        const status = stepStatus(step.id);
-        const Icon = step.icon;
-        const showConnector = idx < STEPS.length - 1;
-        const connectorStatus = stepStatus(STEPS[idx].id);
-        return (
-          <div key={step.id} className="flex flex-col items-stretch w-full">
-            <div className="flex items-center gap-3">
-              <div
-                className={cn(
-                  'flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 transition-colors',
-                  status === 'done' && cn(accentGreenBg, 'border-emerald-300'),
-                  status === 'active' && 'bg-zinc-100 border-zinc-400',
-                  status === 'error' && 'bg-red-50 border-red-300',
-                  status === 'pending' && 'bg-zinc-50 border-zinc-200',
-                )}
-              >
-                {status === 'done' ? (
-                  <Check className="h-4 w-4 text-emerald-600" strokeWidth={2.5} />
-                ) : status === 'active' ? (
-                  <Loader2 className="h-4 w-4 text-zinc-600 animate-spin" strokeWidth={2} />
-                ) : status === 'error' ? (
-                  <span className="text-red-500 text-sm font-bold">!</span>
-                ) : (
-                  <span className={cn('text-sm font-semibold', textPlaceholder)}>{idx + 1}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2 min-w-0">
-                <Icon className={cn('h-4 w-4 shrink-0', status === 'pending' ? textPlaceholder : status === 'done' ? accentGreen : status === 'active' ? textPrimary : 'text-red-500')} strokeWidth={1.75} />
-                <span
+    <div className="flex flex-col items-center gap-5">
+      <div className="flex flex-col items-stretch w-full max-w-xs">
+        {STEPS.map((step, idx) => {
+          const status = stepStatus(step.id);
+          const Icon = step.icon;
+          const showConnector = idx < STEPS.length - 1;
+          const connectorStatus = stepStatus(STEPS[idx].id);
+          return (
+            <div key={step.id} className="flex flex-col items-stretch w-full">
+              <div className="flex items-center gap-3">
+                <div
                   className={cn(
-                    'text-sm font-medium transition-colors',
-                    status === 'done' && accentGreen,
-                    status === 'active' && textPrimary,
-                    status === 'error' && 'text-red-600',
-                    status === 'pending' && textPlaceholder,
+                    'flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 transition-colors',
+                    status === 'done' && cn(accentGreenBg, 'border-emerald-300'),
+                    status === 'active' && 'bg-zinc-100 border-zinc-400',
+                    status === 'error' && 'bg-red-50 border-red-300',
+                    status === 'pending' && 'bg-zinc-50 border-zinc-200',
                   )}
                 >
-                  {step.label}
-                </span>
-              </div>
-            </div>
-            {showConnector && (
-              <div className="flex justify-start">
-                <div className="w-9 flex justify-center">
-                  <div
+                  {status === 'done' ? (
+                    <Check className="h-4 w-4 text-emerald-600" strokeWidth={2.5} />
+                  ) : status === 'active' ? (
+                    <Loader2 className="h-4 w-4 text-zinc-600 animate-spin" strokeWidth={2} />
+                  ) : status === 'error' ? (
+                    <AlertCircle className="h-4 w-4 text-red-500" strokeWidth={2} />
+                  ) : (
+                    <span className={cn('text-sm font-semibold', textPlaceholder)}>{idx + 1}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 min-w-0">
+                  <Icon className={cn('h-4 w-4 shrink-0', status === 'pending' ? textPlaceholder : status === 'done' ? accentGreen : status === 'active' ? textPrimary : 'text-red-500')} strokeWidth={1.75} />
+                  <span
                     className={cn(
-                      'w-0.5 h-8 transition-colors rounded-full',
-                      connectorStatus === 'done' ? 'bg-emerald-300' : cn(borderHairline, 'bg-zinc-200'),
+                      'text-sm font-medium transition-colors',
+                      status === 'done' && accentGreen,
+                      status === 'active' && textPrimary,
+                      status === 'error' && 'text-red-600',
+                      status === 'pending' && textPlaceholder,
                     )}
-                  />
+                  >
+                    {step.label}
+                  </span>
                 </div>
               </div>
-            )}
-          </div>
-        );
-      })}
+              {showConnector && (
+                <div className="flex justify-start">
+                  <div className="w-9 flex justify-center">
+                    <div
+                      className={cn(
+                        'w-0.5 h-8 transition-colors rounded-full',
+                        connectorStatus === 'done' ? 'bg-emerald-300' : cn(borderHairline, 'bg-zinc-200'),
+                      )}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {hasError && (
+        <div className="flex flex-col items-center gap-3 mt-2">
+          <p className="text-sm text-red-600 max-w-xs text-center">{error}</p>
+          <button
+            type="button"
+            onClick={onDismiss}
+            className={`${buttonClass('secondary', 'sm')} ${consoleButtonFocusClass}`}
+          >
+            <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
+            Back
+          </button>
+        </div>
+      )}
     </div>
   );
 }

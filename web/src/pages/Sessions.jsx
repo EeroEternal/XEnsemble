@@ -502,6 +502,7 @@ export default React.forwardRef(function Sessions({
       setLaunchingSession(true);
       setWorkspaceCreating(true);
       setCreationStep('import');
+      let creationFailed = false;
       try {
         const result = await gitApi.importRepo({
           provider: repo.provider,
@@ -536,12 +537,15 @@ export default React.forwardRef(function Sessions({
         setCreationStep('session');
         await handleStartSession(result.id, repo.full_name || repo.name, { closeLaunchModal: true });
       } catch (err) {
+        creationFailed = true;
         setLaunchModalError(err.message || 'Import failed.');
       } finally {
-        await new Promise((r) => setTimeout(r, 800));
-        setWorkspaceCreating(false);
-        setCreationStep(null);
-        setLaunchingSession(false);
+        if (!creationFailed) {
+          await new Promise((r) => setTimeout(r, 800));
+          setWorkspaceCreating(false);
+          setCreationStep(null);
+          setLaunchingSession(false);
+        }
       }
       return;
     }
@@ -1376,7 +1380,16 @@ export default React.forwardRef(function Sessions({
           ) : launchingSession ? (
             <div className="flex-1 bg-white flex flex-col items-center justify-center">
               {workspaceCreating && creationStep ? (
-                <CreationProgress currentStep={creationStep} hasError={Boolean(launchModalError)} />
+                <CreationProgress
+                  currentStep={creationStep}
+                  error={launchModalError}
+                  onDismiss={() => {
+                    setWorkspaceCreating(false);
+                    setCreationStep(null);
+                    setLaunchingSession(false);
+                    setLaunchModalError(null);
+                  }}
+                />
               ) : null}
             </div>
           ) : (
