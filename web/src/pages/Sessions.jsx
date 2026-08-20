@@ -524,6 +524,12 @@ export default React.forwardRef(function Sessions({
           auto_create_branch: true,
           work_branch_name: generateWorkBranchName(repo.full_name),
         });
+        // Switch to the new workspace immediately
+        switchWorkspace(result.id);
+        setProjects((prev) => {
+          if (prev.some((p) => p.id === result.id)) return prev;
+          return [...prev, { id: result.id, name: repo.name, createdAt: Date.now() }];
+        });
         await new Promise((resolve, reject) => {
           let attempts = 0;
           const pollId = setInterval(async () => {
@@ -1323,7 +1329,7 @@ export default React.forwardRef(function Sessions({
                     reconnectVersion={reconnectVersion}
                     onSessionEnd={handleSessionEnd}
                     onSessionConnected={handleSessionConnected}
-                    sessionLive={sessionAlive}
+                    sessionLive={sessionAlive || skipPendingSpinner}
                     sessionWakeable={sessionWakeable}
                   />
                 </div>
