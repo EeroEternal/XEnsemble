@@ -64,6 +64,13 @@
       "when": 1787100000000,
       "tag": "0008_verify_resume",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787200000000,
+      "tag": "0009_agent_runtime",
+      "breakpoints": true
     }
   ]
 }

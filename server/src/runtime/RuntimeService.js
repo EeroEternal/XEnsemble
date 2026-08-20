@@ -75,7 +75,11 @@ function runtimeKey(projectId, runtimeId) {
 }
 
 function runtimeFlightKey(projectId, runtimeId, opts = {}) {
-    const base = runtimeKey(projectId, runtimeId);
+    // When runtimeId is null (new runtime creation), include agentId in the key
+    // to prevent coalescing concurrent provisioning for different agents.
+    const base = runtimeId
+        ? runtimeKey(projectId, runtimeId)
+        : `${projectId}:${opts.agentId || 'default'}`;
     // Do not coalesce agent provisioning with passive attach (git status polls, workspace FS, …).
     if (opts.agentId || opts.forceRecreate || opts.image) return `${base}:provision`;
     return `${base}:attach`;
@@ -95,7 +99,29 @@ function isAttachOnlyRuntimeCall(opts = {}) {
  * @returns {Promise<{ runtime: object, workspacePath: string, recoverable: boolean }>}
  */
 async function ensureProjectRuntime(project, opts = {}) {
-    const targetRuntimeId = opts.runtimeId || project.defaultRuntimeId;
+    let targetRuntimeId = opts.runtimeId;
+
+    // Active caller with agentId: find or create a runtime for this specific agent.
+    // This prevents reusing the default runtime (which belongs to another agent)
+    // and triggering imageMismatch -> VM deletion+recreation.
+    if (!targetRuntimeId && opts.agentId) {
+        const existing = await db.select().from(schema.runtimes)
+            .where(and(
+                eq(schema.runtimes.projectId, project.id),
+                eq(schema.runtimes.agentId, opts.agentId),
+            ));
+        if (existing.length > 0) {
+            targetRuntimeId = existing[0].id;
+        } else {
+            const created = await getOrCreateRuntimeForAgent(project, opts.agentId);
+            targetRuntimeId = created.runtime.id;
+        }
+    }
+
+    // Passive caller fallback: use defaultRuntimeId
+    if (!targetRuntimeId) {
+        targetRuntimeId = project.defaultRuntimeId;
+    }
 
     // Passive callers only need the persisted runtime row; re-entering ensureReady races with session start.
     if (isAttachOnlyRuntimeCall(opts) && targetRuntimeId) {
@@ -347,11 +373,98 @@ async function getOrCreateDefaultRuntime(project) {
     };
 }
 
+async function getOrCreateRuntimeForAgent(project, agentId) {
+    // Check if a runtime already exists for this (project, agent) pair.
+    const existing = await db.select().from(schema.runtimes)
+        .where(and(
+            eq(schema.runtimes.projectId, project.id),
+            eq(schema.runtimes.agentId, agentId),
+        ));
+    if (existing.length > 0) {
+        return {
+            runtime: existing[0],
+            workspacePath: existing[0].endpoint || project.serverPath,
+            recoverable: false,
+        };
+    }
+
+    // Create a new runtime row (metadata only — provisioning happens in ensureReady).
+    const runtimeId = `rt_${crypto.randomBytes(6).toString('hex')}`;
+    const workspacePath = workspace.createProjectDirectory(project.userId, project.id);
+    const now = Date.now();
+
+    try {
+        await db.insert(schema.runtimes).values({
+            id: runtimeId,
+            projectId: project.id,
+            agentId,
+            provider: PROVIDER,
+            runtimeRef: PROVIDER === 'boxlite' ? runtimeId : 'local',
+            role: 'agent',
+            status: 'ready',
+            endpoint: workspacePath,
+            createdAt: now,
+            updatedAt: now,
+        });
+    } catch (err) {
+        // Unique constraint violation: a concurrent call already created it.
+        const rows = await db.select().from(schema.runtimes)
+            .where(and(
+                eq(schema.runtimes.projectId, project.id),
+                eq(schema.runtimes.agentId, agentId),
+            ));
+        if (rows.length > 0) {
+            return {
+                runtime: rows[0],
+                workspacePath: rows[0].endpoint || project.serverPath,
+                recoverable: false,
+            };
+        }
+        throw err;
+    }
+
+    // Set as defaultRuntimeId if the project has none (used by passive callers).
+    if (!project.defaultRuntimeId) {
+        await db.update(schema.projects).set({
+            defaultRuntimeId: runtimeId,
+            serverPath: workspacePath,
+        }).where(eq(schema.projects.id, project.id));
+    }
+
+    await recordEvent({
+        userId: project.userId,
+        projectId: project.id,
+        subjectType: 'runtime',
+        subjectId: runtimeId,
+        type: 'ready',
+        data: { provider: PROVIDER, agentId, role: 'agent' },
+    });
+
+    const runtimeRow = {
+        id: runtimeId,
+        projectId: project.id,
+        agentId,
+        provider: PROVIDER,
+        runtimeRef: PROVIDER === 'boxlite' ? runtimeId : 'local',
+        role: 'agent',
+        status: 'ready',
+        endpoint: workspacePath,
+        specs: null,
+    };
+
+    return {
+        runtime: runtimeRow,
+        workspacePath,
+        recoverable: false,
+    };
+}
+
 function formatRuntime(row) {
     if (!row) return null;
     return {
         id: row.id,
         project_id: row.projectId,
+        agent_id: row.agentId || null,
         provider: row.provider,
         runtime_ref: row.runtimeRef,
         role: row.role,
@@ -364,6 +477,7 @@ function formatRuntime(row) {
 module.exports = {
     ensureProjectRuntime,
     getOrCreateDefaultRuntime,
+    getOrCreateRuntimeForAgent,
     formatRuntime,
     invalidateRuntimeCache,
 };

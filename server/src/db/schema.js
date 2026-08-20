@@ -73,6 +73,7 @@ const projects = pgTable('projects', {
 const runtimes = pgTable('runtimes', {
   id: text('id').primaryKey(),
   projectId: text('project_id').notNull().references(() => projects.id),
+  agentId: text('agent_id'),
   provider: text('provider').notNull().default('boxlite'),
   runtimeRef: text('runtime_ref'),
   role: text('role').notNull().default('default'),
@@ -81,7 +82,9 @@ const runtimes = pgTable('runtimes', {
   specs: text('specs'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
-});
+}, (table) => ({
+  projectAgentUnique: uniqueIndex('runtimes_project_agent_idx').on(table.projectId, table.agentId),
+}));
 
 const sessions = pgTable('sessions', {
   id: text('id').primaryKey(),

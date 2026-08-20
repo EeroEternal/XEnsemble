@@ -138,7 +138,7 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
 
     async ensureReady(project, opts = {}) {
         const runtimeId = opts && opts.runtimeId ? opts.runtimeId : null;
-        const name = runtimeId || `p_${project.id}`;
+        const name = runtimeId || `p_${project.id}_${opts.agentId || 'default'}`;
         const image = await resolveBoxImage({
             agentId: opts.agentId,
             image: opts.image,
