@@ -144,6 +144,28 @@ test('buildGatewayConfigSpec: returns null when no targets at all', () => {
     assert.equal(buildGatewayConfigSpec('qwen-code', { ...ctx, modelTarget: null, modelTargets: [] }), null);
 });
 
+test('github-copilot is in GATEWAY_CONFIG_AGENTS', () => {
+    assert.ok(GATEWAY_CONFIG_AGENTS.has('github-copilot'), 'github-copilot must be in GATEWAY_CONFIG_AGENTS');
+});
+
+test('buildGatewayConfigSpec: github-copilot writes ~/.copilot/settings.json with providers/models registry', () => {
+    const spec = buildGatewayConfigSpec('github-copilot', {
+        ...ctx,
+        modelTargets: ['deepseek/deepseek-v4-flash', 'zxs/qwen-max'],
+        defaultTarget: 'deepseek/deepseek-v4-flash',
+    });
+    assert.equal(spec.filePath, '$HOME/.copilot/settings.json');
+    const content = JSON.parse(spec.content);
+    assert.equal(content.providers.length, 1);
+    assert.equal(content.providers[0].name, 'gateway');
+    assert.equal(content.providers[0].type, 'openai');
+    assert.equal(content.providers[0].baseUrl, 'https://xensemble.dev/api/v1/llm/v1');
+    assert.equal(content.providers[0].apiKey, 'xel_test_token');
+    assert.equal(content.models.length, 2);
+    assert.deepEqual(content.models.map((m) => m.id), ['deepseek/deepseek-v4-flash', 'zxs/qwen-max']);
+    assert.equal(content.models[0].provider, 'gateway');
+});
+
 test('kimi-code is in GATEWAY_CONFIG_AGENTS', () => {
     assert.ok(GATEWAY_CONFIG_AGENTS.has('kimi-code'), 'kimi-code must be in GATEWAY_CONFIG_AGENTS');
 });

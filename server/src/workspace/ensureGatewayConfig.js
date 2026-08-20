@@ -17,6 +17,7 @@ const GATEWAY_CONFIG_AGENTS = new Set([
     'hermes',
     'codebuddy',
     'kimi-code',
+    'github-copilot',
 ]);
 
 function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl, modelTarget, modelTargets, defaultTarget }) {
@@ -264,6 +265,34 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             };
         }
 
+        case 'github-copilot': {
+            // Copilot reads ~/.copilot/settings.json. In gateway mode, register
+            // a gateway provider + all configured models via the providers/models
+            // BYOK registry so /model lists every model. The legacy singular
+            // COPILOT_PROVIDER_* env vars are NOT set (they conflict with the
+            // registry and only support one model). COPILOT_MODEL sets the active.
+            const models = targets.map((t) => ({
+                id: t,
+                name: t,
+                provider: 'gateway',
+                model: t,
+            }));
+            return {
+                dirPath: '$HOME/.copilot',
+                filePath: '$HOME/.copilot/settings.json',
+                content: JSON.stringify({
+                    providers: [{
+                        name: 'gateway',
+                        type: 'openai',
+                        baseUrl: `${routerUrl}/v1`,
+                        apiKey: sessionToken,
+                        wireApi: 'chat',
+                    }],
+                    models,
+                }, null, 2),
+            };
+        }
+
         case 'hermes':
             // hermes loads $HERMES_HOME/config.yaml and its _resolve_openrouter_runtime
             // prioritises config.yaml base_url over OPENROUTER_BASE_URL env var when
@@ -336,7 +365,7 @@ async function ensureGatewayConfig({ runtime, runtimeRef, agentId, authMode, sta
     // minimax-cli and pi use $HOME (no state dir); codebuddy prefers the
     // state dir (CODEBUDDY_CONFIG_DIR) but falls back to $HOME/.codebuddy;
     // all others require a state dir path.
-    if (agentId !== 'minimax-cli' && agentId !== 'pi' && agentId !== 'codebuddy' && !stateDirPath) {
+    if (agentId !== 'minimax-cli' && agentId !== 'pi' && agentId !== 'codebuddy' && agentId !== 'kimi-code' && agentId !== 'github-copilot' && !stateDirPath) {
         return { skipped: true, reason: 'no_state_dir' };
     }
 

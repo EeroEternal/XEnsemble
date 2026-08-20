@@ -12,22 +12,21 @@ test('applyGatewayAgentEnv: non-droid agents are untouched', () => {
     assert.equal(env.FACTORY_AIRGAP_ENABLED, undefined);
 });
 
-test('applyGatewayAgentEnv: github-copilot injects COPILOT_PROVIDER_* env', () => {
+test('applyGatewayAgentEnv: github-copilot sets COPILOT_MODEL only (registry in settings.json)', () => {
     const env = applyGatewayAgentEnv('github-copilot', {
         OPENAI_MODEL: 'zxs_deepseek/deepseek-v4-flash',
     }, {
         LLM_ROUTER_URL: 'https://xensemble.dev/api/v1/llm',
         LLM_ROUTER_API_KEY: 'xel_session_token',
     }, []);
-    assert.equal(env.COPILOT_PROVIDER_BASE_URL, 'https://xensemble.dev/api/v1/llm/v1');
-    assert.equal(env.COPILOT_PROVIDER_TYPE, 'openai');
-    assert.equal(env.COPILOT_PROVIDER_API_KEY, 'xel_session_token');
     assert.equal(env.COPILOT_MODEL, 'zxs_deepseek/deepseek-v4-flash');
+    assert.equal(env.COPILOT_PROVIDER_BASE_URL, undefined,
+        'COPILOT_PROVIDER_* must not be set - it conflicts with the providers/models registry in settings.json');
 });
 
-test('applyGatewayAgentEnv: github-copilot skips injection when gateway missing', () => {
-    const env = applyGatewayAgentEnv('github-copilot', { OPENAI_MODEL: 'm' }, {}, []);
-    assert.equal(env.COPILOT_PROVIDER_BASE_URL, undefined);
+test('applyGatewayAgentEnv: github-copilot skips COPILOT_MODEL when no target', () => {
+    const env = applyGatewayAgentEnv('github-copilot', {}, {}, []);
+    assert.equal(env.COPILOT_MODEL, undefined);
 });
 
 test('applyGatewayAgentEnv: codebuddy injects CODEBUDDY_API_KEY to skip login', () => {

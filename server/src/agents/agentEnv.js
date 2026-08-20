@@ -285,16 +285,13 @@ function applyGatewayAgentEnv(agentId, env, platform, envRequired) {
         out.FACTORY_AIRGAP_ENABLED = '1';
     }
     if (agentId === 'github-copilot') {
-        // Copilot CLI BYOK: without COPILOT_PROVIDER_* the CLI requires GitHub
-        // auth (OAuth / PAT) and talks to GitHub's hosted models. Setting these
-        // env vars routes all requests to the gateway with no GitHub login.
-        const routerUrl = platform.LLM_ROUTER_URL?.trim();
-        const routerKey = platform.LLM_ROUTER_API_KEY?.trim();
+        // Copilot gateway mode uses the providers/models registry in
+        // ~/.copilot/settings.json (written by ensureGatewayConfig) instead of
+        // the legacy singular COPILOT_PROVIDER_* env vars. The registry
+        // supports multiple models; the env approach only supports one.
+        // COPILOT_MODEL is still set as the active model override (primary).
         const target = out.OPENAI_MODEL?.trim() || out.LLM_MODEL?.trim();
-        if (routerUrl && routerKey && target) {
-            out.COPILOT_PROVIDER_BASE_URL = `${routerUrl.replace(/\/+$/, '')}/v1`;
-            out.COPILOT_PROVIDER_TYPE = 'openai';
-            out.COPILOT_PROVIDER_API_KEY = routerKey;
+        if (target) {
             out.COPILOT_MODEL = target;
         }
     }
