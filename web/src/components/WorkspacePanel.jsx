@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo, memo, lazy, Suspense, forwardRef, useImperativeHandle } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  FileText, Files, FolderPlus, Plus, PanelLeftClose, PanelLeft, PanelRightClose, PanelRightOpen, Loader2,
+  FileText, Files, FolderPlus, Plus, PanelLeftClose, PanelLeft, Loader2,
   Terminal, Globe, Monitor, GitBranch, GitPullRequest, X, ArrowLeft,
   Trash2, Pencil, ClipboardCopy, FilePlus, Rocket,
 } from 'lucide-react';
@@ -104,8 +104,6 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   onCopyPath,
   deployContent,
   previewDeployInfo,
-  panelOpen,
-  onTogglePanel,
 }, ref) {
   const [showNewFile, setShowNewFile] = useState(false);
   const [showNewFolder, setShowNewFolder] = useState(false);
@@ -468,15 +466,6 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
             <Plus className="h-3.5 w-3.5" />
           </button>
         </div>
-        <button
-          type="button"
-          onClick={onTogglePanel}
-          title={panelOpen ? 'Close workspace panel' : 'Open workspace panel'}
-          aria-label={panelOpen ? 'Close workspace panel' : 'Open workspace panel'}
-          className={`ml-auto p-1.5 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 ${consoleButtonFocusClass}`}
-        >
-          {panelOpen ? <PanelRightClose className="h-4 w-4" strokeWidth={1.75} /> : <PanelRightOpen className="h-4 w-4" strokeWidth={1.75} />}
-        </button>
       </div>
 
       {mainTab === 'files' && (

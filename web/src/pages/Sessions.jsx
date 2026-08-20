@@ -32,6 +32,8 @@ import {
   FileText,
   Loader2,
   Trash2,
+  PanelRightClose,
+  PanelRightOpen,
 } from 'lucide-react';
 import ByokConfigForm from '../components/ByokConfigForm';
 import { formatQuotaExceeded } from '../lib/quotaLabels';
@@ -1240,6 +1242,20 @@ export default React.forwardRef(function Sessions({
                       <PreviewControlGroup {...preview} onAnalyze={() => { panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); }} />
                     </>
                   ) : null}
+                  {activeSession && (
+                    <>
+                      <div className="mx-0.5 h-5 w-px bg-zinc-200" />
+                      <button
+                        type="button"
+                        onClick={() => setPanelOpen((p) => !p)}
+                        title={panelOpen ? 'Hide side panel' : 'Show side panel'}
+                        aria-label={panelOpen ? 'Hide side panel' : 'Show side panel'}
+                        className={consoleIconButtonClass}
+                      >
+                        {panelOpen ? <PanelRightClose className="w-4 h-4" strokeWidth={1.75} /> : <PanelRightOpen className="w-4 h-4" strokeWidth={1.75} />}
+                      </button>
+                    </>
+                  )}
                   </>
                 )}
               </div>

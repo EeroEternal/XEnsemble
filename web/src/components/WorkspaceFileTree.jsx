@@ -95,16 +95,35 @@ function LazyTree({ selectedPath, onOpenFile, projectId, onFetchDir, refreshTrig
   loadedDirsRef.current = loadedDirs;
   const prevRefresh = useRef(refreshTrigger);
 
+  // 首次加载根目录。新建 workspace 时（Import repository / Start session 两阶段进行中）
+  // VM/workspace 可能尚未就绪，首次请求会失败或返回空——此时做少量、短间隔的延迟重试，
+  // 等就绪后自动加载，避免"文件区为空、要刷新页面才显示"。空目录（真没文件）会在重试结束后显示为空。
   useEffect(() => {
     if (!projectId || !onFetchDir) return;
-    setInitialLoading(true);
-    onFetchDir(projectId, '.').then((files) => {
-      setDirChildren({ '.': files });
-      setLoadedDirs(new Set(['.']));
-      setInitialLoading(false);
-    }).catch(() => {
-      setInitialLoading(false);
-    });
+    let cancelled = false;
+    const attempt = (attemptNo) => {
+      onFetchDir(projectId, '.').then((files) => {
+        if (cancelled) return;
+        if (Array.isArray(files) && files.length > 0) {
+          setDirChildren({ '.': files });
+          setLoadedDirs(new Set(['.']));
+          setInitialLoading(false);
+        } else if (attemptNo < 2) {
+          setTimeout(() => attempt(attemptNo + 1), 2000 * (attemptNo + 1));
+        } else {
+          setInitialLoading(false);
+        }
+      }).catch(() => {
+        if (cancelled) return;
+        if (attemptNo < 2) {
+          setTimeout(() => attempt(attemptNo + 1), 2000 * (attemptNo + 1));
+        } else {
+          setInitialLoading(false);
+        }
+      });
+    };
+    attempt(0);
+    return () => { cancelled = true; };
   }, [projectId, onFetchDir]);
 
   // Silent refresh when refreshTrigger changes: re-fetch root + all expanded dirs,

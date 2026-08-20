@@ -2198,7 +2198,11 @@ fastify.get('/api/v1/workspace/files', { preValidation: [fastify.authenticate, f
         const cached = fsListCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) return cached.data;
         const files = await runtime.fs.fsList(ready.workspacePath, relativePath, { runtimeRef: ref, includeHidden, depth });
-        fsListCache.set(cacheKey, { data: files, expiresAt: Date.now() + FS_LIST_CACHE_TTL_MS });
+        // 空结果不缓存：新 workspace 在两阶段（Import repository / Start session）加载过程中，
+        // 首次请求时 VM/workspace 可能尚未就绪而返回空，缓存空结果会挡住就绪后的请求。
+        if (Array.isArray(files) && files.length > 0) {
+            fsListCache.set(cacheKey, { data: files, expiresAt: Date.now() + FS_LIST_CACHE_TTL_MS });
+        }
         return files;
     } catch (err) {
         if (err instanceof RuntimeError) return reply.code(err.statusCode).send({ error: err.message });
