@@ -211,6 +211,7 @@ function AgentConsole({
       if (hostRef.current) hostRef.current.style.opacity = '1';
       if (overlayRef.current) overlayRef.current.style.display = 'none';
       try { terminal.scrollToBottom(); } catch (_) {}
+      try { if (!serverEnded) terminal.focus(); } catch (_) {}
     };
 
     let disposed = false;
@@ -700,6 +701,7 @@ function AgentConsole({
             setConnected(true);
             setEnded(false);
             onSessionConnectedRef.current?.(sessionId);
+            try { if (!serverEnded) terminal.focus(); } catch (_) {}
           };
 
           const handleConnectionFailure = async (reason, failure = {}) => {
