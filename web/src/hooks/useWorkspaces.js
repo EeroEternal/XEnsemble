@@ -239,11 +239,13 @@ export function useWorkspaces(user) {
 
   // activeWorkspaceId follows the active session's project so the sidebar
   // and header stay in sync when a session is selected/restored.
+  // Re-sync even when activeWorkspaceId was reset (e.g. by the deleted-workspace
+  // fallback) so the active session's project always wins.
   useEffect(() => {
-    if (activeSession?.projectId) {
+    if (activeSession?.projectId && activeSession.projectId !== activeWorkspaceId) {
       setActiveWorkspaceId(activeSession.projectId);
     }
-  }, [activeSession?.projectId]);
+  }, [activeSession?.projectId, activeWorkspaceId]);
 
   // Clear the user-switched latch once a session becomes active again.
   useEffect(() => {

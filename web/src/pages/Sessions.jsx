@@ -273,8 +273,7 @@ export default React.forwardRef(function Sessions({
 
   useEffect(() => {
     if (activeSession && !workspaceCreating) setLaunchingSession(false);
-    if (sessionAlive) setSkipPendingSpinner(false);
-  }, [activeSession, workspaceCreating, sessionAlive]);
+  }, [activeSession, workspaceCreating]);
 
   useEffect(() => {
     if (!activeSession?.projectId) {
@@ -1063,6 +1062,7 @@ export default React.forwardRef(function Sessions({
     setSessions((prev) => prev.map((s) => (
       s.id === sessionId ? { ...s, alive: true, status: 'running', memoryStatus: 'running' } : s
     )));
+    setSkipPendingSpinner(false);
     fetchWorkspaces();
   }, [fetchWorkspaces, setSessions]);
 
