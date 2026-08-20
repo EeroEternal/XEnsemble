@@ -310,7 +310,7 @@ async function resumeSession({
                 userId: requestUser.id,
                 projectId: project.id,
                 agentId: agentMeta.id,
-                model: gwCfg?.model,
+                model: agentGatewayConfig.primaryModel(gwCfg),
                 role: requestUser.role,
             });
         }

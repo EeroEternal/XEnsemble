@@ -43,7 +43,16 @@ async function getAgentAuthMode(agentId) {
     return DEFAULT_AUTH_MODE;
 }
 
-async function setForAgent(agentId, { llm_auth_mode, provider, model, env_overrides } = {}) {
+function primaryModel(cfg) {
+    if (!cfg?.model) return '';
+    if (Array.isArray(cfg.model)) {
+        const first = cfg.model.find((m) => m && String(m).trim());
+        return first ? String(first).trim() : '';
+    }
+    return String(cfg.model).trim();
+}
+
+async function setForAgent(agentId, { llm_auth_mode, provider, model } = {}) {
     const all = await getAll();
     const next = { ...(all[agentId] || {}) };
 
@@ -58,23 +67,17 @@ async function setForAgent(agentId, { llm_auth_mode, provider, model, env_overri
     }
 
     if (model !== undefined) {
-        const trimmed = model != null ? String(model).trim() : '';
-        if (trimmed) next.model = trimmed;
-        else delete next.model;
-    }
-
-    if (env_overrides !== undefined) {
-        const cleaned = {};
-        if (env_overrides && typeof env_overrides === 'object') {
-            for (const [key, raw] of Object.entries(env_overrides)) {
-                const k = (key || '').trim();
-                if (!k) continue;
-                const trimmed = raw != null ? String(raw).trim() : '';
-                cleaned[k] = trimmed;
-            }
+        if (Array.isArray(model)) {
+            const cleaned = model
+                .map((m) => (m != null ? String(m).trim() : ''))
+                .filter(Boolean);
+            if (cleaned.length > 0) next.model = cleaned;
+            else delete next.model;
+        } else {
+            const trimmed = model != null ? String(model).trim() : '';
+            if (trimmed) next.model = trimmed;
+            else delete next.model;
         }
-        if (Object.keys(cleaned).length > 0) next.env_overrides = cleaned;
-        else delete next.env_overrides;
     }
 
     if (Object.keys(next).length === 0) {
@@ -112,4 +115,5 @@ module.exports = {
     getForAgent,
     getAgentAuthMode,
     setForAgent,
+    primaryModel,
 };

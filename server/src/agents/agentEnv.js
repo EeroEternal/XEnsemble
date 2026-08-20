@@ -41,23 +41,8 @@ const KIMI_CODE_AGENT_IDS = new Set(['kimi-code']);
 const KIMI_CODE_DEFAULT_MAX_CONTEXT = String(256 * 1024);
 const OPENCODE_AGENT_IDS = new Set(['opencode']);
 
-// When an env_overrides key is present (non-empty), these env_required keys
-// are suppressed because the agent will use the override instead.
-// E.g. claude-code: if ANTHROPIC_AUTH_TOKEN is set, ANTHROPIC_API_KEY is
-// unnecessary and would take priority over AUTH_TOKEN if left in env.
-const ENV_OVERRIDE_SUPPRESS = {
-    ANTHROPIC_AUTH_TOKEN: ['ANTHROPIC_API_KEY'],
-};
-
-function computeEffectiveRequired(envRequired, cfg) {
-    const overrideKeys = new Set(Object.keys(cfg?.env_overrides || {}));
-    const suppressed = new Set();
-    for (const [overrideKey, reqKeys] of Object.entries(ENV_OVERRIDE_SUPPRESS)) {
-        if (cfg?.env_overrides?.[overrideKey]?.trim()) {
-            for (const k of reqKeys) suppressed.add(k);
-        }
-    }
-    return envRequired.filter((k) => !overrideKeys.has(k) && !suppressed.has(k));
+function computeEffectiveRequired(envRequired) {
+    return envRequired;
 }
 
 const GATEWAY_API_KEY_KEYS = [
@@ -227,8 +212,9 @@ function composeGatewayModelTarget(provider, model) {
 
 async function applyAgentGatewayModel(agentId, env) {
     const cfg = await agentGatewayConfig.getForAgent(agentId);
-    if (!cfg?.model?.trim()) return env;
-    const target = composeGatewayModelTarget(cfg.provider, cfg.model);
+    const model = agentGatewayConfig.primaryModel(cfg);
+    if (!model) return env;
+    const target = composeGatewayModelTarget(cfg.provider, model);
     const out = { ...env };
     for (const key of GATEWAY_MODEL_ENV_KEYS) {
         out[key] = target;
@@ -289,17 +275,6 @@ function applyGatewayAgentEnv(agentId, env, platform, envRequired) {
     return out;
 }
 
-function applyAgentEnvOverrides(env, cfg) {
-    if (!cfg?.env_overrides) return env;
-    const out = { ...env };
-    for (const [key, raw] of Object.entries(cfg.env_overrides)) {
-        const trimmed = raw != null ? String(raw).trim() : '';
-        if (trimmed) out[key] = trimmed;
-        else delete out[key];
-    }
-    return out;
-}
-
 async function resolveTerminalThemeContext({ userId, terminalThemeId, warn } = {}) {
     const settings = await platformSettings.getAll();
     const disabledIds = settings.disabled_terminal_theme_ids || [];
@@ -326,20 +301,18 @@ function resolveTerminalSpawnEnv(themeId) {
     return terminalThemes.getThemeSpawnEnv(themeId);
 }
 
-function mergeSpawnEnvLayers({ platformSpawnEnv, themeSpawnEnv, secretEnv, cfg }) {
+function mergeSpawnEnvLayers({ platformSpawnEnv, themeSpawnEnv, secretEnv }) {
     // Priority (lowest to highest), per desktop/docs/terminal-theme-server-requirements.md §5:
     //   1. platform/theme spawn env
     //   2. agent env_required secrets (BYOK / gateway vault)
-    //   3. admin env_overrides (highest -- admin can force settings like COLORFGBG)
-    let env = {
+    return {
         ...platformSpawnEnv,
         ...themeSpawnEnv,
         ...secretEnv,
     };
-    return applyAgentEnvOverrides(env, cfg);
 }
 
-async function buildGatewaySpawnEnv(agentId, envRequired, { draftModel, draftProvider, draftEnvOverrides, sessionToken, forPreview = false } = {}) {
+async function buildGatewaySpawnEnv(agentId, envRequired, { draftModel, draftProvider, sessionToken, forPreview = false } = {}) {
     const [cfg, platform] = await Promise.all([
         agentGatewayConfig.getForAgent(agentId),
         (async () => {
@@ -347,10 +320,10 @@ async function buildGatewaySpawnEnv(agentId, envRequired, { draftModel, draftPro
             return applyGatewaySynthesis(secrets);
         })(),
     ]);
-    const model = (draftModel ?? cfg?.model ?? '').trim();
+    const model = (draftModel ?? agentGatewayConfig.primaryModel(cfg) ?? '').trim();
     const provider = (draftProvider ?? cfg?.provider ?? '').trim();
 
-    const effectiveRequired = computeEffectiveRequired(envRequired, cfg);
+    const effectiveRequired = computeEffectiveRequired(envRequired);
     let env = pickEnvRequired(platform, effectiveRequired);
     if (model) {
         env = { ...env };
@@ -365,12 +338,6 @@ async function buildGatewaySpawnEnv(agentId, envRequired, { draftModel, draftPro
         OPENROUTER_API_KEY: env.OPENROUTER_API_KEY || platform.OPENROUTER_API_KEY || '',
         OPENROUTER_BASE_URL: env.OPENROUTER_BASE_URL || platform.OPENROUTER_BASE_URL || openRouterCompatibleBaseUrl(platform.LLM_ROUTER_URL) || '',
     };
-
-    if (draftEnvOverrides && typeof draftEnvOverrides === 'object') {
-        env = applyAgentEnvOverrides(env, { env_overrides: draftEnvOverrides });
-    } else {
-        env = applyAgentEnvOverrides(env, cfg);
-    }
 
     if (KIMI_CODE_AGENT_IDS.has(agentId)) {
         env = applyKimiCodeGatewayEnv(env);
@@ -396,14 +363,13 @@ async function resolveSpawnEnv({ userId, agentId, envRequired, sessionToken, pro
         ? cfg.llm_auth_mode
         : 'byok';
 
-    const effectiveRequired = computeEffectiveRequired(envRequired, cfg);
+    const effectiveRequired = computeEffectiveRequired(envRequired);
 
     const finish = (secretEnv, missing = []) => {
         const env = mergeSpawnEnvLayers({
             platformSpawnEnv: themeCtx.platformSpawnEnv,
             themeSpawnEnv: themeCtx.themeSpawnEnv,
             secretEnv,
-            cfg,
         });
         return {
             mode,
@@ -493,10 +459,10 @@ async function isAgentKeysReady(envRequired, userId, agentId) {
         ? cfg.llm_auth_mode
         : 'byok';
     if (mode === 'gateway') {
-        if (!cfg?.model?.trim()) return false;
+        if (!agentGatewayConfig.primaryModel(cfg)) return false;
         return Boolean(await resolveExternalGatewayUrl()) || unigateway.getStatus().running;
     }
-    const effectiveRequired = computeEffectiveRequired(envRequired, cfg);
+    const effectiveRequired = computeEffectiveRequired(envRequired);
     if (effectiveRequired.length === 0) return true;
     const user = await getUserSecrets(userId);
     return findMissing(pickEnvRequired(user, effectiveRequired), effectiveRequired).length === 0;
@@ -517,7 +483,7 @@ function describeGatewayEnvSource(key) {
     return 'Platform gateway';
 }
 
-async function previewGatewaySpawnEnv(agentId, { envRequired = [], cmd, args = [], draftModel, draftProvider, draftEnvOverrides, draftAuthMode } = {}) {
+async function previewGatewaySpawnEnv(agentId, { envRequired = [], cmd, args = [], draftModel, draftProvider, draftAuthMode } = {}) {
     const cfg = await agentGatewayConfig.getForAgent(agentId);
     const savedMode = (cfg?.llm_auth_mode === 'gateway' || cfg?.llm_auth_mode === 'byok')
         ? cfg.llm_auth_mode
@@ -538,7 +504,6 @@ async function previewGatewaySpawnEnv(agentId, { envRequired = [], cmd, args = [
     const { env, model, platform, defaults } = await buildGatewaySpawnEnv(agentId, envRequired, {
         draftModel,
         draftProvider,
-        draftEnvOverrides,
         forPreview: true,
     });
     const routerUrl = platform.LLM_ROUTER_URL?.trim() || '';
@@ -606,7 +571,6 @@ module.exports = {
     resolveTerminalSpawnEnv,
     resolveTerminalThemeContext,
     mergeSpawnEnvLayers,
-    applyAgentEnvOverrides,
     applyGatewayAgentEnv,
     computeEffectiveRequired,
     isAgentKeysReady,

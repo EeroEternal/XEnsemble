@@ -346,7 +346,7 @@ fastify.get('/api/v1/agents', { preValidation: [fastify.authenticate] }, async (
             ...formatAgentRow(a),
             env_required: effectiveRequired,
             llm_auth_mode: authMode,
-            gateway_model: cfg?.model || null,
+            gateway_model: agentGatewayConfig.primaryModel(cfg) || null,
         };
     });
 });
@@ -1347,7 +1347,7 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
             userId: request.user.id,
             projectId: project_id,
             agentId: agentMeta.id,
-            model: gwCfg?.model,
+            model: agentGatewayConfig.primaryModel(gwCfg),
             role: request.user.role,
         });
     }

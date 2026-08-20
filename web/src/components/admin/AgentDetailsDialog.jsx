@@ -55,9 +55,11 @@ export default function AgentDetailsDialog({ agent, onClose }) {
   if (!agent) return null;
 
   const auth = getAuthSummary(agent);
-  const model = agent.llm_auth_mode === 'gateway' && agent.gateway_config?.model
-    ? agent.gateway_config.model
-    : '-';
+  const rawModel = agent.llm_auth_mode === 'gateway' ? agent.gateway_config?.model : null;
+  const modelList = Array.isArray(rawModel)
+    ? rawModel.map((m) => String(m || '').trim()).filter(Boolean)
+    : (rawModel ? [String(rawModel).trim()] : []);
+  const model = modelList.length > 0 ? modelList.join(', ') : '-';
   const executable = [agent.cmd, ...(agent.args || [])].filter(Boolean).join(' ') || '-';
   const path = agent.executable_path_display || agent.executable_path || '-';
 

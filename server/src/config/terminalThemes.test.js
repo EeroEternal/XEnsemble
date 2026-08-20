@@ -7,7 +7,6 @@ const {
 } = require('./terminalThemes');
 const {
     mergeSpawnEnvLayers,
-    applyAgentEnvOverrides,
 } = require('../agents/agentEnv');
 
 describe('terminalThemes', () => {
@@ -77,23 +76,14 @@ describe('terminalThemes', () => {
 });
 
 describe('mergeSpawnEnvLayers', () => {
-    it('merges platform theme, user theme, secrets, then env_overrides', () => {
+    it('merges platform theme, user theme, then secrets', () => {
         const env = mergeSpawnEnvLayers({
             platformSpawnEnv: { COLORFGBG: '15;0', COLORTERM: 'truecolor' },
             themeSpawnEnv: { COLORFGBG: '15;0' },
             secretEnv: { ANTHROPIC_API_KEY: 'sk-test' },
-            cfg: { env_overrides: { COLORFGBG: '0;15' } },
         });
-        assert.equal(env.COLORFGBG, '0;15');
+        assert.equal(env.COLORFGBG, '15;0');
         assert.equal(env.COLORTERM, 'truecolor');
         assert.equal(env.ANTHROPIC_API_KEY, 'sk-test');
-    });
-
-    it('applyAgentEnvOverrides merges BYOK-style overrides', () => {
-        const env = applyAgentEnvOverrides(
-            { COLORFGBG: '15;0' },
-            { env_overrides: { COLORFGBG: '0;15' } },
-        );
-        assert.equal(env.COLORFGBG, '0;15');
     });
 });

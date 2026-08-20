@@ -332,7 +332,7 @@ function registerAdminRoutes(fastify) {
             const llmAuthMode = await agentGatewayConfig.getAgentAuthMode(row.id);
             let keysReady = true;
             if (llmAuthMode === 'gateway') {
-                keysReady = Boolean(cfg?.model?.trim())
+                keysReady = Boolean(agentGatewayConfig.primaryModel(cfg))
                     && (envRequired.length === 0
                         || findMissing(
                             Object.fromEntries(envRequired.map((k) => [k, platformSynth[k] || ''])),
@@ -408,14 +408,6 @@ function registerAdminRoutes(fastify) {
         const draftModel = request.query?.model;
         const draftProvider = request.query?.provider;
         const draftAuthMode = request.query?.llm_auth_mode;
-        let draftEnvOverrides;
-        if (typeof request.query?.env_overrides === 'string' && request.query.env_overrides.trim()) {
-            try {
-                draftEnvOverrides = JSON.parse(request.query.env_overrides);
-            } catch {
-                return reply.code(400).send({ error: 'Invalid env_overrides query JSON' });
-            }
-        }
         try {
             return await previewGatewaySpawnEnv(row.id, {
                 envRequired: JSON.parse(row.envRequired),
@@ -424,7 +416,6 @@ function registerAdminRoutes(fastify) {
                 draftModel: typeof draftModel === 'string' ? draftModel : undefined,
                 draftProvider: typeof draftProvider === 'string' ? draftProvider : undefined,
                 draftAuthMode: typeof draftAuthMode === 'string' ? draftAuthMode : undefined,
-                draftEnvOverrides,
             });
         } catch (err) {
             return sendPublicError(reply, err, 'Failed to preview gateway spawn env', 500);

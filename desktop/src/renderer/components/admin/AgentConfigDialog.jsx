@@ -1,20 +1,15 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Button from '../Button';
 import Input from '../Input';
 import SelectMenu from '../SelectMenu';
+import MultiSelectMenu from '../MultiSelectMenu';
 import { ConsoleDialogShell } from '../ConsoleDialog';
 import { useToast } from '../Toast';
 import {
   consoleDialogAdminFormPanelClass,
   consoleSectionLabelClass,
 } from '../../lib/consoleTheme';
-import { isSecretPasswordField } from '../../lib/secretLabels';
 import { apiFetch } from '../../lib/api';
-
-const EMPTY_SPAWN_DRAFT = {
-  envVars: [{ key: '', value: '' }],
-  launch_command: '',
-};
 
 function SectionDivider({ children }) {
   return <div className="border-t border-zinc-100 pt-4">{children}</div>;
@@ -24,32 +19,23 @@ function SectionLabel({ children }) {
   return <p className={`${consoleSectionLabelClass} mb-2`}>{children}</p>;
 }
 
+function normalizeModels(model) {
+  if (Array.isArray(model)) return model.map((m) => String(m || '').trim()).filter(Boolean);
+  if (model) return [String(model).trim()];
+  return [];
+}
+
 export default function AgentConfigDialog({ agent, gatewayProviders, onClose, onSaved }) {
   const { showToast } = useToast();
-  const [authDraft, setAuthDraft] = useState({ llm_auth_mode: 'byok', provider: '', model: '' });
+  const [authDraft, setAuthDraft] = useState({ llm_auth_mode: 'byok', provider: '', model: [] });
   const [savingKeys, setSavingKeys] = useState(false);
   const [gatewayPreview, setGatewayPreview] = useState(null);
   const [gatewayPreviewLoading, setGatewayPreviewLoading] = useState(false);
-  const [spawnDraft, setSpawnDraft] = useState(EMPTY_SPAWN_DRAFT);
-  const spawnHydratedRef = useRef(false);
   const [vmResources, setVmResources] = useState({ disk_size_gb: '', cpus: '', memory_mib: '' });
-  const [vmResourcesLoaded, setVmResourcesLoaded] = useState(false);
-  const [savingVmResources, setSavingVmResources] = useState(false);
 
   useEffect(() => {
     if (!agent) return;
-
-    spawnHydratedRef.current = false;
-    const overrides = agent.gateway_config?.env_overrides || {};
-    const envVars = Object.keys(overrides).length > 0
-      ? Object.entries(overrides).map(([key, value]) => ({ key, value }))
-      : [{ key: '', value: '' }];
-    setSpawnDraft({
-      envVars,
-      launch_command: [agent.cmd, ...(agent.args || [])].filter(Boolean).join(' '),
-    });
     setVmResources({ disk_size_gb: '', cpus: '', memory_mib: '' });
-    setVmResourcesLoaded(false);
     apiFetch(`/api/v1/admin/agents/${agent.id}/vm-resources`)
       .then((r) => r.json())
       .then((data) => {
@@ -60,21 +46,21 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
             memory_mib: data.vm_resources.memory_mib != null ? String(data.vm_resources.memory_mib) : '',
           });
         }
-        setVmResourcesLoaded(true);
       })
-      .catch(() => setVmResourcesLoaded(true));
+      .catch(() => {});
     setAuthDraft({
       llm_auth_mode: agent.llm_auth_mode || agent.gateway_config?.llm_auth_mode || 'byok',
       provider: agent.gateway_config?.provider || '',
-      model: agent.gateway_config?.model || '',
+      model: normalizeModels(agent.gateway_config?.model),
     });
   }, [agent]);
 
-  const fetchGatewayPreview = useCallback(async (agentId, model, llmAuthMode) => {
+  const fetchGatewayPreview = useCallback(async (agentId, models, llmAuthMode) => {
     setGatewayPreviewLoading(true);
     try {
       const params = new URLSearchParams();
-      if (model?.trim()) params.set('model', model.trim());
+      const firstModel = Array.isArray(models) ? (models[0] || '') : models;
+      if (firstModel?.trim()) params.set('model', firstModel.trim());
       if (llmAuthMode) params.set('llm_auth_mode', llmAuthMode);
       const qs = params.toString();
       const res = await apiFetch(`/api/v1/admin/agents/${agentId}/gateway-spawn-preview${qs ? `?${qs}` : ''}`);
@@ -97,15 +83,6 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
   }, [agent, authDraft.llm_auth_mode, authDraft.model, fetchGatewayPreview]);
 
   useEffect(() => {
-    if (!gatewayPreview || spawnHydratedRef.current) return;
-    spawnHydratedRef.current = true;
-    setSpawnDraft((prev) => ({
-      ...prev,
-      launch_command: prev.launch_command || gatewayPreview.launch?.command_line || '',
-    }));
-  }, [gatewayPreview]);
-
-  useEffect(() => {
     if (gatewayProviders.length === 0) return;
     setAuthDraft((d) => {
       if (d.llm_auth_mode === 'gateway' && !d.provider) {
@@ -115,16 +92,6 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
     });
   }, [gatewayProviders]);
 
-  const buildEnvOverridesPayload = () => {
-    const out = {};
-    for (const { key, value } of spawnDraft.envVars) {
-      const k = (key || '').trim();
-      if (!k) continue;
-      out[k] = (value || '').trim();
-    }
-    return out;
-  };
-
   const handleSave = async (e) => {
     e.preventDefault();
     if (!agent) return;
@@ -133,13 +100,8 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
       showToast('error', 'Select a provider for gateway mode.');
       return;
     }
-    if (mode === 'gateway' && !authDraft.model?.trim()) {
-      showToast('error', 'Select a model for gateway mode.');
-      return;
-    }
-    const launchLine = spawnDraft.launch_command.trim();
-    if (mode === 'gateway' && !launchLine) {
-      showToast('error', 'Launch command is required.');
+    if (mode === 'gateway' && authDraft.model.length === 0) {
+      showToast('error', 'Select at least one model for gateway mode.');
       return;
     }
     setSavingKeys(true);
@@ -149,27 +111,11 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
         body: JSON.stringify({
           llm_auth_mode: mode,
           provider: mode === 'gateway' ? (authDraft.provider || undefined) : undefined,
-          model: mode === 'gateway' ? authDraft.model.trim() : undefined,
-          env_overrides: buildEnvOverridesPayload(),
+          model: mode === 'gateway' ? authDraft.model : undefined,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-
-      if (mode === 'gateway') {
-        const parts = launchLine.split(/\s+/);
-        const cmd = parts[0];
-        const args = parts.slice(1);
-        const currentLine = [agent.cmd, ...(agent.args || [])].filter(Boolean).join(' ');
-        if (launchLine !== currentLine) {
-          const execRes = await apiFetch(`/api/v1/agents/${agent.id}`, {
-            method: 'PUT',
-            body: JSON.stringify({ cmd, args }),
-          });
-          const execData = await execRes.json();
-          if (!execRes.ok) throw new Error(execData.error);
-        }
-      }
 
       if (data.warning) {
         showToast('warning', data.warning, { durationMs: 12000 });
@@ -181,7 +127,6 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
       const memMb = vmResources.memory_mib.trim();
       if (diskGb || cpus || memMb) {
         try {
-          setSavingVmResources(true);
           const body = {};
           if (diskGb) body.disk_size_gb = Number(diskGb);
           if (cpus) body.cpus = Number(cpus);
@@ -192,9 +137,7 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
           });
           const vrData = await vrRes.json();
           if (!vrRes.ok) throw new Error(vrData.error);
-          setSavingVmResources(false);
         } catch (err) {
-          setSavingVmResources(false);
           showToast('error', 'VM resources saved, but: ' + (err.message || 'failed'));
         }
       }
@@ -209,7 +152,7 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
 
   const canSave = agent && (
     authDraft.llm_auth_mode === 'gateway'
-      ? Boolean(authDraft.model?.trim())
+      ? authDraft.model.length > 0
       : true
   );
 
@@ -251,7 +194,7 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
               ...d,
               llm_auth_mode: v,
               provider: v === 'gateway' ? (d.provider || gatewayProviders[0]?.name || '') : '',
-              model: v === 'gateway' ? d.model : '',
+              model: v === 'gateway' ? d.model : [],
             }))}
             options={[
               { value: 'byok', label: 'BYOK' },
@@ -269,18 +212,18 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
                 <label className={`block mb-1 ${consoleSectionLabelClass}`}>Provider</label>
                 <SelectMenu
                   value={authDraft.provider}
-                  onChange={(v) => setAuthDraft((d) => ({ ...d, provider: v, model: '' }))}
+                  onChange={(v) => setAuthDraft((d) => ({ ...d, provider: v, model: [] }))}
                   options={providerOptions}
                   placeholder="Any provider"
                 />
               </div>
               <div>
                 <label className={`block mb-1 ${consoleSectionLabelClass}`}>Model</label>
-                <SelectMenu
+                <MultiSelectMenu
                   value={authDraft.model}
-                  onChange={(v) => setAuthDraft((d) => ({ ...d, model: v }))}
+                  onChange={(vals) => setAuthDraft((d) => ({ ...d, model: vals }))}
                   options={modelOptions}
-                  placeholder={modelOptions.length ? 'Select model...' : 'Add models in Settings - Gateway'}
+                  placeholder={modelOptions.length ? 'Select models...' : 'Add models in Settings - Gateway'}
                   disabled={modelOptions.length === 0}
                 />
               </div>
@@ -292,76 +235,9 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
                   UniGateway is not running. Start it under Settings - Gateway.
                 </p>
               )}
-              <div>
-                <label className={`block mb-1 ${consoleSectionLabelClass}`}>Launch command</label>
-                <Input
-                  value={spawnDraft.launch_command}
-                  onChange={(ev) => setSpawnDraft((d) => ({ ...d, launch_command: ev.target.value }))}
-                  className="h-9 py-1.5 font-mono"
-                  placeholder="hermes chat --ignore-user-config --provider openrouter"
-                />
-                <p className="mt-1 text-xs text-zinc-400">Command and arguments used when launching this agent.</p>
-              </div>
             </div>
           </SectionDivider>
         )}
-
-        {/* Section: Environment variables */}
-        <SectionDivider>
-          <div className="space-y-3">
-            <SectionLabel>Environment variables</SectionLabel>
-            <p className="text-xs text-zinc-400">
-              Injected at session start in both BYOK and Gateway modes. Highest priority, overrides all other env sources. Leave value empty to clear a key (e.g. ANTHROPIC_API_KEY) so lower-priority sources won't inject it.
-            </p>
-            {spawnDraft.envVars.map((pair, idx) => (
-              <div key={idx} className="flex gap-2 items-center">
-                <Input
-                  value={pair.key}
-                  onChange={(ev) => setSpawnDraft((d) => ({
-                    ...d,
-                    envVars: d.envVars.map((p, i) => i === idx ? { ...p, key: ev.target.value } : p),
-                  }))}
-                  className="h-9 py-1.5 font-mono text-xs flex-1 min-w-0 w-1/2"
-                  placeholder="ENV_VAR_NAME"
-                />
-                <Input
-                  type={isSecretPasswordField(pair.key) ? 'password' : 'text'}
-                  value={pair.value}
-                  onChange={(ev) => setSpawnDraft((d) => ({
-                    ...d,
-                    envVars: d.envVars.map((p, i) => i === idx ? { ...p, value: ev.target.value } : p),
-                  }))}
-                  className="h-9 py-1.5 font-mono text-xs flex-1 min-w-0 w-1/2"
-                  placeholder="value"
-                />
-                <button
-                  type="button"
-                  onClick={() => setSpawnDraft((d) => ({
-                    ...d,
-                    envVars: d.envVars.filter((_, i) => i !== idx),
-                  }))}
-                  className="flex-shrink-0 text-zinc-400 hover:text-red-500"
-                  title="Remove"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setSpawnDraft((d) => ({
-                ...d,
-                envVars: [...d.envVars, { key: '', value: '' }],
-              }))}
-              className="text-sm text-zinc-500 hover:text-zinc-700"
-            >
-              + Add env var
-            </button>
-          </div>
-        </SectionDivider>
 
         {/* Section: BYOK hint (conditional) */}
         {authDraft.llm_auth_mode === 'byok' && (
