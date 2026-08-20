@@ -8,6 +8,10 @@ import {
   consoleMenuDropdownZClass,
   consoleInputClass,
   borderHairline,
+  bgSecondary,
+  textPrimary,
+  hoverBgTertiary,
+  transitionBase,
 } from '../../lib/consoleTokens';
 
 export const GIT_REPO_PROVIDERS = new Set(['github', 'gitlab', 'gitea', 'local_git']);
@@ -92,7 +96,9 @@ export default function BranchSwitcher({ projectId, project, git }) {
           onClick={openMenu}
           disabled={operation === 'switch'}
           title="Switch branch"
-          className={`flex items-center gap-1 max-w-[14rem] truncate font-mono text-[15px] font-semibold text-zinc-900 hover:text-zinc-500 transition-colors ${consoleButtonFocusClass}`}
+          className={`flex items-center gap-1 max-w-[14rem] truncate rounded-md px-2 py-1 text-[13px] font-medium ${transitionBase} ${consoleButtonFocusClass} ${
+            menuOpen ? `${bgSecondary} ${textPrimary}` : `text-zinc-700 ${hoverBgTertiary}`
+          } disabled:opacity-50`}
         >
           {operation === 'switch' ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -139,7 +145,7 @@ export default function BranchSwitcher({ projectId, project, git }) {
                   <span className="w-3.5 shrink-0 flex items-center justify-center">
                     {isCurrent && <Check className="h-3 w-3" strokeWidth={2.5} />}
                   </span>
-                  <span className="truncate font-mono">{b.name}</span>
+                  <span className="truncate">{b.name}</span>
                 </button>
               );
             })
