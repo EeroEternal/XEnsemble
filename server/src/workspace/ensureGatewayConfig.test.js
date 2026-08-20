@@ -148,14 +148,14 @@ test('kimi-code is in GATEWAY_CONFIG_AGENTS', () => {
     assert.ok(GATEWAY_CONFIG_AGENTS.has('kimi-code'), 'kimi-code must be in GATEWAY_CONFIG_AGENTS');
 });
 
-test('buildGatewayConfigSpec: kimi-code writes ~/.kimi/config.toml with all models', () => {
+test('buildGatewayConfigSpec: kimi-code writes config.toml to stateDirPath (not ~/.kimi)', () => {
     const spec = buildGatewayConfigSpec('kimi-code', {
         ...ctx,
         modelTargets: ['deepseek/deepseek-v4-flash', 'zxs/qwen-max'],
         defaultTarget: 'deepseek/deepseek-v4-flash',
     });
-    assert.equal(spec.filePath, '$HOME/.kimi/config.toml');
-    assert.equal(spec.dirPath, '$HOME/.kimi');
+    assert.equal(spec.filePath, '/workspace/.xensemble/state/sess_test/config.toml');
+    assert.equal(spec.dirPath, '/workspace/.xensemble/state/sess_test');
     const toml = spec.content;
     assert.match(toml, /default_model = "gateway-0"/);
     assert.match(toml, /\[providers\.gateway\]/);
@@ -163,6 +163,7 @@ test('buildGatewayConfigSpec: kimi-code writes ~/.kimi/config.toml with all mode
     assert.match(toml, /base_url = "https:\/\/xensemble\.dev\/api\/v1\/llm\/v1"/);
     assert.match(toml, /\[models\.gateway-0\][\s\S]*model = "deepseek\/deepseek-v4-flash"/);
     assert.match(toml, /\[models\.gateway-1\][\s\S]*model = "zxs\/qwen-max"/);
+    assert.doesNotMatch(toml, /HOME\/\.kimi/);
 });
 
 test('buildGatewayConfigSpec: kimi-code single target (back-compat) registers one model', () => {
