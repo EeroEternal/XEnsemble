@@ -17,6 +17,8 @@ let registerLlmProxy;
 const TEST_SESSION_ID = 'sess_proxy_models_test';
 const TEST_AGENT_ID = 'proxy-models-test';
 const TEST_PROJECT_ID = 'proj_proxy_models_test';
+const TEST_SESSION_ID_NO_CONFIG = 'sess_proxy_models_noconfig';
+const TEST_AGENT_ID_NO_CONFIG = 'proxy-models-noconfig';
 
 const GATEWAY_MODELS = {
     object: 'list',
@@ -98,6 +100,16 @@ describe('LLM proxy /v1/models', () => {
                 envRequired: '[]',
             });
         }
+        const noConfigAgentRows = await db.select().from(schema.agents).where(eq(schema.agents.id, TEST_AGENT_ID_NO_CONFIG));
+        if (noConfigAgentRows.length === 0) {
+            await db.insert(schema.agents).values({
+                id: TEST_AGENT_ID_NO_CONFIG,
+                name: 'Proxy Models NoConfig',
+                cmd: 'proxy-models-noconfig',
+                args: '[]',
+                envRequired: '[]',
+            });
+        }
         await db.delete(schema.projects).where(eq(schema.projects.id, TEST_PROJECT_ID));
         await db.insert(schema.projects).values({
             id: TEST_PROJECT_ID,
@@ -131,6 +143,17 @@ describe('LLM proxy /v1/models', () => {
             createdAt: Date.now(),
         });
 
+        await db.delete(schema.sessions).where(eq(schema.sessions.id, TEST_SESSION_ID_NO_CONFIG));
+        await db.insert(schema.sessions).values({
+            id: TEST_SESSION_ID_NO_CONFIG,
+            userId: testUserId,
+            projectId: TEST_PROJECT_ID,
+            agentId: TEST_AGENT_ID_NO_CONFIG,
+            cwd: '/tmp',
+            status: 'running',
+            createdAt: Date.now(),
+        });
+
         app = fastify({ logger: false });
         await registerLlmProxy(app);
         await app.listen({ port: 0, host: '127.0.0.1' });
@@ -148,10 +171,12 @@ describe('LLM proxy /v1/models', () => {
             process.env.LLM_GATEWAY_UPSTREAM_URL = originalUpstreamUrl;
         }
         await db.delete(schema.sessions).where(eq(schema.sessions.id, TEST_SESSION_ID));
+        await db.delete(schema.sessions).where(eq(schema.sessions.id, TEST_SESSION_ID_NO_CONFIG));
         await db.delete(schema.projects).where(eq(schema.projects.id, TEST_PROJECT_ID));
         if (insertedAgent) {
             await db.delete(schema.agents).where(eq(schema.agents.id, TEST_AGENT_ID));
         }
+        await db.delete(schema.agents).where(eq(schema.agents.id, TEST_AGENT_ID_NO_CONFIG));
         const cfgRows = await db
             .select()
             .from(schema.platformSettings)
@@ -167,7 +192,7 @@ describe('LLM proxy /v1/models', () => {
         if (ctx) await ctx.teardown();
     });
 
-    it('forwards /v1/models to the gateway and passes the catalog through', { timeout: 15000 }, async () => {
+    it('answers /v1/models locally with the agent configured models', { timeout: 15000 }, async () => {
         const token = issueSessionToken({
             sessionId: TEST_SESSION_ID,
             userId: testUserId,
@@ -184,10 +209,34 @@ describe('LLM proxy /v1/models', () => {
         assert.equal(res.status, 200, rawBody);
         const body = JSON.parse(rawBody);
         assert.equal(body.object, 'list');
+        assert.ok(body.data.some((m) => m.id === 'deepseek/deepseek-v4-flash'), rawBody);
+
+        // Configured models are served locally; the request must NOT reach the upstream gateway.
+        const modelsCall = received.find((r) => r.method === 'GET' && r.url === '/v1/models');
+        assert.equal(modelsCall, undefined, 'gateway must not receive GET /v1/models when models are configured');
+    });
+
+    it('forwards /v1/models to the gateway when no models are configured', { timeout: 15000 }, async () => {
+        const token = issueSessionToken({
+            sessionId: TEST_SESSION_ID_NO_CONFIG,
+            userId: testUserId,
+            projectId: TEST_PROJECT_ID,
+            agentId: TEST_AGENT_ID_NO_CONFIG,
+            role: 'admin',
+        });
+
+        received.length = 0;
+        const res = await fetch(`${appBaseUrl}/api/v1/llm/v1/models`, {
+            headers: { authorization: `Bearer ${token}` },
+        });
+
+        const rawBody = await res.text();
+        assert.equal(res.status, 200, rawBody);
+        const body = JSON.parse(rawBody);
+        assert.equal(body.object, 'list');
         assert.ok(body.data.some((m) => m.id === 'deepseek/deepseek-v4-flash'));
 
-        // The request must actually reach the gateway with the per-agent key,
-        // rather than being answered locally.
+        // No configured models -> fall through to the upstream gateway with the per-agent key.
         const modelsCall = received.find((r) => r.method === 'GET' && r.url === '/v1/models');
         assert.ok(modelsCall, 'gateway should receive GET /v1/models');
         assert.ok(modelsCall.authorization?.startsWith('Bearer '));

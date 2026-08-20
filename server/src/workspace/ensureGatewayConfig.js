@@ -141,6 +141,8 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             // Default provider is "cline" (cline's own API); must override the
             // "openai-compatible" provider to point at the gateway, otherwise
             // cline requests go to api.openai.com and reject the session token.
+            // The provider `models` record enumerates selectable models so /model
+            // offers every configured gateway model (not just the default).
             return {
                 dirPath: `${stateDirPath}/settings`,
                 filePath: `${stateDirPath}/settings/providers.json`,
@@ -152,6 +154,7 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                             settings: {
                                 provider: 'openai-compatible',
                                 model: def,
+                                models: Object.fromEntries(targets.map((t) => [t, { id: t }])),
                                 baseUrl: `${routerUrl}/v1`,
                                 apiKey: sessionToken,
                             },

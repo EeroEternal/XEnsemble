@@ -11,6 +11,7 @@ const policy = require('../auth/PolicyService');
 const { db } = require('../db/index');
 const schema = require('../db/schema');
 const { eq } = require('drizzle-orm');
+const agentGatewayConfig = require('../admin/AgentGatewayConfig');
 
 const LLM_PROXY_PREFIX = '/api/v1/llm';
 
@@ -72,6 +73,32 @@ function isQuotaExemptPath(path) {
     return pathname === '/health'
         || pathname === '/v1/models'
         || pathname.startsWith('/v1/models/');
+}
+
+/**
+ * OpenAI-compatible agents (claude-code, copilot, cline, …) populate their
+ * /model picker by GET-ing /v1/models from the gateway base URL. Forwarding
+ * that to the upstream returns the upstream's full catalog, not the per-agent
+ * configured subset. When the agent has configured gateway models, answer
+ * locally with exactly those; otherwise fall through to the upstream forward.
+ */
+function isModelsDiscoveryPath(path) {
+    const pathname = pathnameOnly(path);
+    return pathname === '/v1/models' || pathname.startsWith('/v1/models/');
+}
+
+async function serveAgentModelsCatalog(claims, reply) {
+    if (!claims?.aid) return false;
+    const cfg = await agentGatewayConfig.getForAgent(claims.aid);
+    const models = agentGatewayConfig.allModels(cfg);
+    if (models.length === 0) return false;
+    const provider = (cfg?.provider ?? '').trim();
+    const data = models.map((m) => {
+        const id = provider ? `${provider}/${m}` : m;
+        return { id, object: 'model', created: 0, owned_by: provider || 'xensemble' };
+    });
+    reply.code(200).send({ object: 'list', data });
+    return true;
 }
 
 async function assertSessionAuthorized(claims) {
@@ -162,6 +189,12 @@ async function proxyLlmRequest(request, reply) {
 
     const path = stripLlmPrefix(request.url);
     const quotaExempt = isQuotaExemptPath(path);
+
+    // /v1/models discovery: answer locally with the agent's configured models so
+    // every OpenAI-compatible CLI's /model offers exactly the configured subset.
+    if (request.method === 'GET' && isModelsDiscoveryPath(path)) {
+        if (await serveAgentModelsCatalog(claims, reply)) return;
+    }
 
     const gatewayPromise = resolveGatewayTarget(request.log);
     const quotaPromise = quotaExempt
@@ -260,4 +293,6 @@ module.exports = {
     stripLlmPrefix,
     normalizeUpstreamPath,
     isQuotaExemptPath,
+    isModelsDiscoveryPath,
+    serveAgentModelsCatalog,
 };
