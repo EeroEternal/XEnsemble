@@ -239,6 +239,22 @@ async function applyAgentGatewayModel(agentId, env) {
     return out;
 }
 
+/**
+ * Resolve every configured gateway model target (provider/model) for an agent,
+ * plus the default (primary) target. Used by ensureGatewayConfig to register
+ * the full model list in each agent's config file so /model offers all models.
+ */
+async function resolveAgentGatewayModelTargets(agentId) {
+    const cfg = await agentGatewayConfig.getForAgent(agentId);
+    const provider = (cfg?.provider ?? '').trim();
+    const primary = agentGatewayConfig.primaryModel(cfg);
+    const defaultTarget = primary ? composeGatewayModelTarget(provider, primary) : '';
+    const targets = agentGatewayConfig.allModels(cfg)
+        .map((m) => composeGatewayModelTarget(provider, m))
+        .filter(Boolean);
+    return { targets, defaultTarget };
+}
+
 async function resolveAgentAuthMode(agentId) {
     return agentGatewayConfig.getAgentAuthMode(agentId);
 }
@@ -585,6 +601,7 @@ module.exports = {
     mergeSpawnEnvLayers,
     applyGatewayAgentEnv,
     applyOpencodeGatewayEnv,
+    resolveAgentGatewayModelTargets,
     computeEffectiveRequired,
     isAgentKeysReady,
     findMissing,

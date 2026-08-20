@@ -423,6 +423,8 @@ async function resumeSession({
             if (authMode === 'gateway') {
                 try {
                     const { ensureGatewayConfig } = require('../workspace/ensureGatewayConfig');
+                    const { resolveAgentGatewayModelTargets } = require('../agents/agentEnv');
+                    const { targets: modelTargets, defaultTarget } = await resolveAgentGatewayModelTargets(agentMeta.id);
                     await ensureGatewayConfig({
                         runtime,
                         runtimeRef,
@@ -432,6 +434,8 @@ async function resumeSession({
                         sessionToken: resolvedSpawnEnv.env.LLM_ROUTER_API_KEY,
                         routerUrl: resolvedSpawnEnv.env.LLM_ROUTER_URL,
                         modelTarget: resolvedSpawnEnv.env.OPENAI_MODEL,
+                        modelTargets,
+                        defaultTarget,
                         warn: (msg) => {
                             if (fastifyLog?.warn) fastifyLog.warn(msg);
                             else if (requestLog?.warn) requestLog.warn(msg);

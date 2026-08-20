@@ -87,3 +87,59 @@ test('buildGatewayConfigSpec: codebuddy falls back to $HOME/.codebuddy without a
     assert.equal(spec.dirPath, '$HOME/.codebuddy');
     assert.equal(spec.extraFiles[0].filePath, '$HOME/.codebuddy/settings.json');
 });
+
+test('buildGatewayConfigSpec: qwen-code registers all configured models for /model', () => {
+    const spec = buildGatewayConfigSpec('qwen-code', {
+        ...ctx,
+        modelTargets: ['deepseek/deepseek-v4-flash', 'zxs/qwen-max'],
+        defaultTarget: 'deepseek/deepseek-v4-flash',
+    });
+    const content = JSON.parse(spec.content);
+    const ids = content.modelProviders.gateway.map((p) => p.id);
+    assert.deepEqual(ids, ['deepseek/deepseek-v4-flash', 'zxs/qwen-max']);
+    assert.equal(content.model.name, 'deepseek/deepseek-v4-flash');
+});
+
+test('buildGatewayConfigSpec: qwen-code single target (back-compat) registers one model', () => {
+    const spec = buildGatewayConfigSpec('qwen-code', ctx);
+    const content = JSON.parse(spec.content);
+    const ids = content.modelProviders.gateway.map((p) => p.id);
+    assert.deepEqual(ids, ['zxs_deepseek/deepseek-v4-flash']);
+    assert.equal(content.model.name, 'zxs_deepseek/deepseek-v4-flash');
+});
+
+test('buildGatewayConfigSpec: glm-agent registers all targets in models array', () => {
+    const spec = buildGatewayConfigSpec('glm-agent', {
+        ...ctx,
+        modelTargets: ['zai/glm-4.6', 'deepseek/deepseek-v4-flash'],
+        defaultTarget: 'zai/glm-4.6',
+    });
+    const content = JSON.parse(spec.content);
+    assert.equal(content.defaultModel, 'zai/glm-4.6');
+    assert.deepEqual(content.models, ['zai/glm-4.6', 'deepseek/deepseek-v4-flash']);
+});
+
+test('buildGatewayConfigSpec: codebuddy registers one entry per target', () => {
+    const spec = buildGatewayConfigSpec('codebuddy', {
+        ...ctx,
+        modelTargets: ['a/m1', 'b/m2'],
+        defaultTarget: 'a/m1',
+    });
+    const models = JSON.parse(spec.content);
+    assert.equal(models.length, 2);
+    assert.deepEqual(models.map((m) => m.id), ['a/m1', 'b/m2']);
+});
+
+test('buildGatewayConfigSpec: droid registers all targets in customModels', () => {
+    const spec = buildGatewayConfigSpec('droid', {
+        ...ctx,
+        modelTargets: ['a/m1', 'b/m2'],
+        defaultTarget: 'a/m1',
+    });
+    const content = JSON.parse(spec.content);
+    assert.deepEqual(content.customModels.map((m) => m.model), ['a/m1', 'b/m2']);
+});
+
+test('buildGatewayConfigSpec: returns null when no targets at all', () => {
+    assert.equal(buildGatewayConfigSpec('qwen-code', { ...ctx, modelTarget: null, modelTargets: [] }), null);
+});

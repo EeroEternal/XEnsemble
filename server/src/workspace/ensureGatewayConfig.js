@@ -18,7 +18,13 @@ const GATEWAY_CONFIG_AGENTS = new Set([
     'codebuddy',
 ]);
 
-function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl, modelTarget }) {
+function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl, modelTarget, modelTargets, defaultTarget }) {
+    const targets = (Array.isArray(modelTargets) && modelTargets.length
+        ? modelTargets.map((t) => String(t ?? '').trim())
+        : (modelTarget ? [String(modelTarget).trim()] : [])
+    ).filter(Boolean);
+    const def = (defaultTarget ?? modelTarget ?? targets[0] ?? '').trim();
+    if (targets.length === 0) return null;
     switch (agentId) {
         case 'qwen-code':
             return {
@@ -26,13 +32,13 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                 filePath: `${stateDirPath}/settings.json`,
                 content: JSON.stringify({
                     general: { enableAutoUpdate: false },
-                    model: { name: modelTarget },
+                    model: { name: def },
                     modelProviders: {
-                        gateway: [{
-                            id: modelTarget,
+                        gateway: targets.map((t) => ({
+                            id: t,
                             baseUrl: `${routerUrl}/v1`,
                             envKey: 'OPENAI_API_KEY',
-                        }],
+                        })),
                     },
                     providerProtocol: { gateway: 'openai' },
                     security: { auth: { selectedType: 'openai' } },
@@ -44,13 +50,13 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                 dirPath: `${stateDirPath}/.factory`,
                 filePath: `${stateDirPath}/.factory/settings.json`,
                 content: JSON.stringify({
-                    customModels: [{
+                    customModels: targets.map((t) => ({
                         provider: 'generic-chat-completion-api',
-                        model: modelTarget,
-                        displayName: modelTarget,
+                        model: t,
+                        displayName: t,
                         baseUrl: `${routerUrl}/v1`,
                         apiKey: sessionToken,
-                    }],
+                    })),
                 }, null, 2),
             };
 
@@ -60,20 +66,20 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                 filePath: `${stateDirPath}/settings.json`,
                 content: JSON.stringify({
                     general: { enableAutoUpdate: false },
-                    model: `gateway/${modelTarget}`,
+                    model: `gateway/${def}`,
                     providers: {
                         gateway: {
                             baseUrl: routerUrl,
                             apiKey: sessionToken,
                             displayName: 'XEnsemble Gateway',
-                            model: modelTarget,
+                            model: def,
                             type: 'openai-compatible',
                             maxOutputTokens: 8192,
-                            models: [{
-                                model: modelTarget,
-                                displayName: modelTarget,
+                            models: targets.map((t) => ({
+                                model: t,
+                                displayName: t,
                                 maxOutputTokens: 8192,
-                            }],
+                            })),
                         },
                     },
                 }, null, 2),
@@ -87,7 +93,7 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                     logging: { level: 'info' },
                     agents: {
                         defaults: {
-                            model: { primary: `gateway/${modelTarget}` },
+                            model: { primary: `gateway/${def}` },
                         },
                     },
                     models: {
@@ -97,10 +103,7 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                                 baseUrl: `${routerUrl}/v1`,
                                 apiKey: sessionToken,
                                 api: 'openai-completions',
-                                models: [{
-                                    id: modelTarget,
-                                    name: modelTarget,
-                                }],
+                                models: targets.map((t) => ({ id: t, name: t })),
                             },
                         },
                     },
@@ -127,10 +130,7 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                             baseUrl: `${routerUrl}/v1`,
                             api: 'openai-completions',
                             apiKey: sessionToken,
-                            models: [{
-                                id: modelTarget,
-                                name: modelTarget,
-                            }],
+                            models: targets.map((t) => ({ id: t, name: t })),
                         },
                     },
                 }, null, 2),
@@ -150,7 +150,7 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                         'openai-compatible': {
                             settings: {
                                 provider: 'openai-compatible',
-                                model: modelTarget,
+                                model: def,
                                 baseUrl: `${routerUrl}/v1`,
                                 apiKey: sessionToken,
                             },
@@ -170,8 +170,8 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                 filePath: `${stateDirPath}/.zai/user-settings.json`,
                 content: JSON.stringify({
                     baseURL: `${routerUrl}/v1`,
-                    defaultModel: modelTarget,
-                    models: [modelTarget],
+                    defaultModel: def,
+                    models: targets.slice(),
                     watchEnabled: false,
                     watchDebounceMs: 300,
                     enableHistory: true,
@@ -180,8 +180,8 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             };
 
         case 'codebuddy': {
-            // CodeBuddy reads models.json from $CODEBUDDY_CONFIG_DIR — which
-            // resumeSession sets to the session state dir (stateEnv) — NOT from
+            // CodeBuddy reads models.json from $CODEBUDDY_CONFIG_DIR - which
+            // resumeSession sets to the session state dir (stateEnv) - NOT from
             // ~/.codebuddy. Writes must target that dir, otherwise the custom
             // model is not registered and CodeBuddy falls back to its official
             // models (gemini/gpt/deepseek-v3-2-volc/...), which require a Tencent
@@ -194,14 +194,14 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             return {
                 dirPath: configDir,
                 filePath: `${configDir}/models.json`,
-                content: JSON.stringify([{
-                    id: modelTarget,
-                    name: modelTarget,
+                content: JSON.stringify(targets.map((t) => ({
+                    id: t,
+                    name: t,
                     vendor: 'custom',
                     apiKey: sessionToken,
                     url: `${routerUrl}/v1/chat/completions`,
                     maxOutputTokens: 8192,
-                }], null, 2),
+                })), null, 2),
                 extraFiles: [{
                     dirPath: configDir,
                     filePath: `${configDir}/settings.json`,
@@ -230,7 +230,7 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                 filePath: `${stateDirPath}/config.yaml`,
                 content: [
                     'model:',
-                    `  default: "${modelTarget}"`,
+                    `  default: "${def}"`,
                     '  provider: "auto"',
                     `  base_url: "${routerUrl}/v1"`,
                     `  api_key: "${sessionToken}"`,
@@ -268,14 +268,15 @@ function buildWriteScript(spec) {
     return lines.join('\n');
 }
 
-async function ensureGatewayConfig({ runtime, runtimeRef, agentId, authMode, stateDirPath, sessionToken, routerUrl, modelTarget, warn }) {
+async function ensureGatewayConfig({ runtime, runtimeRef, agentId, authMode, stateDirPath, sessionToken, routerUrl, modelTarget, modelTargets, defaultTarget, warn }) {
     if (authMode !== 'gateway') {
         return { skipped: true, reason: 'not_gateway' };
     }
     if (!GATEWAY_CONFIG_AGENTS.has(agentId)) {
         return { skipped: true, reason: 'no_config_needed' };
     }
-    if (!sessionToken || !routerUrl || !modelTarget) {
+    const hasTargets = Array.isArray(modelTargets) && modelTargets.some((t) => String(t ?? '').trim());
+    if (!sessionToken || !routerUrl || (!modelTarget && !hasTargets)) {
         return { skipped: true, reason: 'no_gateway_credentials' };
     }
     if (!runtime?.exec?.exec) {
@@ -288,7 +289,7 @@ async function ensureGatewayConfig({ runtime, runtimeRef, agentId, authMode, sta
         return { skipped: true, reason: 'no_state_dir' };
     }
 
-    const spec = buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl, modelTarget });
+    const spec = buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl, modelTarget, modelTargets, defaultTarget });
     if (!spec) {
         return { skipped: true, reason: 'no_config_needed' };
     }

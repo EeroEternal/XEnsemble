@@ -1549,6 +1549,8 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
         if (authMode === 'gateway') {
             try {
                 const { ensureGatewayConfig } = require('./workspace/ensureGatewayConfig');
+                const { resolveAgentGatewayModelTargets } = require('./agents/agentEnv');
+                const { targets: modelTargets, defaultTarget } = await resolveAgentGatewayModelTargets(agentMeta.id);
                 await ensureGatewayConfig({
                     runtime,
                     runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
@@ -1558,6 +1560,8 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
                     sessionToken: resolved.env.LLM_ROUTER_API_KEY,
                     routerUrl: resolved.env.LLM_ROUTER_URL,
                     modelTarget: resolved.env.OPENAI_MODEL,
+                    modelTargets,
+                    defaultTarget,
                     warn: (msg) => fastify.log.warn(msg),
                 });
             } catch (err) {
