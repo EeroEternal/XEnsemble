@@ -36,7 +36,11 @@ export default function QuotaSettingsPanel() {
             <div className="flex justify-between text-sm mb-1">
               <span className="text-zinc-700">{label}</span>
               {isAdmin ? (
-                <span className="font-mono text-zinc-500">Unlimited</span>
+                <span className="font-mono text-zinc-900">
+                  {used}
+                  {' / '}
+                  <span className="text-zinc-500">Unlimited</span>
+                </span>
               ) : (
                 <span className="font-mono text-zinc-900">
                   {used}
