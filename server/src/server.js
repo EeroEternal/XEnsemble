@@ -2551,7 +2551,7 @@ async function startServer() {
         runtime,
         sessionManager,
         fastifyLog: fastify.log,
-        idleThresholdMs: Number(process.env.SESSION_IDLE_HIBERNATE_MS || 1800000),
+        idleThresholdMs: Number(process.env.SESSION_IDLE_HIBERNATE_MS || 600000),
         sweepIntervalMs: Number(process.env.SESSION_IDLE_SWEEP_MS || 60000),
     });
     idleHibernateMonitor.start();

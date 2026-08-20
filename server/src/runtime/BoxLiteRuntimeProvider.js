@@ -5,6 +5,11 @@ const { resolveBoxliteSessionNetwork } = require('./boxliteNetwork');
 const BoxLiteExecAdapter = require('./BoxLiteExecAdapter');
 const workspace = require('../workspace');
 const { BoxLiteStreamHandle } = BoxLiteExecAdapter;
+const fs = require('fs');
+const path = require('path');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const execFileAsync = promisify(execFile);
 
 function buildWorkspaceMountKey(hostPath, guestPath) {
     return `${hostPath}=>${guestPath}`;
@@ -46,15 +51,51 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         return workspace.projectDir(project.userId, project.id);
     }
 
-    buildWorkspaceVolume(project) {
+    buildWorkspaceVolume(project, worktreePath) {
         const guestPath = this.workspacePath();
-        const hostPath = this.hostWorkspacePath(project);
+        const hostPath = worktreePath || this.hostWorkspacePath(project);
         return {
             host_path: hostPath,
             guest_path: guestPath,
             read_only: false,
             mountKey: buildWorkspaceMountKey(hostPath, guestPath),
         };
+    }
+
+    async _ensureWorktree(project, runtimeId) {
+        const mainDir = this.hostWorkspacePath(project);
+        const gitDir = path.join(mainDir, '.git');
+        if (!fs.existsSync(gitDir)) return null;
+
+        const wtDir = workspace.worktreeDir(project.userId, project.id, runtimeId);
+        if (fs.existsSync(path.join(wtDir, '.git'))) return wtDir;
+
+        try {
+            fs.mkdirSync(path.dirname(wtDir), { recursive: true });
+            await execFileAsync('git', ['-C', mainDir, 'worktree', 'add', '--detach', wtDir]);
+            return wtDir;
+        } catch {
+            return null;
+        }
+    }
+
+    async _removeWorktree(project, runtimeId) {
+        const mainDir = this.hostWorkspacePath(project);
+        const wtDir = workspace.worktreeDir(project.userId, project.id, runtimeId);
+        if (!fs.existsSync(wtDir)) return;
+
+        try {
+            await execFileAsync('git', ['-C', mainDir, 'worktree', 'remove', '--force', wtDir]);
+        } catch {
+            try { fs.rmSync(wtDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+        }
+
+        try {
+            const wtRoot = path.dirname(wtDir);
+            if (fs.existsSync(wtRoot) && fs.readdirSync(wtRoot).length === 0) {
+                fs.rmdirSync(wtRoot);
+            }
+        } catch { /* best-effort */ }
     }
 
     async ensureWorkspacePath(runtimeRef, workspacePath) {
@@ -144,7 +185,13 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
             image: opts.image,
         });
         const warm = !!opts.warm;
-        const workspaceVolume = this.buildWorkspaceVolume(project);
+        // For non-default runtimes, create a git worktree so each agent
+        // gets its own working tree (independent branch / uncommitted state).
+        let worktreePath = null;
+        if (runtimeId && project.defaultRuntimeId && runtimeId !== project.defaultRuntimeId) {
+            worktreePath = await this._ensureWorktree(project, runtimeId);
+        }
+        const workspaceVolume = this.buildWorkspaceVolume(project, worktreePath);
         const { host_path: hostWorkspacePath, guest_path: guestWorkspacePath, mountKey } = workspaceVolume;
         workspace.createProjectDirectory(project.userId, project.id);
         const storedImage = opts.storedImage || null;
@@ -322,6 +369,25 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
     }
 
     async destroy(runtimeRef) {
+        // Clean up worktree before destroying VM (best-effort).
+        try {
+            const { db } = require('../db/index');
+            const schema = require('../db/schema');
+            const { eq } = require('drizzle-orm');
+            const rtRows = await db.select().from(schema.runtimes)
+                .where(eq(schema.runtimes.id, runtimeRef));
+            if (rtRows.length > 0) {
+                const rt = rtRows[0];
+                if (rt.agentId && rt.projectId) {
+                    const pRows = await db.select().from(schema.projects)
+                        .where(eq(schema.projects.id, rt.projectId));
+                    if (pRows.length > 0) {
+                        await this._removeWorktree(pRows[0], runtimeRef);
+                    }
+                }
+            }
+        } catch { /* best-effort */ }
+
         await this.client.deleteSession(runtimeRef);
     }
 

@@ -14,6 +14,10 @@ function projectDir(userId, projectId) {
     return path.join(WORKSPACE_ROOT, userId, projectId);
 }
 
+function worktreeDir(userId, projectId, runtimeId) {
+    return path.join(WORKSPACE_ROOT, userId, `${projectId}.wt`, runtimeId);
+}
+
 function createProjectDirectory(userId, projectId) {
     ensureWorkspaceRoot();
     const dir = projectDir(userId, projectId);
@@ -101,6 +105,7 @@ module.exports = {
     WORKSPACE_ROOT,
     ensureWorkspaceRoot,
     projectDir,
+    worktreeDir,
     createProjectDirectory,
     resolveSafePath,
 };
