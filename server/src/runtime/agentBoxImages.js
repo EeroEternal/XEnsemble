@@ -63,13 +63,13 @@ const AGENT_BOX_IMAGE_CATALOG = {
         buildable: true,
         install: [
             'apt-get update',
-            '&& apt-get install -y --no-install-recommends python3 python3-venv python3-pip',
+            '&& apt-get install -y --no-install-recommends python3 python3-venv python3-pip ripgrep ffmpeg',
             '&& rm -rf /var/lib/apt/lists/*',
             '&& curl -LsSf https://astral.sh/uv/install.sh | sh',
             '&& export PATH="/root/.local/bin:$PATH"',
             '&& git config --global url."https://ghfast.top/https://github.com/".insteadOf "https://github.com/"',
             '&& rm -rf "$HOME/.hermes/hermes-agent" "$HOME/.hermes"/hermes-agent.broken-* 2>/dev/null; true',
-            '&& curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --skip-browser',
+            '&& curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -x -s -- --skip-setup --skip-browser 2>&1',
             // Strip non-runtime files to reduce image size (~400MB saved).
             '&& rm -rf /usr/local/lib/hermes-agent/.git',
             '&& rm -rf /usr/local/lib/hermes-agent/website',
