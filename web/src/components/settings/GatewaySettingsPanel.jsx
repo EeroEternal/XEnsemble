@@ -890,7 +890,7 @@ export default function GatewaySettingsPanel() {
         </div>
 
         <div>
-          <div className="flex items-center justify-between gap-3 mb-2">
+          <div className="flex items-center justify-between gap-3 mb-5">
             <span className="text-xs text-zinc-500 shrink-0">
               {providers.length} providers
             </span>

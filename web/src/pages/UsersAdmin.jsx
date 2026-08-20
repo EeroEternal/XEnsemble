@@ -265,7 +265,7 @@ export default function UsersAdmin() {
     <div className={consoleAdminPageClass}>
       <PageHeader title="Users" />
 
-      <div className="flex items-center justify-between gap-3 -mt-3">
+      <div className="flex items-center justify-between gap-3">
         <span className="text-xs text-zinc-500 shrink-0">{users.length} users</span>
         <div className="flex items-center gap-2">
           <div className="relative w-64 shrink-0">

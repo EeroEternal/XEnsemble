@@ -260,7 +260,7 @@ export default function AgentsAdmin() {
     <div className={consoleAdminPageClass}>
       <PageHeader title="Agents" />
 
-      <div className="flex items-center justify-between gap-3 -mt-3">
+      <div className="flex items-center justify-between gap-3">
         <span className="text-xs text-zinc-500 shrink-0">{agents.length} agents</span>
         <div className="flex items-center gap-2">
           <div className="relative w-64 shrink-0">
