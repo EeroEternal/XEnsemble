@@ -4,7 +4,7 @@ const fs = require('fs');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
-const { eq, and, desc, sql, inArray } = require('drizzle-orm');
+const { eq, and, or, desc, sql, inArray } = require('drizzle-orm');
 const { db } = require('../db/index');
 const schema = require('../db/schema');
 const { RuntimeError } = require('./interfaces');
@@ -157,11 +157,19 @@ function formatBuildRow(row) {
   };
 }
 
-async function assertOwnership(userId, imageId) {
+async function assertOwnership(userId, imageId, { allowAdminOwned = false } = {}) {
   const rows = await db.select().from(schema.customImages)
     .where(eq(schema.customImages.id, imageId));
   if (rows.length === 0) return null;
   if (rows[0].ownerUserId !== userId) {
+    if (allowAdminOwned) {
+      const owner = await db.select({ role: schema.users.role })
+        .from(schema.users)
+        .where(eq(schema.users.id, rows[0].ownerUserId));
+      if (owner.length > 0 && owner[0].role === 'admin') {
+        return rows[0];
+      }
+    }
     throw new RuntimeError(
       `custom image not found (id=${imageId})`,
       404,
@@ -307,7 +315,10 @@ async function createImage({ ownerUserId, name, selection }) {
 
 async function listImages(ownerUserId) {
   const images = await db.select().from(schema.customImages)
-    .where(eq(schema.customImages.ownerUserId, ownerUserId))
+    .where(or(
+      eq(schema.customImages.ownerUserId, ownerUserId),
+      sql`${schema.customImages.ownerUserId} IN (SELECT id FROM users WHERE role = 'admin')`,
+    ))
     .orderBy(desc(schema.customImages.createdAt));
 
   if (images.length === 0) return { images: [], count: 0, max: MAX_PER_USER };
@@ -331,7 +342,7 @@ async function listImages(ownerUserId) {
 }
 
 async function getImage(ownerUserId, imageId) {
-  const image = await assertOwnership(ownerUserId, imageId);
+  const image = await assertOwnership(ownerUserId, imageId, { allowAdminOwned: true });
   if (!image) throw new RuntimeError('custom image not found', 404);
 
   const latestBuild = await getLatestBuild(image.id);
@@ -339,7 +350,7 @@ async function getImage(ownerUserId, imageId) {
 }
 
 async function getBuild(ownerUserId, imageId) {
-  const image = await assertOwnership(ownerUserId, imageId);
+  const image = await assertOwnership(ownerUserId, imageId, { allowAdminOwned: true });
   if (!image) throw new RuntimeError('custom image not found', 404);
 
   const latestBuild = await getLatestBuild(image.id);
@@ -348,7 +359,7 @@ async function getBuild(ownerUserId, imageId) {
 }
 
 async function getBuildLog(ownerUserId, imageId) {
-  const image = await assertOwnership(ownerUserId, imageId);
+  const image = await assertOwnership(ownerUserId, imageId, { allowAdminOwned: true });
   if (!image) throw new RuntimeError('custom image not found', 404);
 
   const latestBuild = await getLatestBuild(image.id);

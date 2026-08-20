@@ -396,6 +396,7 @@ export default function UsersAdmin() {
                   </div>
                 </div>
 
+                {form.role !== 'admin' && (
                 <div className={`${consoleCardClass} p-4 space-y-3`}>
                   <h3 className={consoleSectionLabelClass}>Quotas</h3>
                   <div className="grid grid-cols-2 gap-3">
@@ -443,6 +444,7 @@ export default function UsersAdmin() {
                     </div>
                   </div>
                 </div>
+                )}
 
                 {form.role !== 'admin' && (
                   <MultiSelectMenu
