@@ -70,9 +70,12 @@ export function ConsoleStructuredDialogFooter({ className, children }) {
   );
 }
 
-/** Standard ConsoleDialog shell: backdrop + centered panel, Escape / backdrop close. */
+/** Standard ConsoleDialog shell: backdrop + centered panel, Escape / backdrop close.
+ *  `container`: 传入时把弹窗挂载到该容器内（容器需 relative），面板在容器中间居中；
+ *  默认挂载到 document.body（整个页面中间）。 */
 export function ConsoleDialogShell({
   onClose,
+  container,
   backdropClassName,
   shellClassName,
   panelClassName,
@@ -92,7 +95,9 @@ export function ConsoleDialogShell({
   }, []);
 
   const resolvedShellClass = shellClassName
-    ?? 'fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none';
+    ?? (container
+      ? 'absolute inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none'
+      : 'fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none');
 
   const panel = fitContent ? (
     <div
@@ -114,16 +119,23 @@ export function ConsoleDialogShell({
     </ConsoleDialogPanel>
   );
 
+  const mount = container || document.body;
+  const backdrop = container ? (
+    <div className="absolute inset-0 bg-black/50" aria-hidden onClick={onClose} />
+  ) : (
+    <ConsoleDialogBackdrop className={cn('z-[100]', backdropClassName)} onClick={onClose} />
+  );
+
   return createPortal(
     (
       <>
-        <ConsoleDialogBackdrop className={cn('z-[100]', backdropClassName)} onClick={onClose} />
+        {backdrop}
         <div className={resolvedShellClass}>
           {panel}
         </div>
       </>
     ),
-    document.body,
+    mount,
   );
 }
 

@@ -388,7 +388,9 @@ function registerGitRoutes(fastify) {
             await mergeRequestService.syncAll(project);
         } catch (_) {}
         const rows = await mergeRequestService.list(project.id);
-        return { merge_requests: rows };
+        // 附上当前用户在该仓库的写权限（决定前端是否显示 merge/approve/close 等按钮）
+        const permissions = await mergeRequestService.getCurrentUserPermissions(project, request.user.id);
+        return { merge_requests: rows, permissions };
     });
 
     fastify.post('/api/v1/projects/:id/merge-requests', {
@@ -425,7 +427,8 @@ function registerGitRoutes(fastify) {
         if (!record || record.projectId !== project.id) {
             return reply.code(404).send({ error: 'Merge request not found' });
         }
-        return record;
+        const permissions = await mergeRequestService.getCurrentUserPermissions(project, request.user.id);
+        return { ...record, permissions };
     });
 
     fastify.post('/api/v1/projects/:id/merge-requests/:mrId/sync', {

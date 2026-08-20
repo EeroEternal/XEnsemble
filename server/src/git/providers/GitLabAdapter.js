@@ -68,6 +68,8 @@ function normalizeRepoInfo(glProject, apiBase) {
         description: glProject.description || null,
         language: null,
         updatedAt: glProject.last_activity_at || null,
+        // GitLab /projects/{id} 返回当前用户的项目/组权限：{ project_access, group_access }（access_level）
+        permissions: glProject.permissions || null,
     };
 }
 

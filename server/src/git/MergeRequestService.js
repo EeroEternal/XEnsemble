@@ -19,6 +19,43 @@ class MergeRequestService {
         return `mr_${crypto.randomBytes(8).toString('hex')}`;
     }
 
+    // 查询当前用户在 Git 平台上对该仓库的写权限（决定前端是否显示 merge/approve/close/reopen 等按钮）。
+    // 用当前用户的 token 查仓库（GitHub/Gitea 的 permissions.push，GitLab 的 access_level），
+    // 而不是项目 owner 的 token，这样无权限的用户就看不到对应的操作按钮。
+    async getCurrentUserPermissions(project, currentUserId) {
+        const providerName = project.repoProvider || 'github';
+        if (!providerName || providerName === 'none' || providerName === 'local_git') return null;
+        const repoFullName = project.remoteFullName || project.githubFullName;
+        if (!repoFullName) return null;
+        const denied = { can_merge: false, can_approve: false, can_close: false, can_reopen: false, can_comment: true, can_edit: false };
+        const token = await this.gitConnectionService.getDecryptedToken(currentUserId, providerName);
+        if (!token) return denied;
+        const provider = getProvider(providerName);
+        if (!provider || typeof provider.getRepo !== 'function') return denied;
+        const config = await getProviderConfig(providerName);
+        try {
+            const info = await provider.getRepo(token, repoFullName, { apiBase: config?.apiBase });
+            const perms = info?.permissions || {};
+            let canWrite = false;
+            if (providerName === 'gitlab') {
+                const level = perms?.project_access?.access_level ?? perms?.group_access?.access_level ?? 0;
+                canWrite = level >= 30; // Developer(30) 及以上可 merge/approve
+            } else {
+                canWrite = perms?.push === true || perms?.admin === true;
+            }
+            return {
+                can_merge: canWrite,
+                can_approve: canWrite,
+                can_close: canWrite,
+                can_reopen: canWrite,
+                can_comment: true,
+                can_edit: canWrite,
+            };
+        } catch (e) {
+            return denied;
+        }
+    }
+
     _mapStatus({ state, merged }) {
         if (state === 'closed' && merged) return 'merged';
         if (state === 'closed') return 'closed';

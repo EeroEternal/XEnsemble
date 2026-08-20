@@ -9,6 +9,7 @@ import WorkspaceFileTree from './WorkspaceFileTree';
 import CodeEditor from './CodeEditorLazy';
 import { ConsoleDialogShell } from './ConsoleDialog';
 import { confirm } from './ConfirmDialog';
+import { WorkspacePanelPanelContext } from './workspacePanelContext';
 import SourceControlPanel from './SourceControlPanel';
 import WorkspacePreviewPane from './WorkspacePreviewPane';
 import WorkspaceBrowserPane from './WorkspaceBrowserPane';
@@ -118,6 +119,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   const [renamingLoading, setRenamingLoading] = useState(false);
   const [newHereBasePath, setNewHereBasePath] = useState(null);
   const renameInputRef = useRef(null);
+  const panelRootRef = useRef(null);
 
   useEffect(() => {
     setSelectedMR(null);
@@ -264,6 +266,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
       message: `Delete "${label}"? This cannot be undone.`,
       confirmLabel: 'Delete',
       variant: 'danger',
+      container: panelRootRef.current,
     });
     if (!ok) return;
     if (node.type === 'directory') {
@@ -414,7 +417,8 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   });
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="workspace-panel">
+    <div ref={panelRootRef} className="relative flex h-full min-h-0 flex-col" data-testid="workspace-panel">
+      <WorkspacePanelPanelContext.Provider value={panelRootRef}>
       <div className="flex items-center border-b border-zinc-200 px-1 shrink-0 bg-white">
         <div className="flex min-w-0 items-center overflow-x-auto console-scroll-hidden">
           {visibleTabs.map((tab) => {
@@ -758,8 +762,8 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
       )}
 
       {renaming && (
-        <ConsoleDialogShell onClose={() => setRenaming(null)}>
-          <div className="p-4 w-80">
+        <ConsoleDialogShell onClose={() => setRenaming(null)} container={panelRootRef.current}>
+          <div className="p-4 w-80 bg-white border border-zinc-200 shadow-sm rounded-lg">
             <h3 className="font-bold text-lg text-zinc-900 mb-3">Rename</h3>
             <input ref={renameInputRef} type="text" placeholder="new name"
               value={renaming.newName} onChange={(e) => setRenaming((prev) => prev ? { ...prev, newName: e.target.value } : prev)}
@@ -774,6 +778,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
           </div>
         </ConsoleDialogShell>
       )}
+      </WorkspacePanelPanelContext.Provider>
     </div>
   );
 }));

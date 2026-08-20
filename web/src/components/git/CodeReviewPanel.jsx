@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState, useMemo } from 'react';
-import { ArrowLeft, Check, CheckCircle2, ChevronDown, ChevronRight, CircleDot, GitPullRequest, GitMerge, Loader2, MessageSquare, RefreshCw, Send, X, XCircle, RotateCcw, Trash2, Pencil, CornerDownRight } from 'lucide-react';
+import { ArrowLeft, Check, CheckCircle2, ChevronDown, ChevronRight, CircleDot, GitPullRequest, GitMerge, Loader2, MessageSquare, Send, X, XCircle, RotateCcw, Trash2, Pencil, CornerDownRight } from 'lucide-react';
 import * as gitApi from '../../lib/gitApi';
 import { apiFetch } from '../../lib/api';
 import { confirm } from '../ConfirmDialog';
+import { useWorkspacePanelPanel } from '../workspacePanelContext';
 import { useToast } from '../Toast';
 import { renderDiffLines, DiffText } from './DiffText';
 import {
-  consoleIconButtonClass,
   consoleIconButtonDangerClass,
   consoleButtonFocusClass,
   consoleInputClass,
@@ -333,6 +333,7 @@ function ThreadGroup({ thread, mrFiles, renderDiffLines, onReply, onEdit, onDele
 
 export default function CodeReviewPanel({ projectId, mergeRequestId, mergeRequest, onBack, onChanged }) {
   const { showToast } = useToast();
+  const panelRootRef = useWorkspacePanelPanel();
   const [reviews, setReviews] = useState([]);
   const [comments, setComments] = useState([]);
   const [issueComments, setIssueComments] = useState([]);
@@ -366,9 +367,9 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
       .catch(() => {});
   }, [projectId, mergeRequest?.provider]);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (silent = false) => {
     if (!projectId || !mergeRequestId) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const [reviewsRes, commentsRes, issueRes, filesRes, mrRes] = await Promise.all([
         gitApi.listReviews(projectId, mergeRequestId),
@@ -385,7 +386,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
     } catch (err) {
       showToast('error', err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [projectId, mergeRequestId, showToast]);
 
@@ -409,6 +410,13 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // 定期轮询替代手动刷新按钮（静默刷新，不闪 loading），关闭/卸载时停止
+  useEffect(() => {
+    if (!projectId || !mergeRequestId) return;
+    const t = setInterval(() => fetchData(true), 60000);
+    return () => clearInterval(t);
+  }, [projectId, mergeRequestId, fetchData]);
 
   const toggleFileExpand = (path) => {
     setExpandedFiles((prev) => {
@@ -469,6 +477,13 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
   const isMerged = mrStatus === 'merged';
   const isClosed = mrStatus === 'closed';
 
+  // 当前用户在 Git 平台的写权限（来自后端 permissions）。未提供时保持原有行为（显示）。
+  const perms = localMR?.permissions || mergeRequest?.permissions || null;
+  const canApprove = perms ? perms.can_approve !== false : true;
+  const canMerge = perms ? perms.can_merge !== false : true;
+  const canClose = perms ? perms.can_close !== false : true;
+  const canReopen = perms ? perms.can_reopen !== false : true;
+
   const refreshMR = () => {
     fetchData();
     onChanged?.();
@@ -493,7 +508,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
   };
 
   const handleMerge = async () => {
-    if (!await confirm({ title: 'Merge Pull Request', message: 'Merge this pull request? This action cannot be undone.', confirmLabel: 'Merge', variant: 'primary' })) return;
+    if (!await confirm({ title: 'Merge Pull Request', message: 'Merge this pull request? This action cannot be undone.', confirmLabel: 'Merge', variant: 'primary', container: panelRootRef?.current })) return;
     setActionLoading('merge');
     try {
       await gitApi.mergeMergeRequest(projectId, mergeRequestId);
@@ -512,7 +527,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
   };
 
   const handleClose = async () => {
-    if (!await confirm({ title: 'Close Pull Request', message: 'Close this pull request without merging?', confirmLabel: 'Close', variant: 'secondary' })) return;
+    if (!await confirm({ title: 'Close Pull Request', message: 'Close this pull request without merging?', confirmLabel: 'Close', variant: 'secondary', container: panelRootRef?.current })) return;
     setActionLoading('close');
     try {
       await gitApi.closeMergeRequest(projectId, mergeRequestId);
@@ -622,7 +637,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
   };
 
   const handleDeleteComment = async (comment) => {
-    if (!await confirm({ title: 'Delete Comment', message: 'Delete this comment? This cannot be undone.', confirmLabel: 'Delete', variant: 'danger' })) return;
+    if (!await confirm({ title: 'Delete Comment', message: 'Delete this comment? This cannot be undone.', confirmLabel: 'Delete', variant: 'danger', container: panelRootRef?.current })) return;
     setCommentActionLoading({ type: 'delete', id: comment.id, pending: true });
     try {
       await gitApi.deleteMergeRequestComment(projectId, mergeRequestId, comment.id, comment._type || 'issue');
@@ -684,36 +699,42 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
         <div className="flex items-center gap-1 shrink-0">
           {isOpen && (
             <>
-              <button
-                type="button"
-                onClick={handleApprove}
-                disabled={actionLoading !== null}
-                title="Approve this pull request"
-                className={`flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
-              >
-                {actionLoading === 'approve' ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-                Approve
-              </button>
-              <button
-                type="button"
-                onClick={handleMerge}
-                disabled={actionLoading !== null}
-                title="Merge pull request"
-                className={`flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
-              >
-                {actionLoading === 'merge' ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitMerge className="h-3.5 w-3.5" />}
-                Merge
-              </button>
-              <button
-                type="button"
-                onClick={handleClose}
-                disabled={actionLoading !== null}
-                title="Close pull request"
-                className={`flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-zinc-500 bg-zinc-100 hover:bg-zinc-200 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
-              >
-                {actionLoading === 'close' ? <Loader2 className="h-3 w-3 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
-                Close
-              </button>
+              {canApprove && (
+                <button
+                  type="button"
+                  onClick={handleApprove}
+                  disabled={actionLoading !== null}
+                  title="Approve this pull request"
+                  className={`flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
+                >
+                  {actionLoading === 'approve' ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                  Approve
+                </button>
+              )}
+              {canMerge && (
+                <button
+                  type="button"
+                  onClick={handleMerge}
+                  disabled={actionLoading !== null}
+                  title="Merge pull request"
+                  className={`flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
+                >
+                  {actionLoading === 'merge' ? <Loader2 className="w-3 h-3 animate-spin" /> : <GitMerge className="h-3.5 w-3.5" />}
+                  Merge
+                </button>
+              )}
+              {canClose && (
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  disabled={actionLoading !== null}
+                  title="Close pull request"
+                  className={`flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-zinc-500 bg-zinc-100 hover:bg-zinc-200 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
+                >
+                  {actionLoading === 'close' ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
+                  Close
+                </button>
+              )}
             </>
           )}
           {isClosed && (
@@ -722,16 +743,18 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
                 <XCircle className="h-3.5 w-3.5" />
                 Closed
               </span>
-              <button
-                type="button"
-                onClick={handleReopen}
-                disabled={actionLoading !== null}
-                title="Reopen pull request"
-                className={`flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-black bg-blue-50 hover:bg-blue-100 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
-              >
-                {actionLoading === 'reopen' ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-                Reopen
-              </button>
+              {canReopen && (
+                <button
+                  type="button"
+                  onClick={handleReopen}
+                  disabled={actionLoading !== null}
+                  title="Reopen pull request"
+                  className={`flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-black bg-blue-50 hover:bg-blue-100 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
+                >
+                  {actionLoading === 'reopen' ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                  Reopen
+                </button>
+              )}
             </>
           )}
           {isMerged && (
@@ -740,15 +763,6 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
               Merged
             </span>
           )}
-          <button
-            type="button"
-            onClick={fetchData}
-            disabled={loading}
-            title="Refresh"
-            className={consoleIconButtonClass}
-          >
-            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          </button>
         </div>
       </div>
 

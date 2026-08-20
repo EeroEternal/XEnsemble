@@ -24,6 +24,7 @@ export default function ConfirmDialog() {
         confirmLabel: opts.confirmLabel || 'Confirm',
         cancelLabel: opts.cancelLabel || 'Cancel',
         variant: opts.variant || 'primary',
+        container: opts.container || null,
         resolve,
       });
     });
@@ -55,7 +56,7 @@ export default function ConfirmDialog() {
   if (!state) return null;
 
   return (
-    <ConsoleDialogShell onClose={handleCancel} panelClassName="w-96" fitContent>
+    <ConsoleDialogShell onClose={handleCancel} container={state.container || undefined} panelClassName="w-96 bg-white border border-zinc-200 shadow-sm rounded-lg" fitContent>
       <div className="px-5 pt-5 pb-2">
         <h3 className={`text-sm font-semibold ${textPrimary}`}>{state.title}</h3>
       </div>

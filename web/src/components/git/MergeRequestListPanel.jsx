@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, ExternalLink, GitPullRequest, Loader2, RefreshCw, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink, GitPullRequest, Loader2, Search } from 'lucide-react';
 import { openExternal } from '../../lib/githubApi';
 import * as gitApi from '../../lib/gitApi';
 import { buttonClass } from '../../lib/buttonStyles';
@@ -53,24 +53,26 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
   const { showToast } = useToast();
   const [mergeRequests, setMergeRequests] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [syncingId, setSyncingId] = useState(null);
   const [statusFilter, setStatusFilter] = useState('open');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
+  // 当前用户在该仓库的写权限（merge/approve/close/reopen），来自列表接口
+  const [permissions, setPermissions] = useState(null);
 
   const label = provider === 'gitlab' ? 'Merge Requests' : 'Pull Requests';
 
-  const fetchMRs = useCallback(async () => {
+  const fetchMRs = useCallback(async (silent = false) => {
     if (!projectId) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const data = await gitApi.listMergeRequests(projectId);
       const rows = data.merge_requests || data.pull_requests || data;
       setMergeRequests(Array.isArray(rows) ? rows : []);
+      setPermissions(data.permissions || null);
     } catch (err) {
       showToast('error', err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [projectId, showToast]);
 
@@ -82,19 +84,12 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
     if (refreshTrigger > 0) fetchMRs();
   }, [refreshTrigger, fetchMRs]);
 
-  const handleSync = useCallback(async (mrId) => {
-    if (!projectId || !mrId) return;
-    setSyncingId(mrId);
-    try {
-      const updated = await gitApi.syncMergeRequest(projectId, mrId);
-      setMergeRequests((prev) => prev.map((mr) => (mr.id === mrId ? updated : mr)));
-      showToast('success', `${provider === 'gitlab' ? 'Merge request' : 'Pull request'} synchronized.`);
-    } catch (err) {
-      showToast('error', err.message);
-    } finally {
-      setSyncingId(null);
-    }
-  }, [projectId, provider, showToast]);
+  // 定期轮询替代手动刷新按钮（静默刷新，不闪 loading），卸载时停止
+  useEffect(() => {
+    if (!projectId) return;
+    const t = setInterval(() => fetchMRs(true), 60000);
+    return () => clearInterval(t);
+  }, [projectId, fetchMRs]);
 
   const filteredMRs = useMemo(() => {
     let result = mergeRequests;
@@ -109,7 +104,24 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
         String(mr.remote_mr_number || mr.remoteMrNumber || '').includes(q)
       );
     }
-    return result;
+    // 固定排序：时间由近到远；all 列表 open 最前、merged 次之、closed 最后（组内按时间）
+    const timeOf = (mr) => {
+      const t = mr.created_at || mr.createdAt || mr.updated_at || mr.updatedAt;
+      return typeof t === 'number' ? t : (t ? Date.parse(t) : 0);
+    };
+    const statusRank = { open: 0, merged: 1, closed: 2 };
+    const sorted = [...result];
+    if (statusFilter === 'all') {
+      sorted.sort((a, b) => {
+        const ra = statusRank[a.status] ?? 9;
+        const rb = statusRank[b.status] ?? 9;
+        if (ra !== rb) return ra - rb;
+        return timeOf(b) - timeOf(a);
+      });
+    } else {
+      sorted.sort((a, b) => timeOf(b) - timeOf(a));
+    }
+    return sorted;
   }, [mergeRequests, statusFilter, searchQuery]);
 
   const countByStatus = useMemo(() => {
@@ -166,16 +178,6 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
           />
         </div>
         <div className="ml-auto flex items-center gap-1 shrink-0">
-          <button
-            type="button"
-            onClick={fetchMRs}
-            disabled={loading}
-            title={`Refresh ${label.toLowerCase()}`}
-            aria-label={`Refresh ${label.toLowerCase()}`}
-            className={consoleIconButtonClass}
-          >
-            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          </button>
           {onCreatePR && (
             <button
               type="button"
@@ -236,29 +238,29 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
                 >
                   <button
                     type="button"
-                    onClick={() => onSelectMR?.(mr)}
+                    onClick={() => onSelectMR?.({ ...mr, permissions })}
                     className={`absolute inset-0 z-0 ${consoleButtonFocusClass}`}
                     aria-label={`Open pull request${number != null ? ` #${number}` : ''}${mr.title ? `: ${mr.title}` : ''}`}
                   />
                   <span className={`relative z-10 mt-1.5 h-2 w-2 shrink-0 rounded-full ${meta.dot}`} />
                   <div className="relative z-10 min-w-0 flex-1 pointer-events-none">
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-start gap-2 min-w-0">
                       {number != null && (
-                        <span className="font-mono text-xs text-zinc-400 shrink-0">#{number}</span>
+                        <span className="font-mono text-xs text-zinc-400 shrink-0 mt-0.5">#{number}</span>
                       )}
-                      <span className="truncate text-sm font-medium text-zinc-900" title={mr.title}>
+                      <span className="break-words text-sm font-medium leading-snug text-zinc-900">
                         {mr.title || 'Untitled'}
                       </span>
                     </div>
-                    <div className="mt-1 flex items-center gap-1.5 min-w-0 text-[11px] text-zinc-500">
+                    <div className="mt-1 flex items-start gap-1.5 min-w-0 text-[11px] text-zinc-500">
                       {src && (
-                        <span className="font-mono truncate" title={src}>{src}</span>
+                        <span className="font-mono break-all" title={src}>{src}</span>
                       )}
                       {src && tgt && (
                         <span className="text-zinc-300 shrink-0">{'→'}</span>
                       )}
                       {tgt && (
-                        <span className="font-mono truncate" title={tgt}>{tgt}</span>
+                        <span className="font-mono break-all" title={tgt}>{tgt}</span>
                       )}
                       {(src || tgt) && (
                         <span className="text-zinc-300 shrink-0">·</span>
@@ -268,7 +270,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
                       </span>
                     </div>
                   </div>
-                  <div className="relative z-10 flex items-center gap-1 shrink-0 pointer-events-none">
+                  <div className="relative z-10 ml-auto flex items-center gap-1 shrink-0 pointer-events-none">
                     <span className={`pointer-events-none inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${meta.pill}`}>
                       {mr.status}
                     </span>
@@ -283,16 +285,6 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
                         <ExternalLink className="h-3.5 w-3.5" />
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => handleSync(mr.id)}
-                      disabled={syncingId === mr.id}
-                      title="Sync status"
-                      aria-label="Sync status"
-                      className={`${consoleIconButtonClass} pointer-events-auto`}
-                    >
-                      {syncingId === mr.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                    </button>
                   </div>
                 </li>
               );

@@ -66,6 +66,8 @@ function normalizeRepoInfo(repo) {
         description: repo.description || null,
         language: repo.language || null,
         updatedAt: repo.updated_at || null,
+        // Gitea API 返回当前 token 用户对仓库的权限：{ pull, push, admin }
+        permissions: repo.permissions || null,
     };
 }
 

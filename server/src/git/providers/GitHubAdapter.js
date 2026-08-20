@@ -77,6 +77,8 @@ function normalizeRepoInfo(ghRepo) {
         description: ghRepo.description || null,
         language: ghRepo.language || null,
         updatedAt: ghRepo.updated_at || null,
+        // GitHub API 返回当前 token 用户对仓库的权限：{ pull, push, admin }
+        permissions: ghRepo.permissions || null,
     };
 }
 
