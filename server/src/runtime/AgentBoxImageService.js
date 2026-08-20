@@ -256,7 +256,10 @@ ENV PATH="/usr/local/bin:/root/.local/bin:/root/.cargo/bin:\${PATH}" HOME="/root
     KIMI_CODE_NO_AUTO_UPDATE=1 \
     DISABLE_UPDATES=1 \
     FACTORY_DROID_AUTO_UPDATE_ENABLED=false \
-    OPENCLAW_NO_AUTO_UPDATE=1
+    OPENCLAW_NO_AUTO_UPDATE=1 \
+    npm_config_registry=https://registry.npmmirror.com \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 RUN set -eux; \\
   echo ">>> ${agentId}" && \\
