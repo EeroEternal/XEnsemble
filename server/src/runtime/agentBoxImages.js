@@ -76,8 +76,8 @@ const AGENT_BOX_IMAGE_CATALOG = {
             '&& rm -rf /usr/local/lib/hermes-agent/apps',
             '&& rm -rf /usr/local/lib/hermes-agent/tests',
             '&& rm -rf /usr/local/lib/hermes-agent/node_modules',
-            '&& find /usr/local/lib/hermes-agent -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true',
-            '&& find /usr/local/lib/hermes-agent -name "*.pyc" -delete 2>/dev/null || true',
+            '&& (find /usr/local/lib/hermes-agent -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true)',
+            '&& (find /usr/local/lib/hermes-agent -name "*.pyc" -delete 2>/dev/null || true)',
         ].join(' '),
     },
 };
