@@ -17,11 +17,11 @@ import {
 import { SidebarAccountMenu } from './AppSidebar';
 
 const ALL_TABS = [
-  { id: 'general', label: 'General', icon: Settings2, route: '/settings', adminOnly: false },
-  { id: 'api-keys', label: 'API Keys', icon: Key, route: '/settings', adminOnly: false },
+  { id: 'general', label: 'General', icon: Settings2, route: '/settings', adminOnly: true },
+  { id: 'api-keys', label: 'API Keys', icon: Key, route: '/settings', adminOnly: true },
   { id: 'git', label: 'Git', icon: GitBranch, route: '/settings', adminOnly: false },
   { id: 'quota', label: 'Quota', icon: Gauge, route: '/settings', adminOnly: false },
-  { id: 'images', label: 'Images', icon: Container, route: '/custom-images', adminOnly: false },
+  { id: 'images', label: 'Images', icon: Container, route: '/custom-images', adminOnly: true },
   { id: 'agents', label: 'Agents', icon: Bot, route: '/admin/agents', adminOnly: true },
   { id: 'users', label: 'Users', icon: Users, route: '/admin/users', adminOnly: true },
   { id: 'gateway', label: 'Gateway', icon: Globe, route: '/admin/gateway', adminOnly: true },
@@ -32,13 +32,6 @@ export default function SettingsTabSidebar({ activeTab, onSectionChange, user, o
   const isAdmin = user?.role === 'admin';
 
   const visibleTabs = ALL_TABS.filter((t) => !t.adminOnly || isAdmin);
-
-  const adminLinkClass = ({ isActive }) =>
-    `flex w-full items-center gap-2 px-3 py-2 text-xs font-medium transition-colors ${
-      isActive
-        ? 'bg-zinc-100 text-zinc-900'
-        : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'
-    }`;
 
   return (
     <aside className="h-full w-48 shrink-0 flex flex-col border-r border-zinc-200 bg-zinc-50 select-none">
@@ -76,7 +69,6 @@ export default function SettingsTabSidebar({ activeTab, onSectionChange, user, o
           user={user}
           onOpenSettings={onOpenSettings}
           onLogout={onLogout}
-          adminLinkClass={adminLinkClass}
         />
       </div>
     </aside>

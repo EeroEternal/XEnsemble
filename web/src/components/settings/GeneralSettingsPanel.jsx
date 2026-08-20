@@ -160,13 +160,6 @@ export default function GeneralSettingsPanel() {
   }
 
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-zinc-500">
-        Your administrator assigns each agent to BYOK (bring your own key) or the shared gateway.
-      </p>
-      <p className="text-sm text-zinc-500">
-        Visit the <strong>API Keys</strong> tab to see which agents need your keys and configure them.
-      </p>
-    </div>
+    <div className="space-y-3" />
   );
 }

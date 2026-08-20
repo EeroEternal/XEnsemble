@@ -3,12 +3,8 @@ import { Loader2, ChevronDown, ChevronRight, Check } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { apiFetch } from '../../lib/api';
 import {
-  consoleSectionLabelClass,
   consoleButtonFocusClass,
-} from '../../lib/consoleTokens';
-import {
   textPrimary,
-  textPlaceholder,
   borderHairline,
 } from '../../lib/consoleTokens';
 import ByokConfigForm from '../ByokConfigForm';
@@ -62,13 +58,6 @@ export default function ApiKeysSettingsPanel() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h3 className={cn('mb-1', consoleSectionLabelClass)}>Agent API Keys</h3>
-        <p className={cn('text-xs', textPlaceholder)}>
-          BYOK agents require your own API keys. Gateway agents use the shared platform key and need no configuration.
-        </p>
-      </div>
-
       <div className={cn('rounded-lg border', borderHairline, 'overflow-hidden')}>
         {agents.map((agent, idx) => {
           const isByok = agent.llm_auth_mode === 'byok' || !agent.llm_auth_mode;

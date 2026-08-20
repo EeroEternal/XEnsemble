@@ -105,7 +105,6 @@ export default function GitProvidersSettingsPanel() {
   if (error) {
     return (
       <div className="space-y-4">
-        <h3 className={consoleSectionLabelClass}>Git Providers</h3>
         <p className="text-sm text-red-600">{error}</p>
         <Button type="button" size="md" onClick={loadSettings}>Retry</Button>
       </div>
@@ -121,13 +120,6 @@ export default function GitProvidersSettingsPanel() {
   return (
     <form onSubmit={handleSave} className="h-full flex flex-col">
       <div className="flex-1 min-h-0 space-y-4">
-        <div>
-          <h3 className={consoleSectionLabelClass}>Git Providers</h3>
-          <p className="text-xs text-zinc-500 mt-1">
-            Configure OAuth for GitHub, GitLab, and Gitea. Users import repos from the sidebar.
-          </p>
-        </div>
-
         <div className="flex gap-1 border-b border-zinc-200 pb-0">
           {PROVIDERS.map((p) => {
             const isConfigured = Boolean(settings[providerKey(p.id, 'CLIENT_ID')]);

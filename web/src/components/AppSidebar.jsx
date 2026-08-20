@@ -1,15 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { NavLink } from 'react-router-dom';
 import {
   Trash2,
   LogOut,
   Settings2,
   Search,
   PenSquare,
-  Users,
-  Bot,
-  Globe,
   Container,
   Loader2,
   ChevronDown,
@@ -58,7 +54,7 @@ function sortSessions(list, prefs) {
   });
 }
 
-export function SidebarAccountMenu({ user, onOpenSettings, onLogout, adminLinkClass, collapsed = false }) {
+export function SidebarAccountMenu({ user, onOpenSettings, onLogout, collapsed = false }) {
   const [open, setOpen] = useState(false);
   const [menuRect, setMenuRect] = useState(null);
   const rootRef = useRef(null);
@@ -129,27 +125,6 @@ export function SidebarAccountMenu({ user, onOpenSettings, onLogout, adminLinkCl
         <p className="px-3 py-2 text-[11px] text-zinc-400 truncate border-b border-zinc-200">
           {user.email}
         </p>
-      )}
-      <NavLink to="/custom-images" className={adminLinkClass} onClick={close}>
-        <Container className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
-        Images
-      </NavLink>
-      {isAdmin && (
-        <>
-          <NavLink to="/admin/users" className={adminLinkClass} onClick={close}>
-            <Users className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
-            Users
-          </NavLink>
-          <NavLink to="/admin/agents" className={adminLinkClass} onClick={close}>
-            <Bot className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
-            Agents
-          </NavLink>
-          <NavLink to="/admin/gateway" className={adminLinkClass} onClick={close}>
-            <Globe className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
-            Gateway
-          </NavLink>
-          <div className="my-1 border-t border-zinc-200" />
-        </>
       )}
       {onOpenSettings && (
         <button
@@ -369,13 +344,6 @@ export default function AppSidebar({
     [visibleSessions, sessionMatchesQuery],
   );
 
-  const adminLinkClass = ({ isActive }) =>
-    `flex w-full items-center gap-2 px-3 py-2 text-xs font-medium transition-colors ${
-      isActive
-        ? 'bg-zinc-100 text-zinc-900'
-        : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'
-    }`;
-
   const sidebarNavItemClass =
     `flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-zinc-700 ${hoverBgTertiary} ${transitionBase}`;
 
@@ -388,7 +356,6 @@ export default function AppSidebar({
             user={user}
             onOpenSettings={onOpenSettings}
             onLogout={onLogout}
-            adminLinkClass={adminLinkClass}
           />
         </div>
       </aside>
@@ -429,7 +396,6 @@ export default function AppSidebar({
             user={user}
             onOpenSettings={onOpenSettings}
             onLogout={onLogout}
-            adminLinkClass={adminLinkClass}
             collapsed
           />
         </div>
@@ -519,7 +485,6 @@ export default function AppSidebar({
           user={user}
           onOpenSettings={onOpenSettings}
           onLogout={onLogout}
-          adminLinkClass={adminLinkClass}
         />
       </div>
     </aside>

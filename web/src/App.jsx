@@ -47,6 +47,8 @@ function AuthenticatedLayout({
     setSettingsSection(section);
     if (location.pathname !== '/settings') navigate('/settings');
   }, [navigate, location.pathname]);
+  const isAdmin = user?.role === 'admin';
+  const effectiveSettingsSection = !isAdmin && (settingsSection === 'general' || settingsSection === 'api-keys') ? 'git' : settingsSection;
   const activeWorkspaceName = projects.find((p) => p.id === activeWorkspaceId)?.name || null;
 
   useEffect(() => {
@@ -207,9 +209,9 @@ function AuthenticatedLayout({
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab={settingsSection} onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
+              <SettingsTabSidebar activeTab={effectiveSettingsSection} onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
               <div className="flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden">
-                <SettingsShell section={settingsSection} />
+                <SettingsShell section={effectiveSettingsSection} />
               </div>
             </div>
         )}
@@ -360,7 +362,10 @@ function App() {
             >
               <Route path="/sessions" element={null} />
               <Route path="/settings" element={null} />
-              <Route path="/custom-images" element={null} />
+              <Route
+                path="/custom-images"
+                element={user?.role === 'admin' ? null : <Navigate to="/sessions" replace />}
+              />
               <Route path="/console" element={<Navigate to="/sessions" replace />} />
               <Route
                 path="/admin/agents"
@@ -376,7 +381,7 @@ function App() {
               />
               <Route
                 path="/admin/images"
-                element={user?.role === 'admin' ? null : <Navigate to="/custom-images" replace />}
+                element={user?.role === 'admin' ? null : <Navigate to="/sessions" replace />}
               />
             </Route>
 

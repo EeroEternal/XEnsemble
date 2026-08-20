@@ -29,9 +29,6 @@ export default function QuotaSettingsPanel() {
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-zinc-500">
-        Limits set by your administrator.
-      </p>
       <div className="space-y-2.5">
         {rows.map(({ label, used, max }) => (
           <div key={label}>

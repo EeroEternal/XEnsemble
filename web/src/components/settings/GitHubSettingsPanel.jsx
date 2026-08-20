@@ -177,13 +177,6 @@ export default function GitHubSettingsPanel() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className={consoleSectionLabelClass}>Git Accounts</h3>
-        <p className="text-xs text-zinc-500 mt-1">
-          Connect Git providers to import repositories as workspaces.
-        </p>
-      </div>
-
       <div className="flex gap-1 border-b border-zinc-200 pb-0">
         {USER_PROVIDERS.map((id) => (
           <button
