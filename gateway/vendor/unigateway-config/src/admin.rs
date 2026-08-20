@@ -267,6 +267,7 @@ impl GatewayState {
         api_key: Option<&str>,
         default_model: Option<&str>,
         model_mapping: Option<&str>,
+        provider_type: Option<&str>,
     ) -> Result<()> {
         let mut guard = self.write_config().await;
         let provider = guard
@@ -297,6 +298,9 @@ impl GatewayState {
         }
         if let Some(mapping) = model_mapping {
             provider.model_mapping = mapping.to_string();
+        }
+        if let Some(pt) = provider_type {
+            provider.provider_type = pt.to_string();
         }
         guard.dirty = true;
         drop(guard);

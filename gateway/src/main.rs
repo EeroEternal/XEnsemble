@@ -702,6 +702,26 @@ struct UpdateProviderBody {
     models: Option<Vec<String>>,
 }
 
+/// Auto-detect provider_type from base_url.
+/// If the URL path contains "anthropic" or the domain is anthropic.com, use "anthropic".
+/// Otherwise default to "openai".
+fn detect_provider_type(base_url: &str) -> &'static str {
+    let lower = base_url.to_lowercase();
+    if lower.contains("/anthropic") || lower.contains("anthropic.com") {
+        "anthropic"
+    } else {
+        "openai"
+    }
+}
+
+/// Auto-detect endpoint_id from provider_type.
+fn endpoint_id_for_type(provider_type: &str) -> &'static str {
+    match provider_type {
+        "anthropic" => "anthropic",
+        _ => "openai",
+    }
+}
+
 async fn admin_create_provider(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -721,7 +741,8 @@ async fn admin_create_provider(
         return Err(ApiError::bad_request("api_key is required"));
     }
 
-    let endpoint_id = body.endpoint_id.as_deref().unwrap_or("openai");
+    let provider_type = detect_provider_type(base_url);
+    let endpoint_id = body.endpoint_id.as_deref().unwrap_or_else(|| endpoint_id_for_type(provider_type));
     let model_mapping_str = body
         .models
         .as_ref()
@@ -743,7 +764,7 @@ async fn admin_create_provider(
         .gateway
         .create_provider_with_models(
             name,
-            "openai",
+            provider_type,
             endpoint_id,
             Some(base_url),
             body.api_key.trim(),
@@ -795,6 +816,8 @@ async fn admin_update_provider(
             })
         });
 
+    let detected_type = body.base_url.as_deref().map(|s| detect_provider_type(s.trim()));
+
     state
         .gateway
         .update_provider_by_name(
@@ -803,6 +826,7 @@ async fn admin_update_provider(
             body.api_key.as_deref(),
             default_model,
             model_mapping.as_deref(),
+            detected_type,
         )
         .await
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
