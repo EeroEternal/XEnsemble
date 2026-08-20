@@ -1,5 +1,11 @@
 import { apiFetch } from './api';
 
+export function generateWorkBranchName(repoFullName) {
+  const repoName = (repoFullName || '').split('/').pop() || 'workspace';
+  const shortId = Date.now().toString(36).slice(-4);
+  return `skyharness/${repoName}-${shortId}`;
+}
+
 async function request(path, options = {}) {
   const res = await apiFetch(path, options);
   let data = {};

@@ -12,6 +12,7 @@ import BranchSwitcher, { GIT_REPO_PROVIDERS } from '../components/git/BranchSwit
 import { apiFetch } from '../lib/api';
 import * as githubApi from '../lib/githubApi';
 import * as gitApi from '../lib/gitApi';
+import { generateWorkBranchName } from '../lib/gitApi';
 import {
   ConsoleDialogShell,
   ConsoleInlineDialog,
@@ -512,7 +513,7 @@ export default React.forwardRef(function Sessions({
           name: repo.name,
           branch: repo.default_branch,
           auto_create_branch: true,
-          work_branch_name: `skyharness/${Date.now()}`,
+          work_branch_name: generateWorkBranchName(repo.full_name),
         });
         await new Promise((resolve, reject) => {
           let attempts = 0;

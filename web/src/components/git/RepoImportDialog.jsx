@@ -14,6 +14,7 @@ import { useGitProvider } from '../../hooks/useGitProvider';
 import { formatGitOAuthError } from '../../lib/gitLabels';
 import { useToast } from '../Toast';
 import * as gitApi from '../../lib/gitApi';
+import { generateWorkBranchName } from '../../lib/gitApi';
 import * as githubApi from '../../lib/githubApi';
 import {
   consoleDialogLgClass,
@@ -88,7 +89,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
 
   const [name, setName] = useState('');
   const [branch, setBranch] = useState('');
-  const [workBranchName, setWorkBranchName] = useState(`skyharness/${Date.now()}`);
+  const [workBranchName, setWorkBranchName] = useState(() => generateWorkBranchName(''));
   const [autoCreateBranch, setAutoCreateBranch] = useState(true);
 
   const [importing, setImporting] = useState(false);
@@ -111,7 +112,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
     setUrlError(null);
     setName('');
     setBranch('');
-    setWorkBranchName(`skyharness/${Date.now()}`);
+    setWorkBranchName(generateWorkBranchName(''));
     setAutoCreateBranch(true);
     setImporting(false);
     setImportedProjectId(null);
@@ -265,7 +266,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
         name: name.trim() || selectedRepo?.name,
         branch: branch.trim() || selectedRepo?.default_branch || 'main',
         auto_create_branch: autoCreateBranch,
-        work_branch_name: workBranchName.trim() || `skyharness/${Date.now()}`,
+        work_branch_name: workBranchName.trim() || generateWorkBranchName(''),
       });
       setImportedProjectId(result.id);
       setCloneStatus(result.status || 'cloning');
@@ -547,7 +548,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
                     id="import-work-branch"
                     value={workBranchName}
                     onChange={(e) => setWorkBranchName(e.target.value)}
-                    placeholder="skyharness/dev"
+                    placeholder="skyharness/my-repo-a1b2"
                     className="mt-1.5"
                   />
                 </div>

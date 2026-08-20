@@ -293,7 +293,7 @@ function registerGitHubRoutes(fastify) {
         const createdAt = Date.now();
         const baseBranch = branch || ghRepo.default_branch || 'main';
         const autoCreateBranch = auto_create_branch !== false;
-        const workBranchName = work_branch_name || `xensemble/${Date.now()}`;
+        const workBranchName = work_branch_name || `skyharness/workspace-${Date.now().toString(36).slice(-4)}`;
         const currentBranch = autoCreateBranch ? workBranchName : baseBranch;
 
         const projectRow = {
