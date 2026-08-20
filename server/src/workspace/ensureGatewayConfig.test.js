@@ -143,3 +143,32 @@ test('buildGatewayConfigSpec: droid registers all targets in customModels', () =
 test('buildGatewayConfigSpec: returns null when no targets at all', () => {
     assert.equal(buildGatewayConfigSpec('qwen-code', { ...ctx, modelTarget: null, modelTargets: [] }), null);
 });
+
+test('kimi-code is in GATEWAY_CONFIG_AGENTS', () => {
+    assert.ok(GATEWAY_CONFIG_AGENTS.has('kimi-code'), 'kimi-code must be in GATEWAY_CONFIG_AGENTS');
+});
+
+test('buildGatewayConfigSpec: kimi-code writes ~/.kimi/config.toml with all models', () => {
+    const spec = buildGatewayConfigSpec('kimi-code', {
+        ...ctx,
+        modelTargets: ['deepseek/deepseek-v4-flash', 'zxs/qwen-max'],
+        defaultTarget: 'deepseek/deepseek-v4-flash',
+    });
+    assert.equal(spec.filePath, '$HOME/.kimi/config.toml');
+    assert.equal(spec.dirPath, '$HOME/.kimi');
+    const toml = spec.content;
+    assert.match(toml, /default_model = "gateway-0"/);
+    assert.match(toml, /\[providers\.gateway\]/);
+    assert.match(toml, /type = "openai"/);
+    assert.match(toml, /base_url = "https:\/\/xensemble\.dev\/api\/v1\/llm\/v1"/);
+    assert.match(toml, /\[models\.gateway-0\][\s\S]*model = "deepseek\/deepseek-v4-flash"/);
+    assert.match(toml, /\[models\.gateway-1\][\s\S]*model = "zxs\/qwen-max"/);
+});
+
+test('buildGatewayConfigSpec: kimi-code single target (back-compat) registers one model', () => {
+    const spec = buildGatewayConfigSpec('kimi-code', ctx);
+    const toml = spec.content;
+    assert.match(toml, /default_model = "gateway-0"/);
+    assert.match(toml, /\[models\.gateway-0\][\s\S]*model = "zxs_deepseek\/deepseek-v4-flash"/);
+    assert.doesNotMatch(toml, /\[models\.gateway-1\]/);
+});
