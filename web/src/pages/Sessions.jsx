@@ -502,11 +502,11 @@ export default React.forwardRef(function Sessions({
 
     if (importedProject?.repo) {
       const repo = importedProject.repo;
-      setShowNewInstanceModal(false);
-      onLaunchPanelClose?.();
       setLaunchingSession(true);
       setWorkspaceCreating(true);
       setCreationStep('import');
+      setShowNewInstanceModal(false);
+      onLaunchPanelClose?.();
       let creationFailed = false;
       try {
         const result = await gitApi.importRepo({
