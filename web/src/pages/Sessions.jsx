@@ -211,6 +211,7 @@ export default React.forwardRef(function Sessions({
   const [importedProject, setImportedProject] = useState(null);
   const [workspaceCreating, setWorkspaceCreating] = useState(false);
   const [creationStep, setCreationStep] = useState(null);
+  const [skipPendingSpinner, setSkipPendingSpinner] = useState(false);
   const [createNewWorkspaceInline, setCreateNewWorkspaceInline] = useState(false);
   const [customImageId, setCustomImageId] = useState('');
   const [customImages, setCustomImages] = useState([]);
@@ -265,7 +266,8 @@ export default React.forwardRef(function Sessions({
 
   useEffect(() => {
     if (activeSession && !workspaceCreating) setLaunchingSession(false);
-  }, [activeSession, workspaceCreating]);
+    if (sessionAlive) setSkipPendingSpinner(false);
+  }, [activeSession, workspaceCreating, sessionAlive]);
 
   useEffect(() => {
     if (!activeSession?.projectId) {
@@ -545,6 +547,7 @@ export default React.forwardRef(function Sessions({
       } finally {
         if (!creationFailed) {
           await new Promise((r) => setTimeout(r, 800));
+          setSkipPendingSpinner(true);
           setWorkspaceCreating(false);
           setCreationStep(null);
           setLaunchingSession(false);
@@ -621,6 +624,7 @@ export default React.forwardRef(function Sessions({
     setWizardWorkspace(null);
     setWorkspaceCreating(false);
     setCreationStep(null);
+    setSkipPendingSpinner(false);
     onLaunchPanelClose?.();
   }, [onLaunchPanelClose]);
 
@@ -1264,7 +1268,7 @@ export default React.forwardRef(function Sessions({
             topbarEl
           )}
           {activeSession && !workspaceCreating ? (
-            sessionPending ? (
+            (sessionPending && !skipPendingSpinner) ? (
               <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-white p-8 text-center">
                 <Loader2 className="w-8 h-8 text-zinc-400 animate-spin mb-4" strokeWidth={1.5} />
                 <h3 className="text-lg font-semibold text-zinc-900 mb-1.5">Preparing your environment…</h3>
