@@ -71,7 +71,8 @@ const AGENT_BOX_IMAGE_CATALOG = {
             '&& node --version',
             '&& git config --global url."https://ghfast.top/https://github.com/".insteadOf "https://github.com/"',
             '&& rm -rf "$HOME/.hermes/hermes-agent" "$HOME/.hermes"/hermes-agent.broken-* 2>/dev/null; true',
-            '&& curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --skip-browser',
+            '&& (curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --skip-browser || true)',
+            '&& test -x /usr/local/bin/hermes',
             // Strip non-runtime files to reduce image size (~400MB saved).
             '&& rm -rf /usr/local/lib/hermes-agent/.git',
             '&& rm -rf /usr/local/lib/hermes-agent/website',
