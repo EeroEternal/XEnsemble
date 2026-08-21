@@ -74,11 +74,11 @@ function shouldHibernateSession(session, now, thresholdMs, supportsHibernate) {
     return (now - lastActivityAt) > thresholdMs;
 }
 
-async function maybeAutoCheckpointProject({ project, sessionId, fastifyLog }) {
+async function maybeAutoCheckpointProject({ project, sessionId, fastifyLog, runtimeId }) {
     if (!project || project.workspaceMode !== 'git') return;
     try {
         const { GitOperationService } = require('../github/GitOperationService');
-        const gitOps = new GitOperationService({ getToken: () => null });
+        const gitOps = new GitOperationService({ getToken: () => null, runtimeId });
         await gitOps.commitAll(project, `chore(xensemble): auto-checkpoint session ${sessionId}`);
     } catch (err) {
         fastifyLog?.warn?.(err, 'Failed to auto-checkpoint idle session');
@@ -175,7 +175,7 @@ async function stopSession({
 
     if (session.projectId) {
         const projectRows = await db.select().from(schema.projects).where(eq(schema.projects.id, session.projectId));
-        await maybeAutoCheckpointProject({ project: projectRows[0] || null, sessionId, fastifyLog });
+        await maybeAutoCheckpointProject({ project: projectRows[0] || null, sessionId, fastifyLog, runtimeId: session.runtimeId });
     }
 
     const liveAfter = sessionManager.getSession(sessionId);
