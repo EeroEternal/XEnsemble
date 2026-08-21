@@ -22,6 +22,7 @@ export default function MaskedApiKeyInput({
         type="text"
         value={displayValue}
         onChange={(e) => onChange(e.target.value)}
+        readOnly={!revealed && Boolean(displayValue)}
         placeholder={placeholder}
         aria-label={ariaLabel}
         onFocus={(e) => {
