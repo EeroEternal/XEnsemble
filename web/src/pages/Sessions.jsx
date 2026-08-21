@@ -949,7 +949,7 @@ export default React.forwardRef(function Sessions({
         return [...withoutOld, { id: data.session_id, projectId, agentId, status: 'running', alive: true, projectName, createdAt: now }];
       });
       fetchWorkspaces();
-      showToast('success', 'Session started.');
+      showToast('success', 'Session restarted.');
     } catch (err) {
       showToast('error', err.message);
     } finally {
