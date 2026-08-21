@@ -63,11 +63,6 @@ function stripAlternateScreen(text) {
     .replace(/\x1b\[\?1015l/g, '');
 }
 
-// Mouse-tracking SET sequences that capture mouse events, preventing text
-// selection.  Stripped in live mode so xterm.js handles mouse selection
-// natively.  Wheel scrolling is preserved via a wheel event listener.
-const MOUSE_TRACKING_SET_RE = /\x1b\[\?(?:1000|1002|1003|1005|1006|1015|1016)h/g;
-
 function parseMessage(raw) {
   if (typeof raw === 'string') return JSON.parse(raw);
   return JSON.parse(raw.toString());
@@ -673,7 +668,6 @@ function AgentConsole({
           };
 
           function writeTerminalData(processed) {
-            processed = processed.replace(MOUSE_TRACKING_SET_RE, '');
             if (processed.trim()) dismissGuide();
             const buf = terminal.buffer.active;
             const atBottom = buf.baseY + terminal.rows >= buf.length;
