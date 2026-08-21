@@ -14,6 +14,7 @@ ENV PATH="/usr/local/bin:/root/.local/bin:${PATH}" \
     HOME="/root" \
     KIMI_CODE_NO_AUTO_UPDATE=1 \
     DISABLE_UPDATES=1 \
+    CLINE_NO_AUTO_UPDATE=1 \
     FACTORY_DROID_AUTO_UPDATE_ENABLED=false \
     OPENCLAW_NO_AUTO_UPDATE=1 \
     npm_config_registry=https://registry.npmmirror.com \
