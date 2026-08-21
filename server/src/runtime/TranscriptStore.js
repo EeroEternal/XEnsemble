@@ -244,6 +244,7 @@ class TranscriptStore {
             kept--;
         }
         return { frames: tail.slice(0, kept), omittedCount };
+    }
 
     head(streamRef) {
         const state = this._state(streamRef);
