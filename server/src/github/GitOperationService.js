@@ -549,7 +549,7 @@ class GitOperationService {
             // Worktrees are created with --detach, so HEAD may not be on the
             // named branch. Push HEAD explicitly to avoid pushing a stale local
             // branch tip that doesn't include the worktree's latest commits.
-            const args = ['push', '-u', 'origin', `HEAD:${safeBranch}`];
+            const args = ['push', '-u', 'origin', `HEAD:refs/heads/${safeBranch}`];
             if (force) {
                 args.push('--force');
             }
