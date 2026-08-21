@@ -131,7 +131,7 @@ const DEFAULT_AGENTS = [
         id: 'cline',
         name: 'Cline',
         cmd: 'cline',
-        args: ['-i'],
+        args: [],
         env_required: ['ANTHROPIC_API_KEY'],
         resume: {
             level: 'L2',
