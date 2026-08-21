@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useWorkspaceFiles } from './useWorkspaceFiles';
 
-export function useEditorTabs(projectId, sessionId) {
+export function useEditorTabs(projectId, sessionId, ready) {
   const [tabs, setTabs] = useState([]);
   const [activePath, setActivePath] = useState(null);
   const [diffView, setDiffView] = useState(null);
@@ -137,7 +137,7 @@ export function useEditorTabs(projectId, sessionId) {
 
   // 进入 session 时默认打开根目录文档（优先 README）
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || !ready) return;
     if (autoOpenedForProject.current === sessionId) return;
     if (tabsRef.current.length > 0) {
       autoOpenedForProject.current = sessionId;
@@ -165,7 +165,7 @@ export function useEditorTabs(projectId, sessionId) {
     })();
 
     return () => { cancelled = true; };
-  }, [projectId, fetchDir, openFile]);
+  }, [projectId, sessionId, ready, fetchDir, openFile]);
 
   const handleCreateFile = useCallback(async (projectId, name) => {
     // 先创建空文件，然后打开 tab 进入编辑模式

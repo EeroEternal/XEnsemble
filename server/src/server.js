@@ -1475,8 +1475,7 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
 
         // Backfill built-in git if create-time initRepo failed (e.g. BoxLite).
         try {
-            const _localGitSid = request.query?.session_id || request.body?.session_id;
-    const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
+            const localGit = new LocalGitService({ runtimeId });
             await localGit.ensureGitInit(project);
         } catch (err) {
             fastify.log.warn({ err, sessionId, projectId: project.id }, '[sessions] ensureGitInit failed (non-fatal)');

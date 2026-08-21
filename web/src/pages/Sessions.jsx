@@ -126,6 +126,7 @@ export default React.forwardRef(function Sessions({
     return Math.min(Math.floor(maxW / 2), maxW);
   });
   const panelRowRef = useRef(null);
+  const [skipPendingSpinner, setSkipPendingSpinner] = useState(false);
 
   // Measure actual container width for true 1:1 ratio (sidebar width varies)
   useLayoutEffect(() => {
@@ -163,11 +164,11 @@ export default React.forwardRef(function Sessions({
     setSessionContext(activeSession?.sessionId || null);
   }, [activeSession?.sessionId]);
 
-  const editorTabs = useEditorTabs(activeSession?.projectId, activeSession?.sessionId);
+  const editorTabs = useEditorTabs(activeSession?.projectId, activeSession?.sessionId, sessionAlive || skipPendingSpinner);
   // Changes 与 Files 共用同一 workspace attach 路径；不能再按 sessionAlive 关掉，
   // 否则编辑器已能保存、Changes 却一直空白（分支显示 —）。
   const changesTabActiveRef = useRef(false);
-  const gitChanges = useGitChanges(activeSession?.projectId || null, changesTabActiveRef, activeSession?.sessionId);
+  const gitChanges = useGitChanges(activeSession?.projectId || null, changesTabActiveRef, activeSession?.sessionId, sessionAlive || skipPendingSpinner);
   const preview = usePreview(activeSession?.projectId, Boolean(activeSession?.projectId), activeSession?.sessionId);
   const { showToast } = useToast();
   const panelRef = useRef(null);
@@ -218,7 +219,6 @@ export default React.forwardRef(function Sessions({
   const [importedProject, setImportedProject] = useState(null);
   const [workspaceCreating, setWorkspaceCreating] = useState(false);
   const [creationStep, setCreationStep] = useState(null);
-  const [skipPendingSpinner, setSkipPendingSpinner] = useState(false);
   const [createNewWorkspaceInline, setCreateNewWorkspaceInline] = useState(false);
   const [customImageId, setCustomImageId] = useState('');
   const [customImages, setCustomImages] = useState([]);

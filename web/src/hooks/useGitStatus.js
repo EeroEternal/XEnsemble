@@ -5,7 +5,7 @@ import * as githubApi from '../lib/githubApi';
 const POLL_INTERVAL_MS = 15000;
 const FULL_POLL_INTERVAL_MS = 60000;
 
-export function useGitStatus(projectId, fullPollEnabledRef, sessionId) {
+export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
   const { showToast } = useToast();
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -50,6 +50,7 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId) {
   }, [projectId]);
 
   useEffect(() => {
+    if (!ready) return undefined;
     fetchStatusFull();
     lastFullAtRef.current = Date.now();
     let timer;
@@ -76,7 +77,7 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId) {
     };
     scheduleNext();
     return () => clearTimeout(timer);
-  }, [fetchStatusFull, fetchStatusLight, fullPollEnabledRef]);
+  }, [fetchStatusFull, fetchStatusLight, fullPollEnabledRef, ready]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
