@@ -12,6 +12,7 @@ const FLUSH_INTERVAL_MS = Number(process.env.TRANSCRIPT_FLUSH_INTERVAL_MS) || 10
 const FLUSH_SIZE_BYTES = Number(process.env.TRANSCRIPT_FLUSH_SIZE_BYTES) || 65536;
 const MAX_FRAMES = Number(process.env.TRANSCRIPT_MAX_FRAMES) || 50000;
 const TAIL_BYTES = Number(process.env.TRANSCRIPT_TAIL_BYTES) || 1048576;
+const ALT_SCREEN_ENTER_RE = /\x1b\[\?(?:1049|47|1047)h/;
 
 function safeRef(ref) {
     return String(ref || '').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -193,9 +194,16 @@ class TranscriptStore {
     }
 
     /**
-     * Return the last N frames whose combined `out` data size <= maxBytes.
-     * Used for initial-load replay to avoid sending the entire transcript.
-     * Non-out frames (in/resize/exit) between included out frames are kept.
+     * Return frames for initial-load replay.
+     *
+     * TUI agents (opencode/cline/qwen) use alt screen (\x1b[?1049h) and render
+     * incrementally — no full-screen redraws. The replay must start from the
+     * alt screen enter so the client enters alt screen and replays every
+     * incremental update; otherwise only fragments render on a blank screen.
+     * No byte cap: TUI sessions need the full history to reconstruct state.
+     *
+     * CLI agents (claude code) have no alt screen — use byte-capped tail.
+     *
      * Returns { frames, omittedCount }.
      */
     readTail(streamRef, maxBytes = TAIL_BYTES) {
@@ -205,6 +213,14 @@ class TranscriptStore {
         if (state.frames.length === 0) {
             return { frames: [], omittedCount: 0 };
         }
+
+        for (let i = 0; i < state.frames.length; i++) {
+            const f = state.frames[i];
+            if (f.kind === 'out' && typeof f.data === 'string' && ALT_SCREEN_ENTER_RE.test(f.data)) {
+                return { frames: state.frames.slice(i), omittedCount: i };
+            }
+        }
+
         let totalBytes = 0;
         let startIdx = state.frames.length;
         for (let i = state.frames.length - 1; i >= 0; i--) {
