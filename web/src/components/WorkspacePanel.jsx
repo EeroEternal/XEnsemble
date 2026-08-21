@@ -429,6 +429,8 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
 
   const addableRemaining = ADDABLE_TABS.filter((t) => {
     if (extraTabs.includes(t.key)) return false;
+    // deploy 通过页面右上角的 Deploy 按钮打开，不放进"添加新窗口"菜单
+    if (t.key === 'deploy') return false;
     if (t.key === 'pullrequests') return isExternalGit;
     return true;
   });

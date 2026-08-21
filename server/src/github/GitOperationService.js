@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 const { getRuntime } = require('../runtime/registry');
 const { ensureProjectRuntime } = require('../runtime/RuntimeService');
 const { stripCredentialFromUrl, buildCredentialEnv } = require('./gitCredentialHelper');

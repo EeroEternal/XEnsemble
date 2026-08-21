@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   GitCommit, GitPullRequest, RefreshCw, PanelLeftClose,
   Loader2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Folder,
-  Upload, Download, AlertTriangle, RotateCcw, User, Sparkles,
+  Upload, Download, AlertTriangle, RotateCcw, User,
 } from 'lucide-react';
 import {
   consoleButtonFocusClass,
@@ -241,6 +241,12 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       setGeneratingMsg(false);
     }
   }, [projectId, showToast]);
+
+  // 打开 commit 对话框时自动用 AI 总结当前变更并填入 commit 信息（无需手动点 AI draft）
+  useEffect(() => {
+    if (!showCommitDialog) return;
+    handleGenerateMessage();
+  }, [showCommitDialog, handleGenerateMessage]);
 
   const handlePull = useCallback(async () => {
     setActionMenuOpen(false);
@@ -715,25 +721,11 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
         <ConsoleDialogShell onClose={() => setShowCommitDialog(false)} panelClassName={consoleDialogSmClass}>
           <div className="px-5 pt-5 pb-2 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-zinc-900">Stage & commit changes</h3>
-            <button
-              type="button"
-              onClick={handleGenerateMessage}
-              disabled={generatingMsg}
-              title="Let AI draft a commit message from your changes"
-              className={`flex items-center gap-1 text-xs font-medium text-zinc-600 hover:text-zinc-900 disabled:opacity-50 ${consoleButtonFocusClass}`}
-            >
-              {generatingMsg ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Sparkles className="h-3.5 w-3.5" />
-              )}
-              {generatingMsg ? 'Generating…' : 'AI draft'}
-            </button>
           </div>
           <div className="px-5 pb-5 flex flex-col gap-3">
             <textarea
               ref={commitMsgRef}
-              placeholder="Describe what changed, or use AI draft"
+              placeholder={generatingMsg ? 'AI 正在总结你的变更…' : 'Describe what changed'}
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
               onKeyDown={(e) => {
