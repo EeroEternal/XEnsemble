@@ -479,7 +479,8 @@ export default function GatewaySettingsPanel() {
       return {
         ...prev,
         apiKeyDirty: true,
-        apiKeyRevealed: replacingSaved ? true : prev.apiKeyRevealed,
+        apiKeyRevealed: true,
+        apiKeyMasked: replacingSaved ? '' : prev.apiKeyMasked,
         apiKeyFull: nextValue,
         form: { ...prev.form, api_key: nextValue },
       };

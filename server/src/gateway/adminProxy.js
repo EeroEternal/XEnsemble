@@ -265,6 +265,7 @@ function registerGatewayAdminRoutes(fastify) {
                     const apiKey = creds?.api_key || '';
                     return {
                         ...provider,
+                        has_api_key: Boolean(apiKey),
                         api_key_masked: apiKey ? maskApiKey(apiKey) : '',
                     };
                 });
