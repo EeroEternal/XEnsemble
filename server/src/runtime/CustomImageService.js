@@ -408,7 +408,7 @@ async function rebuildImage(ownerUserId, imageId) {
     throw new RuntimeError('docker is not available', 503);
   }
 
-  const image = await assertOwnership(ownerUserId, imageId);
+  const image = await assertOwnership(ownerUserId, imageId, { allowAdminOwned: true });
   if (!image) throw new RuntimeError('custom image not found', 404);
 
   const latestBuild = await getLatestBuild(image.id);
@@ -442,7 +442,7 @@ async function rebuildImage(ownerUserId, imageId) {
 }
 
 async function deleteImage(ownerUserId, imageId) {
-  const image = await assertOwnership(ownerUserId, imageId);
+  const image = await assertOwnership(ownerUserId, imageId, { allowAdminOwned: true });
   if (!image) throw new RuntimeError('custom image not found', 404);
 
   // Check if any active session is using this image.
