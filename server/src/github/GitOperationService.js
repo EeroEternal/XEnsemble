@@ -132,7 +132,11 @@ class GitOperationService {
     }
 
     _invalidateAheadBehind(projectId) {
-        aheadBehindCache.delete(projectId);
+        aheadBehindCache.delete(this._cacheKey(projectId));
+    }
+
+    _cacheKey(projectId) {
+        return this._runtimeId ? `${projectId}:${this._runtimeId}` : projectId;
     }
 
     async _revParse(project, ref) {
@@ -345,7 +349,8 @@ class GitOperationService {
             .map((line) => line.slice(3).trim());
 
         // ahead/behind 只在 commit/push/pull 后变化，缓存 60s 避免每次 status 都跑 rev-list
-        const cachedAheadBehind = aheadBehindCache.get(project.id);
+        const cacheKey = this._cacheKey(project.id);
+        const cachedAheadBehind = aheadBehindCache.get(cacheKey);
         const aheadBehindFresh = cachedAheadBehind && cachedAheadBehind.expiresAt > Date.now();
 
         const [ignoredResult, aheadBehindResult] = await Promise.all([
@@ -371,14 +376,14 @@ class GitOperationService {
                         const r = await Promise.any(candidates);
                         const [a, b] = r.stdout.trim().split('\t').map((n) => Number(n) || 0);
                         const result = { ahead: a, behind: b, expiresAt: Date.now() + AHEAD_BEHIND_TTL_MS };
-                        aheadBehindCache.set(project.id, result);
+                        aheadBehindCache.set(cacheKey, result);
                         return result;
                     } catch {
                         try {
                             const r2 = await this._execGit(project, ['rev-list', '--count', 'HEAD', '--not', '--remotes']);
                             const ahead = Number(r2.stdout.trim()) || 0;
                             const result = { ahead, behind: 0, expiresAt: Date.now() + AHEAD_BEHIND_TTL_MS };
-                            aheadBehindCache.set(project.id, result);
+                            aheadBehindCache.set(cacheKey, result);
                             return result;
                         } catch {
                             return { ahead: 0, behind: 0 };
