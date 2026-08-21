@@ -361,15 +361,18 @@ class GitOperationService {
                     .catch(() => new Set())
                 : Promise.resolve(new Set()),
             // ahead/behind：有缓存时直接用，否则并行尝试 @{upstream} 和 origin/<branch>
+            // Worktrees use detached HEAD, so branch may be null. Fall back to
+            // project.currentBranch for the origin comparison.
             aheadBehindFresh
                 ? Promise.resolve(cachedAheadBehind)
                 : (async () => {
+                    const remoteBranch = branch || project.currentBranch;
                     const candidates = [
                         this._execGit(project, ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']),
                     ];
-                    if (branch) {
+                    if (remoteBranch) {
                         candidates.push(
-                            this._execGit(project, ['rev-list', '--left-right', '--count', `HEAD...origin/${branch}`]),
+                            this._execGit(project, ['rev-list', '--left-right', '--count', `HEAD...origin/${remoteBranch}`]),
                         );
                     }
                     try {
@@ -533,7 +536,11 @@ class GitOperationService {
 
     async pushBranch(project, branchName, { force = false } = {}) {
         return this._mutate(project, async () => {
-            const args = ['push', '-u', 'origin', assertGitBranch(branchName)];
+            const safeBranch = assertGitBranch(branchName);
+            // Worktrees are created with --detach, so HEAD may not be on the
+            // named branch. Push HEAD explicitly to avoid pushing a stale local
+            // branch tip that doesn't include the worktree's latest commits.
+            const args = ['push', '-u', 'origin', `HEAD:${safeBranch}`];
             if (force) {
                 args.push('--force');
             }
