@@ -185,8 +185,9 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
             image: opts.image,
         });
         const warm = !!opts.warm;
-        // For non-default runtimes, create a git worktree so each agent
+        // For non-default runtimes, create a git worktree so each session
         // gets its own working tree (independent branch / uncommitted state).
+        // Since each session gets its own runtimeId, the worktree is per-session.
         let worktreePath = null;
         if (runtimeId && project.defaultRuntimeId && runtimeId !== project.defaultRuntimeId) {
             worktreePath = await this._ensureWorktree(project, runtimeId);

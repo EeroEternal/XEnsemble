@@ -82,9 +82,7 @@ const runtimes = pgTable('runtimes', {
   specs: text('specs'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
-}, (table) => ({
-  projectAgentUnique: uniqueIndex('runtimes_project_agent_idx').on(table.projectId, table.agentId),
-}));
+});
 
 const sessions = pgTable('sessions', {
   id: text('id').primaryKey(),

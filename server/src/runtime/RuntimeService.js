@@ -101,21 +101,11 @@ function isAttachOnlyRuntimeCall(opts = {}) {
 async function ensureProjectRuntime(project, opts = {}) {
     let targetRuntimeId = opts.runtimeId;
 
-    // Active caller with agentId: find or create a runtime for this specific agent.
-    // This prevents reusing the default runtime (which belongs to another agent)
-    // and triggering imageMismatch -> VM deletion+recreation.
+    // Active caller with agentId: always create a new runtime for each session.
+    // This ensures each session gets its own VM + worktree, even for the same agent.
     if (!targetRuntimeId && opts.agentId) {
-        const existing = await db.select().from(schema.runtimes)
-            .where(and(
-                eq(schema.runtimes.projectId, project.id),
-                eq(schema.runtimes.agentId, opts.agentId),
-            ));
-        if (existing.length > 0) {
-            targetRuntimeId = existing[0].id;
-        } else {
-            const created = await getOrCreateRuntimeForAgent(project, opts.agentId);
-            targetRuntimeId = created.runtime.id;
-        }
+        const created = await getOrCreateRuntimeForAgent(project, opts.agentId);
+        targetRuntimeId = created.runtime.id;
     }
 
     // Passive caller fallback: use defaultRuntimeId
@@ -374,73 +364,14 @@ async function getOrCreateDefaultRuntime(project) {
 }
 
 async function getOrCreateRuntimeForAgent(project, agentId) {
-    // Check if a runtime already exists for this (project, agent) pair.
-    const existing = await db.select().from(schema.runtimes)
-        .where(and(
-            eq(schema.runtimes.projectId, project.id),
-            eq(schema.runtimes.agentId, agentId),
-        ));
-    if (existing.length > 0) {
-        return {
-            runtime: existing[0],
-            workspacePath: existing[0].endpoint || project.serverPath,
-            recoverable: false,
-        };
-    }
-
-    // Create a new runtime row (metadata only — provisioning happens in ensureReady).
+    // Always create a new runtime row — each session gets its own VM + worktree.
+    // The unique constraint on (project_id, agent_id) has been removed to allow
+    // multiple runtimes for the same agent in the same project.
     const runtimeId = `rt_${crypto.randomBytes(6).toString('hex')}`;
     const workspacePath = workspace.createProjectDirectory(project.userId, project.id);
     const now = Date.now();
 
-    try {
-        await db.insert(schema.runtimes).values({
-            id: runtimeId,
-            projectId: project.id,
-            agentId,
-            provider: PROVIDER,
-            runtimeRef: PROVIDER === 'boxlite' ? runtimeId : 'local',
-            role: 'agent',
-            status: 'ready',
-            endpoint: workspacePath,
-            createdAt: now,
-            updatedAt: now,
-        });
-    } catch (err) {
-        // Unique constraint violation: a concurrent call already created it.
-        const rows = await db.select().from(schema.runtimes)
-            .where(and(
-                eq(schema.runtimes.projectId, project.id),
-                eq(schema.runtimes.agentId, agentId),
-            ));
-        if (rows.length > 0) {
-            return {
-                runtime: rows[0],
-                workspacePath: rows[0].endpoint || project.serverPath,
-                recoverable: false,
-            };
-        }
-        throw err;
-    }
-
-    // Set as defaultRuntimeId if the project has none (used by passive callers).
-    if (!project.defaultRuntimeId) {
-        await db.update(schema.projects).set({
-            defaultRuntimeId: runtimeId,
-            serverPath: workspacePath,
-        }).where(eq(schema.projects.id, project.id));
-    }
-
-    await recordEvent({
-        userId: project.userId,
-        projectId: project.id,
-        subjectType: 'runtime',
-        subjectId: runtimeId,
-        type: 'ready',
-        data: { provider: PROVIDER, agentId, role: 'agent' },
-    });
-
-    const runtimeRow = {
+    await db.insert(schema.runtimes).values({
         id: runtimeId,
         projectId: project.id,
         agentId,
@@ -449,11 +380,12 @@ async function getOrCreateRuntimeForAgent(project, agentId) {
         role: 'agent',
         status: 'ready',
         endpoint: workspacePath,
-        specs: null,
-    };
+        createdAt: now,
+        updatedAt: now,
+    });
 
     return {
-        runtime: runtimeRow,
+        runtime: { id: runtimeId, agentId, projectId: project.id, runtimeRef: PROVIDER === 'boxlite' ? runtimeId : 'local', endpoint: workspacePath, status: 'ready' },
         workspacePath,
         recoverable: false,
     };
