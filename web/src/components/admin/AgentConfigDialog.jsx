@@ -102,6 +102,7 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
       showToast('error', 'Select at least one model.');
       return;
     }
+    const validModels = authDraft.model.filter((m) => modelOptions.some((opt) => opt.value === m));
     setSavingKeys(true);
     try {
       const res = await apiFetch(`/api/v1/admin/gateway/agent-configs/${agent.id}`, {
@@ -109,7 +110,7 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
         body: JSON.stringify({
           llm_auth_mode: 'gateway',
           provider: authDraft.provider || undefined,
-          model: authDraft.model,
+          model: validModels,
         }),
       });
       const data = await res.json();
