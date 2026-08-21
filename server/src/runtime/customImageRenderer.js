@@ -39,6 +39,18 @@ function renderInstallSteps(selection) {
   return steps.join('\n');
 }
 
+function npmRegistry() {
+  return process.env.CUSTOM_IMAGE_NPM_REGISTRY?.trim()
+    || process.env.NPM_CONFIG_REGISTRY?.trim()
+    || 'https://registry.npmmirror.com';
+}
+
+function pipIndexUrl() {
+  return process.env.CUSTOM_IMAGE_PIP_INDEX_URL?.trim()
+    || process.env.PIP_INDEX_URL?.trim()
+    || 'https://pypi.tuna.tsinghua.edu.cn/simple';
+}
+
 function renderDockerfile(selection) {
   const baseImage = getBaseImage();
   const installSteps = renderInstallSteps(selection);
@@ -51,7 +63,10 @@ ENV PATH="/usr/local/bin:/root/.local/bin:/root/.cargo/bin:\${PATH}" HOME="/root
     KIMI_CODE_NO_AUTO_UPDATE=1 \
     DISABLE_UPDATES=1 \
     FACTORY_DROID_AUTO_UPDATE_ENABLED=false \
-    OPENCLAW_NO_AUTO_UPDATE=1
+    OPENCLAW_NO_AUTO_UPDATE=1 \
+    npm_config_registry=${npmRegistry()} \
+    PIP_INDEX_URL=${pipIndexUrl()} \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 ${installSteps}
 

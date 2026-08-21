@@ -86,6 +86,26 @@ test('renderDockerfile includes cleanup step', () => {
   assert.ok(dockerfile.includes('WORKDIR /workspace'), 'should set workspace');
 });
 
+test('renderDockerfile configures npm and pip mirrors for reliable CN builds', () => {
+  const dockerfile = renderDockerfile([{ component_id: 'lang:python', version: '3.12' }]);
+  assert.ok(dockerfile.includes('npm_config_registry='), 'should set npm registry');
+  assert.ok(dockerfile.includes('registry.npmmirror.com'), 'should default to npmmirror');
+  assert.ok(dockerfile.includes('PIP_INDEX_URL='), 'should set pip index url');
+});
+
+test('renderDockerfile honors custom npm registry override', () => {
+  const prev = process.env.CUSTOM_IMAGE_NPM_REGISTRY;
+  process.env.CUSTOM_IMAGE_NPM_REGISTRY = 'https://my-mirror.example.com';
+  try {
+    const dockerfile = renderDockerfile([{ component_id: 'lang:python', version: '3.12' }]);
+    assert.ok(dockerfile.includes('my-mirror.example.com'), 'should use overridden registry');
+    assert.ok(!dockerfile.includes('registry.npmmirror.com'), 'should not include default');
+  } finally {
+    if (prev === undefined) delete process.env.CUSTOM_IMAGE_NPM_REGISTRY;
+    else process.env.CUSTOM_IMAGE_NPM_REGISTRY = prev;
+  }
+});
+
 test('renderDockerfile only outputs catalog-approved tokens', () => {
   const selection = [
     { component_id: 'lang:python', version: '3.12' },
