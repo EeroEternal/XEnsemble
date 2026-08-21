@@ -25,7 +25,7 @@ import {
   consoleTableHeadCellClass,
   consoleTableShellClass,
 } from '../lib/consoleTokens';
-import { formatDuration, getBuildState } from '../lib/imageBuildStates';
+import { getBuildState } from '../lib/imageBuildStates';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
 import { cn } from '../lib/utils';
 import { apiFetch } from '../lib/api';
@@ -40,12 +40,6 @@ function stateBadge(state) {
   return (
     <StatusBadge tone={entry.tone} icon={entry.icon} spinning={entry.spinning} label={entry.label} />
   );
-}
-
-function componentIds(components) {
-  return Array.isArray(components)
-    ? components.map((c) => (c.component_id || '').replace(/^(agent:|lang:|tool:)/, ''))
-    : [];
 }
 
 const CATEGORY_ORDER = ['agent', 'language', 'database', 'devops', 'package-manager', 'shell-tool'];
@@ -97,26 +91,41 @@ export function CustomImagesContent() {
   const [collapsedGroups, setCollapsedGroups] = useState(() => new Set(CATEGORY_ORDER));
   const [logImage, setLogImage] = useState(null);
   const [rebuildingId, setRebuildingId] = useState(null);
-  const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const inProgressCount = images.filter(
-    (img) => img.status === 'queued' || img.status === 'building',
-  ).length;
-
-  useEffect(() => {
-    if (inProgressCount === 0) return;
-    const timer = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [inProgressCount]);
+  const mergedImages = useMemo(() => {
+    const custom = images.map((img) => ({
+      kind: 'custom',
+      key: `custom-${img.id}`,
+      name: img.name,
+      imageRef: img.image_ref || null,
+      status: img.status,
+      createdAt: img.created_at,
+      data: img,
+    }));
+    const agents = agentImages.map((a) => {
+      const active = a.active_version;
+      const status = active ? (active.status === 'ready' ? 'ready' : active.status) : 'not_registered';
+      return {
+        kind: 'agent',
+        key: `agent-${a.agent_id}`,
+        name: a.agent_name,
+        imageRef: active?.image_ref || a.default_image_ref || a.suggested_image_ref || null,
+        status,
+        createdAt: active?.created_at || null,
+        data: a,
+      };
+    });
+    return [...custom, ...agents];
+  }, [images, agentImages]);
 
   const filteredImages = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return images;
-    return images.filter((img) => {
-      const haystack = [img.name, ...componentIds(img.components)].join(' ').toLowerCase();
+    if (!q) return mergedImages;
+    return mergedImages.filter((row) => {
+      const haystack = [row.name, row.imageRef, row.kind].filter(Boolean).join(' ').toLowerCase();
       return haystack.includes(q);
     });
-  }, [images, searchQuery]);
+  }, [mergedImages, searchQuery]);
 
   const filteredComponents = useMemo(() => {
     const q = componentSearch.trim().toLowerCase();
@@ -602,21 +611,21 @@ export function CustomImagesContent() {
 
       {/* Image List */}
       <div className={cn(consoleTableShellClass, 'overflow-x-auto')}>
-        <table className="w-full min-w-[640px] table-fixed border-collapse text-left">
+        <table className="w-full min-w-[720px] table-fixed border-collapse text-left">
           <colgroup>
             <col className="w-auto" />
-            <col className="w-36" />
+            <col className="w-24" />
             <col className="w-auto" />
-            <col className="w-20" />
+            <col className="w-32" />
             <col className="w-28" />
             <col className="w-32" />
           </colgroup>
           <thead>
             <tr className="border-b border-zinc-200">
               <th className={consoleTableHeadCellClass}>Name</th>
+              <th className={consoleTableHeadCellClass}>Type</th>
+              <th className={consoleTableHeadCellClass}>Image</th>
               <th className={consoleTableHeadCellClass}>Status</th>
-              <th className={consoleTableHeadCellClass}>Components</th>
-              <th className={consoleTableHeadCellClass}>Build time</th>
               <th className={consoleTableHeadCellClass}>Created</th>
               <th className={consoleTableHeadCellClass}>Actions</th>
             </tr>
@@ -631,66 +640,56 @@ export function CustomImagesContent() {
             ) : filteredImages.length === 0 ? (
               <tr>
                 <td colSpan={6} className={cn(consoleTableBodyCellClass, 'text-center text-zinc-400')}>
-                  {images.length === 0
-                    ? <>No custom images yet. Click &ldquo;New Image&rdquo; to create one.</>
+                  {mergedImages.length === 0
+                    ? 'No images yet.'
                     : 'No images match your search.'}
                 </td>
               </tr>
             ) : (
-              filteredImages.map((img) => {
-                const build = img.latest_build;
-                const buildTimeMs = img.status === 'building' && build?.started_at
-                  ? nowMs - new Date(build.started_at).getTime()
-                  : build?.started_at && build?.finished_at
-                    ? new Date(build.finished_at) - new Date(build.started_at)
-                    : null;
-                const names = componentIds(img.components);
-                const max = 5;
-
-                return (
-                  <tr key={img.id} className="border-b border-zinc-100 align-top">
-                    <td className={cn(consoleTableBodyCellClass, 'font-medium text-zinc-900')}>
-                      <span className="block truncate" title={img.name}>{img.name}</span>
-                    </td>
-                    <td className={consoleTableBodyCellClass}>
-                      {stateBadge(img.status)}
-                    </td>
-                    <td className={cn(consoleTableBodyCellClass, 'max-w-[320px]')}>
-                      {names.length === 0 ? (
-                        <span className="text-zinc-400">\u2014</span>
-                      ) : names.length <= max ? (
-                        <div className="flex flex-wrap gap-1">
-                          {names.map((n, i) => (
-                            <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">{n}</span>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="flex flex-wrap gap-1">
-                          {names.slice(0, max).map((n, i) => (
-                            <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">{n}</span>
-                          ))}
-                          <span className="text-xs text-zinc-400" title={names.slice(max).join(', ')}>
-                            +{names.length - max} more
-                          </span>
-                        </div>
-                      )}
-                    </td>
-                    <td className={cn(consoleTableBodyCellClass, 'text-zinc-500 tabular-nums')}>
-                      {buildTimeMs != null ? formatDuration(buildTimeMs) : '\u2014'}
-                    </td>
-                    <td className={cn(consoleTableBodyCellClass, 'text-zinc-500')}>
-                      <span className="block truncate" title={formatTime(img.created_at)}>{formatRelativeTime(img.created_at)}</span>
-                    </td>
-                    <td className={consoleTableBodyCellClass}>
+              filteredImages.map((row) => (
+                <tr key={row.key} className="border-b border-zinc-100 align-top">
+                  <td className={cn(consoleTableBodyCellClass, 'font-medium text-zinc-900')}>
+                    <span className="block truncate" title={row.name}>{row.name}</span>
+                  </td>
+                  <td className={consoleTableBodyCellClass}>
+                    {row.kind === 'custom' ? (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">Custom</span>
+                    ) : (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-sky-100 text-sky-700">Agent</span>
+                    )}
+                  </td>
+                  <td className={cn(consoleTableBodyCellClass, 'max-w-[320px]')}>
+                    {row.imageRef ? (
+                      <span className="block truncate font-mono text-xs text-zinc-600" title={row.imageRef}>{row.imageRef}</span>
+                    ) : (
+                      <span className="text-zinc-400">—</span>
+                    )}
+                  </td>
+                  <td className={consoleTableBodyCellClass}>
+                    {row.kind === 'custom' ? (
+                      stateBadge(row.data.status)
+                    ) : row.status === 'ready' ? (
+                      <span className="text-xs font-medium text-emerald-600">Ready</span>
+                    ) : row.status === 'not_registered' ? (
+                      <span className="text-xs text-zinc-400">Not registered</span>
+                    ) : (
+                      <span className="text-xs text-amber-600">{row.status}</span>
+                    )}
+                  </td>
+                  <td className={cn(consoleTableBodyCellClass, 'text-zinc-500')}>
+                    <span className="block truncate" title={formatTime(row.createdAt)}>{formatRelativeTime(row.createdAt)}</span>
+                  </td>
+                  <td className={consoleTableBodyCellClass}>
+                    {row.kind === 'custom' ? (
                       <RowActionsMenu
-                        label={`Actions for ${img.name}`}
+                        label={`Actions for ${row.name}`}
                         items={[
-                          { icon: ScrollText, label: 'View logs', onClick: () => setLogImage(img) },
-                          img.status === 'failed' && {
+                          { icon: ScrollText, label: 'View logs', onClick: () => setLogImage(row.data) },
+                          row.data.status === 'failed' && {
                             icon: RotateCw,
                             label: 'Rebuild',
-                            onClick: () => handleRebuild(img),
-                            busy: rebuildingId === img.id,
+                            onClick: () => handleRebuild(row.data),
+                            busy: rebuildingId === row.data.id,
                             busyLabel: 'Rebuilding…',
                           },
                           { separator: true },
@@ -698,81 +697,21 @@ export function CustomImagesContent() {
                             icon: Trash2,
                             label: 'Delete',
                             danger: true,
-                            onClick: () => setConfirmDelete(img),
-                            busy: deletingId === img.id,
+                            onClick: () => setConfirmDelete(row.data),
+                            busy: deletingId === row.data.id,
                             busyLabel: 'Deleting…',
                           },
                         ].filter(Boolean)}
                       />
-                    </td>
-                  </tr>
-                );
-              })
+                    ) : (
+                      <span className="text-zinc-300">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))
             )}
           </tbody>
         </table>
-      </div>
-
-      {/* Agent Images (sandbox-pulled) */}
-      <div className="mt-8">
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-zinc-700">Agent Images</h2>
-          <span className="text-xs text-zinc-500">{agentImages.length} agents</span>
-        </div>
-        <div className={cn(consoleTableShellClass, 'overflow-x-auto')}>
-          <table className="w-full min-w-[640px] table-fixed border-collapse text-left">
-            <colgroup>
-              <col className="w-56" />
-              <col className="w-auto" />
-              <col className="w-24" />
-              <col className="w-32" />
-            </colgroup>
-            <thead>
-              <tr className="border-b border-zinc-200">
-                <th className={consoleTableHeadCellClass}>Agent</th>
-                <th className={consoleTableHeadCellClass}>Image</th>
-                <th className={consoleTableHeadCellClass}>Tag</th>
-                <th className={consoleTableHeadCellClass}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {agentImages.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className={cn(consoleTableBodyCellClass, 'text-center text-zinc-400')}>
-                    No agent images registered yet.
-                  </td>
-                </tr>
-              ) : (
-                agentImages.map((a) => {
-                  const active = a.active_version;
-                  const imageRef = active?.image_ref || a.default_image_ref || a.suggested_image_ref || '—';
-                  return (
-                    <tr key={a.agent_id} className="border-b border-zinc-100 align-top">
-                      <td className={consoleTableBodyCellClass}>
-                        <span className="block truncate font-medium text-zinc-900" title={a.agent_id}>{a.agent_name}</span>
-                      </td>
-                      <td className={cn(consoleTableBodyCellClass, 'max-w-[320px]')}>
-                        <span className="block truncate font-mono text-xs text-zinc-600" title={imageRef}>{imageRef}</span>
-                      </td>
-                      <td className={consoleTableBodyCellClass}>
-                        <span className="font-mono text-xs text-zinc-600">{active?.tag || '—'}</span>
-                      </td>
-                      <td className={consoleTableBodyCellClass}>
-                        {active ? (
-                          <span className={active.status === 'ready' ? 'text-emerald-600' : 'text-amber-600'}>
-                            {active.status === 'ready' ? 'Ready' : active.status}
-                          </span>
-                        ) : (
-                          <span className="text-zinc-400">Not registered</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
       </div>
     </>
   );
