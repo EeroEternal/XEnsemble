@@ -404,6 +404,8 @@ async fn openai_chat(
     let (_, default_model) = split_provider_model(raw_model);
     let provider_hint = resolve_provider_hint(&state, &service_id, raw_model).await;
 
+    tracing::info!(%service_id, %raw_model, %default_model, %provider_hint, "openai_chat dispatch");
+
     let request = openai_payload_to_chat_request(&payload, &default_model)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
@@ -450,6 +452,8 @@ async fn anthropic_messages(
         .unwrap_or("claude-sonnet-4-20250514");
     let (_, default_model) = split_provider_model(raw_model);
     let provider_hint = resolve_provider_hint(&state, &service_id, raw_model).await;
+
+    tracing::info!(%service_id, %raw_model, %default_model, %provider_hint, "anthropic_messages dispatch");
 
     let payload = normalize_anthropic_system(payload);
     let request = anthropic_payload_to_chat_request(&payload, &default_model)
