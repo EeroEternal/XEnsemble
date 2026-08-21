@@ -54,11 +54,17 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
     buildWorkspaceVolume(project, worktreePath) {
         const guestPath = this.workspacePath();
         const hostPath = worktreePath || this.hostWorkspacePath(project);
+        const gitVolume = worktreePath ? {
+            host_path: path.join(this.hostWorkspacePath(project), '.git'),
+            guest_path: '/workspace.git',
+            read_only: true,
+        } : null;
         return {
             host_path: hostPath,
             guest_path: guestPath,
             read_only: false,
-            mountKey: buildWorkspaceMountKey(hostPath, guestPath),
+            mountKey: buildWorkspaceMountKey(hostPath, guestPath) + (gitVolume ? `+${gitVolume.guest_path}` : ''),
+            gitVolume,
         };
     }
 
@@ -73,6 +79,19 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         try {
             fs.mkdirSync(path.dirname(wtDir), { recursive: true });
             await execFileAsync('git', ['-C', mainDir, 'worktree', 'add', '--detach', wtDir]);
+            // Rewrite paths inside the worktree's gitdir metadata so they resolve
+            // inside the VM where the worktree is at /workspace and the main .git
+            // directory is at /workspace.git (read-only mount).
+            const wtName = runtimeId;
+            const wtGitMetaDir = path.join(gitDir, 'worktrees', wtName);
+            if (fs.existsSync(wtGitMetaDir)) {
+                // commondir: "../.." already resolves to /workspace.git — OK.
+                // gitdir: rewrite from host path to VM path.
+                fs.writeFileSync(path.join(wtGitMetaDir, 'gitdir'), '/workspace/.git', 'utf8');
+            }
+            // Rewrite the worktree's .git pointer file.
+            const dotGitPath = path.join(wtDir, '.git');
+            fs.writeFileSync(dotGitPath, `gitdir: /workspace.git/worktrees/${wtName}`, 'utf8');
             return wtDir;
         } catch {
             return null;
@@ -209,11 +228,18 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
             }
         }
         const openOptions = {
-            volumes: [{
-                host_path: workspaceVolume.host_path,
-                guest_path: workspaceVolume.guest_path,
-                read_only: workspaceVolume.read_only,
-            }],
+            volumes: [
+                {
+                    host_path: workspaceVolume.host_path,
+                    guest_path: workspaceVolume.guest_path,
+                    read_only: workspaceVolume.read_only,
+                },
+                ...(workspaceVolume.gitVolume ? [{
+                    host_path: workspaceVolume.gitVolume.host_path,
+                    guest_path: workspaceVolume.gitVolume.guest_path,
+                    read_only: workspaceVolume.gitVolume.read_only,
+                }] : []),
+            ],
             network: resolveBoxliteSessionNetwork(opts.network),
             resources: {
                 disk_size_gb: Number(process.env.BOXLITE_DISK_SIZE_GB || 20),
