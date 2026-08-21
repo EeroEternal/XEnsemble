@@ -168,7 +168,7 @@ export default React.forwardRef(function Sessions({
   // 否则编辑器已能保存、Changes 却一直空白（分支显示 —）。
   const changesTabActiveRef = useRef(false);
   const gitChanges = useGitChanges(activeSession?.projectId || null, changesTabActiveRef, activeSession?.sessionId);
-  const preview = usePreview(activeSession?.projectId, Boolean(activeSession?.projectId));
+  const preview = usePreview(activeSession?.projectId, Boolean(activeSession?.projectId), activeSession?.sessionId);
   const { showToast } = useToast();
   const panelRef = useRef(null);
   const shellRef = useRef(null);
@@ -1385,8 +1385,9 @@ export default React.forwardRef(function Sessions({
                     shellContent={<WorkspaceShell ref={shellRef} projectId={activeSession.projectId} sessionId={activeSession.sessionId} />}
                     deployContent={activeSession?.projectId ? (
                       <DeployPanel
-                        key={`${activeSession.projectId}-${deployVersion}`}
+                        key={`${activeSession.projectId}-${activeSession.sessionId}-${deployVersion}`}
                         projectId={activeSession.projectId}
+                        sessionId={activeSession.sessionId}
                         onSuccess={onDeploySuccess}
                       />
                     ) : null}

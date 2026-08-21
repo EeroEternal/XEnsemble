@@ -2149,7 +2149,13 @@ fastify.post('/api/v1/projects/:projectId/preview', { preValidation: [fastify.au
     if (!previewQuota.ok) return policy.quotaErrorReply(reply, previewQuota);
 
     try {
-        const dep = await deploymentService.deployAndStartPreview(request.user.id, project);
+        const sessionId = request.query?.session_id || request.body?.session_id;
+        let opts = {};
+        if (sessionId) {
+            const rtId = await resolveRuntimeIdFromSession(request.user.id, sessionId);
+            if (rtId) opts = { runtimeId: rtId };
+        }
+        const dep = await deploymentService.deployAndStartPreview(request.user.id, project, opts);
         return reply.code(201).send(dep);
     } catch (err) {
         const code = err instanceof RuntimeError ? err.statusCode : 503;

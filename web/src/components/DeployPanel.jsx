@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Loader2, CheckCircle2, AlertCircle, RotateCcw, Copy, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { buttonClass } from '../lib/buttonStyles';
 import { apiFetch } from '../lib/api';
+import { withSessionId } from '../lib/sessionContext';
 
 /**
  * 一键部署面板（WorkspacePanel 的 'deploy' tab）。全自动，无任何模式切换。
@@ -14,7 +15,7 @@ import { apiFetch } from '../lib/api';
  * 成功 → 短暂显示完成状态后回调 onSuccess（父组件跳转到 Preview tab）；
  * 失败 → 显示错误 + 「重新部署」按钮。
  */
-export default function DeployPanel({ projectId, onSuccess }) {
+export default function DeployPanel({ projectId, sessionId, onSuccess }) {
     const [runState, setRunState] = useState('idle');
     const [result, setResult] = useState(null);
     const [latestMessage, setLatestMessage] = useState(null);
@@ -27,7 +28,7 @@ export default function DeployPanel({ projectId, onSuccess }) {
         setLatestMessage(null);
         try {
             const res = await apiFetch(
-                `/api/v1/projects/${encodeURIComponent(projectId)}/auto-deploy`,
+                withSessionId(`/api/v1/projects/${encodeURIComponent(projectId)}/auto-deploy`),
                 { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resume: !!opts.resume }) },
             );
             const data = await res.json().catch(() => ({}));
@@ -44,13 +45,21 @@ export default function DeployPanel({ projectId, onSuccess }) {
             setResult({ ok: false, error: e.message || String(e) });
             setRunState('failed');
         }
-    }, [projectId, onSuccess]);
+    }, [projectId, sessionId, onSuccess]);
 
     useEffect(() => {
         if (autoStartedRef.current) return;
         autoStartedRef.current = true;
         startRun();
     }, [startRun]);
+
+    // Reset auto-start when session changes so deploy re-triggers for the new worktree
+    useEffect(() => {
+        autoStartedRef.current = false;
+        setRunState('idle');
+        setResult(null);
+        setLatestMessage(null);
+    }, [sessionId]);
 
     useEffect(() => () => {
         if (jumpTimerRef.current) clearTimeout(jumpTimerRef.current);

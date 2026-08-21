@@ -84,8 +84,9 @@ async function getForUser(userId, deploymentId) {
     return rows[0] || null;
 }
 
-async function createPreview(userId, project) {
-    const { runtime } = await ensureProjectRuntime(project);
+async function createPreview(userId, project, opts = {}) {
+    const ensureOpts = opts.runtimeId ? { runtimeId: opts.runtimeId } : {};
+    const { runtime } = await ensureProjectRuntime(project, ensureOpts);
     const now = Date.now();
     const id = `dep_${crypto.randomBytes(8).toString('hex')}`;
 
@@ -96,7 +97,7 @@ async function createPreview(userId, project) {
     const prov = resolveRuntimeProvider();
     if (prov === 'boxlite') {
         try {
-            const ready = await ensureProjectRuntime(project);
+            const ready = await ensureProjectRuntime(project, ensureOpts);
             const ref = ready.runtime && ready.runtime.runtimeRef;
             const rtt = getRuntime();
             if (ref && typeof rtt.provider.checkpoint === 'function') {
@@ -252,8 +253,8 @@ async function remove(userId, deploymentId) {
 }
 
 /** 创建 preview deployment 并立即 start（Console 一键部署）。 */
-async function deployAndStartPreview(userId, project) {
-    const dep = await createPreview(userId, project);
+async function deployAndStartPreview(userId, project, opts = {}) {
+    const dep = await createPreview(userId, project, opts);
     const row = await getForUser(userId, dep.id);
     return startPreview(userId, project, row);
 }

@@ -258,7 +258,7 @@ async function ensureFrontendServed({ runtimeRef, workspacePath, port, onLog }) 
     return { ok: true, port: listenPort, dist, backendOk, backendPort };
 }
 
-async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onProgress, resume }) {
+async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onProgress, resume, sessionId }) {
     const project = await getProjectForUser(userId, projectId);
     if (!project) return { ok: false, error: 'Project not found' };
     if (!process.env.LLM_ANALYZE_API_KEY && !process.env.LLM_ANALYZE_API_URL) {
@@ -280,7 +280,23 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
         console.error('[twoStage] failed to mark old deployments stopped:', e.message);
     }
 
-    const ready = await ensureProjectRuntime(project);
+    // Resolve runtimeId from session_id so deploy targets the correct worktree
+    let ensureOpts = {};
+    if (sessionId) {
+        try {
+            const { and: _and, eq: _eq } = require('drizzle-orm');
+            const sessRows = await db.select().from(schema.sessions)
+                .where(_and(_eq(schema.sessions.id, sessionId), _eq(schema.sessions.userId, userId)))
+                .limit(1);
+            if (sessRows.length > 0 && sessRows[0].runtimeId) {
+                ensureOpts = { runtimeId: sessRows[0].runtimeId };
+            }
+        } catch (e) {
+            console.error('[twoStage] failed to resolve runtimeId from session:', e.message);
+        }
+    }
+
+    const ready = await ensureProjectRuntime(project, ensureOpts);
     const runtime = getRuntime();
     const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
     const runtimeId = ready.runtime ? ready.runtime.id : undefined;
@@ -393,6 +409,7 @@ function registerAutoDeployRoutes(fastify, { getProjectForUser }) {
                 userId: request.user.id,
                 getProjectForUser,
                 resume: Boolean(request.body?.resume),
+                sessionId: request.query?.session_id || request.body?.session_id,
             });
             return reply.send(result);
         } catch (err) {

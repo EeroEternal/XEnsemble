@@ -7,6 +7,7 @@ import {
   Square,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { withSessionId } from '../lib/sessionContext';
 import { useToast } from './Toast';
 
 const STATUS_STYLES = {
@@ -64,7 +65,7 @@ function closePreviewWindow(winRef) {
   if (winRef) winRef.current = null;
 }
 
-export function usePreview(projectId, token) {
+export function usePreview(projectId, token, sessionId) {
   const { showToast } = useToast();
   const lastFailedToastRef = useRef(null);
   const [deployment, setDeployment] = useState(null);
@@ -75,7 +76,7 @@ export function usePreview(projectId, token) {
   useEffect(() => {
     lastFailedToastRef.current = null;
     closePreviewWindow(previewWindowRef);
-  }, [projectId]);
+  }, [projectId, sessionId]);
 
   useEffect(() => () => closePreviewWindow(previewWindowRef), []);
 
@@ -83,7 +84,7 @@ export function usePreview(projectId, token) {
     if (!projectId || !token) return;
     try {
       const res = await apiFetch(
-        `/api/v1/deployments?project_id=${encodeURIComponent(projectId)}`,
+        withSessionId(`/api/v1/deployments?project_id=${encodeURIComponent(projectId)}`),
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load preview');
@@ -95,13 +96,13 @@ export function usePreview(projectId, token) {
     } catch (e) {
       // Polling errors stay silent; action failures toast in their handlers.
     }
-  }, [projectId, token]);
+  }, [projectId, sessionId, token]);
 
-  // Initial fetch on mount / project change
+  // Initial fetch on mount / project / session change
   useEffect(() => {
     if (!projectId || !token) return;
     loadDeployments();
-  }, [loadDeployments, projectId, token]);
+  }, [loadDeployments, projectId, sessionId, token]);
 
   // Only poll when there's an active deployment (running/building/pending)
   useEffect(() => {
@@ -113,7 +114,7 @@ export function usePreview(projectId, token) {
   const deployPreview = async () => {
     setLoading(true);
     try {
-      const res = await apiFetch(`/api/v1/projects/${encodeURIComponent(projectId)}/preview`, {
+      const res = await apiFetch(withSessionId(`/api/v1/projects/${encodeURIComponent(projectId)}/preview`), {
         method: 'POST',
       });
       const data = await res.json();
