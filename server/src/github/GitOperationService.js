@@ -62,12 +62,19 @@ class GitOperationService {
         const needsToken = options.needsToken ?? REMOTE_GIT_COMMANDS.has(args[0]);
         const token = needsToken ? await this._resolveToken(project) : undefined;
         let hostPath = workspace.projectDir(project.userId, project.id);
+        let gitDir = null;
+        let workTree = null;
 
         // If a runtimeId is set (session-scoped), prefer the worktree path.
+        // Compute explicit --git-dir / --work-tree so host git bypasses the
+        // worktree's .git pointer (which may be rewritten to a VM path).
         if (this._runtimeId) {
+            const mainDir = workspace.projectDir(project.userId, project.id);
             const wtPath = workspace.worktreeDir(project.userId, project.id, this._runtimeId);
             if (fs.existsSync(path.join(wtPath, '.git'))) {
                 hostPath = wtPath;
+                gitDir = path.join(mainDir, '.git', 'worktrees', this._runtimeId);
+                workTree = wtPath;
             }
         }
 
@@ -78,6 +85,8 @@ class GitOperationService {
                 const result = await this.hostGit(hostPath, args, {
                     timeoutMs: options.timeoutMs || 120_000,
                     env: credentials ? credentials.env : {},
+                    gitDir,
+                    workTree,
                 });
                 return { ...result, workspacePath: hostPath };
             } catch (err) {

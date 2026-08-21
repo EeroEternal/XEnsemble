@@ -14,13 +14,23 @@ function usesHostWorkspace() {
 /**
  * Run git on the host filesystem.
  * Must not be used for guest-only paths that are not visible on the host.
+ *
+ * When `gitDir` and `workTree` are provided (worktree case), pass them
+ * explicitly via --git-dir/--work-tree. This bypasses the worktree's .git
+ * pointer file, which may have been rewritten to a VM-internal path
+ * (/workspace.git/...) by _initFreshSessionExecs for guest git access.
  */
 function hostGit(cwd, args, options = {}) {
     return new Promise((resolve, reject) => {
         // -c safe.directory=* 绕过 "dubious ownership"：server 常以 root 运行，
         // 而 workspace 目录可能属主为运行服务用户（administrator），git 默认拒绝访问，
         // 导致分支/status 拉取失败。
-        const child = spawn('git', ['-c', 'safe.directory=*', ...args], {
+        let gitArgs = ['-c', 'safe.directory=*'];
+        if (options.gitDir && options.workTree) {
+            gitArgs.push('--git-dir', options.gitDir, '--work-tree', options.workTree);
+        }
+        gitArgs.push(...args);
+        const child = spawn('git', gitArgs, {
             cwd,
             env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...(options.env || {}) },
             stdio: ['ignore', 'pipe', 'pipe'],
