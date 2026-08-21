@@ -69,12 +69,20 @@ async function fetchImages() {
   return { images: data.images ?? data, count: data.count, max: data.max };
 }
 
+async function fetchAgentImages() {
+  const res = await apiFetch('/api/v1/admin/agent-images');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to load agent images');
+  return data.agents ?? [];
+}
+
 export function CustomImagesContent() {
   const { showToast } = useToast();
   const nameRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [catalog, setCatalog] = useState(null);
   const [images, setImages] = useState([]);
+  const [agentImages, setAgentImages] = useState([]);
   const [imageQuota, setImageQuota] = useState({ count: 0, max: 10 });
   const [selectedComponentIds, setSelectedComponentIds] = useState([]);
   const [componentVersions, setComponentVersions] = useState({});
@@ -123,6 +131,12 @@ export function CustomImagesContent() {
       setCatalog(cat);
       setImages(imgData.images);
       setImageQuota({ count: imgData.count ?? imgData.images?.length ?? 0, max: imgData.max ?? 10 });
+
+      try {
+        setAgentImages(await fetchAgentImages());
+      } catch {
+        setAgentImages([]);
+      }
 
       const polling = new Set();
       for (const img of imgData.images) {
@@ -697,6 +711,68 @@ export function CustomImagesContent() {
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Agent Images (sandbox-pulled) */}
+      <div className="mt-8">
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-zinc-700">Agent Images</h2>
+          <span className="text-xs text-zinc-500">{agentImages.length} agents</span>
+        </div>
+        <div className={cn(consoleTableShellClass, 'overflow-x-auto')}>
+          <table className="w-full min-w-[640px] table-fixed border-collapse text-left">
+            <colgroup>
+              <col className="w-56" />
+              <col className="w-auto" />
+              <col className="w-24" />
+              <col className="w-32" />
+            </colgroup>
+            <thead>
+              <tr className="border-b border-zinc-200">
+                <th className={consoleTableHeadCellClass}>Agent</th>
+                <th className={consoleTableHeadCellClass}>Image</th>
+                <th className={consoleTableHeadCellClass}>Tag</th>
+                <th className={consoleTableHeadCellClass}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {agentImages.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className={cn(consoleTableBodyCellClass, 'text-center text-zinc-400')}>
+                    No agent images registered yet.
+                  </td>
+                </tr>
+              ) : (
+                agentImages.map((a) => {
+                  const active = a.active_version;
+                  const imageRef = active?.image_ref || a.default_image_ref || a.suggested_image_ref || '—';
+                  return (
+                    <tr key={a.agent_id} className="border-b border-zinc-100 align-top">
+                      <td className={consoleTableBodyCellClass}>
+                        <span className="block truncate font-medium text-zinc-900" title={a.agent_id}>{a.agent_name}</span>
+                      </td>
+                      <td className={cn(consoleTableBodyCellClass, 'max-w-[320px]')}>
+                        <span className="block truncate font-mono text-xs text-zinc-600" title={imageRef}>{imageRef}</span>
+                      </td>
+                      <td className={consoleTableBodyCellClass}>
+                        <span className="font-mono text-xs text-zinc-600">{active?.tag || '—'}</span>
+                      </td>
+                      <td className={consoleTableBodyCellClass}>
+                        {active ? (
+                          <span className={active.status === 'ready' ? 'text-emerald-600' : 'text-amber-600'}>
+                            {active.status === 'ready' ? 'Ready' : active.status}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-400">Not registered</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </>
   );

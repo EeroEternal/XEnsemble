@@ -20,18 +20,10 @@ function statusBadge(installed) {
 }
 
 function getAuthSummary(agent) {
-  const isGateway = agent.llm_auth_mode === 'gateway';
-  if (isGateway) {
-    return {
-      mode: 'Gateway',
-      hint: agent.keys_ready ? 'Ready' : 'Needs model',
-      hintClass: agent.keys_ready ? 'text-emerald-600' : 'text-amber-600',
-    };
-  }
   return {
-    mode: 'BYOK',
-    hint: 'User keys',
-    hintClass: 'text-zinc-500',
+    mode: 'Gateway',
+    hint: agent.keys_ready ? 'Ready' : 'Needs model',
+    hintClass: agent.keys_ready ? 'text-emerald-600' : 'text-amber-600',
   };
 }
 
@@ -55,7 +47,7 @@ export default function AgentDetailsDialog({ agent, onClose }) {
   if (!agent) return null;
 
   const auth = getAuthSummary(agent);
-  const rawModel = agent.llm_auth_mode === 'gateway' ? agent.gateway_config?.model : null;
+  const rawModel = agent.gateway_config?.model;
   const modelList = Array.isArray(rawModel)
     ? rawModel.map((m) => String(m || '').trim()).filter(Boolean)
     : (rawModel ? [String(rawModel).trim()] : []);

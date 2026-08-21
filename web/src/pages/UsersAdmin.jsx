@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Plus, Pencil, Pause, Play, CheckCircle, Clock, KeyRound, Loader2, RefreshCw, Search } from 'lucide-react';
 
 import Button from '../components/Button';
@@ -6,7 +6,6 @@ import Input from '../components/Input';
 import PageHeader from '../components/PageHeader';
 import RowActionsMenu from '../components/RowActionsMenu';
 import SelectMenu from '../components/SelectMenu';
-import MultiSelectMenu from '../components/MultiSelectMenu';
 import StatusBadge from '../components/StatusBadge';
 import { ConsoleDialogShell } from '../components/ConsoleDialog';
 import { useToast } from '../components/Toast';
@@ -42,14 +41,12 @@ const emptyForm = {
   max_sessions: 2,
   max_previews: 1,
   resource_tier: 'basic',
-  agent_ids: [],
 };
 
 export default function UsersAdmin() {
   
   const { showToast } = useToast();
   const [users, setUsers] = useState([]);
-  const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -57,7 +54,6 @@ export default function UsersAdmin() {
   const [editingUser, setEditingUser] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [resetPassword, setResetPassword] = useState('');
-  const pendingCreateAgentDefaults = useRef(false);
 
   const fetchUsers = useCallback(({ silent = false } = {}) => {
     if (!silent) setRefreshing(true);
@@ -73,33 +69,12 @@ export default function UsersAdmin() {
       });
   }, []);
 
-  const fetchAgents = useCallback(() => {
-    apiFetch('/api/v1/admin/agents')
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setAgents(data.filter((a) => a.installed));
-        }
-      });
-  }, []);
-
   useEffect(() => {
     fetchUsers();
-    fetchAgents();
-  }, [fetchUsers, fetchAgents]);
-
-  useEffect(() => {
-    if (!pendingCreateAgentDefaults.current || dialogMode !== 'create' || agents.length === 0) return;
-    setForm((f) => ({ ...f, agent_ids: agents.map((a) => a.id) }));
-    pendingCreateAgentDefaults.current = false;
-  }, [dialogMode, agents]);
+  }, [fetchUsers]);
 
   const openCreate = () => {
-    pendingCreateAgentDefaults.current = agents.length === 0;
-    setForm({
-      ...emptyForm,
-      agent_ids: agents.map((a) => a.id),
-    });
+    setForm({ ...emptyForm });
     setEditingUser(null);
     setResetPassword('');
     setDialogMode('create');
@@ -120,7 +95,6 @@ export default function UsersAdmin() {
         max_sessions: detail.quotas?.max_sessions ?? 2,
         max_previews: detail.quotas?.max_previews ?? 1,
         resource_tier: detail.quotas?.resource_tier ?? 'basic',
-        agent_ids: detail.granted_agent_ids || [],
       });
       setResetPassword('');
       setDialogMode('edit');
@@ -130,7 +104,6 @@ export default function UsersAdmin() {
   };
 
   const closeDialog = () => {
-    pendingCreateAgentDefaults.current = false;
     setDialogMode(null);
     setEditingUser(null);
     setResetPassword('');
@@ -158,7 +131,6 @@ export default function UsersAdmin() {
               max_previews: Number(form.max_previews),
               resource_tier: form.resource_tier,
             },
-            agent_ids: form.agent_ids,
           }),
         });
         const data = await res.json();
@@ -188,14 +160,6 @@ export default function UsersAdmin() {
         });
         const quotaData = await quotaRes.json();
         if (!quotaRes.ok) throw new Error(quotaData.error);
-
-        const agentsRes = await apiFetch(`/api/v1/admin/users/${editingUser.id}/agents`, {
-          method: 'PUT',
-          
-          body: JSON.stringify({ agent_ids: form.agent_ids }),
-        });
-        const agentsData = await agentsRes.json();
-        if (!agentsRes.ok) throw new Error(agentsData.error);
 
         if (resetPassword.trim()) {
           if (resetPassword.length < 8) {
@@ -253,8 +217,6 @@ export default function UsersAdmin() {
     }
   };
 
-  const agentOptions = agents.map((a) => ({ value: a.id, label: a.name }));
-
   const filteredUsers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return users;
@@ -301,7 +263,6 @@ export default function UsersAdmin() {
               <col className="w-28" />
               <col className="w-40" />
               <col className="w-20" />
-              <col className="w-24" />
               <col className="w-36" />
               <col className="w-20" />
             </colgroup>
@@ -311,7 +272,6 @@ export default function UsersAdmin() {
                 <th className={consoleTableHeadCellClass}>Status</th>
                 <th className={consoleTableHeadCellClass}>Usage</th>
                 <th className={consoleTableHeadCellClass} title="Resource tier — controls LLM request rate">Tier</th>
-                <th className={consoleTableHeadCellClass} title="Granted agent access">Agents</th>
                 <th className={consoleTableHeadCellClass}>Last login</th>
                 <th className={consoleTableHeadCellClass}>Actions</th>
               </tr>
@@ -319,11 +279,11 @@ export default function UsersAdmin() {
             <tbody className="divide-y divide-zinc-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className={`${consoleTableBodyCellClass} text-zinc-400`}>Loading…</td>
+                  <td colSpan={6} className={`${consoleTableBodyCellClass} text-zinc-400`}>Loading…</td>
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>
+                  <td colSpan={6} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>
                     {users.length === 0 ? 'No users yet.' : 'No users match your search.'}
                   </td>
                 </tr>
@@ -345,11 +305,6 @@ export default function UsersAdmin() {
                   </td>
                   <td className={consoleTableBodyCellClass}>
                     <span className="text-xs text-zinc-500">{user.quotas?.resource_tier ?? 'basic'}</span>
-                  </td>
-                  <td className={consoleTableBodyCellClass}>
-                    <span className="text-xs text-zinc-600">
-                      {user.role === 'admin' ? 'All' : (user.granted_agents_count ?? 0)}
-                    </span>
                   </td>
                   <td className={consoleTableBodyCellClass}>
                     <span className="text-xs text-zinc-500" title={user.last_login_at ? new Date(user.last_login_at).toLocaleString() : undefined}>
@@ -487,17 +442,6 @@ export default function UsersAdmin() {
                     </div>
                   </div>
                 </div>
-                )}
-
-                {form.role !== 'admin' && (
-                  <MultiSelectMenu
-                    label="Agent access"
-                    value={form.agent_ids}
-                    onChange={(agent_ids) => setForm({ ...form, agent_ids })}
-                    options={agentOptions}
-                    placeholder="Select agents"
-                    showSelectAll
-                  />
                 )}
 
                 {dialogMode === 'edit' && (

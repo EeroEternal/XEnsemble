@@ -27,7 +27,7 @@ function normalizeModels(model) {
 
 export default function AgentConfigDialog({ agent, gatewayProviders, onClose, onSaved }) {
   const { showToast } = useToast();
-  const [authDraft, setAuthDraft] = useState({ llm_auth_mode: 'byok', provider: '', model: [] });
+  const [authDraft, setAuthDraft] = useState({ provider: '', model: [] });
   const [savingKeys, setSavingKeys] = useState(false);
   const [gatewayPreview, setGatewayPreview] = useState(null);
   const [gatewayPreviewLoading, setGatewayPreviewLoading] = useState(false);
@@ -49,19 +49,18 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
       })
       .catch(() => {});
     setAuthDraft({
-      llm_auth_mode: agent.llm_auth_mode || agent.gateway_config?.llm_auth_mode || 'byok',
       provider: agent.gateway_config?.provider || '',
       model: normalizeModels(agent.gateway_config?.model),
     });
   }, [agent]);
 
-  const fetchGatewayPreview = useCallback(async (agentId, models, llmAuthMode) => {
+  const fetchGatewayPreview = useCallback(async (agentId, models) => {
     setGatewayPreviewLoading(true);
     try {
       const params = new URLSearchParams();
       const firstModel = Array.isArray(models) ? (models[0] || '') : models;
       if (firstModel?.trim()) params.set('model', firstModel.trim());
-      if (llmAuthMode) params.set('llm_auth_mode', llmAuthMode);
+      params.set('llm_auth_mode', 'gateway');
       const qs = params.toString();
       const res = await apiFetch(`/api/v1/admin/agents/${agentId}/gateway-spawn-preview${qs ? `?${qs}` : ''}`);
       const data = await res.json();
@@ -74,18 +73,18 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
   }, []);
 
   useEffect(() => {
-    if (!agent || authDraft.llm_auth_mode !== 'gateway') {
+    if (!agent) {
       setGatewayPreview(null);
       return undefined;
     }
-    fetchGatewayPreview(agent.id, authDraft.model, authDraft.llm_auth_mode);
+    fetchGatewayPreview(agent.id, authDraft.model);
     return undefined;
-  }, [agent, authDraft.llm_auth_mode, authDraft.model, fetchGatewayPreview]);
+  }, [agent, authDraft.model, fetchGatewayPreview]);
 
   useEffect(() => {
     if (gatewayProviders.length === 0) return;
     setAuthDraft((d) => {
-      if (d.llm_auth_mode === 'gateway' && !d.provider) {
+      if (!d.provider) {
         return { ...d, provider: gatewayProviders[0].name };
       }
       return d;
@@ -95,13 +94,12 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
   const handleSave = async (e) => {
     e.preventDefault();
     if (!agent) return;
-    const mode = authDraft.llm_auth_mode;
-    if (mode === 'gateway' && !authDraft.provider?.trim()) {
-      showToast('error', 'Select a provider for gateway mode.');
+    if (!authDraft.provider?.trim()) {
+      showToast('error', 'Select a provider.');
       return;
     }
-    if (mode === 'gateway' && authDraft.model.length === 0) {
-      showToast('error', 'Select at least one model for gateway mode.');
+    if (authDraft.model.length === 0) {
+      showToast('error', 'Select at least one model.');
       return;
     }
     setSavingKeys(true);
@@ -109,9 +107,9 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
       const res = await apiFetch(`/api/v1/admin/gateway/agent-configs/${agent.id}`, {
         method: 'PUT',
         body: JSON.stringify({
-          llm_auth_mode: mode,
-          provider: mode === 'gateway' ? (authDraft.provider || undefined) : undefined,
-          model: mode === 'gateway' ? authDraft.model : undefined,
+          llm_auth_mode: 'gateway',
+          provider: authDraft.provider || undefined,
+          model: authDraft.model,
         }),
       });
       const data = await res.json();
@@ -150,11 +148,7 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
     }
   };
 
-  const canSave = agent && (
-    authDraft.llm_auth_mode === 'gateway'
-      ? authDraft.model.length > 0
-      : true
-  );
+  const canSave = agent && authDraft.model.length > 0;
 
   const providerOptions = useMemo(
     () => gatewayProviders.map((p) => ({ value: p.name, label: p.name })),
@@ -182,69 +176,42 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
         Configure - {agent.name}
       </h2>
       <p className="text-sm text-zinc-500 mb-4">
-        Choose BYOK (users enter keys in Settings - API Keys) or Gateway (shared router + model).
+        Route this agent through the shared gateway and select the model(s) users can use.
       </p>
       <form onSubmit={handleSave} className="space-y-4">
-        {/* Section: LLM Auth */}
-        <div>
-          <label className={`block mb-1 ${consoleSectionLabelClass}`}>LLM auth</label>
-          <SelectMenu
-            value={authDraft.llm_auth_mode}
-            onChange={(v) => setAuthDraft((d) => ({
-              ...d,
-              llm_auth_mode: v,
-              provider: v === 'gateway' ? (d.provider || gatewayProviders[0]?.name || '') : '',
-              model: v === 'gateway' ? d.model : [],
-            }))}
-            options={[
-              { value: 'byok', label: 'BYOK' },
-              { value: 'gateway', label: 'Gateway' },
-            ]}
-          />
-        </div>
-
-        {/* Section: Gateway config (conditional) */}
-        {authDraft.llm_auth_mode === 'gateway' && (
-          <SectionDivider>
-            <div className="space-y-3">
-              <SectionLabel>Gateway</SectionLabel>
-              <div>
-                <label className={`block mb-1 ${consoleSectionLabelClass}`}>Provider</label>
-                <SelectMenu
-                  value={authDraft.provider}
-                  onChange={(v) => setAuthDraft((d) => ({ ...d, provider: v, model: [] }))}
-                  options={providerOptions}
-                  placeholder="Any provider"
-                />
-              </div>
-              <div>
-                <label className={`block mb-1 ${consoleSectionLabelClass}`}>Model</label>
-                <MultiSelectMenu
-                  value={authDraft.model}
-                  onChange={(vals) => setAuthDraft((d) => ({ ...d, model: vals }))}
-                  options={modelOptions}
-                  placeholder={modelOptions.length ? 'Select models...' : 'Add models in Settings - Gateway'}
-                  disabled={modelOptions.length === 0}
-                />
-              </div>
-              {gatewayPreviewLoading && !gatewayPreview && (
-                <p className="text-sm text-zinc-500">Loading defaults...</p>
-              )}
-              {!gatewayPreviewLoading && gatewayPreview && !gatewayPreview.gateway_running && (
-                <p className="text-sm text-amber-700">
-                  UniGateway is not running. Start it under Settings - Gateway.
-                </p>
-              )}
+        {/* Section: Gateway config */}
+        <SectionDivider>
+          <div className="space-y-3">
+            <SectionLabel>Gateway</SectionLabel>
+            <div>
+              <label className={`block mb-1 ${consoleSectionLabelClass}`}>Provider</label>
+              <SelectMenu
+                value={authDraft.provider}
+                onChange={(v) => setAuthDraft((d) => ({ ...d, provider: v, model: [] }))}
+                options={providerOptions}
+                placeholder="Any provider"
+              />
             </div>
-          </SectionDivider>
-        )}
-
-        {/* Section: BYOK hint (conditional) */}
-        {authDraft.llm_auth_mode === 'byok' && (
-          <p className="text-sm text-zinc-500">
-            Users configure their own API keys in the Sessions page before launching this agent.
-          </p>
-        )}
+            <div>
+              <label className={`block mb-1 ${consoleSectionLabelClass}`}>Model</label>
+              <MultiSelectMenu
+                value={authDraft.model}
+                onChange={(vals) => setAuthDraft((d) => ({ ...d, model: vals }))}
+                options={modelOptions}
+                placeholder={modelOptions.length ? 'Select models...' : 'Add models in Settings - Gateway'}
+                disabled={modelOptions.length === 0}
+              />
+            </div>
+            {gatewayPreviewLoading && !gatewayPreview && (
+              <p className="text-sm text-zinc-500">Loading defaults...</p>
+            )}
+            {!gatewayPreviewLoading && gatewayPreview && !gatewayPreview.gateway_running && (
+              <p className="text-sm text-amber-700">
+                UniGateway is not running. Start it under Settings - Gateway.
+              </p>
+            )}
+          </div>
+        </SectionDivider>
 
         {/* Section: VM Resources */}
         <SectionDivider>

@@ -44,18 +44,10 @@ function formatLifecycleTime(ts) {
 }
 
 function getAuthSummary(agent) {
-  const isGateway = agent.llm_auth_mode === 'gateway';
-  if (isGateway) {
-    return {
-      mode: 'Gateway',
-      hint: agent.keys_ready ? 'Ready' : 'Needs model',
-      hintClass: agent.keys_ready ? 'text-emerald-600' : 'text-amber-600',
-    };
-  }
   return {
-    mode: 'BYOK',
-    hint: 'User keys',
-    hintClass: 'text-zinc-500',
+    mode: 'Gateway',
+    hint: agent.keys_ready ? 'Ready' : 'Needs model',
+    hintClass: agent.keys_ready ? 'text-emerald-600' : 'text-amber-600',
   };
 }
 
