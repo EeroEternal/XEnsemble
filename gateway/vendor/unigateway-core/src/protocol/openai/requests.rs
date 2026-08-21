@@ -86,6 +86,9 @@ pub fn build_chat_request(
         if key == "max_tokens" && request.extra.contains_key("max_completion_tokens") {
             continue;
         }
+        if is_anthropic_only_extra_key(&key) {
+            continue;
+        }
         payload.entry(key).or_insert(value);
     }
 
@@ -96,6 +99,22 @@ pub fn build_chat_request(
         &Value::Object(payload),
         None,
     )
+}
+
+/// Keys that originate from Anthropic's API spec and have no equivalent
+/// meaning in the OpenAI Chat Completions schema.  When an Anthropic-protocol
+/// client (e.g. Claude Code) sends a request that gets translated to an
+/// OpenAI upstream, these fields must be stripped — otherwise strict OpenAI
+/// endpoints (e.g. tokenhub) reject the payload with HTTP 400.
+fn is_anthropic_only_extra_key(key: &str) -> bool {
+    matches!(
+        key,
+        "thinking"
+            | "enable_thinking"
+            | "service_tier"
+            | "anthropic_version"
+            | "anthropic_beta"
+    ) || key.starts_with("anthropic_")
 }
 
 fn openai_chat_messages(request: &ProxyChatRequest) -> Result<Vec<Value>, GatewayError> {
@@ -326,6 +345,9 @@ pub fn build_responses_request(
         payload.insert("metadata".to_string(), request_metadata);
     }
     for (key, value) in request.extra.clone() {
+        if is_anthropic_only_extra_key(&key) {
+            continue;
+        }
         payload.entry(key).or_insert(value);
     }
 

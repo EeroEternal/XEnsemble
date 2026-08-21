@@ -393,6 +393,45 @@ fn build_chat_request_uses_max_completion_tokens_when_client_provides_it() {
 }
 
 #[test]
+fn build_chat_request_strips_anthropic_only_extra_keys() {
+    let request = build_chat_request(
+        &mut endpoint(),
+        &ProxyChatRequest {
+            model: "alias".to_string(),
+            messages: vec![Message::text(MessageRole::User, "hello")],
+            system: None,
+            tools: None,
+            tool_choice: None,
+            raw_messages: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            max_tokens: Some(32),
+            stop_sequences: None,
+            stream: false,
+            extra: HashMap::from([
+                ("thinking".to_string(), json!({"type": "enabled", "budget_tokens": 1024})),
+                ("service_tier".to_string(), json!("priority")),
+                ("anthropic_version".to_string(), json!("2023-06-01")),
+                ("reasoning_effort".to_string(), json!("high")),
+            ]),
+            metadata: HashMap::new(),
+        },
+    )
+    .expect("chat request");
+
+    let body: Value = serde_json::from_slice(&request.body.expect("body")).expect("json body");
+    assert!(body.get("thinking").is_none(), "thinking should be stripped");
+    assert!(body.get("service_tier").is_none(), "service_tier should be stripped");
+    assert!(body.get("anthropic_version").is_none(), "anthropic_version should be stripped");
+    assert_eq!(
+        body.get("reasoning_effort").and_then(Value::as_str),
+        Some("high"),
+        "OpenAI-compatible extra keys should be preserved"
+    );
+}
+
+#[test]
 fn build_chat_request_preserves_explicit_max_completion_tokens_over_max_tokens() {
     let request = build_chat_request(
         &mut endpoint(),
