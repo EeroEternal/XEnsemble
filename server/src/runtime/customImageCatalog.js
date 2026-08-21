@@ -43,6 +43,11 @@ const LANGUAGE_INSTALL = {
     '20': { install: 'curl -fsSL https://nodejs.org/dist/v20.20.2/node-v20.20.2-linux-x64.tar.gz | tar -xz -C /usr/local --strip-components=1', default: false, diskSizeMb: 100 },
     '22': { install: 'curl -fsSL https://nodejs.org/dist/v22.23.1/node-v22.23.1-linux-x64.tar.gz | tar -xz -C /usr/local --strip-components=1', default: true, diskSizeMb: 100 },
     '23': { install: 'curl -fsSL https://nodejs.org/dist/v23.11.1/node-v23.11.1-linux-x64.tar.gz | tar -xz -C /usr/local --strip-components=1', default: false, diskSizeMb: 100 },
+    // Node 24 LTS (Krypton) + 25 Current — openclaw engines require
+    // >=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0, so 23 is excluded but
+    // 24.19.0 and 25.9.0 satisfy it. Use npmmirror for CN reliability.
+    '24': { install: 'curl -fsSL https://npmmirror.com/mirrors/node/v24.19.0/node-v24.19.0-linux-x64.tar.gz | tar -xz -C /usr/local --strip-components=1', default: false, diskSizeMb: 100 },
+    '25': { install: 'curl -fsSL https://npmmirror.com/mirrors/node/v25.9.0/node-v25.9.0-linux-x64.tar.gz | tar -xz -C /usr/local --strip-components=1', default: false, diskSizeMb: 100 },
   },
   rust: {
     'stable': { install: 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable', default: true, diskSizeMb: 500 },
