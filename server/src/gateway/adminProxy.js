@@ -141,6 +141,23 @@ function registerGatewayAdminRoutes(fastify) {
         } catch (err) {
             fastify.log.warn(err, '[llm] gateway binding sync after provider change failed');
         }
+        try {
+            const result = await requestGateway('GET', '/api/admin/providers', { log: fastify.log });
+            if (result.statusCode === 200 && result.body) {
+                const body = typeof result.body === 'string' ? JSON.parse(result.body) : result.body;
+                const providers = body?.data || body || [];
+                if (Array.isArray(providers)) {
+                    const { pruneAgentModelsForProvider } = require('../admin/AgentGatewayConfig');
+                    for (const p of providers) {
+                        if (p?.name && Array.isArray(p?.models)) {
+                            await pruneAgentModelsForProvider(p.name, p.models, fastify.log);
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            fastify.log.warn(err, '[llm] agent model pruning after provider change failed');
+        }
     }
 
     fastify.get('/api/v1/admin/gateway/status', { preValidation: adminPre }, async (request) => {

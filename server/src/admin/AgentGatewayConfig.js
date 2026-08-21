@@ -119,6 +119,36 @@ async function setForAgent(agentId, { llm_auth_mode, provider, model } = {}) {
     return { config: saved, sync };
 }
 
+async function pruneAgentModelsForProvider(providerName, validModels, log = console) {
+    if (!providerName || !Array.isArray(validModels)) return;
+    const validSet = new Set(validModels.map((m) => String(m).trim()).filter(Boolean));
+    const all = await getAll();
+    let changed = false;
+    for (const [agentId, cfg] of Object.entries(all)) {
+        if (cfg?.llm_auth_mode !== 'gateway' || cfg?.provider !== providerName) continue;
+        const current = allModels(cfg);
+        const pruned = current.filter((m) => validSet.has(m));
+        if (pruned.length === current.length) continue;
+        if (pruned.length === 0) {
+            log.warn?.(`[agent-gateway-config] agent ${agentId} has no valid models after pruning ${providerName}; keeping current list`);
+            continue;
+        }
+        all[agentId] = { ...cfg, model: pruned };
+        changed = true;
+        log.info?.(`[agent-gateway-config] pruned models for agent ${agentId}: ${current.filter((m) => !validSet.has(m)).join(', ')} removed`);
+    }
+    if (changed) {
+        const value = JSON.stringify(all);
+        const existing = await db.select().from(schema.platformSettings).where(eq(schema.platformSettings.key, CONFIG_KEY));
+        if (existing.length > 0) {
+            await db.update(schema.platformSettings).set({ value }).where(eq(schema.platformSettings.key, CONFIG_KEY));
+        } else {
+            await db.insert(schema.platformSettings).values({ key: CONFIG_KEY, value });
+        }
+        _cache = null;
+    }
+}
+
 module.exports = {
     getAll,
     getForAgent,
@@ -126,4 +156,5 @@ module.exports = {
     setForAgent,
     primaryModel,
     allModels,
+    pruneAgentModelsForProvider,
 };
