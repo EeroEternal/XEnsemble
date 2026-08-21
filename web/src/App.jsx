@@ -92,7 +92,7 @@ function AuthenticatedLayout({
         className="shrink-0 h-12 border-b border-zinc-200 bg-white flex items-center px-4 gap-3 relative z-30"
       >
         <BrandMark className="h-7 w-7 shrink-0" iconClassName="h-3.5 w-3.5" />
-        <span className="text-sm font-bold text-zinc-900 shrink-0">SkyHarness</span>
+        <span className="text-sm font-bold text-zinc-900 shrink-0">AgentHarness</span>
         {isSettingsRoute ? (
           <div className="flex-1 min-w-0 flex items-center gap-3">
             <button

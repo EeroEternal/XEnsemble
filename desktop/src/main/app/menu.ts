@@ -7,7 +7,7 @@ export function createMenu(_mainWindow: BrowserWindow): Menu {
     ...(isMac
       ? [
           {
-            label: 'XEnsemble',
+            label: 'AgentHarness',
             submenu: [
               { role: 'about' },
               { type: 'separator' },

@@ -1,6 +1,6 @@
-# XEnsemble Design System
+# AgentHarness Design System
 
-**Console UI 唯一规范入口**（对齐 [ParaRouter DESIGN.md](https://github.com/EeroEternal/ParaRouter/blob/main/DESIGN.md) 的 Console 面）。`AGENTS.md` 与 Cursor 规则仅指向本文；**完整细则见 [`docs/Designs.md`](docs/Designs.md)**（Settings、Agents、Preview、Toast 等 XEnsemble 扩展均在该文件）。
+**Console UI 唯一规范入口**（对齐 [ParaRouter DESIGN.md](https://github.com/EeroEternal/ParaRouter/blob/main/DESIGN.md) 的 Console 面）。`AGENTS.md` 与 Cursor 规则仅指向本文；**完整细则见 [`docs/Designs.md`](docs/Designs.md)**（Settings、Agents、Preview、Toast 等 AgentHarness 扩展均在该文件）。
 
 后端系统架构以 [`docs/Architecture.md`](docs/Architecture.md) 为准；勿在本文重复架构或 API 契约。
 

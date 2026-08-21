@@ -1,6 +1,6 @@
 import { cn } from '../lib/utils';
 
-/** XEnsemble logo: three linked nodes (ensemble / orchestration). */
+/** AgentHarness logo: three linked nodes (ensemble / orchestration). */
 export default function BrandMark({ className, iconClassName }) {
   return (
     <div

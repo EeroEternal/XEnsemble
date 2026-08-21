@@ -548,7 +548,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
                     id="import-work-branch"
                     value={workBranchName}
                     onChange={(e) => setWorkBranchName(e.target.value)}
-                    placeholder="skyharness/my-repo-a1b2"
+                    placeholder="agentharness/my-repo-a1b2"
                     className="mt-1.5"
                   />
                 </div>

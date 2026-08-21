@@ -2,7 +2,7 @@ import { defineConfig } from 'electron-builder';
 
 export default defineConfig({
   appId: 'dev.xensemble.desktop',
-  productName: 'XEnsemble',
+  productName: 'AgentHarness',
   directories: {
     output: 'dist'
   },

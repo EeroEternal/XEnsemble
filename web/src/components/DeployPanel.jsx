@@ -154,7 +154,7 @@ export default function DeployPanel({ projectId, sessionId, onSuccess, onDeployS
 
 function copyDiagnostics(result) {
     const lines = [
-        '== SkyHarness 部署诊断 ==',
+        '== AgentHarness 部署诊断 ==',
         `错误: ${result?.error || ''}`,
         `警告: ${result?.verify?.warning || ''}`,
         '',
