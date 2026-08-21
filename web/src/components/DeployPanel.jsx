@@ -15,7 +15,7 @@ import { withSessionId } from '../lib/sessionContext';
  * 成功 → 短暂显示完成状态后回调 onSuccess（父组件跳转到 Preview tab）；
  * 失败 → 显示错误 + 「重新部署」按钮。
  */
-export default function DeployPanel({ projectId, sessionId, onSuccess, onDeployStatus, onDeployStatus }) {
+export default function DeployPanel({ projectId, sessionId, onSuccess, onDeployStatus, onDeployStatus, onDeployStatus }) {
     const [runState, setRunState] = useState('idle');
     const [result, setResult] = useState(null);
     const [latestMessage, setLatestMessage] = useState(null);
