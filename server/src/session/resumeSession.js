@@ -449,13 +449,13 @@ async function resumeSession({
             }
 
             // Kill any lingering agent process from a previous run.
-            // Use exact-name match first (-x) to avoid collateral kills;
-            // fall back to -f only when -x finds no match (pkill exits 1).
+            // Use SIGINT first (TUI agents like opencode checkpoint their SQLite
+            // state on SIGINT/Ctrl+C), then escalate to SIGKILL after a short wait.
             if (runtimeRef) {
                 const agentBin = agentMeta.cmd || agentMeta.id;
                 try {
-                    await runtime.exec.exec('sh', ['-c', `pkill -x "$1" 2>/dev/null || pkill -f "$1" 2>/dev/null || true`, 'sh', agentBin], {}, {
-                        runtimeRef, cwd: '/', timeoutMs: 5000,
+                    await runtime.exec.exec('sh', ['-c', `pkill -INT -x "$1" 2>/dev/null || pkill -INT -f "$1" 2>/dev/null || true; sleep 1; pkill -KILL -x "$1" 2>/dev/null || pkill -KILL -f "$1" 2>/dev/null || true`, 'sh', agentBin], {}, {
+                        runtimeRef, cwd: '/', timeoutMs: 10000,
                     });
                 } catch (_) { /* best-effort */ }
             }

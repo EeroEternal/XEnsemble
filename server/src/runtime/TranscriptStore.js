@@ -12,6 +12,7 @@ const FLUSH_INTERVAL_MS = Number(process.env.TRANSCRIPT_FLUSH_INTERVAL_MS) || 10
 const FLUSH_SIZE_BYTES = Number(process.env.TRANSCRIPT_FLUSH_SIZE_BYTES) || 65536;
 const MAX_FRAMES = Number(process.env.TRANSCRIPT_MAX_FRAMES) || 50000;
 const TAIL_BYTES = Number(process.env.TRANSCRIPT_TAIL_BYTES) || 1048576;
+const ALT_SCREEN_TAIL_BYTES = Number(process.env.TRANSCRIPT_ALT_SCREEN_TAIL_BYTES) || 20971520;
 const ALT_SCREEN_ENTER_RE = /\x1b\[\?(?:1049|47|1047)h/;
 
 function safeRef(ref) {
@@ -200,7 +201,8 @@ class TranscriptStore {
      * incrementally — no full-screen redraws. The replay must start from the
      * alt screen enter so the client enters alt screen and replays every
      * incremental update; otherwise only fragments render on a blank screen.
-     * No byte cap: TUI sessions need the full history to reconstruct state.
+     * Uses a generous byte cap (20MB) to prevent unbounded memory on extreme
+     * sessions while covering virtually all real-world TUI conversations.
      *
      * CLI agents (claude code) have no alt screen — use byte-capped tail.
      *
@@ -217,25 +219,31 @@ class TranscriptStore {
         for (let i = 0; i < state.frames.length; i++) {
             const f = state.frames[i];
             if (f.kind === 'out' && typeof f.data === 'string' && ALT_SCREEN_ENTER_RE.test(f.data)) {
-                return { frames: state.frames.slice(i), omittedCount: i };
+                return this._readTailFromIndex(state, i, ALT_SCREEN_TAIL_BYTES);
             }
         }
 
+        return this._readTailFromIndex(state, 0, maxBytes);
+    }
+
+    _readTailFromIndex(state, startIdx, maxBytes) {
+        const tail = state.frames.slice(startIdx);
         let totalBytes = 0;
-        let startIdx = state.frames.length;
-        for (let i = state.frames.length - 1; i >= 0; i--) {
-            const frame = state.frames[i];
-            if (frame.kind === 'out' && typeof frame.data === 'string') {
-                if (totalBytes + frame.data.length > maxBytes && startIdx < state.frames.length) {
-                    break;
-                }
-                totalBytes += frame.data.length;
-            }
-            startIdx = i;
+        for (const f of tail) {
+            if (f.kind === 'out' && typeof f.data === 'string') totalBytes += f.data.length;
         }
         const omittedCount = startIdx;
-        return { frames: state.frames.slice(startIdx), omittedCount };
-    }
+        if (totalBytes <= maxBytes) {
+            return { frames: tail, omittedCount };
+        }
+        let kept = tail.length;
+        let keptBytes = totalBytes;
+        while (kept > 1 && keptBytes > maxBytes) {
+            const f = tail[kept - 1];
+            if (f.kind === 'out' && typeof f.data === 'string') keptBytes -= f.data.length;
+            kept--;
+        }
+        return { frames: tail.slice(0, kept), omittedCount };
 
     head(streamRef) {
         const state = this._state(streamRef);

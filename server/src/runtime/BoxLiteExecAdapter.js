@@ -238,12 +238,13 @@ class BoxLiteStreamHandle extends StreamHandle {
         this._stopHeartbeat();
         try {
             if (this._ws && this._ws.readyState === 1) {
-                this._ws.send(JSON.stringify({ type: 'signal', signal: 15 }));
-                this._ws.close();
+                this._ws.send(JSON.stringify({ type: 'signal', signal: 2 }));
             }
         } catch (_) {}
-        // Mark as closed regardless - the actual process kill is handled
-        // by resumeSession via VM exec (pkill) since the WebSocket may be dead.
+        // Do NOT close the WebSocket here — blink may terminate the exec
+        // process (SIGHUP) when the control WS closes, preventing opencode
+        // from running its graceful shutdown (SQLite WAL checkpoint).
+        // waitForAgentExit (VM exec kill -INT) handles process termination.
         this._closed = true;
     }
 

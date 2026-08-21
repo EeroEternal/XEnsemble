@@ -1,7 +1,7 @@
 const { eq } = require('drizzle-orm');
 const { terminateDetachedSessionProcess } = require('./sessionTermination');
 
-const AGENT_EXIT_TIMEOUT_MS = 5000;
+const AGENT_EXIT_TIMEOUT_MS = 15000;
 
 async function waitForAgentExit(runtime, runtimeRef, agentId) {
     if (!runtime?.exec?.exec || !runtimeRef || !agentId) {
@@ -17,16 +17,19 @@ async function waitForAgentExit(runtime, runtimeRef, agentId) {
 
     const isLinux = (process.platform === 'linux');
 
-    // Linux: iterate /proc to find and gracefully terminate agent processes.
-    // macOS/other: fall back to pkill, which is the best available mechanism.
+    // Signal escalation: SIGINT (Ctrl+C, TUI graceful shutdown + DB checkpoint)
+    // → SIGTERM → SIGKILL.  TUI agents like opencode only checkpoint their
+    // SQLite state on SIGINT; SIGTERM kills them immediately and loses
+    // uncommitted conversation history.
     const maxTries = 10;
     const script = isLinux
         ? [
             'for f in /proc/[0-9]*/cmdline; do',
             '  p=${f#/proc/}; p=${p%/cmdline}',
             '  [ "$p" = "$$" ] && continue',
-            '  cat "$f" 2>/dev/null | tr "\\0" " " | grep -q "$1" && kill -TERM "$p" 2>/dev/null',
+            '  cat "$f" 2>/dev/null | tr "\\0" " " | grep -q "$1" && kill -INT "$p" 2>/dev/null',
             'done',
+            'sleep 1',
             'i=0',
             `while [ $i -lt ${maxTries} ]; do`,
             '  found=0',
@@ -42,19 +45,26 @@ async function waitForAgentExit(runtime, runtimeRef, agentId) {
             'for f in /proc/[0-9]*/cmdline; do',
             '  p=${f#/proc/}; p=${p%/cmdline}',
             '  [ "$p" = "$$" ] && continue',
+            '  cat "$f" 2>/dev/null | tr "\\0" " " | grep -q "$1" && kill -TERM "$p" 2>/dev/null',
+            'done',
+            'sleep 1',
+            'for f in /proc/[0-9]*/cmdline; do',
+            '  p=${f#/proc/}; p=${p%/cmdline}',
+            '  [ "$p" = "$$" ] && continue',
             '  cat "$f" 2>/dev/null | tr "\\0" " " | grep -q "$1" && kill -KILL "$p" 2>/dev/null',
             'done',
         ].join('\n')
         : [
-            // macOS / non-Linux fallback: use pkill (matches by process name).
-            // pkill exits 1 when no process matches, which is fine.
-            `pkill -TERM -x "$1" 2>/dev/null || pkill -TERM -f "$1" 2>/dev/null || true`,
+            `pkill -INT -x "$1" 2>/dev/null || pkill -INT -f "$1" 2>/dev/null || true`,
+            'sleep 1',
             'i=0',
             `while [ $i -lt ${maxTries} ]; do`,
             `  pgrep -x "$1" >/dev/null 2>&1 || pgrep -f "$1" >/dev/null 2>&1 || exit 0`,
             '  sleep 0.5',
             '  i=$((i+1))',
             'done',
+            `pkill -TERM -x "$1" 2>/dev/null || pkill -TERM -f "$1" 2>/dev/null || true`,
+            'sleep 1',
             `pkill -KILL -x "$1" 2>/dev/null || pkill -KILL -f "$1" 2>/dev/null || true`,
         ].join('\n');
 
