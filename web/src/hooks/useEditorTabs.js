@@ -1,13 +1,14 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useWorkspaceFiles } from './useWorkspaceFiles';
 
-export function useEditorTabs(projectId) {
+export function useEditorTabs(projectId, sessionId) {
   const [tabs, setTabs] = useState([]);
   const [activePath, setActivePath] = useState(null);
   const [diffView, setDiffView] = useState(null);
   const { listFiles, readFile, writeFile, createDir, deleteFile, deleteDir, moveFile } = useWorkspaceFiles();
   const fetchDirLock = useRef({});
   const lastProjectId = useRef(projectId);
+  const lastSessionId = useRef(sessionId);
   const autoOpenedForProject = useRef(null);
   const [treeRefreshTrigger, setTreeRefreshTrigger] = useState(0);
   const bumpTreeRefresh = useCallback(() => setTreeRefreshTrigger((n) => n + 1), []);
@@ -20,10 +21,13 @@ export function useEditorTabs(projectId) {
   const activePathRef = useRef(activePath);
   activePathRef.current = activePath;
 
-  // projectId 变化时重置 state，防止跨项目 state 泄漏
+  // projectId or sessionId 变化时重置 state，防止跨 session state 泄漏
   useEffect(() => {
-    if (lastProjectId.current !== projectId) {
+    const projectChanged = lastProjectId.current !== projectId;
+    const sessionChanged = lastSessionId.current !== sessionId;
+    if (projectChanged || sessionChanged) {
       lastProjectId.current = projectId;
+      lastSessionId.current = sessionId;
       tabsRef.current = [];
       activePathRef.current = null;
       autoOpenedForProject.current = null;
@@ -33,7 +37,7 @@ export function useEditorTabs(projectId) {
       fetchDirLock.current = {};
       setTreeRefreshTrigger(0);
     }
-  }, [projectId]);
+  }, [projectId, sessionId]);
 
   const openFile = useCallback(async (projectId, file) => {
     if (!file || file.type !== 'file') return;
@@ -131,12 +135,12 @@ export function useEditorTabs(projectId) {
     }
   }, [listFiles]);
 
-  // 进入项目时默认打开根目录文档（优先 README）
+  // 进入 session 时默认打开根目录文档（优先 README）
   useEffect(() => {
     if (!projectId) return;
-    if (autoOpenedForProject.current === projectId) return;
+    if (autoOpenedForProject.current === sessionId) return;
     if (tabsRef.current.length > 0) {
-      autoOpenedForProject.current = projectId;
+      autoOpenedForProject.current = sessionId;
       return;
     }
 
@@ -144,19 +148,19 @@ export function useEditorTabs(projectId) {
     (async () => {
       try {
         const entries = await fetchDir(projectId, '.');
-        if (cancelled || autoOpenedForProject.current === projectId) return;
+        if (cancelled || autoOpenedForProject.current === sessionId) return;
         if (tabsRef.current.length > 0) {
-          autoOpenedForProject.current = projectId;
+          autoOpenedForProject.current = sessionId;
           return;
         }
         // 只在存在 README 时打开它（并显示内容）；没有 README 不打开任何文件
         const readme = (entries || []).find(
           (f) => f.type === 'file' && /^readme(\.|$)/i.test(f.name || f.path),
         );
-        autoOpenedForProject.current = projectId;
+        autoOpenedForProject.current = sessionId;
         if (readme) await openFile(projectId, readme);
       } catch {
-        if (!cancelled) autoOpenedForProject.current = projectId;
+        if (!cancelled) autoOpenedForProject.current = sessionId;
       }
     })();
 

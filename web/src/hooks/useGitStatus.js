@@ -5,12 +5,20 @@ import * as githubApi from '../lib/githubApi';
 const POLL_INTERVAL_MS = 15000;
 const FULL_POLL_INTERVAL_MS = 60000;
 
-export function useGitStatus(projectId, fullPollEnabledRef) {
+export function useGitStatus(projectId, fullPollEnabledRef, sessionId) {
   const { showToast } = useToast();
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [operation, setOperation] = useState(null);
   const lastFullAtRef = useRef(0);
+
+  // Reset status and trigger refetch when sessionId changes (same project, different worktree)
+  useEffect(() => {
+    setStatus(null);
+    setLoading(false);
+    setOperation(null);
+    lastFullAtRef.current = 0;
+  }, [sessionId]);
 
   const fetchStatusFull = useCallback(async ({ silent = false, skipIfFreshMs = 0 } = {}) => {
     if (!projectId) return null;
@@ -29,7 +37,7 @@ export function useGitStatus(projectId, fullPollEnabledRef) {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [projectId, showToast]);
+  }, [projectId, sessionId, showToast]);
 
   const fetchStatusLight = useCallback(async () => {
     if (!projectId) return;

@@ -77,6 +77,7 @@ function readMainTab(extraTabs) {
 
 const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   projectId,
+  sessionId,
   tabs,
   activePath,
   onSelectTab,
@@ -123,13 +124,13 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
 
   useEffect(() => {
     setSelectedMR(null);
-  }, [projectId]);
+  }, [projectId, sessionId]);
 
   // 进入（或切换）session 时默认切到文件界面，避免停留在上次的 tab（如 preview / deploy）
   useEffect(() => {
     if (!projectId) return;
     setMainTab('files');
-  }, [projectId]);
+  }, [projectId, sessionId]);
 
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     const stored = sessionStorage.getItem('xe_sidebar_open');

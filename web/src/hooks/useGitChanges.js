@@ -4,8 +4,8 @@ import * as githubApi from '../lib/githubApi';
 
 const OPTIMISTIC_TIMEOUT_MS = 5000;
 
-export function useGitChanges(projectId, fullPollEnabledRef) {
-  const { status, loading, operation, commit: originalCommit, push: originalPush, pull: originalPull, fetchRemote: originalFetchRemote, switchBranch: originalSwitchBranch, createBranch: originalCreateBranch, fetchStatus } = useGitStatus(projectId, fullPollEnabledRef);
+export function useGitChanges(projectId, fullPollEnabledRef, sessionId) {
+  const { status, loading, operation, commit: originalCommit, push: originalPush, pull: originalPull, fetchRemote: originalFetchRemote, switchBranch: originalSwitchBranch, createBranch: originalCreateBranch, fetchStatus } = useGitStatus(projectId, fullPollEnabledRef, sessionId);
   const [optimistic, setOptimistic] = useState(null);
   const optimisticTimerRef = useRef(null);
 

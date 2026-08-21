@@ -163,11 +163,11 @@ export default React.forwardRef(function Sessions({
     setSessionContext(activeSession?.sessionId || null);
   }, [activeSession?.sessionId]);
 
-  const editorTabs = useEditorTabs(activeSession?.projectId);
+  const editorTabs = useEditorTabs(activeSession?.projectId, activeSession?.sessionId);
   // Changes 与 Files 共用同一 workspace attach 路径；不能再按 sessionAlive 关掉，
   // 否则编辑器已能保存、Changes 却一直空白（分支显示 —）。
   const changesTabActiveRef = useRef(false);
-  const gitChanges = useGitChanges(activeSession?.projectId || null, changesTabActiveRef);
+  const gitChanges = useGitChanges(activeSession?.projectId || null, changesTabActiveRef, activeSession?.sessionId);
   const preview = usePreview(activeSession?.projectId, Boolean(activeSession?.projectId));
   const { showToast } = useToast();
   const panelRef = useRef(null);
@@ -714,13 +714,13 @@ export default React.forwardRef(function Sessions({
     } finally {
       setIsLoadingFiles(false);
     }
-  }, [activeSession?.projectId, showHiddenFiles, showToast]);
+  }, [activeSession?.projectId, activeSession?.sessionId, showHiddenFiles, showToast]);
 
   const handleOpenFile = useCallback(async (file) => {
     if (!activeSession?.projectId || file?.type !== 'file') return;
     try {
       const res = await apiFetch(
-        `/api/v1/workspace/file?project_id=${encodeURIComponent(activeSession.projectId)}&path=${encodeURIComponent(file.path)}`
+        withSessionId(`/api/v1/workspace/file?project_id=${encodeURIComponent(activeSession.projectId)}&path=${encodeURIComponent(file.path)}`)
       );
       const data = await res.json();
       if (!res.ok) {
@@ -1362,6 +1362,7 @@ export default React.forwardRef(function Sessions({
                   <WorkspacePanel
                     ref={panelRef}
                     projectId={activeSession.projectId}
+                    sessionId={activeSession.sessionId}
                     tabs={editorTabs.tabs}
                     activePath={editorTabs.activePath}
                     onSelectTab={editorTabs.selectTab}
