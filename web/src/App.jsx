@@ -160,7 +160,7 @@ function AuthenticatedLayout({
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab="agents" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
+              <SettingsTabSidebar activeTab="agents" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
               <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
                 <AgentsAdmin />
               </div>
@@ -173,7 +173,7 @@ function AuthenticatedLayout({
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab="users" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
+              <SettingsTabSidebar activeTab="users" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
               <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
                 <UsersAdmin />
               </div>
@@ -186,7 +186,7 @@ function AuthenticatedLayout({
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab="gateway" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
+              <SettingsTabSidebar activeTab="gateway" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
               <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
                 <GatewayAdmin />
               </div>
@@ -199,7 +199,7 @@ function AuthenticatedLayout({
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab="images" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={() => navigate('/settings')} onLogout={logout} />
+              <SettingsTabSidebar activeTab="images" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
               <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
                 <ImagesManager />
               </div>
