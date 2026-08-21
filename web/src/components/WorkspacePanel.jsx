@@ -387,8 +387,15 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
     setMainTab((current) => (current === key ? 'files' : current));
   }, []);
 
+  // 新创建 workspace / session 时调用：只保留 Files + Changes 两个 tab，回到文件界面
+  const resetTabs = useCallback(() => {
+    setExtraTabs([]);
+    setMainTab('files');
+    try { sessionStorage.removeItem('xe_extra_tabs'); } catch { /* ignore */ }
+  }, []);
+
   // 暴露给父组件：程序化创建/切换/关闭 tab（一键部署用于创建 Terminal/Preview/Deploy tab）
-  useImperativeHandle(ref, () => ({ addTab, selectMainTab, setMainTab, closeExtraTab }), [addTab, selectMainTab, closeExtraTab]);
+  useImperativeHandle(ref, () => ({ addTab, selectMainTab, setMainTab, closeExtraTab, resetTabs }), [addTab, selectMainTab, closeExtraTab, resetTabs]);
 
   const activeTab = tabs.find((t) => t.path === activePath);
   const activePathRef = useRef(activePath);

@@ -90,7 +90,7 @@ export default function DeployPanel({ projectId, onSuccess }) {
     const resumeReady = !!result?.verify?.resumeReady;
 
     return (
-        <div className="flex-1 min-h-0 flex flex-col">
+        <div className="flex h-full min-h-0 flex-col">
             <div className="flex-1 min-h-0 overflow-y-auto flex items-center justify-center">
                 {runState === 'running' && (
                     <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8">

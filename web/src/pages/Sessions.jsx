@@ -422,6 +422,8 @@ export default React.forwardRef(function Sessions({
         projectId,
         projectName: projectName || projectId,
       });
+      // 新创建 session：右半边只保留 Files + Changes 两个 tab，回到文件界面
+      panelRef.current?.resetTabs();
       goToSessions();
       setSessions((prev) => {
         if (prev.some((s) => s.id === data.session_id)) return prev;
