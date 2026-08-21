@@ -391,7 +391,10 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   const resetTabs = useCallback(() => {
     setExtraTabs([]);
     setMainTab('files');
-    try { sessionStorage.removeItem('xe_extra_tabs'); } catch { /* ignore */ }
+    try {
+      sessionStorage.removeItem('xe_main_tab');
+      sessionStorage.removeItem('xe_extra_tabs');
+    } catch { /* ignore */ }
   }, []);
 
   // 暴露给父组件：程序化创建/切换/关闭 tab（一键部署用于创建 Terminal/Preview/Deploy tab）

@@ -422,7 +422,12 @@ export default React.forwardRef(function Sessions({
         projectId,
         projectName: projectName || projectId,
       });
-      // 新创建 session：右半边只保留 Files + Changes 两个 tab，回到文件界面
+      // 新创建 session：右半边只保留 Files + Changes 两个 tab，回到文件界面。
+      // 先清 sessionStorage（WorkspacePanel 首次挂载时从它恢复 tab），再清面板内 state。
+      try {
+        sessionStorage.removeItem('xe_main_tab');
+        sessionStorage.removeItem('xe_extra_tabs');
+      } catch { /* ignore */ }
       panelRef.current?.resetTabs();
       goToSessions();
       setSessions((prev) => {
