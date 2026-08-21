@@ -100,7 +100,7 @@ pub fn build_chat_request(
 
     TransportRequest::post_json(
         Some(endpoint.endpoint_id.clone()),
-        join_url(&endpoint.base_url, "messages"),
+        join_anthropic_url(&endpoint.base_url),
         anthropic_headers(endpoint),
         &Value::Object(payload),
         None,
@@ -195,6 +195,21 @@ fn resolved_model(endpoint: &DriverEndpointContext, requested_model: &str) -> St
         .unwrap_or_else(|| requested_model.to_string())
 }
 
-fn join_url(base_url: &str, path: &str) -> String {
-    format!("{}/{}", base_url.trim_end_matches('/'), path)
+/// Builds the Anthropic messages endpoint URL.
+///
+/// The Anthropic API convention is `{base_url}/v1/messages`.  However some
+/// providers (e.g. DeepSeek) accept `{base_url}/messages` without the `v1/`
+/// segment, while others (e.g. tokenhub) strictly require the `v1/` segment.
+///
+/// To support both, we check whether the configured `base_url` already ends
+/// with `/v1` (or `/v1/`).  If so, we append only `messages`; otherwise we
+/// insert the `v1/` segment, matching the behaviour of the official Anthropic
+/// SDK.
+fn join_anthropic_url(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    if trimmed.ends_with("/v1") {
+        format!("{}/messages", trimmed)
+    } else {
+        format!("{}/v1/messages", trimmed)
+    }
 }

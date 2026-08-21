@@ -70,6 +70,52 @@ fn endpoint() -> DriverEndpointContext {
     }
 }
 
+fn endpoint_with_base(base_url: &str) -> DriverEndpointContext {
+    DriverEndpointContext {
+        endpoint_id: "anth-1".to_string(),
+        provider_kind: ProviderKind::Anthropic,
+        base_url: base_url.to_string(),
+        api_key: SecretString::new("sk-ant"),
+        model_policy: ModelPolicy::default(),
+        capabilities: EndpointCapabilities::default(),
+        metadata: HashMap::from([("pool_id".to_string(), "beta".to_string())]),
+    }
+}
+
+#[test]
+fn build_chat_request_url_includes_v1_when_base_url_omits_it() {
+    // tokenhub: base_url = https://ai-tokenhub.com/api/anthropic/
+    // expected URL: https://ai-tokenhub.com/api/anthropic/v1/messages
+    let mut ep = endpoint_with_base("https://ai-tokenhub.com/api/anthropic/");
+    let request = build_chat_request(&mut ep, &ProxyChatRequest {
+        model: "claude-3-5-sonnet".to_string(),
+        messages: vec![Message::text(MessageRole::User, "hi")],
+        system: None, tools: None, tool_choice: None, raw_messages: None,
+        temperature: None, top_p: None, top_k: None,
+        max_tokens: Some(32), stop_sequences: None, stream: false,
+        extra: HashMap::new(), metadata: HashMap::new(),
+    })
+    .expect("request");
+    assert_eq!(request.url, "https://ai-tokenhub.com/api/anthropic/v1/messages");
+}
+
+#[test]
+fn build_chat_request_url_omits_extra_v1_when_base_url_already_has_it() {
+    // DeepSeek: base_url = https://api.deepseek.com/anthropic/v1
+    // expected URL: https://api.deepseek.com/anthropic/v1/messages (no double v1)
+    let mut ep = endpoint_with_base("https://api.deepseek.com/anthropic/v1");
+    let request = build_chat_request(&mut ep, &ProxyChatRequest {
+        model: "claude-3-5-sonnet".to_string(),
+        messages: vec![Message::text(MessageRole::User, "hi")],
+        system: None, tools: None, tool_choice: None, raw_messages: None,
+        temperature: None, top_p: None, top_k: None,
+        max_tokens: Some(32), stop_sequences: None, stream: false,
+        extra: HashMap::new(), metadata: HashMap::new(),
+    })
+    .expect("request");
+    assert_eq!(request.url, "https://api.deepseek.com/anthropic/v1/messages");
+}
+
 #[test]
 fn build_chat_request_moves_system_messages_to_top_level_field() {
     let request = build_chat_request(
