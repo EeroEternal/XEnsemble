@@ -639,7 +639,9 @@ export default function GatewaySettingsPanel() {
       models: models.length > 0 ? models : undefined,
       service_id: 'default',
     };
-    if (apiKeyDirty && body.api_key.trim()) payload.api_key = body.api_key.trim();
+    if (apiKeyDirty && body.api_key.trim() && !body.api_key.includes('*')) {
+        payload.api_key = body.api_key.trim();
+    }
 
     if (isEdit) {
       if (!payload.api_key) delete payload.api_key;
