@@ -326,22 +326,12 @@ function AgentConsole({
       }
     };
 
-    const handleWheel = (e) => {
-      const inAlt = terminal.buffer.active === terminal.buffer.alternate;
-      if (!inAlt || serverEnded || disposed) return;
-      if (wsRef.current?.readyState !== WebSocket.OPEN) return;
-      e.preventDefault();
-      e.stopPropagation();
-      wsRef.current.send(JSON.stringify({ type: 'input', data: e.deltaY > 0 ? '\x1b[6~' : '\x1b[5~' }));
-    };
-
     const focusTerminal = () => {
       if (!serverEnded) terminal.focus();
     };
     host.addEventListener('mousedown', focusTerminal);
     host.addEventListener('click', focusTerminal);
     host.addEventListener('contextmenu', handleContextMenu);
-    host.addEventListener('wheel', handleWheel, { passive: false });
 
     let lastHostWidth = 0;
     let lastHostHeight = 0;
@@ -811,7 +801,6 @@ function AgentConsole({
       host.removeEventListener('mousedown', focusTerminal);
       host.removeEventListener('click', focusTerminal);
       host.removeEventListener('contextmenu', handleContextMenu);
-      host.removeEventListener('wheel', handleWheel);
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
