@@ -41,6 +41,7 @@ async function registerSessionLifecycle({
     sessionId,
     project,
     fastifyLog,
+    runtimeId,
 }) {
     const live = sessionManager.getSession(sessionId);
     if (live?.lifecycleRegistered) return;
@@ -65,7 +66,7 @@ async function registerSessionLifecycle({
 
         if (project && project.workspaceMode === 'git') {
             const { GitOperationService } = require('../github/GitOperationService');
-            const gitOps = new GitOperationService({ getToken: () => null, runtimeId: session.runtimeId || null });
+            const gitOps = new GitOperationService({ getToken: () => null, runtimeId: runtimeId || null });
             // Check for dirty state first (1 VM exec) to skip the 3-exec commitAll
             // when there's nothing to commit (the common case on clean exit).
             gitOps._execGit(project, ['status', '--porcelain'])

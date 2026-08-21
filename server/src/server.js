@@ -1731,6 +1731,7 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
             sessionId,
             project,
             fastifyLog: fastify.log,
+            runtimeId,
         });
 
         const streamRef = handle.streamRef ?? null;

@@ -62,9 +62,9 @@ const AGENT_LIFECYCLE = {
         npmPackage: 'opencode-ai',
     },
     'cline': {
-        install: 'npm install -g cline',
+        install: 'npm install -g cline@3.0.55',
         uninstall: 'npm uninstall -g cline',
-        update: 'npm install -g cline@latest',
+        update: 'npm install -g cline@3.0.55',
         npmPackage: 'cline',
     },
     'codebuddy': {
