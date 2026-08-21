@@ -79,19 +79,11 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         try {
             fs.mkdirSync(path.dirname(wtDir), { recursive: true });
             await execFileAsync('git', ['-C', mainDir, 'worktree', 'add', '--detach', wtDir]);
-            // Rewrite paths inside the worktree's gitdir metadata so they resolve
-            // inside the VM where the worktree is at /workspace and the main .git
-            // directory is at /workspace.git (read-only mount).
-            const wtName = runtimeId;
-            const wtGitMetaDir = path.join(gitDir, 'worktrees', wtName);
-            if (fs.existsSync(wtGitMetaDir)) {
-                // commondir: "../.." already resolves to /workspace.git — OK.
-                // gitdir: rewrite from host path to VM path.
-                fs.writeFileSync(path.join(wtGitMetaDir, 'gitdir'), '/workspace/.git', 'utf8');
-            }
-            // Rewrite the worktree's .git pointer file.
-            const dotGitPath = path.join(wtDir, '.git');
-            fs.writeFileSync(dotGitPath, `gitdir: /workspace.git/worktrees/${wtName}`, 'utf8');
+            // Do NOT rewrite the .git pointer file — it must remain as the host
+            // path so that host-side git operations (commit, push, status, …)
+            // work correctly. VM-side git is handled by mounting the main .git
+            // directory at /workspace.git and having the VM pass --git-dir.
+            return wtDir;
             return wtDir;
         } catch {
             return null;
@@ -189,6 +181,26 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
             ]);
         } catch (_) {
             // Best-effort: cache cleanup failure does not block the session.
+        }
+
+        // Fix git worktree .git pointer for VM access: the worktree's .git file
+        // points to a host path that doesn't exist inside the VM. Create a
+        // symlink so git inside the VM can resolve the worktree metadata.
+        if (hostWorkspacePath && guestWorkspacePath) {
+            try {
+                await this.client.execForResult(name, 'sh', ['-c',
+                    `if [ -f "${guestWorkspacePath}/.git" ]; then ` +
+                    `GITDIR=$(cat "${guestWorkspacePath}/.git" | sed 's/^gitdir: //'); ` +
+                    `WTPATH=$(echo "$GITDIR" | sed 's|/[^/]*$||'); ` +
+                    `if [ ! -d "$GITDIR" ] && [ -d /workspace.git ]; then ` +
+                    `WTNAME=$(basename "$WTPATH"); ` +
+                    `echo "gitdir: /workspace.git/worktrees/$WTNAME" > "${guestWorkspacePath}/.git"; ` +
+                    `echo "/workspace/.git" > "/workspace.git/worktrees/$WTNAME/gitdir" 2>/dev/null || true; ` +
+                    `fi; fi`,
+                ]);
+            } catch (_) {
+                // Best-effort: if git fixup fails, host-side git still works.
+            }
         }
 
         await bootstrapPromise;
