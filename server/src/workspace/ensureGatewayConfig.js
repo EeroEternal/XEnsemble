@@ -98,7 +98,7 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                         },
                     },
                     models: {
-                        mode: 'merge',
+                        mode: 'replace',
                         providers: {
                             gateway: {
                                 baseUrl: `${routerUrl}/v1`,
