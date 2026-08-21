@@ -328,6 +328,32 @@ async fn dispatch_for_service(
     }
 }
 
+/// Flatten Anthropic `system` array (`[{"type":"text","text":"..."}]`) to a
+/// string so the protocol crate's `as_str()`-only handling doesn't drop it.
+fn normalize_anthropic_system(mut payload: Value) -> Value {
+    if let Some(system) = payload.get("system") {
+        if system.is_array() {
+            let text: String = system
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|block| {
+                    if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                        block.get("text").and_then(|t| t.as_str()).map(String::from)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !text.is_empty() {
+                payload["system"] = Value::String(text);
+            }
+        }
+    }
+    payload
+}
+
 /// Split a routing target of the form `provider/model` into a provider hint and
 /// the upstream model name. When no `/` is present the whole string is used both
 /// as the routing hint and the model, keeping provider-name targets working.
@@ -425,6 +451,7 @@ async fn anthropic_messages(
     let (_, default_model) = split_provider_model(raw_model);
     let provider_hint = resolve_provider_hint(&state, &service_id, raw_model).await;
 
+    let payload = normalize_anthropic_system(payload);
     let request = anthropic_payload_to_chat_request(&payload, &default_model)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
