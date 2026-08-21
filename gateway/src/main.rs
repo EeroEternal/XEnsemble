@@ -813,9 +813,6 @@ async fn admin_create_provider(
         .await
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     state.gateway.persist_if_dirty().await.ok();
-    sync_core_pools(&state.gateway, state.engine.as_ref())
-        .await
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
     Ok(Json(AdminResponse::ok(json!({
         "id": provider_id,
@@ -865,9 +862,6 @@ async fn admin_update_provider(
         .await
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     state.gateway.persist_if_dirty().await.ok();
-    sync_core_pools(&state.gateway, state.engine.as_ref())
-        .await
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(Json(AdminResponse::ok(json!({ "name": name }))))
 }
 
@@ -883,9 +877,6 @@ async fn admin_delete_provider(
         .await
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     state.gateway.persist_if_dirty().await.ok();
-    sync_core_pools(&state.gateway, state.engine.as_ref())
-        .await
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(Json(AdminResponse::ok(json!({ "name": name }))))
 }
 
