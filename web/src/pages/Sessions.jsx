@@ -1382,7 +1382,7 @@ export default React.forwardRef(function Sessions({
                     onCloseGitDiff={handleCloseGitDiff}
                     provider={activeProject?.repoProvider}
                     sessionLive={sessionAlive}
-                    shellContent={<WorkspaceShell ref={shellRef} projectId={activeSession.projectId} />}
+                    shellContent={<WorkspaceShell ref={shellRef} projectId={activeSession.projectId} sessionId={activeSession.sessionId} />}
                     deployContent={activeSession?.projectId ? (
                       <DeployPanel
                         key={`${activeSession.projectId}-${deployVersion}`}

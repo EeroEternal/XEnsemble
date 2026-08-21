@@ -57,7 +57,7 @@ function getArrowSequence(key, applicationCursorKeys) {
   }
 }
 
-const WorkspaceShell = forwardRef(function WorkspaceShell({ projectId, onOutput }, ref) {
+const WorkspaceShell = forwardRef(function WorkspaceShell({ projectId, sessionId, onOutput }, ref) {
   const { preset } = useTerminalTheme();
   const xtermTheme = preset?.xterm || FALLBACK_XTERM_THEME;
 
@@ -241,7 +241,7 @@ const WorkspaceShell = forwardRef(function WorkspaceShell({ projectId, onOutput 
     } else {
       var connect = () => {
         try {
-          const ws = new WebSocket(getWorkspaceShellWsUrl(projectId, getAccessToken()));
+          const ws = new WebSocket(getWorkspaceShellWsUrl(projectId, getAccessToken(), sessionId));
           wsRef.current = ws;
           let failureHandled = false;
           let authenticated = false;
@@ -363,7 +363,7 @@ const WorkspaceShell = forwardRef(function WorkspaceShell({ projectId, onOutput 
       termRef.current = null;
       terminal.dispose();
     };
-  }, [projectId]);
+  }, [projectId, sessionId]);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-transparent">

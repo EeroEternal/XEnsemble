@@ -1956,10 +1956,12 @@ fastify.register(async function workspaceTerminalWsRoutes(app) {
         try {
             let projectId = null;
             let accessToken = null;
+            let sessionId = null;
             try {
                 const url = new URL(req.url, 'http://localhost');
                 projectId = url.searchParams.get('project_id');
                 accessToken = url.searchParams.get('access_token');
+                sessionId = url.searchParams.get('session_id');
             } catch (_) {
                 projectId = null;
                 accessToken = null;
@@ -1995,9 +1997,16 @@ fastify.register(async function workspaceTerminalWsRoutes(app) {
                 return;
             }
 
+            // Resolve runtimeId from session_id so the workspace shell lands in the
+            // correct worktree (per-agent isolation via git worktree).
+            let runtimeId = null;
+            if (sessionId) {
+                runtimeId = await resolveRuntimeIdFromSession(payload.id, sessionId);
+            }
+
             let ready;
             try {
-                ready = await ensureProjectRuntime(project);
+                ready = await ensureProjectRuntime(project, runtimeId ? { runtimeId } : {});
             } catch (err) {
                 req.log.error(err);
                 const { message } = sanitizePublicError(err, 'Failed to initialize workspace shell');
@@ -2007,7 +2016,7 @@ fastify.register(async function workspaceTerminalWsRoutes(app) {
             }
 
             const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
-            const shellId = `${payload.id}:${projectId}`;
+            const shellId = `${payload.id}:${projectId}:${runtimeId || 'default'}`;
             let shell = WorkspaceShellManager.get(shellId);
             if (!shell || !WorkspaceShellManager.isAlive(shellId)) {
                 shell = null;

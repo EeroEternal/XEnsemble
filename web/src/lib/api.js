@@ -26,9 +26,10 @@ export function getWsUrl(sessionId, accessToken, after) {
   return `${getWsBase()}/ws/v1/terminal?${params.toString()}`;
 }
 
-export function getWorkspaceShellWsUrl(projectId, accessToken) {
+export function getWorkspaceShellWsUrl(projectId, accessToken, sessionId) {
   const params = new URLSearchParams({ project_id: projectId });
   if (accessToken) params.set('access_token', accessToken);
+  if (sessionId) params.set('session_id', sessionId);
   return `${getWsBase()}/ws/v1/workspace-terminal?${params.toString()}`;
 }
 
