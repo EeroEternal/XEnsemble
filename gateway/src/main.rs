@@ -406,8 +406,9 @@ async fn openai_chat(
 
     tracing::info!(%service_id, %raw_model, %default_model, %provider_hint, "openai_chat dispatch");
 
-    let request = openai_payload_to_chat_request(&payload, &default_model)
+    let mut request = openai_payload_to_chat_request(&payload, &default_model)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    request.model = default_model.to_string();
 
     let response = dispatch_for_service(
         &state,
@@ -456,8 +457,9 @@ async fn anthropic_messages(
     tracing::info!(%service_id, %raw_model, %default_model, %provider_hint, "anthropic_messages dispatch");
 
     let payload = normalize_anthropic_system(payload);
-    let request = anthropic_payload_to_chat_request(&payload, &default_model)
+    let mut request = anthropic_payload_to_chat_request(&payload, &default_model)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    request.model = default_model.to_string();
 
     let response = dispatch_for_service(
         &state,
@@ -497,8 +499,9 @@ async fn openai_embeddings(
     let (_, default_model) = split_provider_model(raw_model);
     let provider_hint = resolve_provider_hint(&state, &service_id, raw_model).await;
 
-    let request = openai_payload_to_embed_request(&payload, &default_model)
+    let mut request = openai_payload_to_embed_request(&payload, &default_model)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    request.model = default_model.to_string();
 
     let response = dispatch_for_service(
         &state,
