@@ -53,14 +53,6 @@ export default function DeployPanel({ projectId, sessionId, onSuccess }) {
         startRun();
     }, [startRun]);
 
-    // Reset auto-start when session changes so deploy re-triggers for the new worktree
-    useEffect(() => {
-        autoStartedRef.current = false;
-        setRunState('idle');
-        setResult(null);
-        setLatestMessage(null);
-    }, [sessionId]);
-
     useEffect(() => () => {
         if (jumpTimerRef.current) clearTimeout(jumpTimerRef.current);
     }, []);

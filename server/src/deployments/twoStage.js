@@ -284,9 +284,8 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
     let ensureOpts = {};
     if (sessionId) {
         try {
-            const { and: _and, eq: _eq } = require('drizzle-orm');
             const sessRows = await db.select().from(schema.sessions)
-                .where(_and(_eq(schema.sessions.id, sessionId), _eq(schema.sessions.userId, userId)))
+                .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, userId)))
                 .limit(1);
             if (sessRows.length > 0 && sessRows[0].runtimeId) {
                 ensureOpts = { runtimeId: sessRows[0].runtimeId };

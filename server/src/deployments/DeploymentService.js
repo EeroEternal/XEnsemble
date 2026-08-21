@@ -149,9 +149,12 @@ async function getByPreviewToken(deploymentId, rawToken) {
 async function startPreview(userId, project, deployment) {
     return singleflight(`preview:start:${deployment.id}`, async () => {
         let ensureOpts = {};
+        if (deployment.runtimeId) {
+            ensureOpts = { runtimeId: deployment.runtimeId };
+        }
         if (deployment.revision && deployment.revision.startsWith('checkpoint:')) {
             const ckId = deployment.revision.split(':')[1];
-            ensureOpts = { checkpointId: ckId };
+            ensureOpts = { ...ensureOpts, checkpointId: ckId };
         }
         const { runtime, workspacePath } = await ensureProjectRuntime(project, ensureOpts);
         const now = Date.now();
