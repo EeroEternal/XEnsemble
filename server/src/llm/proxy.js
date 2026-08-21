@@ -226,6 +226,17 @@ async function proxyLlmRequest(request, reply) {
         return reply.code(gateway.status).send({ error: gateway.error });
     }
     const started = Date.now();
+    // The session-token model is the default chosen at session creation and
+    // does NOT reflect /model switches inside the agent CLI. Extract the
+    // actual model from the request body so the log shows what the agent
+    // really selected — this is the value UniGateway routes on.
+    let bodyModel = null;
+    if (Buffer.isBuffer(request.body) && request.body.length > 0) {
+        try {
+            const parsed = JSON.parse(request.body.toString('utf8'));
+            bodyModel = parsed.model || null;
+        } catch { /* non-JSON body */ }
+    }
     request.log.info(
         {
             sessionId: claims.sid,
@@ -233,6 +244,7 @@ async function proxyLlmRequest(request, reply) {
             projectId: claims.pid,
             agentId: claims.aid,
             model: claims.model || null,
+            bodyModel,
             path,
             method: request.method,
             quota_exempt: quotaExempt,
