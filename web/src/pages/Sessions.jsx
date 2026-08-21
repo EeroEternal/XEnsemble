@@ -879,6 +879,7 @@ export default React.forwardRef(function Sessions({
     const oldSessionId = sessionId;
     const sessionMeta = sessions.find((s) => s.id === oldSessionId);
     const targetAlive = sessionMeta?.alive === true;
+    const isRecoverable = sessionMeta?.recoverable !== false;
     // Restarting a non-active sidebar session: switch the view to it first.
     if (sessionParam && activeSession?.sessionId !== sessionId) {
       setActiveSession({ sessionId, agentId, agentName: sess.agentName || agent?.name, projectId, projectName });
@@ -892,7 +893,7 @@ export default React.forwardRef(function Sessions({
         return;
       }
 
-      if (sessionMeta?.recoverable) {
+      if (isRecoverable) {
         if (targetAlive) {
           const stopRes = await apiFetch(`/api/v1/sessions/${encodeURIComponent(oldSessionId)}/stop`, { method: 'POST' });
           const stopData = await stopRes.json();
