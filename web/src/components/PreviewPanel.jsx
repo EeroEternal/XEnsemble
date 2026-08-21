@@ -10,15 +10,6 @@ import { apiFetch } from '../lib/api';
 import { withSessionId } from '../lib/sessionContext';
 import { useToast } from './Toast';
 
-const STATUS_STYLES = {
-  pending: 'bg-zinc-200 text-zinc-500',
-  building: 'bg-amber-100 text-amber-700',
-  running: 'bg-emerald-50 text-emerald-600',
-  failed: 'bg-red-50 text-red-600',
-  stopped: 'bg-zinc-200 text-zinc-400',
-  expired: 'bg-zinc-200 text-zinc-400',
-};
-
 function pickActiveDeployment(list) {
   if (!Array.isArray(list) || list.length === 0) return null;
   const running = list.find((d) => d.status === 'running');
@@ -26,15 +17,6 @@ function pickActiveDeployment(list) {
   const building = list.find((d) => d.status === 'building' || d.status === 'pending');
   if (building) return building;
   return list[0];
-}
-
-function formatTtl(expiresAt) {
-  if (!expiresAt) return '';
-  const ms = expiresAt - Date.now();
-  if (ms <= 0) return 'Expired';
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
 const PREVIEW_WINDOW_NAME = 'xensemble-preview';
@@ -237,36 +219,36 @@ export function usePreview(projectId, token, sessionId) {
 const ICON_BTN =
   'rounded-md p-1.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 disabled:opacity-50';
 
-export function PreviewStatus({ deployment, status }) {
-  if (!deployment) return null;
+export function PreviewStatus({ deployStatus }) {
+  // 只显示部署流程状态：running（部署中）/ finished（部署结束）；aborted / idle 不显示
+  if (deployStatus !== 'running' && deployStatus !== 'finished') return null;
   return (
     <div className="flex items-center gap-1.5 shrink-0">
       <span
-        className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${STATUS_STYLES[status] || STATUS_STYLES.stopped}`}
+        className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
+          deployStatus === 'running' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-50 text-emerald-600'
+        }`}
       >
-        {status}
+        {deployStatus}
       </span>
-      {deployment.expires_at && status === 'running' && (
-        <span className="text-[10px] text-zinc-400 font-mono hidden xl:inline">
-          TTL {formatTtl(deployment.expires_at)}
-        </span>
-      )}
     </div>
   );
 }
 
-export function PreviewControlGroup(props) {
+export function PreviewControlGroup({ deployStatus, onCancelDeploy, ...props }) {
   const { deployment } = props;
   return (
     <div className="flex items-center gap-0.5 shrink-0">
-      <PreviewStatus {...props} />
+      <PreviewStatus deployStatus={deployStatus} />
       {deployment && <div className="h-3.5 w-px bg-zinc-200 mx-0.5 shrink-0" aria-hidden />}
-      <PreviewActions {...props} />
+      <PreviewActions {...props} deployStatus={deployStatus} onCancelDeploy={onCancelDeploy} />
     </div>
   );
 }
 
 export function PreviewActions({
+  deployStatus,
+  onCancelDeploy,
   status,
   isBusy,
   previewUrl,
@@ -276,6 +258,20 @@ export function PreviewActions({
   restartPreview,
   onAnalyze,
 }) {
+  // 部署中：用"Stop deploy"按钮替代 Deploy 按钮（同位置、同样式）
+  if (deployStatus === 'running') {
+    return (
+      <button
+        type="button"
+        onClick={onCancelDeploy}
+        title="Stop deployment"
+        className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md bg-black text-white hover:bg-zinc-800 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-0"
+      >
+        <Square className="w-3.5 h-3.5" />
+        Stop deploy
+      </button>
+    );
+  }
   if (status === 'running') {
     return (
       <>

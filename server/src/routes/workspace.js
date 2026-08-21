@@ -4,6 +4,7 @@ const { ensureAgentResume } = require('../workspace/agentResumeHook');
 const { buildPreflightReport } = require('../workspace/preflight');
 const { appendInboxLog } = require('../workspace/logInbox');
 const deploymentService = require('../deployments/DeploymentService');
+const { abortDeploy } = require('../deployments/activeDeploys');
 const { analyzeProjectDeploy } = require('../deployments/analyzeDeploy');
 const { createTunnel, stopByProjectId } = require('../preview/tunnelServer');
 const { db } = require('../db');
@@ -221,11 +222,11 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
         };
     });
 
-    // 一键部署：中止当前部署——停掉 tunnel（deploying 中的预览隧道）并返回 ok。
-    // 前端配合 sendInput('\u0003') (Ctrl+C) 中断当前前台命令 + AbortController 停止等待。
+    // 一键部署：中止当前部署——abort 进行中的 auto-deploy（verify agent 会尽快停止）+ 停掉 tunnel。
     fastify.post('/api/v1/projects/:projectId/deploy/cancel', { preValidation: [fastify.authenticate, fastify.requireActive] }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.projectId);
         if (!project) return reply.code(404).send({ error: 'Project not found' });
+        try { abortDeploy(project.id); } catch (_) { /* ignore */ }
         try { stopByProjectId(project.id); } catch (_) { /* ignore */ }
         return { ok: true };
     });

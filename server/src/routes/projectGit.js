@@ -38,7 +38,17 @@ async function getGitService(request) {
 // DeepSeek-compatible LLM (same env as session titleService).
 async function generateCommitMessage(project, gitOperationService) {
     const result = await gitOperationService.getDiff(project, { base: 'HEAD' });
-    const diff = (result?.diff || '').trim();
+    let diff = (result?.diff || '').trim();
+    // git diff HEAD 不含未跟踪文件；如果全是新增文件（untracked），回退用 git status 的文件列表
+    if (!diff) {
+        try {
+            const status = await gitOperationService.getStatus(project);
+            const changed = (status?.files || [])
+                .map((f) => `${f.type === 'untracked' ? 'A' : f.type === 'conflict' ? 'C' : 'M'} ${f.path}`)
+                .join('\n');
+            if (changed) diff = changed;
+        } catch { /* ignore */ }
+    }
     if (!diff) return { message: '' };
     // 复用 ai-tokenhub（LLM_ANALYZE_*，与一键部署同一套），缺失时回退到 DeepSeek 官方配置
     const apiKey = process.env.LLM_ANALYZE_API_KEY || process.env.DEEPSEEK_API_KEY;
@@ -57,7 +67,7 @@ async function generateCommitMessage(project, gitOperationService) {
                 { role: 'system', content: prompt },
                 { role: 'user', content: truncated },
             ],
-            max_tokens: 80,
+            max_tokens: 2000,
             temperature: 0.4,
         }),
     });

@@ -389,11 +389,12 @@ function tryParseJson(text) {
     try { return JSON.parse(s.slice(start, end + 1)); } catch { return null; }
 }
 
-async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeRef }) {
+async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeRef, isAborted }) {
     // 优先用 opencode（真正的 agent：LLM 自主探索项目 + 输出 JSON），失败 fallback 轻量 ReAct
     // opencode 跑在 host，需要 host workspace path（boxlite 下 /workspace 是 guest 路径，xensemble host 看不到）
+    if (isAborted?.()) return { ok: false, aborted: true };
     const opencodeWs = hostWorkspacePath || workspacePath;
-    const opencodeResult = await analyzeProjectWithOpencode(opencodeWs);
+    const opencodeResult = await analyzeProjectWithOpencode(opencodeWs, isAborted);
     if (opencodeResult && opencodeResult.ok && opencodeResult.steps && opencodeResult.steps.length) {
         const normalized = { steps: normalizeSteps(opencodeResult.steps), configFiles: opencodeResult.configFiles || [] };
         const check = await runSelfCheck({ ...normalized, runtimeRef, workspacePath });
@@ -419,6 +420,7 @@ async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeR
     let prevToolSig = '';
     let repeatCount = 0;
     for (let round = 0; round < MAX_AGENT_ROUNDS; round++) {
+        if (isAborted?.()) return { ok: false, aborted: true };
         const llmResult = await callLlm(messages);
         if (!llmResult.ok) {
             if (round === 0) {

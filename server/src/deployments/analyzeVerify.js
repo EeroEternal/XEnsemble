@@ -314,7 +314,7 @@ function buildResumeHint(trail) {
     return lines.filter(Boolean).join('\n');
 }
 
-async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType, onRound, resume }) {
+async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType, onRound, resume, isAborted }) {
     const defaultPort = projectType?.defaultPort || 3000;
     let messages;
     let roundStart = 0;
@@ -340,6 +340,9 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
     const trail = [];
 
     for (let round = roundStart; round < MAX_AGENT_ROUNDS; round++) {
+        if (isAborted?.()) {
+            return { ok: false, source: 'ai', aborted: true, warning: '部署已中止', finalStderr: '', tested: [], trail, messages: trimContext(messages), roundsUsed: round };
+        }
         if (onRound) onRound(round);
         const llmResult = await callLlm(messages);
         if (!llmResult.ok) {
@@ -496,11 +499,11 @@ async function runVerifyWithoutLlm({ workspacePath, runtimeRef, plan, projectTyp
     }
 }
 
-async function analyzeProjectVerify({ workspacePath, runtimeRef, plan, projectType, onRound, resume }) {
+async function analyzeProjectVerify({ workspacePath, runtimeRef, plan, projectType, onRound, resume, isAborted }) {
     if (!API_KEY || !API_URL) {
         return runVerifyWithoutLlm({ workspacePath, runtimeRef, plan, projectType });
     }
-    return runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType, onRound, resume });
+    return runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType, onRound, resume, isAborted });
 }
 
 module.exports = { analyzeProjectVerify, assertAppIsServed };

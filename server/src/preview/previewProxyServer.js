@@ -43,6 +43,16 @@ function serveStatic(req, res) {
         fs.stat(p, (err, st) => {
             if (!err && st.isFile()) {
                 const type = MIME[path.extname(p).toLowerCase()] || 'application/octet-stream';
+                // HTML：把资源绝对路径改写为相对（/assets/… → ./assets/…），适配 /preview/<id>/ 子路径部署。
+                // 不改 /api、/preview、/@vite 等。这样前端资源请求带上 preview 前缀，由网关直接路由，
+                // 不依赖 Referer 转发（否则部分资源请求落宿主根 /assets 会 401/text-html）。
+                if (type.startsWith('text/html')) {
+                    let html = fs.readFileSync(p, 'utf8');
+                    html = html.replace(/(src|href)="\/(?!api\/|preview\/|@vite\/)/g, '$1="./');
+                    res.writeHead(200, { 'Content-Type': type });
+                    res.end(html);
+                    return;
+                }
                 res.writeHead(200, { 'Content-Type': type });
                 return fs.createReadStream(p).pipe(res);
             }

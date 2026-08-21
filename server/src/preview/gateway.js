@@ -132,14 +132,29 @@ function stripPreviewPrefix(url, deploymentId) {
  */
 async function proxyPreviewRequest(request, reply) {
     const deploymentId = request.params.deploymentId;
-    const resolved = await resolveDeployment(request.raw, deploymentId);
-    if (resolved.error) {
-        const payload = { error: resolved.error };
-        if (resolved.code) payload.code = resolved.code;
-        return reply.code(resolved.status).send(payload);
+    let entry = null;
+    try {
+        const urlPath = new URL(request.raw.url, 'http://localhost').pathname;
+        // 静态资源（js/css/图片/字体等）不校验 preview_token：预览资源随页面公开，
+        // 避免前端资源请求（动态 import 等）因不带 token / Referer 而 401。
+        const isAsset = /\.(js|css|png|jpg|jpeg|gif|svg|webp|woff2?|ttf|ico|map|txt|json)$/i.test(urlPath) || /\/assets\//.test(urlPath);
+        if (isAsset) {
+            entry = previewRegistry.get(deploymentId);
+            if (!entry) return reply.code(503).send({ error: 'Preview process not found' });
+        } else {
+            const resolved = await resolveDeployment(request.raw, deploymentId);
+            if (resolved.error) {
+                const payload = { error: resolved.error };
+                if (resolved.code) payload.code = resolved.code;
+                return reply.code(resolved.status).send(payload);
+            }
+            entry = resolved.entry;
+        }
+    } catch (e) {
+        return reply.code(500).send({ error: 'Preview proxy error' });
     }
 
-    const target = `http://127.0.0.1:${resolved.entry.port}`;
+    const target = `http://127.0.0.1:${entry.port}`;
     const path = stripPreviewPrefix(request.url, deploymentId);
 
     await new Promise((resolve, reject) => {

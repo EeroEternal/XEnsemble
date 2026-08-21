@@ -15,12 +15,20 @@ import { withSessionId } from '../lib/sessionContext';
  * 成功 → 短暂显示完成状态后回调 onSuccess（父组件跳转到 Preview tab）；
  * 失败 → 显示错误 + 「重新部署」按钮。
  */
-export default function DeployPanel({ projectId, sessionId, onSuccess }) {
+export default function DeployPanel({ projectId, sessionId, onSuccess, onDeployStatus }) {
     const [runState, setRunState] = useState('idle');
     const [result, setResult] = useState(null);
     const [latestMessage, setLatestMessage] = useState(null);
     const autoStartedRef = useRef(false);
     const jumpTimerRef = useRef(null);
+
+    // 上报部署状态：running / finished / aborted / idle（驱动右上角状态与中止按钮）
+    useEffect(() => {
+        const s = runState === 'running' ? 'running'
+            : (runState === 'success' || runState === 'failed') ? 'finished'
+            : (runState === 'aborted' ? 'aborted' : 'idle');
+        onDeployStatus?.(s);
+    }, [runState, onDeployStatus]);
 
     const startRun = useCallback(async (opts = {}) => {
         setRunState('running');
@@ -37,6 +45,9 @@ export default function DeployPanel({ projectId, sessionId, onSuccess }) {
                 setResult(data);
                 setRunState('success');
                 jumpTimerRef.current = setTimeout(() => onSuccess?.(data), 800);
+            } else if (data.aborted) {
+                setResult(data);
+                setRunState('aborted');
             } else {
                 setResult(data);
                 setRunState('failed');
@@ -107,6 +118,12 @@ export default function DeployPanel({ projectId, sessionId, onSuccess }) {
                         <CheckCircle2 className="w-10 h-10 text-green-600" />
                         <div className="text-base font-semibold text-zinc-900">部署完成 ✓</div>
                         <div className="text-xs text-zinc-500">正在打开预览…</div>
+                    </div>
+                )}
+                {runState === 'aborted' && (
+                    <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8">
+                        <AlertCircle className="w-9 h-9 text-zinc-400" />
+                        <div className="text-sm font-semibold text-zinc-700">部署已中止</div>
                     </div>
                 )}
                 {runState === 'failed' && result && (

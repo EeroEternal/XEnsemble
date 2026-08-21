@@ -18,6 +18,7 @@ const { analyzeProjectVerify } = require('./analyzeVerify');
 const { createTunnel, stopByProjectId } = require('../preview/tunnelServer');
 const deploymentService = require('./DeploymentService');
 const workspace = require('../workspace');
+const { registerDeploy, isAborted } = require('./activeDeploys');
 const { db } = require('../db');
 const schema = require('../db/schema');
 
@@ -147,9 +148,11 @@ async function ensureFrontendServed({ runtimeRef, workspacePath, port, onLog }) 
     const runtime = getRuntime();
     let dist = null;
     try {
+        // 常见前端构建产物位置：web/dist、frontend/dist、client/dist、dist，
+        // 以及由后端 serve 的 frontend 产物（如 fastapi 模板的 backend/app/frontend）。
         const probe = await runtime.exec.exec(
             'sh',
-            ['-c', 'ls -d client/dist web/dist frontend/dist dist 2>/dev/null | head -1'],
+            ['-c', 'ls -d web/dist frontend/dist client/dist dist backend/app/frontend backend/templates/frontend app/frontend 2>/dev/null | head -1'],
             {},
             { runtimeRef, cwd: workspacePath, timeoutMs: 15000 },
         );
@@ -162,7 +165,7 @@ async function ensureFrontendServed({ runtimeRef, workspacePath, port, onLog }) 
 
     // 用空闲端口（规避 verify 残留进程占用的 3000/5173/8080/9000 等）。
     const listenPort = (await getGuestFreePort(runtimeRef)) || Number(port) || 3000;
-    const backendPort = (await getGuestFreePort(runtimeRef)) || 9000;
+    let backendPort = (await getGuestFreePort(runtimeRef)) || 9000;
     let backendOk = false;
 
     // 1) 探测后端（server/ 目录 + 入口文件）。
@@ -194,6 +197,33 @@ async function ensureFrontendServed({ runtimeRef, workspacePath, port, onLog }) 
             if (onLog) onLog(`backend spawned: server/${backendEntry} on :${backendPort}`);
         } catch (e) {
             if (onLog) onLog(`backend spawn failed (frontend only): ${e.message}`);
+        }
+    } else {
+        // 非 Node 后端（如 fastapi 的 backend/ + uvicorn，或其它自托管后端）：
+        // 扫描 guest 监听端口，自动发现 verify 阶段已经跑起来的后端（能对 /api 返回 JSON 的端口），
+        // 聚合服务器的 /api 反代指向它，避免 502。
+        try {
+            const scan = await runtime.exec.exec(
+                'sh',
+                ['-c', `
+for p in $(awk 'NR>1 && $4=="0A" {split($2,a,":"); h=a[2]; n=0; for(i=1;i<=length(h);i++){c=tolower(substr(h,i,1)); v=(c~/[0-9]/)?c:index("abcdef",c)+9; n=n*16+v;} print n}' /proc/net/tcp 2>/dev/null | sort -un); do
+  ct=$(curl -s -m 2 -o /dev/null -w "%{content_type}" http://127.0.0.1:$p/api/ 2>/dev/null);
+  case "$ct" in application/json*|text/json*|application/problem+json*) echo $p; break;; esac
+done
+`],
+                {},
+                { runtimeRef, cwd: workspacePath, timeoutMs: 25000 },
+            );
+            const found = Number(String(scan.stdout || '').trim().split('\n')[0]);
+            if (found > 0 && found < 65535) {
+                backendPort = found;
+                backendOk = true;
+                if (onLog) onLog(`detected existing backend on :${found}`);
+            } else {
+                if (onLog) onLog('no existing backend detected (frontend only)');
+            }
+        } catch (e) {
+            if (onLog) onLog(`backend scan failed (frontend only): ${e.message}`);
         }
     }
 
@@ -264,6 +294,8 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
     if (!process.env.LLM_ANALYZE_API_KEY && !process.env.LLM_ANALYZE_API_URL) {
         return { ok: false, error: 'LLM_ANALYZE_* env not configured.' };
     }
+    // 注册为进行中（供「中止部署」abort）；verify agent 每轮检查 aborted。
+    registerDeploy(project.id);
     const startedAt = Date.now();
 
     // A new deploy attempt supersedes any existing 'running' deployment for
@@ -328,7 +360,10 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
 
     if (!plan) {
         if (onProgress) onProgress({ stage: 'A', message: '阶段 1：调用 LLM 1 出部署计划' });
-        const planResult = await analyzeProjectDeploy({ workspacePath: wsPath, hostWorkspacePath: hostWs, runtimeRef: ref });
+        const planResult = await analyzeProjectDeploy({ workspacePath: wsPath, hostWorkspacePath: hostWs, runtimeRef: ref, isAborted: () => isAborted(project.id) });
+        if (planResult?.aborted) {
+            return { ok: false, aborted: true, error: '部署已中止', elapsedMs: Date.now() - startedAt };
+        }
         if (!planResult || !planResult.steps?.length) {
             return { ok: false, error: '阶段 1 失败：未生成计划', planResult };
         }
@@ -338,6 +373,9 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
 
     if (onProgress) onProgress({ stage: 'B', message: resumeState ? '阶段 2：续修（接回上次对话继续修复）' : '阶段 2：调用 LLM 2（agent）准备环境 + 测试 + 自动修复' });
     const detected = hostWs ? detectProjectType(hostWs) : { type: 'unknown', defaultPort: 3000 };
+    if (isAborted(project.id)) {
+        return { ok: false, aborted: true, error: '部署已中止', elapsedMs: Date.now() - startedAt };
+    }
     const verify = await analyzeProjectVerify({
         workspacePath: wsPath,
         hostWorkspacePath: hostWs,
@@ -345,7 +383,11 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
         plan,
         projectType: detected,
         resume: resumeState ? { messages: resumeState.messages, trail: resumeState.trail, roundsUsed: resumeState.roundsUsed } : undefined,
+        isAborted: () => isAborted(project.id),
     });
+    if (verify.aborted) {
+        return { ok: false, aborted: true, error: '部署已中止', elapsedMs: Date.now() - startedAt };
+    }
     if (onProgress) onProgress({
         stage: 'B',
         message: `阶段 2 ${verify.ok ? '✓ 通过' : '✗ 失败'}（agent: ${verify.source || 'opencode'}）`,

@@ -112,7 +112,7 @@ function parsePlan(raw) {
     };
 }
 
-async function analyzeProjectWithOpencode(workspacePath) {
+async function analyzeProjectWithOpencode(workspacePath, isAborted) {
     if (!workspacePath) return null;
     const cfg = buildOpencodeConfig();
     if (!cfg) {
@@ -153,13 +153,24 @@ async function analyzeProjectWithOpencode(workspacePath) {
             env,
             stdio: ['ignore', 'pipe', 'pipe'],
         });
-        const timer = setTimeout(() => {
+        const finish = (payload) => {
             if (resolved) return;
             resolved = true;
+            clearTimeout(timer);
+            clearInterval(abortTimer);
             cleanup();
+            resolve(payload);
+        };
+        const timer = setTimeout(() => {
+            finish({ ok: false, warning: 'opencode run timeout' });
             child.kill('SIGTERM');
-            resolve({ ok: false, warning: 'opencode run timeout' });
         }, PROMPT_TIMEOUT_MS);
+        // 中止部署：定期检查 isAborted，立即 kill opencode（阶段 1 也能中止）
+        const abortTimer = setInterval(() => {
+            if (resolved || !isAborted?.()) return;
+            finish({ ok: false, aborted: true });
+            child.kill('SIGKILL');
+        }, 800);
         child.stdout.on('data', (d) => {
             if (stdout.length < MAX_OUTPUT_BYTES) stdout += d.toString();
         });
@@ -167,26 +178,18 @@ async function analyzeProjectWithOpencode(workspacePath) {
             if (stderr.length < MAX_OUTPUT_BYTES) stderr += d.toString();
         });
         child.on('error', (err) => {
-            if (resolved) return;
-            resolved = true;
-            clearTimeout(timer);
-            cleanup();
-            resolve({ ok: false, warning: `opencode spawn failed: ${err.message}` });
+            finish({ ok: false, warning: `opencode spawn failed: ${err.message}` });
         });
         child.on('exit', (code) => {
-            if (resolved) return;
-            resolved = true;
-            clearTimeout(timer);
-            cleanup();
             const raw = extractPlan(stdout) || extractPlan(stderr);
             if (!raw) {
-                return resolve({ ok: false, warning: `opencode exit ${code}, no markers in output (stdout tail: ${stdout.slice(-200)}, stderr tail: ${stderr.slice(-200)})` });
+                return finish({ ok: false, warning: `opencode exit ${code}, no markers in output (stdout tail: ${stdout.slice(-200)}, stderr tail: ${stderr.slice(-200)})` });
             }
             const parsed = parsePlan(raw);
             if (!parsed) {
-                return resolve({ ok: false, warning: `opencode exit ${code}, failed to parse plan JSON` });
+                return finish({ ok: false, warning: `opencode exit ${code}, failed to parse plan JSON` });
             }
-            resolve({ ok: true, source: 'opencode', steps: parsed.steps, configFiles: parsed.configFiles });
+            finish({ ok: true, source: 'opencode', steps: parsed.steps, configFiles: parsed.configFiles });
         });
     });
 }

@@ -58,14 +58,15 @@ function readExtraTabs() {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.map(migrateTabKey).filter((k) => ADDABLE_KEYS.has(k));
+        // deploy 是临时操作面板（挂载即自动部署），刷新/重新进入时不恢复，避免后台自动部署
+        return parsed.map(migrateTabKey).filter((k) => ADDABLE_KEYS.has(k) && k !== 'deploy');
       }
     }
   } catch {
     // ignore
   }
   const legacy = migrateTabKey(sessionStorage.getItem('xe_main_tab') || '');
-  return legacy && ADDABLE_KEYS.has(legacy) ? [legacy] : [];
+  return legacy && ADDABLE_KEYS.has(legacy) && legacy !== 'deploy' ? [legacy] : [];
 }
 
 function readMainTab(extraTabs) {

@@ -177,6 +177,8 @@ export default React.forwardRef(function Sessions({
   const [deployVersion, setDeployVersion] = useState(0);
   // 最近一次自动部署成功后的结果摘要，展示在 Preview 面板的"部署详情"里
   const [lastDeployInfo, setLastDeployInfo] = useState(null);
+  // 当前会话的部署状态（idle/running/finished/aborted），驱动右上角状态与中止按钮
+  const [deployStatus, setDeployStatus] = useState('idle');
   // 自动部署成功 → 关闭 Deploy tab，跳转到 Preview tab（Preview 面板常驻，可展开部署详情）
   const onDeploySuccess = useCallback((info) => {
     setLastDeployInfo(info);
@@ -185,6 +187,18 @@ export default React.forwardRef(function Sessions({
     panelRef.current?.closeExtraTab('deploy');
     preview.loadDeployments();
   }, [preview.loadDeployments]);
+
+  // 中止部署：通知后端 abort（杀 verify agent / 停隧道），前端把状态置为 aborted（右上角不再显示状态与按钮）
+  const handleCancelDeploy = useCallback(async () => {
+    const pid = activeSession?.projectId;
+    setDeployStatus('aborted');
+    if (!pid) return;
+    try {
+      await apiFetch(`/api/v1/projects/${encodeURIComponent(pid)}/deploy/cancel`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+    } catch { /* ignore */ }
+  }, [activeSession?.projectId]);
 
   const [gitDiffView, setGitDiffView] = useState(null);
 
@@ -1265,7 +1279,7 @@ export default React.forwardRef(function Sessions({
                   {activeSession.projectId ? (
                     <>
                       <div className="mx-0.5 h-5 w-px bg-zinc-200" />
-                      <PreviewControlGroup {...preview} onAnalyze={() => { panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); }} />
+                      <PreviewControlGroup {...preview} deployStatus={deployStatus} onCancelDeploy={handleCancelDeploy} onAnalyze={() => { panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); }} />
                     </>
                   ) : null}
                   {activeSession && (
@@ -1389,6 +1403,7 @@ export default React.forwardRef(function Sessions({
                         projectId={activeSession.projectId}
                         sessionId={activeSession.sessionId}
                         onSuccess={onDeploySuccess}
+                        onDeployStatus={setDeployStatus}
                       />
                     ) : null}
                     previewDeployInfo={lastDeployInfo}
