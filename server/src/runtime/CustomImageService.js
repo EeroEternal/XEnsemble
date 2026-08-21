@@ -674,7 +674,7 @@ async function executeBuild(image, build) {
 }
 
 async function getReadyImageRef(customImageId, userId) {
-  const image = await assertOwnership(userId, customImageId);
+  const image = await assertOwnership(userId, customImageId, { allowAdminOwned: true });
   if (!image) throw new RuntimeError('custom image not found', 404);
 
   const latestBuild = await getLatestBuild(image.id);
