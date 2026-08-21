@@ -57,7 +57,11 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         const gitVolume = worktreePath ? {
             host_path: path.join(this.hostWorkspacePath(project), '.git'),
             guest_path: '/workspace.git',
-            read_only: true,
+            // Read-write: git write operations (commit, add, merge) inside the VM
+            // need to update index, HEAD, refs, and objects. Git's built-in file
+            // locks (index.lock, ref-lock, atomic temp+rename) safely handle
+            // concurrent access across worktrees that share the same .git dir.
+            read_only: false,
         } : null;
         return {
             host_path: hostPath,
