@@ -365,49 +365,36 @@ class GitOperationService {
             .filter((line) => line.length >= 3 && line[0] === '?' && line[1] === '?')
             .map((line) => line.slice(3).trim());
 
-        // ahead/behind 只在 commit/push/pull 后变化，缓存 60s 避免每次 status 都跑 rev-list
-        const cacheKey = this._cacheKey(project.id);
-        const cachedAheadBehind = aheadBehindCache.get(cacheKey);
-        const aheadBehindFresh = cachedAheadBehind && cachedAheadBehind.expiresAt > Date.now();
-
         const [ignoredResult, aheadBehindResult] = await Promise.all([
-            // check-ignore：检查哪些 untracked 文件被 .gitignore 匹配
             untrackedPaths.length > 0
                 ? this._execGit(project, ['check-ignore', ...untrackedPaths])
                     .then((r) => new Set(r.stdout.split('\n').filter(Boolean)))
                     .catch(() => new Set())
                 : Promise.resolve(new Set()),
-            // ahead/behind：有缓存时直接用，否则并行尝试 @{upstream} 和 origin/<branch>
-            aheadBehindFresh
-                ? Promise.resolve(cachedAheadBehind)
-                : (async () => {
-                    const remoteBranch = branch || project.currentBranch;
-                    const candidates = [
-                        this._execGit(project, ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']),
-                    ];
-                    if (remoteBranch) {
-                        candidates.push(
-                            this._execGit(project, ['rev-list', '--left-right', '--count', `HEAD...origin/${remoteBranch}`]),
-                        );
-                    }
+            (async () => {
+                const remoteBranch = branch || project.currentBranch;
+                const candidates = [
+                    this._execGit(project, ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']),
+                ];
+                if (remoteBranch) {
+                    candidates.push(
+                        this._execGit(project, ['rev-list', '--left-right', '--count', `HEAD...origin/${remoteBranch}`]),
+                    );
+                }
+                try {
+                    const r = await Promise.any(candidates);
+                    const [a, b] = r.stdout.trim().split('\t').map((n) => Number(n) || 0);
+                    return { ahead: a, behind: b };
+                } catch {
                     try {
-                        const r = await Promise.any(candidates);
-                        const [a, b] = r.stdout.trim().split('\t').map((n) => Number(n) || 0);
-                        const result = { ahead: a, behind: b, expiresAt: Date.now() + AHEAD_BEHIND_TTL_MS };
-                        aheadBehindCache.set(cacheKey, result);
-                        return result;
+                        const r2 = await this._execGit(project, ['rev-list', '--count', 'HEAD', '--not', '--remotes']);
+                        const ahead = Number(r2.stdout.trim()) || 0;
+                        return { ahead, behind: 0 };
                     } catch {
-                        try {
-                            const r2 = await this._execGit(project, ['rev-list', '--count', 'HEAD', '--not', '--remotes']);
-                            const ahead = Number(r2.stdout.trim()) || 0;
-                            const result = { ahead, behind: 0, expiresAt: Date.now() + AHEAD_BEHIND_TTL_MS };
-                            aheadBehindCache.set(cacheKey, result);
-                            return result;
-                        } catch {
-                            return { ahead: 0, behind: 0 };
-                        }
+                        return { ahead: 0, behind: 0 };
                     }
-                })(),
+                }
+            })(),
         ]);
 
         const ignoredSet = ignoredResult;
