@@ -17,6 +17,7 @@ const GATEWAY_CONFIG_AGENTS = new Set([
     'hermes',
     'codebuddy',
     'kimi-code',
+    'opencode',
 ]);
 
 function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl, modelTarget, modelTargets, defaultTarget }) {
@@ -287,6 +288,34 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                     `  api_key: "${sessionToken}"`,
                 ].join('\n') + '\n',
             };
+
+        case 'opencode': {
+            const safeModelId = (t) => t.replace('/', ':');
+            const ocModels = {};
+            for (const t of targets) {
+                const id = safeModelId(t);
+                ocModels[id] = { name: id };
+            }
+            return {
+                dirPath: '/root/.config/opencode',
+                filePath: '/root/.config/opencode/opencode.json',
+                content: JSON.stringify({
+                    autoupdate: false,
+                    model: `gateway/${safeModelId(def)}`,
+                    provider: {
+                        gateway: {
+                            npm: '@ai-sdk/openai-compatible',
+                            name: 'gateway',
+                            options: {
+                                baseURL: routerUrl,
+                                apiKey: sessionToken,
+                            },
+                            models: ocModels,
+                        },
+                    },
+                }, null, 2),
+            };
+        }
 
         default:
             return null;
