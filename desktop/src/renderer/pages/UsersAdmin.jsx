@@ -18,6 +18,7 @@ import {
   consoleTableShellClass,
 } from '../lib/consoleTheme';
 import { apiFetch } from '../lib/api.ts';
+import { useTranslation } from 'react-i18next';
 
 function statusBadge(status) {
   const map = {
@@ -46,6 +47,7 @@ const emptyForm = {
 };
 
 export default function UsersAdmin() {
+  const { t } = useTranslation();
   const { showToast } = useToast();
   const [users, setUsers] = useState([]);
   const [agents, setAgents] = useState([]);
@@ -132,7 +134,7 @@ export default function UsersAdmin() {
     await runSave(async () => {
       if (dialogMode === 'create') {
         if (!form.password || form.password.length < 8) {
-          showToast('error', 'Password must be at least 8 characters.');
+          showToast('error', t('users:error.password_too_short'));
           return;
         }
         const res = await apiFetch('/api/v1/admin/users', {
@@ -153,7 +155,7 @@ export default function UsersAdmin() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
-        showToast('success', 'User created.');
+        showToast('success', t('users:toast.user_created'));
       } else if (editingUser) {
         const patchRes = await apiFetch(`/api/v1/admin/users/${editingUser.id}`, {
           method: 'PATCH',
@@ -186,7 +188,7 @@ export default function UsersAdmin() {
 
         if (resetPassword.trim()) {
           if (resetPassword.length < 8) {
-            showToast('error', 'New password must be at least 8 characters.');
+            showToast('error', t('users:error.new_password_too_short', { defaultValue: 'New password must be at least 8 characters.' }));
             return;
           }
           const pwRes = await apiFetch(`/api/v1/admin/users/${editingUser.id}/reset-password`, {
@@ -197,7 +199,7 @@ export default function UsersAdmin() {
           if (!pwRes.ok) throw new Error(pwData.error);
         }
 
-        showToast('success', 'User updated.');
+        showToast('success', t('users:toast.user_updated'));
       }
       closeDialog();
       fetchUsers();
@@ -213,7 +215,7 @@ export default function UsersAdmin() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      showToast('success', next === 'active' ? 'User activated.' : 'User suspended.');
+      showToast('success', next === 'active' ? t('users:toast.user_activated') : t('users:toast.user_suspended'));
       fetchUsers();
     } catch (err) {
       showToast('error', err.message);
@@ -228,7 +230,7 @@ export default function UsersAdmin() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      showToast('success', 'User approved.');
+      showToast('success', t('users:toast.user_approved', { defaultValue: 'User approved.' }));
       fetchUsers();
     } catch (err) {
       showToast('error', err.message);
@@ -240,12 +242,12 @@ export default function UsersAdmin() {
   return (
     <div className={`h-full w-full overflow-auto p-6 ${consolePageStackClass}`}>
       <PageHeader
-        title="User Management"
-        description="Manage accounts, quotas, and agent access."
+        title={t('users:title')}
+        description={t('users:description', { defaultValue: 'Manage accounts, quotas, and agent access.' })}
         actions={(
           <Button type="button" onClick={openCreate} size="md" className="shrink-0">
             <Plus className="w-4 h-4" />
-            Add User
+            {t('users:add_user')}
           </Button>
         )}
       />
@@ -255,19 +257,19 @@ export default function UsersAdmin() {
           <table className="w-full text-left text-sm whitespace-nowrap">
             <thead className="border-b border-zinc-200 bg-white">
               <tr>
-                <th className={consoleTableHeadCellClass}>User</th>
-                <th className={consoleTableHeadCellClass}>Status</th>
-                <th className={consoleTableHeadCellClass}>Usage</th>
-                <th className={consoleTableHeadCellClass}>Quotas</th>
-                <th className={consoleTableHeadCellClass}>Agents</th>
-                <th className={consoleTableHeadCellClass}>Last login</th>
-                <th className={consoleTableHeadCellClass}>Actions</th>
+                <th className={consoleTableHeadCellClass}>{t('users:field.username')}</th>
+                <th className={consoleTableHeadCellClass}>{t('users:field.status')}</th>
+                <th className={consoleTableHeadCellClass}>{t('users:field.usage', { defaultValue: 'Usage' })}</th>
+                <th className={consoleTableHeadCellClass}>{t('users:field.quotas', { defaultValue: 'Quotas' })}</th>
+                <th className={consoleTableHeadCellClass}>{t('agents:title')}</th>
+                <th className={consoleTableHeadCellClass}>{t('users:field.last_login')}</th>
+                <th className={consoleTableHeadCellClass}>{t('common:table.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className={`${consoleTableBodyCellClass} text-zinc-400`}>Loading…</td>
+                  <td colSpan={7} className={`${consoleTableBodyCellClass} text-zinc-400`}>{t('common:state.loading')}</td>
                 </tr>
               ) : users.map((user) => (
                 <tr key={user.id} className="hover:bg-zinc-50/50">
@@ -277,7 +279,7 @@ export default function UsersAdmin() {
                   </td>
                   <td className={consoleTableBodyCellClass}>
                     <span className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase ${statusBadge(user.status)}`}>
-                      {user.status}
+                      {t(`users:status.${user.status}`, { defaultValue: user.status })}
                     </span>
                   </td>
                   <td className={consoleTableBodyCellClass}>
@@ -290,11 +292,11 @@ export default function UsersAdmin() {
                     </span>
                   </td>
                   <td className={consoleTableBodyCellClass}>
-                    <span className="text-xs text-zinc-500">{user.quotas?.resource_tier ?? 'basic'}</span>
+                    <span className="text-xs text-zinc-500">{t(`users:tier.${user.quotas?.resource_tier ?? 'basic'}`, { defaultValue: user.quotas?.resource_tier ?? 'basic' })}</span>
                   </td>
                   <td className={consoleTableBodyCellClass}>
                     <span className="text-xs text-zinc-600">
-                      {user.role === 'admin' ? 'All' : (user.granted_agents_count ?? 0)}
+                      {user.role === 'admin' ? t('common:select.all_agents') : (user.granted_agents_count ?? 0)}
                     </span>
                   </td>
                   <td className={consoleTableBodyCellClass}>
@@ -306,7 +308,7 @@ export default function UsersAdmin() {
                         type="button"
                         onClick={() => openEdit(user)}
                         className="p-1.5 rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
-                        title="Edit"
+                        title={t('common:action.edit')}
                       >
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
@@ -315,7 +317,7 @@ export default function UsersAdmin() {
                           type="button"
                           onClick={() => approveUser(user)}
                           className="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-50"
-                          title="Approve"
+                          title={t('common:action.approve')}
                         >
                           <CheckCircle className="w-3.5 h-3.5" />
                         </button>
@@ -325,7 +327,7 @@ export default function UsersAdmin() {
                           type="button"
                           onClick={() => toggleStatus(user)}
                           className="p-1.5 rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
-                          title={user.status === 'active' ? 'Suspend' : 'Activate'}
+                          title={user.status === 'active' ? t('users:action.suspend', { defaultValue: 'Suspend' }) : t('users:action.activate', { defaultValue: 'Activate' })}
                         >
                           <Ban className="w-3.5 h-3.5" />
                         </button>
@@ -345,12 +347,12 @@ export default function UsersAdmin() {
           panelClassName={`${consoleDialogMdClass} max-h-[calc(100vh-2rem)] overflow-y-auto p-6`}
         >
               <h2 className="font-bold text-lg text-zinc-900 mb-4">
-                {dialogMode === 'create' ? 'Create user' : `Edit ${editingUser?.username}`}
+                {dialogMode === 'create' ? t('users:dialog.create_user') : t('users:dialog.edit_user', { username: editingUser?.username })}
               </h2>
               <form onSubmit={handleSave} className="space-y-4">
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
-                    <label className={`block mb-1 ${consoleSectionLabelClass}`}>Username</label>
+                    <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('users:field.username')}</label>
                     <Input
                       required
                       disabled={dialogMode === 'edit'}
@@ -361,7 +363,7 @@ export default function UsersAdmin() {
                   </div>
                   {dialogMode === 'create' && (
                     <div>
-                      <label className={`block mb-1 ${consoleSectionLabelClass}`}>Password</label>
+                      <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('users:field.password')}</label>
                       <Input
                         required
                         type="password"
@@ -372,25 +374,25 @@ export default function UsersAdmin() {
                     </div>
                   )}
                   <div>
-                    <label className={`block mb-1 ${consoleSectionLabelClass}`}>Role</label>
+                    <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('users:field.role')}</label>
                     <SelectMenu
                       value={form.role}
                       onChange={(v) => setForm({ ...form, role: v })}
                       options={[
-                        { value: 'user', label: 'User' },
-                        { value: 'admin', label: 'Admin' },
+                        { value: 'user', label: t('users:role.user') },
+                        { value: 'admin', label: t('users:role.admin') },
                       ]}
                     />
                   </div>
                   <div>
-                    <label className={`block mb-1 ${consoleSectionLabelClass}`}>Status</label>
+                    <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('users:field.status')}</label>
                     <SelectMenu
                       value={form.status}
                       onChange={(v) => setForm({ ...form, status: v })}
                       options={[
-                        { value: 'active', label: 'Active' },
-                        { value: 'pending', label: 'Pending' },
-                        { value: 'suspended', label: 'Suspended' },
+                        { value: 'active', label: t('users:status.active') },
+                        { value: 'pending', label: t('users:status.pending') },
+                        { value: 'suspended', label: t('users:status.suspended') },
                       ]}
                     />
                   </div>
@@ -398,10 +400,10 @@ export default function UsersAdmin() {
 
                 {form.role !== 'admin' && (
                 <div className={`${consoleCardClass} p-4 space-y-3`}>
-                  <h3 className={consoleSectionLabelClass}>Quotas</h3>
+                  <h3 className={consoleSectionLabelClass}>{t('users:field.quota')}</h3>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs text-zinc-500">Workspaces</label>
+                      <label className="text-xs text-zinc-500">{t('users:field.max_projects', { defaultValue: 'Workspaces' })}</label>
                       <Input
                         type="number"
                         min={0}
@@ -411,7 +413,7 @@ export default function UsersAdmin() {
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-zinc-500">Sessions</label>
+                      <label className="text-xs text-zinc-500">{t('users:field.max_sessions', { defaultValue: 'Sessions' })}</label>
                       <Input
                         type="number"
                         min={0}
@@ -421,7 +423,7 @@ export default function UsersAdmin() {
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-zinc-500">Previews</label>
+                      <label className="text-xs text-zinc-500">{t('users:field.max_previews', { defaultValue: 'Previews' })}</label>
                       <Input
                         type="number"
                         min={0}
@@ -431,14 +433,14 @@ export default function UsersAdmin() {
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-zinc-500">Tier</label>
+                      <label className="text-xs text-zinc-500">{t('users:field.resource_tier')}</label>
                       <SelectMenu
                         value={form.resource_tier}
                         onChange={(v) => setForm({ ...form, resource_tier: v })}
                         options={[
-                          { value: 'basic', label: 'Basic' },
-                          { value: 'pro', label: 'Pro' },
-                          { value: 'enterprise', label: 'Enterprise' },
+                          { value: 'basic', label: t('users:tier.basic') },
+                          { value: 'pro', label: t('users:tier.pro') },
+                          { value: 'enterprise', label: t('users:tier.enterprise') },
                         ]}
                       />
                     </div>
@@ -448,11 +450,11 @@ export default function UsersAdmin() {
 
                 {form.role !== 'admin' && (
                   <MultiSelectMenu
-                    label="Agent access"
+                    label={t('users:field.agent_auth', { defaultValue: 'Agent access' })}
                     value={form.agent_ids}
                     onChange={(agent_ids) => setForm({ ...form, agent_ids })}
                     options={agentOptions}
-                    placeholder="Select agents"
+                    placeholder={t('users:field.select_agents', { defaultValue: 'Select agents' })}
                     showSelectAll
                   />
                 )}
@@ -461,11 +463,11 @@ export default function UsersAdmin() {
                   <div>
                     <label className={`flex items-center gap-1 mb-1 ${consoleSectionLabelClass}`}>
                       <KeyRound className="w-3 h-3" />
-                      Reset password (optional)
+                      {t('users:field.reset_password_optional')}
                     </label>
                     <Input
                       type="password"
-                      placeholder="Leave blank to keep current"
+                      placeholder={t('users:field.leave_blank')}
                       value={resetPassword}
                       onChange={(e) => setResetPassword(e.target.value)}
                       className="h-9 py-1.5"
@@ -475,10 +477,10 @@ export default function UsersAdmin() {
 
                 <div className="flex justify-end gap-2 pt-2">
                   <Button type="button" variant="secondary" size="md" onClick={closeDialog}>
-                    Cancel
+                    {t('users:action.cancel')}
                   </Button>
                   <Button type="submit" size="md" disabled={saving}>
-                    {saving ? 'Saving…' : 'Save'}
+                    {saving ? t('users:action.saving', { defaultValue: 'Saving…' }) : t('users:action.save')}
                   </Button>
                 </div>
               </form>

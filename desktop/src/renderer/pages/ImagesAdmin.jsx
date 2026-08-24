@@ -30,6 +30,7 @@ import {
 } from '../lib/consoleTheme';
 import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
+import { useTranslation } from 'react-i18next';
 
 const API_BASE = '/api/v1/admin/agent-images';
 
@@ -74,10 +75,11 @@ const STATUS_DOT = {
 };
 
 function WorkflowStrip({ hasVersions, hasActive }) {
+    const { t } = useTranslation();
     const steps = [
-        { label: 'Build', desc: 'Build an image', done: hasVersions },
-        { label: 'Register', desc: 'Auto on build success', done: hasVersions },
-        { label: 'Activate', desc: 'Pick a version to use', done: hasActive },
+        { label: t('images:build'), desc: t('images:workflow.build_desc', { defaultValue: 'Build an image' }), done: hasVersions },
+        { label: t('images:workflow.register', { defaultValue: 'Register' }), desc: t('images:workflow.register_desc', { defaultValue: 'Auto on build success' }), done: hasVersions },
+        { label: t('images:action.activate'), desc: t('images:workflow.activate_desc', { defaultValue: 'Pick a version to use' }), done: hasActive },
     ];
     return (
         <div className={cn('flex items-center gap-2 px-4 py-2 border-b shrink-0', borderHairline, bgTertiary)}>
@@ -103,6 +105,7 @@ function WorkflowStrip({ hasVersions, hasActive }) {
 }
 
 function AgentListItem({ agent, selected, onClick }) {
+    const { t } = useTranslation();
     const activeVersion = agent.active_version;
     const hasDefault = Boolean(agent.default_image_ref);
     const isBuilding = agent.build_state === 'building';
@@ -113,12 +116,12 @@ function AgentListItem({ agent, selected, onClick }) {
         : isFailed ? STATUS_DOT.failed
         : (activeVersion || hasDefault) ? STATUS_DOT.active
         : STATUS_DOT.none;
-    const statusText = isBuilding ? 'Building'
-        : isQueued ? 'Queued'
-        : isFailed ? 'Failed'
+    const statusText = isBuilding ? t('images:status.building')
+        : isQueued ? t('images:status.queued')
+        : isFailed ? t('images:status.failed')
         : activeVersion ? activeVersion.tag
-        : hasDefault ? 'default'
-        : 'Not built';
+        : hasDefault ? t('images:default_label', { defaultValue: 'default' })
+        : t('images:not_built', { defaultValue: 'Not built' });
 
     return (
         <button
@@ -147,6 +150,7 @@ function AgentListItem({ agent, selected, onClick }) {
 }
 
 function VersionRow({ version, actionId, onActivate, onDeactivate, onDelete }) {
+    const { t } = useTranslation();
     const isBusy = actionId === `activate:${version.id}` || actionId === `deprecate:${version.id}` || actionId === `delete:${version.id}`;
     return (
         <div className={cn('flex items-center gap-3 px-4 py-2.5 transition-colors border-b last:border-b-0', borderHairline, 'hover:bg-[#F4F5F6]')}>
@@ -155,10 +159,10 @@ function VersionRow({ version, actionId, onActivate, onDeactivate, onDelete }) {
                     <span className={cn('font-mono text-xs truncate', textPrimary)}>{version.tag}</span>
                     {version.is_active ? (
                         <span className="inline-flex items-center rounded-full bg-[#E8F5E9] px-1.5 py-0.5 text-xs font-medium text-[#4A7C59] shrink-0">
-                            <Check className="h-2.5 w-2.5 mr-0.5" />Active
+                            <Check className="h-2.5 w-2.5 mr-0.5" />{t('images:status.active')}
                         </span>
                     ) : (
-                        <span className={cn('inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium shrink-0', bgActive, textSecondary)}>Ready</span>
+                        <span className={cn('inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium shrink-0', bgActive, textSecondary)}>{t('images:status.built', { defaultValue: 'Ready' })}</span>
                     )}
                 </div>
                 <div className={cn('text-xs mt-0.5', textPlaceholder)}>
@@ -171,21 +175,21 @@ function VersionRow({ version, actionId, onActivate, onDeactivate, onDelete }) {
                 ) : (
                     <>
                         {!version.is_active && (
-                            <button type="button" onClick={() => onActivate(version.id)} title="Activate" className={cn('group/btn inline-flex items-center gap-1 p-1 rounded text-[#4A7C59] hover:bg-[#E8F5E9]', consoleButtonFocusClass)}>
+                            <button type="button" onClick={() => onActivate(version.id)} title={t('images:action.activate')} className={cn('group/btn inline-flex items-center gap-1 p-1 rounded text-[#4A7C59] hover:bg-[#E8F5E9]', consoleButtonFocusClass)}>
                                 <Check className="h-3.5 w-3.5" />
-                                <span className="text-xs hidden group-hover/btn:inline">Activate</span>
+                                <span className="text-xs hidden group-hover/btn:inline">{t('images:action.activate')}</span>
                             </button>
                         )}
                         {version.is_active && (
-                            <button type="button" onClick={() => onDeactivate(version)} title="Deactivate" className={cn('group/btn inline-flex items-center gap-1 p-1 rounded text-[#9AA0A6] hover:bg-[#E8EAED]', consoleButtonFocusClass)}>
+                            <button type="button" onClick={() => onDeactivate(version)} title={t('images:action.deactivate', { defaultValue: 'Deactivate' })} className={cn('group/btn inline-flex items-center gap-1 p-1 rounded text-[#9AA0A6] hover:bg-[#E8EAED]', consoleButtonFocusClass)}>
                                 <XCircle className="h-3.5 w-3.5" />
-                                <span className="text-xs hidden group-hover/btn:inline">Deactivate</span>
+                                <span className="text-xs hidden group-hover/btn:inline">{t('images:action.deactivate', { defaultValue: 'Deactivate' })}</span>
                             </button>
                         )}
                         {!version.is_active && (
-                            <button type="button" onClick={() => onDelete(version)} title="Delete" className={cn('group/btn inline-flex items-center gap-1 p-1 rounded text-[#C06C5D] hover:bg-[#FDECEA]', consoleButtonFocusClass)}>
+                            <button type="button" onClick={() => onDelete(version)} title={t('common:action.delete')} className={cn('group/btn inline-flex items-center gap-1 p-1 rounded text-[#C06C5D] hover:bg-[#FDECEA]', consoleButtonFocusClass)}>
                                 <Trash2 className="h-3 w-3" />
-                                <span className="text-xs hidden group-hover/btn:inline">Delete</span>
+                                <span className="text-xs hidden group-hover/btn:inline">{t('common:action.delete')}</span>
                             </button>
                         )}
                     </>
@@ -196,15 +200,16 @@ function VersionRow({ version, actionId, onActivate, onDeactivate, onDelete }) {
 }
 
 function BuildStatusCard({ agent, latestBuild, isBuilding, isQueued, isFailed, onBuild, onRetry, onViewLogs, onDiscard, logsBuildId, actionId }) {
+    const { t } = useTranslation();
     if (isBuilding || isQueued) {
         return (
             <div className={cn('flex items-center gap-3 px-4 py-3 rounded-lg', bgTertiary)}>
                 <Loader2 className="h-4 w-4 animate-spin text-[#5B8DB8] shrink-0" />
                 <div className="min-w-0">
-                    <div className={cn('text-xs font-medium', textPrimary)}>{isBuilding ? 'Building image…' : 'Queued for build…'}</div>
+                    <div className={cn('text-xs font-medium', textPrimary)}>{isBuilding ? t('images:building_image', { defaultValue: 'Building image…' }) : t('images:queued_for_build', { defaultValue: 'Queued for build…' })}</div>
                     {latestBuild && (
                         <div className={cn('text-xs mt-0.5', textPlaceholder)}>
-                            Started {formatTime(latestBuild.started_at)} · {formatDuration(latestBuild.started_at, latestBuild.finished_at)}
+                            {t('images:started', { defaultValue: 'Started' })} {formatTime(latestBuild.started_at)} · {formatDuration(latestBuild.started_at, latestBuild.finished_at)}
                         </div>
                     )}
                 </div>
@@ -217,7 +222,7 @@ function BuildStatusCard({ agent, latestBuild, isBuilding, isQueued, isFailed, o
             <div className={cn('rounded-lg border', accentRedBg, 'border-[#FADBD8]')}>
                 <div className="flex items-center gap-2 px-4 py-2.5">
                     <XCircle className={cn('h-4 w-4 shrink-0', accentRed)} />
-                    <span className={cn('text-xs font-medium', accentRed)}>Build failed</span>
+                    <span className={cn('text-xs font-medium', accentRed)}>{t('images:build_failed', { defaultValue: 'Build failed' })}</span>
                 </div>
                 {latestBuild?.failure_reason && (
                     <pre className={cn('mx-4 mb-2 rounded p-2 text-xs font-mono overflow-auto whitespace-pre-wrap max-h-20', accentRed, bgTertiary)}>
@@ -227,17 +232,17 @@ function BuildStatusCard({ agent, latestBuild, isBuilding, isQueued, isFailed, o
                 <div className="flex items-center gap-3 px-4 py-2 border-t border-[#FADBD8]">
                     {latestBuild && (
                         <button type="button" onClick={() => onViewLogs(latestBuild.id)} className={cn('text-xs text-[#5B8DB8] hover:underline', consoleButtonFocusClass)}>
-                            {logsBuildId === latestBuild.id ? 'Hide logs' : 'View logs'}
+                            {logsBuildId === latestBuild.id ? t('images:hide_logs', { defaultValue: 'Hide logs' }) : t('images:view_logs', { defaultValue: 'View logs' })}
                         </button>
                     )}
                     {latestBuild && (
                         <button type="button" onClick={() => onRetry(latestBuild.id)} className={cn('text-xs', accentGreenText, 'hover:underline', consoleButtonFocusClass)}>
-                            Retry
+                            {t('common:action.retry')}
                         </button>
                     )}
                     {latestBuild && (
                         <button type="button" onClick={() => onDiscard(latestBuild.id)} className={cn('text-xs', accentRed, 'hover:underline', consoleButtonFocusClass)}>
-                            Discard
+                            {t('images:discard', { defaultValue: 'Discard' })}
                         </button>
                     )}
                 </div>
@@ -256,19 +261,20 @@ function BuildStatusCard({ agent, latestBuild, isBuilding, isQueued, isFailed, o
             )}
         >
             <Upload className="h-3.5 w-3.5" />
-            Build new image
+            {t('images:build_new_image', { defaultValue: 'Build new image' })}
         </button>
     );
 }
 
 function EmptyState({ onBuild }) {
+    const { t } = useTranslation();
     return (
         <div className="flex flex-col items-center justify-center py-16">
             <div className={cn('flex items-center justify-center w-12 h-12 rounded-xl mb-4', bgSecondary)}>
                 <TerminalIcon className={cn('h-6 w-6', textPlaceholder)} />
             </div>
-            <p className={cn('text-sm font-medium', textPrimary)}>No image configured</p>
-            <p className={cn('text-xs mt-1 mb-4', textPlaceholder)}>Build a custom image to install this agent in sandboxes.</p>
+            <p className={cn('text-sm font-medium', textPrimary)}>{t('images:empty.no_image', { defaultValue: 'No image configured' })}</p>
+            <p className={cn('text-xs mt-1 mb-4', textPlaceholder)}>{t('images:empty.build_hint', { defaultValue: 'Build a custom image to install this agent in sandboxes.' })}</p>
             <button
                 type="button"
                 onClick={onBuild}
@@ -279,13 +285,14 @@ function EmptyState({ onBuild }) {
                 )}
             >
                 <Upload className="h-3.5 w-3.5" />
-                Build image
+                {t('images:build_image', { defaultValue: 'Build image' })}
             </button>
         </div>
     );
 }
 
 export function ImagesAdminContent() {
+    const { t } = useTranslation();
     const { showToast } = useToast();
     const [loading, setLoading] = useState(true);
     const [catalog, setCatalog] = useState(null);
@@ -388,7 +395,7 @@ export function ImagesAdminContent() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ tag: buildTag.trim(), notes: buildNotes.trim() || undefined }),
             });
-            showToast('success', 'Build started.');
+            showToast('success', t('images:toast.build_started', { defaultValue: 'Build started.' }));
             setBuildDialogOpen(false);
             await loadCatalog();
             await loadBuilds(selectedAgentId);
@@ -403,7 +410,7 @@ export function ImagesAdminContent() {
         setActionId(`activate:${versionId}`);
         try {
             await api(`/versions/${versionId}/activate`, { method: 'POST' });
-            showToast('success', 'Version activated.');
+            showToast('success', t('images:toast.version_activated', { defaultValue: 'Version activated.' }));
             await loadCatalog();
         } catch (err) {
             showToast('error', err.message);
@@ -416,7 +423,7 @@ export function ImagesAdminContent() {
         setActionId(`deprecate:${versionId}`);
         try {
             await api(`/versions/${versionId}/deprecate`, { method: 'POST' });
-            showToast('success', 'Version deactivated.');
+            showToast('success', t('images:toast.version_deactivated', { defaultValue: 'Version deactivated.' }));
             await loadCatalog();
         } catch (err) {
             showToast('error', err.message);
@@ -432,7 +439,7 @@ export function ImagesAdminContent() {
         setDeleteVersionTarget(null);
         try {
             await api(`/versions/${vid}`, { method: 'DELETE' });
-            showToast('success', 'Version deleted.');
+            showToast('success', t('images:toast.version_deleted', { defaultValue: 'Version deleted.' }));
             await loadCatalog();
         } catch (err) {
             showToast('error', err.message);
@@ -442,10 +449,10 @@ export function ImagesAdminContent() {
     };
 
     const handleRetry = async (buildId) => {
-        if (!await confirm({ title: 'Retry Build', message: 'Retry this build?', confirmLabel: 'Retry' })) return;
+        if (!await confirm({ title: t('images:retry_build_title', { defaultValue: 'Retry Build' }), message: t('images:retry_build_message', { defaultValue: 'Retry this build?' }), confirmLabel: t('common:action.retry') })) return;
         try {
             await api(`/builds/${buildId}/retry`, { method: 'POST' });
-            showToast('success', 'Build retried.');
+            showToast('success', t('images:toast.build_retried', { defaultValue: 'Build retried.' }));
             await loadCatalog();
             if (selectedAgentId) await loadBuilds(selectedAgentId);
         } catch (err) {
@@ -454,10 +461,10 @@ export function ImagesAdminContent() {
     };
 
     const handleDiscardBuild = async (buildId) => {
-        if (!await confirm({ title: 'Discard Build Record', message: 'Discard this build record? Logs will be permanently deleted.', confirmLabel: 'Discard', variant: 'danger' })) return;
+        if (!await confirm({ title: t('images:discard_build_title', { defaultValue: 'Discard Build Record' }), message: t('images:discard_build_message', { defaultValue: 'Discard this build record? Logs will be permanently deleted.' }), confirmLabel: t('images:discard', { defaultValue: 'Discard' }), variant: 'danger' })) return;
         try {
             await api(`/builds/${buildId}`, { method: 'DELETE' });
-            showToast('success', 'Build discarded.');
+            showToast('success', t('images:toast.build_discarded', { defaultValue: 'Build discarded.' }));
             if (selectedAgentId) await loadBuilds(selectedAgentId);
         } catch (err) {
             showToast('error', err.message);
@@ -470,7 +477,7 @@ export function ImagesAdminContent() {
         setLogsLoading(true);
         try {
             const data = await api(`/builds/${buildId}/logs`);
-            setLogsContent(data.content || '(no logs)');
+            setLogsContent(data.content || t('images:no_logs', { defaultValue: '(no logs)' }));
         } catch (err) {
             setLogsContent(`Error: ${err.message}`);
         } finally {
@@ -486,14 +493,14 @@ export function ImagesAdminContent() {
             {/* Header bar */}
             <div className={cn('flex items-center justify-between border-b px-4 py-3 shrink-0', borderHairline, bgCanvas)}>
                 <div className="flex items-center gap-2">
-                    <h2 className={cn('text-sm font-bold', textPrimary)}>Agent Images</h2>
+                    <h2 className={cn('text-sm font-bold', textPrimary)}>{t('images:agent_images')}</h2>
                     <span className={cn('text-xs', textPlaceholder)}>
-                        {buildableAgents.length} buildable
+                        {buildableAgents.length} {t('images:buildable', { defaultValue: 'buildable' })}
                     </span>
                 </div>
                 <div className="flex items-center gap-3">
                     <p className={cn('text-xs hidden sm:block max-w-md', textPlaceholder)}>
-                        Rebuild agent sandbox images to update the runtime environment (CLI upgrades, new dependencies). Activate a version after build to use it for new agent sessions.
+                        {t('images:header_description', { defaultValue: 'Rebuild agent sandbox images to update the runtime environment (CLI upgrades, new dependencies). Activate a version after build to use it for new agent sessions.' })}
                     </p>
                     <button
                         type="button"

@@ -1,0 +1,39 @@
+{
+  "title": "Deploy",
+  "deployment": "Deployment",
+  "deployments": "Deployments",
+  "preview": "Preview",
+  "previews": "Previews",
+  "action": {
+    "start": "Start",
+    "stop": "Stop",
+    "restart": "Restart",
+    "delete": "Delete",
+    "copy_url": "Copy URL",
+    "open_in_browser": "Open in browser"
+  },
+  "field": {
+    "public_url": "Public URL",
+    "internal": "Internal",
+    "status": "Status",
+    "created": "Created",
+    "expires": "Expires"
+  },
+  "status": {
+    "pending": "pending",
+    "building": "building",
+    "running": "running",
+    "stopped": "stopped",
+    "failed": "failed",
+    "expired": "expired"
+  },
+  "error": {
+    "start_failed": "Failed to start",
+    "stop_failed": "Stop failed",
+    "restart_failed": "Restart failed",
+    "preview_token_failed": "Failed to issue preview token",
+    "load_preview_failed": "Failed to load preview",
+    "preview_deploy_failed": "Preview deploy failed",
+    "auto_deploy_failed": "Auto-deploy failed ({{status}})"
+  }
+}

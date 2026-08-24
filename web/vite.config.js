@@ -16,10 +16,14 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "html-parse-stringify": path.resolve(__dirname, "node_modules/html-parse-stringify/dist/esm/html-parse-stringify.js"),
+      "use-sync-external-store/shim": path.resolve(__dirname, "node_modules/use-sync-external-store/shim/index.js"),
     },
+    mainFields: ["module", "main"],
+    conditions: ["module", "import", "default"],
   },
   optimizeDeps: {
-    include: ["monaco-editor"],
+    include: ["monaco-editor", "i18next", "react-i18next", "html-parse-stringify"],
   },
   build: {
     // 拆分大依赖（特别是 monaco-editor，单文件就几 MB）到独立 chunk，避免主 bundle 过大导致 vite 转换/打包时内存峰值爆 OOM

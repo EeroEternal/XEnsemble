@@ -12,21 +12,22 @@ import {
   borderHairline,
   bgCanvas,
 } from '../../lib/consoleTheme';
-
-const STRATEGY_OPTIONS = [
-  { value: 'ours', label: 'Keep ours' },
-  { value: 'theirs', label: 'Keep theirs' },
-  { value: 'manual', label: 'Manual merge' },
-];
-
-const STRATEGY_DESCRIPTIONS = {
-  ours: 'Accept the current branch version',
-  theirs: 'Accept the incoming branch version',
-  manual: 'Mark as manually resolved',
-};
+import { useTranslation } from 'react-i18next';
 
 export function ConflictFileItem({ file, projectId, onResolved }) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
+  const STRATEGY_OPTIONS = [
+    { value: 'ours', label: t('git:strategy.keep_ours', { defaultValue: 'Keep ours' }) },
+    { value: 'theirs', label: t('git:strategy.keep_theirs', { defaultValue: 'Keep theirs' }) },
+    { value: 'manual', label: t('git:strategy.manual_merge', { defaultValue: 'Manual merge' }) },
+  ];
+
+  const STRATEGY_DESCRIPTIONS = {
+    ours: t('git:strategy.ours_desc', { defaultValue: 'Accept the current branch version' }),
+    theirs: t('git:strategy.theirs_desc', { defaultValue: 'Accept the incoming branch version' }),
+    manual: t('git:strategy.manual_desc', { defaultValue: 'Mark as manually resolved' }),
+  };
   const [expanded, setExpanded] = useState(false);
   const [oursContent, setOursContent] = useState(null);
   const [theirsContent, setTheirsContent] = useState(null);
@@ -39,17 +40,17 @@ export function ConflictFileItem({ file, projectId, onResolved }) {
     setLoading(true);
     try {
       const [oursRes, theirsRes] = await Promise.all([
-        gitApi.getFileAtRef(projectId, file.path, 'HEAD').catch(() => ({ content: '(unable to load)' })),
-        gitApi.getFileAtRef(projectId, file.path, 'MERGE_HEAD').catch(() => ({ content: '(unable to load)' })),
+        gitApi.getFileAtRef(projectId, file.path, 'HEAD').catch(() => ({ content: t('git:empty.unable_to_load', { defaultValue: '(unable to load)' }) })),
+        gitApi.getFileAtRef(projectId, file.path, 'MERGE_HEAD').catch(() => ({ content: t('git:empty.unable_to_load', { defaultValue: '(unable to load)' }) })),
       ]);
       setOursContent(oursRes.content || '');
       setTheirsContent(theirsRes.content || '');
     } catch {
-      showToast('error', `Failed to load file content for ${file.path}`);
+      showToast('error', t('git:toast.load_content_failed', { path: file.path, defaultValue: 'Failed to load file content for {{path}}' }));
     } finally {
       setLoading(false);
     }
-  }, [expanded, projectId, file, showToast]);
+  }, [expanded, projectId, file, showToast, t]);
 
   useEffect(() => {
     if (expanded) loadContents();
@@ -59,7 +60,7 @@ export function ConflictFileItem({ file, projectId, onResolved }) {
     setResolving(true);
     try {
       await gitApi.resolveConflict(projectId, file.path, strategy);
-      showToast('success', `Resolved ${file.path} using "${strategy}" strategy.`);
+      showToast('success', t('git:toast.resolved_strategy', { path: file.path, strategy, defaultValue: 'Resolved {{path}} using "{{strategy}}" strategy.' }));
       onResolved?.(file.path);
     } catch (err) {
       showToast('error', err.message);
@@ -89,25 +90,25 @@ export function ConflictFileItem({ file, projectId, onResolved }) {
           {loading ? (
             <div className="flex items-center justify-center gap-2 p-4 text-xs text-[#5F6368]">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Loading file contents…
+              {t('git:state.loading_file_contents', { defaultValue: 'Loading file contents…' })}
             </div>
           ) : (
             <>
               <div className="grid grid-cols-2 divide-x divide-[#E8EAED] max-h-64 overflow-auto">
                 <div>
                   <div className="sticky top-0 bg-[#F4F5F6] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[#5F6368] border-b border-[#E8EAED]">
-                    Ours (current branch)
+                    {t('git:label.ours_current', { defaultValue: 'Ours (current branch)' })}
                   </div>
                   <pre className="p-2 text-xs font-mono whitespace-pre-wrap text-[#202124] overflow-auto">
-                    {oursContent || '(empty)'}
+                    {oursContent || t('git:empty.empty_content', { defaultValue: '(empty)' })}
                   </pre>
                 </div>
                 <div>
                   <div className="sticky top-0 bg-[#F4F5F6] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[#5F6368] border-b border-[#E8EAED]">
-                    Theirs (incoming)
+                    {t('git:label.theirs_incoming', { defaultValue: 'Theirs (incoming)' })}
                   </div>
                   <pre className="p-2 text-xs font-mono whitespace-pre-wrap text-[#202124] overflow-auto">
-                    {theirsContent || '(empty)'}
+                    {theirsContent || t('git:empty.empty_content', { defaultValue: '(empty)' })}
                   </pre>
                 </div>
               </div>
@@ -132,12 +133,12 @@ export function ConflictFileItem({ file, projectId, onResolved }) {
                   {resolving ? (
                     <>
                       <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                      Resolving…
+                      {t('git:state.resolving', { defaultValue: 'Resolving…' })}
                     </>
                   ) : (
                     <>
                       <Check className="mr-1 h-3 w-3" />
-                      Resolve
+                      {t('git:resolve')}
                     </>
                   )}
                 </Button>
@@ -152,6 +153,7 @@ export function ConflictFileItem({ file, projectId, onResolved }) {
 
 export default function ConflictResolutionPanel({ projectId, targetBranch }) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [conflicts, setConflicts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [checkResult, setCheckResult] = useState(null);
@@ -180,16 +182,16 @@ export default function ConflictResolutionPanel({ projectId, targetBranch }) {
       const result = await gitApi.conflictCheck(projectId, targetBranch);
       setCheckResult(result);
       if (!result.canMerge) {
-        showToast('warning', `${result.conflictFiles?.length || 0} conflict(s) detected.`);
+        showToast('warning', t('git:toast.conflicts_detected', { count: result.conflictFiles?.length || 0, defaultValue: '{{count}} conflict(s) detected.' }));
       } else {
-        showToast('success', 'No conflicts — branches can be merged cleanly.');
+        showToast('success', t('git:toast.no_conflicts_clean', { defaultValue: 'No conflicts — branches can be merged cleanly.' }));
       }
     } catch (err) {
       showToast('error', err.message);
     } finally {
       setChecking(false);
     }
-  }, [projectId, targetBranch, showToast]);
+  }, [projectId, targetBranch, showToast, t]);
 
   useEffect(() => {
     fetchConflicts();
@@ -204,7 +206,7 @@ export default function ConflictResolutionPanel({ projectId, targetBranch }) {
       <div className="flex items-center justify-between border-b border-[#E8EAED] px-4 py-2.5 shrink-0">
         <div className="flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 text-amber-500" />
-          <h3 className={`text-sm font-semibold ${textPrimary}`}>Conflict Resolution</h3>
+          <h3 className={`text-sm font-semibold ${textPrimary}`}>{t('git:conflict_resolution')}</h3>
           {conflicts.length > 0 && (
             <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
               {conflicts.length} file{conflicts.length > 1 ? 's' : ''}
@@ -223,10 +225,10 @@ export default function ConflictResolutionPanel({ projectId, targetBranch }) {
               {checking ? (
                 <>
                   <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                  Checking…
+                  {t('git:state.checking', { defaultValue: 'Checking…' })}
                 </>
               ) : (
-                'Check conflicts'
+                t('git:check_conflicts', { defaultValue: 'Check conflicts' })
               )}
             </Button>
           )}
@@ -234,7 +236,7 @@ export default function ConflictResolutionPanel({ projectId, targetBranch }) {
             type="button"
             onClick={fetchConflicts}
             disabled={loading}
-            title="Refresh"
+            title={t('common:action.refresh')}
             className={consoleIconButtonClass}
           >
             {loading ? (
@@ -250,7 +252,7 @@ export default function ConflictResolutionPanel({ projectId, targetBranch }) {
         <div className={`px-4 py-2 border-b border-[#E8EAED] text-xs ${bgCanvas}`}>
           <div className="flex items-center gap-3">
             <span className={checkResult.canMerge ? 'text-green-700' : 'text-amber-700'}>
-              {checkResult.canMerge ? '✓ Clean merge possible' : `✗ ${checkResult.conflictFiles?.length || 0} conflict(s)`}
+              {checkResult.canMerge ? t('git:state.clean_merge', { defaultValue: '✓ Clean merge possible' }) : t('git:state.conflicts_found', { count: checkResult.conflictFiles?.length || 0, defaultValue: '✗ {{count}} conflict(s)' })}
             </span>
             {checkResult.aheadBehind && (
               <span className={textSecondary}>
@@ -274,14 +276,14 @@ export default function ConflictResolutionPanel({ projectId, targetBranch }) {
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-8 text-sm text-[#5F6368]">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Loading conflicts…
+            {t('git:state.loading_conflicts', { defaultValue: 'Loading conflicts…' })}
           </div>
         ) : conflicts.length === 0 ? (
           <div className="text-center py-8">
             <Check className="mx-auto h-8 w-8 text-green-500 mb-2" />
-            <p className={`text-sm ${textSecondary}`}>No conflicts in the working tree.</p>
+            <p className={`text-sm ${textSecondary}`}>{t('git:empty.no_conflicts_working', { defaultValue: 'No conflicts in the working tree.' })}</p>
             <p className={`text-xs mt-1 ${textPlaceholder}`}>
-              Use "Check conflicts" to dry-run merge against a target branch.
+              {t('git:hint.check_conflicts_dryrun', { defaultValue: 'Use "Check conflicts" to dry-run merge against a target branch.' })}
             </p>
           </div>
         ) : (

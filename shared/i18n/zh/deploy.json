@@ -1,0 +1,39 @@
+{
+  "title": "部署",
+  "deployment": "部署",
+  "deployments": "部署",
+  "preview": "预览",
+  "previews": "预览",
+  "action": {
+    "start": "启动",
+    "stop": "停止",
+    "restart": "重启",
+    "delete": "删除",
+    "copy_url": "复制 URL",
+    "open_in_browser": "在浏览器中打开"
+  },
+  "field": {
+    "public_url": "公网 URL",
+    "internal": "内部",
+    "status": "状态",
+    "created": "创建时间",
+    "expires": "过期时间"
+  },
+  "status": {
+    "pending": "等待中",
+    "building": "构建中",
+    "running": "运行中",
+    "stopped": "已停止",
+    "failed": "失败",
+    "expired": "已过期"
+  },
+  "error": {
+    "start_failed": "启动失败",
+    "stop_failed": "停止失败",
+    "restart_failed": "重启失败",
+    "preview_token_failed": "签发预览令牌失败",
+    "load_preview_failed": "加载预览失败",
+    "preview_deploy_failed": "预览部署失败",
+    "auto_deploy_failed": "自动部署失败 ({{status}})"
+  }
+}

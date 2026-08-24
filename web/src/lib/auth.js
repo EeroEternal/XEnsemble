@@ -83,6 +83,10 @@ export async function apiFetch(path, options = {}) {
   if (options.body && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
+  const locale = localStorage.getItem('xe_locale') || 'en';
+  if (!headers['Accept-Language']) {
+    headers['Accept-Language'] = locale;
+  }
 
   const url = apiUrl(path);
   let res = await fetch(url, { ...options, headers });

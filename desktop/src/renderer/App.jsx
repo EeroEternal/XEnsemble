@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import Login from './pages/Login';
 import SessionsPage from './pages/SessionsPage';
 import AgentsAdmin from './pages/AgentsAdmin';
@@ -148,6 +149,7 @@ function AuthenticatedLayout({
 }
 
 function App() {
+  const { t } = useTranslation();
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
@@ -192,7 +194,7 @@ function App() {
   if (!authReady) {
     return (
       <div className="flex h-full items-center justify-center bg-[#F4F5F6]">
-        <div className="text-sm text-[#5F6368]">Loading…</div>
+        <div className="text-sm text-[#5F6368]">{t('common:state.loading', { defaultValue: 'Loading…' })}</div>
       </div>
     );
   }

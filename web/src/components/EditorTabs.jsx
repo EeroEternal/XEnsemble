@@ -3,8 +3,10 @@ import { X } from 'lucide-react';
 import { ConsoleDialogShell } from './ConsoleDialog';
 import { consoleButtonFocusClass } from '@/lib/consoleTokens';
 import { buttonClass } from '@/lib/buttonStyles';
+import { useTranslation } from 'react-i18next';
 
 const EditorTabs = memo(function EditorTabs({ tabs, activePath, onSelectTab, onCloseTab, onSaveTab }) {
+  const { t } = useTranslation();
   const [closingTab, setClosingTab] = useState(null);
 
   const handleClose = (path) => {
@@ -63,7 +65,7 @@ const EditorTabs = memo(function EditorTabs({ tabs, activePath, onSelectTab, onC
               <span className="truncate max-w-[160px]">{displayName}</span>
               {dirty && <span className="text-red-600 text-xs leading-none">&#x2022;</span>}
               <button
-                aria-label={`Close ${tab.path}`}
+                aria-label={t('workspace:action.close_tab', { name: tab.path })}
                 className={`ml-0.5 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-zinc-200 transition-opacity ${consoleButtonFocusClass}`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -82,19 +84,19 @@ const EditorTabs = memo(function EditorTabs({ tabs, activePath, onSelectTab, onC
           panelClassName="max-w-sm"
         >
           <div className="p-4">
-            <h3 className="font-bold text-lg text-zinc-900 mb-2">Unsaved Changes</h3>
+            <h3 className="font-bold text-lg text-zinc-900 mb-2">{t('workspace:label.unsaved_changes')}</h3>
             <p className="text-sm text-zinc-500 mb-4">
-              This file has unsaved changes. Close without saving?
+              {t('workspace:dialog.close_without_saving', { defaultValue: 'This file has unsaved changes. Close without saving?' })}
             </p>
             <div className="flex justify-end gap-2">
               <button onClick={handleCancelClose} className={buttonClass('secondary', 'sm')}>
-                Cancel
+                {t('common:action.cancel')}
               </button>
               <button onClick={handleDiscardAndClose} className={buttonClass('secondary', 'sm')}>
-                Don't Save
+                {t('workspace:action.dont_save', { defaultValue: "Don't Save" })}
               </button>
               <button onClick={handleSaveAndClose} className={buttonClass('primary', 'sm')}>
-                Save
+                {t('workspace:action.save')}
               </button>
             </div>
           </div>

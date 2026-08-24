@@ -12,6 +12,7 @@ import {
 import { usePreview } from './PreviewPanel';
 import { consoleButtonFocusClass } from '@/lib/consoleTokens';
 import { useToast } from './Toast';
+import { useTranslation } from 'react-i18next';
 
 function formatTtl(expiresAt) {
   if (!expiresAt) return '';
@@ -24,6 +25,7 @@ function formatTtl(expiresAt) {
 
 /** Deployed app preview (start/stop + embed). */
 export default function WorkspacePreviewPane({ projectId, deployInfo }) {
+  const { t } = useTranslation();
   const preview = usePreview(projectId, true);
   const { status, previewUrl, isBusy, resolveEmbedUrl, openPreview } = preview;
   const { showToast } = useToast();
@@ -51,7 +53,7 @@ export default function WorkspacePreviewPane({ projectId, deployInfo }) {
       .catch((err) => {
         if (!cancelled) {
           setEmbedUrl(null);
-          setEmbedError(err.message || 'Failed to load preview');
+          setEmbedError(err.message || t('deploy:error.load_preview_failed'));
         }
       })
       .finally(() => {

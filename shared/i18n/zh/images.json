@@ -1,0 +1,42 @@
+{
+  "title": "镜像",
+  "agent_images": "Agent 镜像",
+  "custom_images": "自定义镜像",
+  "build": "构建",
+  "build_log": "构建日志",
+  "build_status": "构建状态",
+  "status": {
+    "queued": "排队中",
+    "building": "构建中…",
+    "built": "已构建",
+    "failed": "失败",
+    "deprecated": "已废弃",
+    "active": "活跃",
+    "ready": "就绪"
+  },
+  "action": {
+    "activate": "激活",
+    "deprecate": "废弃",
+    "retry_build": "重试构建",
+    "delete_image": "删除镜像",
+    "add_image": "添加镜像"
+  },
+  "field": {
+    "components": "组件",
+    "image_ref": "镜像引用",
+    "tag": "标签",
+    "digest": "摘要"
+  },
+  "empty": {
+    "no_images": "暂无镜像",
+    "no_custom_images": "暂无自定义镜像"
+  },
+  "error": {
+    "load_catalog_failed": "加载目录失败",
+    "load_images_failed": "加载镜像失败",
+    "create_image_failed": "创建镜像失败",
+    "rebuild_image_failed": "重新构建镜像失败",
+    "delete_image_failed": "删除镜像失败",
+    "load_build_log_failed": "加载构建日志失败"
+  }
+}

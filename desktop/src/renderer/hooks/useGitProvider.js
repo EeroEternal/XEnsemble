@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useToast } from '../components/Toast';
 import * as gitApi from '../lib/gitApi.js';
 import { openExternal } from '../lib/githubApi.js';
@@ -16,6 +17,7 @@ function isNotConnectedError(err) {
  */
 export function useGitProvider(providerName, { onChange } = {}) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [connection, setConnection] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -61,7 +63,7 @@ export function useGitProvider(providerName, { onChange } = {}) {
     try {
       const { auth_url: authUrl } = await gitApi.connectProvider(providerName);
       openExternal(authUrl);
-      showToast('loading', `Waiting for ${providerName} authorization…`);
+      showToast('loading', t('git:toast.waiting_authorization', { provider: providerName, defaultValue: 'Waiting for {{provider}} authorization…' }));
       clearPoll();
 
       let attempts = 0;
@@ -71,10 +73,10 @@ export function useGitProvider(providerName, { onChange } = {}) {
         if (conn) {
           clearPoll();
           const username = conn.remote_username || conn.remoteUsername || conn.github_username || conn.githubUsername || providerName;
-          showToast('success', `Connected to ${providerName} as ${username}`);
+          showToast('success', t('git:toast.connected_as', { provider: providerName, username, defaultValue: 'Connected to {{provider}} as {{username}}' }));
         } else if (attempts >= MAX_POLL_ATTEMPTS) {
           clearPoll();
-          showToast('error', `${providerName} authorization timed out. Please try again.`);
+          showToast('error', t('git:toast.authorization_timed_out', { provider: providerName, defaultValue: '{{provider}} authorization timed out. Please try again.' }));
         }
       }, POLL_INTERVAL_MS);
       return true;
@@ -101,7 +103,7 @@ export function useGitProvider(providerName, { onChange } = {}) {
       }
       const username = conn.remote_username || conn.remoteUsername
         || conn.github_username || conn.githubUsername || providerName;
-      showToast('success', `Connected to ${providerName} as ${username}`);
+      showToast('success', t('git:toast.connected_as', { provider: providerName, username, defaultValue: 'Connected to {{provider}} as {{username}}' }));
       return true;
     } catch (err) {
       setError(err.message);
@@ -119,7 +121,7 @@ export function useGitProvider(providerName, { onChange } = {}) {
       await gitApi.disconnectProvider(providerName);
       setConnection(null);
       onChange?.(null);
-      showToast('success', `Disconnected from ${providerName}.`);
+      showToast('success', t('git:toast.disconnected', { provider: providerName }));
     } catch (err) {
       showToast('error', err.message);
     } finally {

@@ -12,13 +12,14 @@ import {
   borderHairline,
   bgCanvas,
 } from '../../lib/consoleTheme';
+import { useTranslation } from 'react-i18next';
 
 const REVIEW_STATE_STYLES = {
-  APPROVED: { icon: Check, bg: 'bg-green-50', text: 'text-green-700', label: 'Approved' },
-  CHANGES_REQUESTED: { icon: X, bg: 'bg-red-50', text: 'text-red-700', label: 'Changes Requested' },
-  COMMENTED: { icon: MessageSquare, bg: 'bg-blue-50', text: 'text-blue-700', label: 'Commented' },
-  PENDING: { icon: CircleDot, bg: 'bg-yellow-50', text: 'text-yellow-700', label: 'Pending' },
-  DISMISSED: { icon: X, bg: 'bg-zinc-50', text: 'text-zinc-500', label: 'Dismissed' },
+  APPROVED: { icon: Check, bg: 'bg-green-50', text: 'text-green-700' },
+  CHANGES_REQUESTED: { icon: X, bg: 'bg-red-50', text: 'text-red-700' },
+  COMMENTED: { icon: MessageSquare, bg: 'bg-blue-50', text: 'text-blue-700' },
+  PENDING: { icon: CircleDot, bg: 'bg-yellow-50', text: 'text-yellow-700' },
+  DISMISSED: { icon: X, bg: 'bg-zinc-50', text: 'text-zinc-500' },
 };
 
 function formatDate(ts) {
@@ -28,17 +29,26 @@ function formatDate(ts) {
 }
 
 function ReviewBadge({ state }) {
+  const { t } = useTranslation();
   const style = REVIEW_STATE_STYLES[state] || REVIEW_STATE_STYLES.COMMENTED;
   const Icon = style.icon;
+  const reviewLabels = {
+    APPROVED: t('git:review_state.approved', { defaultValue: 'Approved' }),
+    CHANGES_REQUESTED: t('git:review_state.changes_requested', { defaultValue: 'Changes Requested' }),
+    COMMENTED: t('git:review_state.commented', { defaultValue: 'Commented' }),
+    PENDING: t('common:state.pending'),
+    DISMISSED: t('git:review_state.dismissed', { defaultValue: 'Dismissed' }),
+  };
   return (
     <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${style.bg} ${style.text}`}>
       <Icon className="h-3 w-3" />
-      {style.label}
+      {reviewLabels[state] || reviewLabels.COMMENTED}
     </span>
   );
 }
 
 function ReviewItem({ review }) {
+  const { t } = useTranslation();
   return (
     <div className="rounded-xl bg-white shadow-sm border border-[#E8EAED] p-3.5 transition-shadow hover:shadow-md">
       <div className="flex items-center justify-between gap-2">
@@ -49,7 +59,7 @@ function ReviewItem({ review }) {
             <div className="h-6 w-6 rounded-full bg-[#E8EAED]" />
           )}
           <span className={`text-sm font-medium ${textPrimary} truncate`}>
-            {review.user?.login || 'Unknown'}
+            {review.user?.login || t('common:user.unknown', { defaultValue: 'Unknown' })}
           </span>
           <ReviewBadge state={review.state} />
         </div>
@@ -67,6 +77,7 @@ function ReviewItem({ review }) {
 }
 
 function CommentItem({ comment, mrFiles, renderDiffLines }) {
+  const { t } = useTranslation();
   const isInline = Boolean(comment.path);
   const fileDiff = isInline ? (mrFiles || []).find((f) => f.path === comment.path)?.diff : null;
   const [codeExpanded, setCodeExpanded] = useState(true);
@@ -82,7 +93,7 @@ function CommentItem({ comment, mrFiles, renderDiffLines }) {
             <div className="h-6 w-6 rounded-full bg-[#E8EAED]" />
           )}
           <span className={`text-xs font-medium ${textPrimary}`}>
-            {comment.user?.login || 'Unknown'}
+            {comment.user?.login || t('common:user.unknown', { defaultValue: 'Unknown' })}
           </span>
           <span className={`text-[10px] ${textPlaceholder}`}>
             {formatDate(comment.createdAt)}
@@ -103,7 +114,7 @@ function CommentItem({ comment, mrFiles, renderDiffLines }) {
             <button
               type="button"
               onClick={() => setCodeExpanded((v) => !v)}
-              title={codeExpanded ? 'Collapse code' : 'Expand code'}
+              title={codeExpanded ? t('git:action.collapse_code', { defaultValue: 'Collapse code' }) : t('git:action.expand_code', { defaultValue: 'Expand code' })}
               className={`p-0.5 rounded text-[#9AA0A6] hover:text-[#5F6368] hover:bg-[#F4F5F6] ${consoleButtonFocusClass}`}
             >
               {codeExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
@@ -134,6 +145,7 @@ function CommentItem({ comment, mrFiles, renderDiffLines }) {
 }
 
 export default function CodeReviewPanel({ projectId, mergeRequestId, mergeRequest, onBack, onChanged }) {
+  const { t } = useTranslation();
   const { showToast } = useToast();
   const [reviews, setReviews] = useState([]);
   const [comments, setComments] = useState([]);

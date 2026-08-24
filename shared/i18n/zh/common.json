@@ -1,0 +1,96 @@
+{
+  "menu": {
+    "file": "文件",
+    "edit": "编辑",
+    "view": "视图",
+    "window": "窗口"
+  },
+  "action": {
+    "save": "保存",
+    "cancel": "取消",
+    "confirm": "确认",
+    "close": "关闭",
+    "delete": "删除",
+    "edit": "编辑",
+    "add": "添加",
+    "remove": "移除",
+    "refresh": "刷新",
+    "search": "搜索",
+    "copy": "复制",
+    "retry": "重试",
+    "back": "返回",
+    "next": "下一步",
+    "finish": "完成",
+    "open": "打开",
+    "rename": "重命名",
+    "download": "下载",
+    "upload": "上传",
+    "stop": "停止",
+    "start": "启动",
+    "restart": "重启",
+    "install": "安装",
+    "uninstall": "卸载",
+    "update": "更新",
+    "check_update": "检查更新",
+    "activate": "激活",
+    "deprecate": "废弃",
+    "connect": "连接",
+    "disconnect": "断开连接",
+    "authorize": "授权",
+    "approve": "批准",
+    "reject": "拒绝"
+  },
+  "state": {
+    "loading": "加载中…",
+    "ready": "就绪",
+    "error": "错误",
+    "success": "成功",
+    "pending": "等待中",
+    "running": "运行中",
+    "stopped": "已停止",
+    "failed": "失败",
+    "building": "构建中",
+    "queued": "排队中",
+    "expired": "已过期",
+    "active": "活跃",
+    "suspended": "已封禁",
+    "installed": "已安装",
+    "not_installed": "未安装",
+    "unlimited": "不限"
+  },
+  "table": {
+    "name": "名称",
+    "status": "状态",
+    "actions": "操作",
+    "type": "类型",
+    "created": "创建时间",
+    "updated": "更新时间",
+    "version": "版本",
+    "path": "路径",
+    "model": "模型",
+    "role": "角色",
+    "description": "描述"
+  },
+  "dialog": {
+    "confirm_title": "确定吗？",
+    "cannot_undo": "此操作无法撤销。",
+    "confirm_delete": "确定要删除 {{name}} 吗？"
+  },
+  "empty": {
+    "no_data": "暂无数据",
+    "no_results": "未找到结果"
+  },
+  "pagination": {
+    "more": "更多",
+    "show_fewer": "收起"
+  },
+  "select": {
+    "placeholder": "请选择…",
+    "search_placeholder": "搜索…",
+    "no_matches": "无匹配项",
+    "recently_used": "最近使用",
+    "all_agents": "全部 Agent",
+    "select_all": "全选",
+    "close": "关闭"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "title": "网关",
+  "provider": "提供商",
+  "base_url": "Base URL",
+  "api_key": "API Key",
+  "model": "模型",
+  "models": "模型",
+  "add_provider": "添加提供商",
+  "delete_provider": "删除提供商",
+  "verify": "验证",
+  "control_plane_url": "控制面公网 URL",
+  "external_unigateway_url": "外部 UniGateway URL",
+  "error": {
+    "verify_failed": "提供商验证失败。",
+    "load_key_failed": "加载 API Key 失败。",
+    "fetch_models_failed": "获取模型失败。",
+    "update_failed": "更新提供商失败",
+    "save_failed": "保存提供商失败",
+    "save_settings_failed": "保存网关进程设置失败。",
+    "delete_failed": "删除提供商失败",
+    "provider_not_found": "未找到提供商 \"{{name}}\"。",
+    "no_api_key": "未配置 API Key。",
+    "no_base_url": "提供商未配置 Base URL。"
+  },
+  "toast": {
+    "models_fetched_one": "已获取 {{count}} 个模型",
+    "models_fetched_other": "已获取 {{count}} 个模型",
+    "provider_saved": "提供商已保存。",
+    "provider_deleted": "提供商已删除。",
+    "settings_saved": "网关设置已保存。"
+  }
+}

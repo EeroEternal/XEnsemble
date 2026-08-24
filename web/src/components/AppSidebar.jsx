@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Trash2,
   LogOut,
@@ -55,6 +56,7 @@ function sortSessions(list, prefs) {
 }
 
 export function SidebarAccountMenu({ user, onOpenSettings, onLogout, collapsed = false }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [menuRect, setMenuRect] = useState(null);
   const rootRef = useRef(null);
@@ -137,7 +139,7 @@ export function SidebarAccountMenu({ user, onOpenSettings, onLogout, collapsed =
           className={menuItemClass}
         >
           <Settings2 className="w-3.5 h-3.5 shrink-0" />
-          Settings
+          {t('settings:title')}
         </button>
       )}
       <button
@@ -150,7 +152,7 @@ export function SidebarAccountMenu({ user, onOpenSettings, onLogout, collapsed =
         className={menuItemClass}
       >
         <LogOut className="w-3.5 h-3.5 shrink-0" />
-        Log out
+        {t('common:action.logout', { defaultValue: 'Log out' })}
       </button>
     </div>
   ) : null;
@@ -162,8 +164,8 @@ export function SidebarAccountMenu({ user, onOpenSettings, onLogout, collapsed =
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="menu"
-        aria-label={isAdmin ? 'Admin menu' : 'Account menu'}
-        title={isAdmin ? 'Admin' : (user?.username || 'User')}
+        aria-label={isAdmin ? t('users:role.admin') : t('common:action.account_menu', { defaultValue: 'Account menu' })}
+        title={isAdmin ? t('users:role.admin') : (user?.username || t('users:role.user', { defaultValue: 'User' }))}
         className={`flex w-full items-center rounded-lg text-left ${transitionBase} hover:bg-zinc-50 ${
           open ? 'bg-zinc-50' : ''
         } ${collapsed ? `justify-center p-2 ${consoleButtonFocusClass}` : 'gap-2 px-2 py-2'}`}
@@ -175,7 +177,7 @@ export function SidebarAccountMenu({ user, onOpenSettings, onLogout, collapsed =
           <>
             <div className="min-w-0 flex-1">
               <p className="truncate text-[13px] font-medium text-zinc-900">
-                {isAdmin ? 'Admin' : (user?.username || 'User')}
+                {isAdmin ? t('users:role.admin') : (user?.username || t('users:role.user', { defaultValue: 'User' }))}
               </p>
               {isAdmin && (
                 <p className="truncate text-[10px] text-zinc-400">{user?.username || 'User'}</p>
@@ -207,6 +209,7 @@ export default function AppSidebar({
   onLogout,
   minimal = false,
 }) {
+  const { t } = useTranslation();
   const [sidebarPrefs, setSidebarPrefs] = useState(() => loadSidebarPrefs());
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -315,7 +318,7 @@ export default function AppSidebar({
         <div className="flex items-center shrink-0 opacity-0 group-hover/session:opacity-100 focus-within:opacity-100">
           <button
             type="button"
-            title={isLive ? 'Stop and remove' : 'Remove'}
+            title={isLive ? t('sessions:action.stop_and_remove') : t('sessions:action.remove')}
             onClick={(e) => {
               e.stopPropagation();
               onRequestDeleteSession?.(s, { name: s.projectName || activeWorkspaceName });
@@ -372,8 +375,8 @@ export default function AppSidebar({
           <BrandMark className="h-8 w-8" iconClassName="h-4 w-4" />
           <button
             type="button"
-            title="Expand sidebar"
-            aria-label="Expand sidebar"
+            title={t('common:action.expand_sidebar', { defaultValue: 'Expand sidebar' })}
+            aria-label={t('common:action.expand_sidebar', { defaultValue: 'Expand sidebar' })}
             onClick={() => setSidebarCollapsed(false)}
             className={`mt-1 p-2 rounded-lg ${textPlaceholder} hover:text-zinc-900 ${hoverBgTertiary} ${transitionBase} ${consoleButtonFocusClass}`}
           >
@@ -383,8 +386,8 @@ export default function AppSidebar({
             type="button"
             disabled={!onNewSession}
             onClick={onNewSession}
-            title="New Session"
-            aria-label="New Session"
+            title={t('sessions:new_session')}
+            aria-label={t('sessions:new_session')}
             className={`p-2 rounded-lg text-zinc-700 hover:text-zinc-900 ${hoverBgTertiary} ${transitionBase} disabled:opacity-40 ${consoleButtonFocusClass}`}
           >
             <PenSquare className="w-4 h-4" strokeWidth={1.75} />
@@ -407,11 +410,11 @@ export default function AppSidebar({
     <aside className={`h-full w-[272px] ${bgSecondary} border-r border-zinc-200 flex flex-col flex-shrink-0 select-none`}>
       <div className="shrink-0 px-3 pt-3 pb-2 border-b border-zinc-200">
         <div className="flex items-center justify-between px-0.5 mb-2">
-          <h3 className="text-xs font-medium text-zinc-400">Sessions</h3>
+          <h3 className="text-xs font-medium text-zinc-400">{t('sessions:title')}</h3>
           <button
             type="button"
-            title="Collapse sidebar"
-            aria-label="Collapse sidebar"
+            title={t('common:action.collapse_sidebar', { defaultValue: 'Collapse sidebar' })}
+            aria-label={t('common:action.collapse_sidebar', { defaultValue: 'Collapse sidebar' })}
             onClick={() => setSidebarCollapsed(true)}
             className={`p-1.5 rounded-md ${textPlaceholder} hover:text-zinc-900 ${hoverBgTertiary} ${transitionBase} ${consoleButtonFocusClass}`}
           >
@@ -426,7 +429,7 @@ export default function AppSidebar({
             className={`${sidebarNavItemClass} disabled:opacity-40`}
           >
             <PenSquare className="w-4 h-4 shrink-0" strokeWidth={1.75} />
-            New Session
+            {t('sessions:new_session')}
           </button>
           <label className={`${sidebarNavItemClass} cursor-text`}>
             <Search className="w-4 h-4 shrink-0 text-zinc-400" strokeWidth={1.75} />
@@ -434,7 +437,7 @@ export default function AppSidebar({
               type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search"
+              placeholder={t('sessions:search')}
               className="min-w-0 flex-1 bg-transparent text-[13px] text-zinc-700 placeholder:text-zinc-400 outline-none"
             />
           </label>
@@ -446,10 +449,10 @@ export default function AppSidebar({
           {filteredSessions.length === 0 ? (
             <p className={`text-xs ${textSecondary} px-2.5 py-2`}>
               {searchQuery.trim()
-                ? 'No matching sessions'
+                ? t('sessions:empty.no_matching')
                 : (activeWorkspaceId
-                  ? 'No sessions in this workspace yet.'
-                  : 'Select a workspace to view its sessions.')}
+                  ? t('sessions:empty.no_sessions')
+                  : t('sessions:empty.select_workspace'))}
             </p>
           ) : (
             <>
@@ -463,7 +466,7 @@ export default function AppSidebar({
                   onClick={() => setSessionListExpanded(true)}
                   className={`px-2.5 py-1 text-xs ${textPlaceholder} ${hoverTextPrimary} text-left ${transitionBase}`}
                 >
-                  More ({filteredSessions.length - SESSION_PREVIEW_LIMIT})
+                  {t('common:pagination.more')} ({filteredSessions.length - SESSION_PREVIEW_LIMIT})
                 </button>
               )}
               {filteredSessions.length > SESSION_PREVIEW_LIMIT && sessionListExpanded && (
@@ -472,7 +475,7 @@ export default function AppSidebar({
                   onClick={() => setSessionListExpanded(false)}
                   className={`px-2.5 py-1 text-xs ${textPlaceholder} ${hoverTextPrimary} text-left ${transitionBase}`}
                 >
-                  Show fewer
+                  {t('common:pagination.show_fewer')}
                 </button>
               )}
             </>

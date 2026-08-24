@@ -8,9 +8,11 @@ import {
   consoleSectionLabelClass,
 } from '../../lib/consoleTheme';
 import { apiFetch } from '../../lib/api';
+import { useTranslation } from 'react-i18next';
 
 export default function AgentEditDialog({ agent, onClose, onSaved }) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [editDraft, setEditDraft] = useState({ cmd: '', args: '' });
   const [saving, setSaving] = useState(false);
 
@@ -25,7 +27,7 @@ export default function AgentEditDialog({ agent, onClose, onSaved }) {
     if (!agent) return;
     const cmd = editDraft.cmd.trim();
     if (!cmd) {
-      showToast('error', 'Command is required.');
+      showToast('error', t('agents:toast.command_required', { defaultValue: 'Command is required.' }));
       return;
     }
     const args = editDraft.args.trim() ? editDraft.args.trim().split(/\s+/) : [];
@@ -37,11 +39,11 @@ export default function AgentEditDialog({ agent, onClose, onSaved }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      showToast('success', 'Executable updated.');
+      showToast('success', t('agents:toast.executable_updated', { defaultValue: 'Executable updated.' }));
       onClose();
       onSaved?.();
     } catch (err) {
-      showToast('error', err.message || 'Failed to update executable.');
+      showToast('error', err.message || t('agents:toast.update_executable_failed', { defaultValue: 'Failed to update executable.' }));
     } finally {
       setSaving(false);
     }
@@ -55,13 +57,13 @@ export default function AgentEditDialog({ agent, onClose, onSaved }) {
       onClose={onClose}
       panelClassName={`${consoleDialogAdminFormPanelClass} p-6`}
     >
-      <h2 className="font-bold text-lg text-zinc-900 mb-1">Executable - {agent.name}</h2>
+      <h2 className="font-bold text-lg text-zinc-900 mb-1">{t('agents:dialog.executable_title', { name: agent.name, defaultValue: 'Executable - {{name}}' })}</h2>
       <p className="text-sm text-zinc-500 mb-4">
-        Command and arguments used when launching this agent.
+        {t('agents:dialog.executable_hint', { defaultValue: 'Command and arguments used when launching this agent.' })}
       </p>
       <form onSubmit={handleSave} className="space-y-4">
         <div>
-          <label className={`block mb-1 ${consoleSectionLabelClass}`}>Command</label>
+          <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('agents:field.cmd')}</label>
           <Input
             required
             value={editDraft.cmd}
@@ -71,21 +73,21 @@ export default function AgentEditDialog({ agent, onClose, onSaved }) {
           />
         </div>
         <div>
-          <label className={`block mb-1 ${consoleSectionLabelClass}`}>Arguments</label>
+          <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('agents:field.args')}</label>
           <Input
             value={editDraft.args}
             onChange={(e) => setEditDraft({ ...editDraft, args: e.target.value })}
             className="h-9 py-1.5 font-mono"
             placeholder="--not-interactive"
           />
-          <p className="mt-1 text-xs text-zinc-400">Space-separated. Leave empty if none.</p>
+          <p className="mt-1 text-xs text-zinc-400">{t('agents:dialog.args_hint', { defaultValue: 'Space-separated. Leave empty if none.' })}</p>
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="secondary" size="md" onClick={onClose}>
-            Cancel
+            {t('common:action.cancel')}
           </Button>
           <Button type="submit" size="md" disabled={saving}>
-            {saving ? 'Saving...' : 'Save'}
+            {saving ? t('common:state.loading') : t('common:action.save')}
           </Button>
         </div>
       </form>

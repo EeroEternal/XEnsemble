@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft } from 'lucide-react';
 import Login from './pages/Login';
 import Sessions from './pages/Sessions';
@@ -40,6 +41,7 @@ function AuthenticatedLayout({
 }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const sessionsRef = useRef(null);
   const [launchPanelOpen, setLaunchPanelOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState('general');
@@ -102,10 +104,10 @@ function AuthenticatedLayout({
               type="button"
               onClick={() => navigate('/sessions')}
               className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 ${consoleButtonFocusClass}`}
-              title="Back to workspace"
+              title={t('common:action.back')}
             >
               <ArrowLeft className="w-3.5 h-3.5" strokeWidth={1.75} />
-              Back to workspace
+              {t('common:action.back')}
             </button>
           </div>
         ) : (

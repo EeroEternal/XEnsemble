@@ -10,6 +10,7 @@ import {
   isTerminalAuthFailure,
   refreshTokenForTerminalFailure,
 } from '../../../../shared/terminalReconnect.mjs';
+import { useTranslation } from 'react-i18next';
 
 function parseMessage(raw) {
   if (typeof raw === 'string') return JSON.parse(raw);
@@ -28,6 +29,7 @@ function getArrowSequence(key, applicationCursorKeys) {
 }
 
 export default function WorkspaceShell({ projectId }) {
+  const { t } = useTranslation();
   const { preset } = useTerminalTheme();
   const hostRef = useRef(null);
   const wsRef = useRef(null);
@@ -80,11 +82,11 @@ export default function WorkspaceShell({ projectId }) {
       if (disposed || serverEnded) return;
       const next = reconnectState.nextReconnect();
       if (next.exhausted) {
-        terminal.write(`\r\n\x1b[31m[System] Workspace shell could not be restored${reason ? ` (${reason})` : ''}. Switch tabs to retry.\x1b[0m\r\n`);
+        terminal.write(`\r\n\x1b[31m${t('sessions:terminal.system_prefix')} ${t('sessions:terminal.restore_shell_failed', { reason: reason ? ` (${reason})` : '' })}\x1b[0m\r\n`);
         serverEnded = true;
         return;
       }
-      terminal.write(`\r\n\x1b[33m[System] Reconnecting workspace shell… (${next.attempt}/${MAX_RECONNECTS})\x1b[0m\r\n`);
+      terminal.write(`\r\n\x1b[33m${t('sessions:terminal.system_prefix')} ${t('sessions:terminal.reconnecting_shell', { attempt: next.attempt, max: MAX_RECONNECTS })}\x1b[0m\r\n`);
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         if (!disposed) connect();
@@ -123,7 +125,7 @@ export default function WorkspaceShell({ projectId }) {
     resizeObserver.observe(host);
 
     if (!projectId) {
-      terminal.write('\r\n\x1b[33m[System] Select a workspace to open a shell.\x1b[0m\r\n');
+      terminal.write(`\r\n\x1b[33m${t('sessions:terminal.system_prefix')} ${t('sessions:terminal.select_workspace')}\x1b[0m\r\n`);
       serverEnded = true;
     } else {
       var connect = async () => {

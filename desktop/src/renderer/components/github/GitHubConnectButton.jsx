@@ -2,6 +2,7 @@ import React from 'react';
 import { Github, Loader2, Unlink } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { consoleIconButtonClass } from '../../lib/consoleTheme';
+import { useTranslation } from 'react-i18next';
 
 export default function GitHubConnectButton({
   connection,
@@ -10,6 +11,8 @@ export default function GitHubConnectButton({
   onDisconnect,
   className,
 }) {
+  const { t } = useTranslation();
+
   if (connection) {
     return (
       <div className={cn('flex items-center gap-3', className)}>
@@ -28,14 +31,14 @@ export default function GitHubConnectButton({
           <p className="truncate text-sm font-medium text-zinc-900">
             {connection.github_username || connection.githubUsername || 'GitHub'}
           </p>
-          <p className="text-xs text-zinc-500">Connected</p>
+          <p className="text-xs text-zinc-500">{t('git:connected')}</p>
         </div>
         <button
           type="button"
           onClick={onDisconnect}
           disabled={loading}
-          title="Disconnect GitHub"
-          aria-label="Disconnect GitHub"
+          title={t('git:disconnect_github', { defaultValue: 'Disconnect GitHub' })}
+          aria-label={t('git:disconnect_github', { defaultValue: 'Disconnect GitHub' })}
           className={cn(consoleIconButtonClass, 'ml-auto')}
         >
           {loading ? (
@@ -63,7 +66,7 @@ export default function GitHubConnectButton({
       ) : (
         <Github className="h-4 w-4" />
       )}
-      Connect to GitHub
+      {t('git:connect_to_github', { defaultValue: 'Connect to GitHub' })}
     </button>
   );
 }

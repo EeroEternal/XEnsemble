@@ -9,6 +9,7 @@ import {
 import { apiFetch } from '../lib/api';
 import { withSessionId } from '../lib/sessionContext';
 import { useToast } from './Toast';
+import { useTranslation } from 'react-i18next';
 
 function pickActiveDeployment(list) {
   if (!Array.isArray(list) || list.length === 0) return null;
@@ -49,6 +50,7 @@ function closePreviewWindow(winRef) {
 
 export function usePreview(projectId, token, sessionId) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const lastFailedToastRef = useRef(null);
   const [deployment, setDeployment] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -69,7 +71,7 @@ export function usePreview(projectId, token, sessionId) {
         withSessionId(`/api/v1/deployments?project_id=${encodeURIComponent(projectId)}`),
       );
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to load preview');
+      if (!res.ok) throw new Error(data.error || t('deploy:error.load_preview_failed'));
       setDeployment((prev) => {
         const next = pickActiveDeployment(data);
         if (prev && next && prev.id === next.id && prev.status === next.status && prev.public_url === next.public_url) return prev;
@@ -100,7 +102,7 @@ export function usePreview(projectId, token, sessionId) {
         method: 'POST',
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Preview deploy failed');
+      if (!res.ok) throw new Error(data.error || t('deploy:error.preview_deploy_failed'));
       setDeployment(data);
       if (data.status === 'running' && data.public_url) {
         const url = data.preview_token
@@ -126,7 +128,7 @@ export function usePreview(projectId, token, sessionId) {
         { method: 'POST' },
       );
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Stop failed');
+      if (!res.ok) throw new Error(data.error || t('deploy:error.stop_failed'));
       setDeployment(data);
       closePreviewWindow(previewWindowRef);
     } catch (e) {
@@ -145,7 +147,7 @@ export function usePreview(projectId, token, sessionId) {
         { method: 'POST' },
       );
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.deployment?.last_error_message || 'Restart failed');
+      if (!res.ok) throw new Error(data.error || data.deployment?.last_error_message || t('deploy:error.restart_failed'));
       const next = data.deployment || data;
       setDeployment(next);
       if (next.status === 'running' && next.public_url) {
@@ -184,7 +186,7 @@ export function usePreview(projectId, token, sessionId) {
       { method: 'POST' },
     );
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to issue preview token');
+    if (!res.ok) throw new Error(data.error || t('deploy:error.preview_token_failed'));
     if (!data.preview_token || !deployment.public_url) return null;
     return `${deployment.public_url}${deployment.public_url.includes('?') ? '&' : '?'}preview_token=${encodeURIComponent(data.preview_token)}`;
   }, [deployment?.id, deployment?.public_url, previewUrl]);
@@ -258,17 +260,18 @@ export function PreviewActions({
   restartPreview,
   onAnalyze,
 }) {
+  const { t } = useTranslation();
   // 部署中：用"Stop deploy"按钮替代 Deploy 按钮（同位置、同样式）
   if (deployStatus === 'running') {
     return (
       <button
         type="button"
         onClick={onCancelDeploy}
-        title="Stop deployment"
+        title={t('deploy:action.stop_deployment', { defaultValue: 'Stop deployment' })}
         className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md bg-black text-white hover:bg-zinc-800 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-0"
       >
         <Square className="w-3.5 h-3.5" />
-        Stop deploy
+        {t('deploy:action.stop_deploy', { defaultValue: 'Stop deploy' })}
       </button>
     );
   }
@@ -278,7 +281,7 @@ export function PreviewActions({
         {previewUrl && (
           <button
             type="button"
-            title="Open preview window"
+            title={t('deploy:action.open_in_browser', { defaultValue: 'Open preview window' })}
             onClick={openPreview}
             className={ICON_BTN}
           >
@@ -287,7 +290,7 @@ export function PreviewActions({
         )}
         <button
           type="button"
-          title="Restart preview"
+          title={t('deploy:action.restart', { defaultValue: 'Restart preview' })}
           disabled={isBusy}
           onClick={restartPreview}
           className={ICON_BTN}
@@ -296,7 +299,7 @@ export function PreviewActions({
         </button>
         <button
           type="button"
-          title="Stop preview"
+          title={t('deploy:action.stop', { defaultValue: 'Stop preview' })}
           disabled={isBusy}
           onClick={stopPreview}
           className={ICON_BTN}
@@ -312,11 +315,11 @@ export function PreviewActions({
       type="button"
       disabled={isBusy}
       onClick={onAnalyze || deployPreview}
-      title="Deploy preview"
+      title={t('deploy:action.deploy_preview', { defaultValue: 'Deploy preview' })}
       className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md bg-black text-white hover:bg-zinc-800 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-0"
     >
       {isBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />}
-      Deploy
+      {t('deploy:action.deploy', { defaultValue: 'Deploy' })}
     </button>
   );
 }

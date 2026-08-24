@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { isUniqueViolation } = require('../http/publicError');
+const { t } = require('../i18n');
 const { db } = require('../db/index');
 const schema = require('../db/schema');
 const { eq, and, sql, inArray, ne, isNull, gt } = require('drizzle-orm');
@@ -137,10 +138,10 @@ async function getUserDetail(userId) {
 
 async function createUser({ username, password, role = 'user', status = 'active', displayName, email, quota, agentIds }, createdBy) {
     if (!username || !password) {
-        throw Object.assign(new Error('username and password are required'), { statusCode: 400 });
+        throw Object.assign(new Error('username and password are required'), { statusCode: 400, code: 'username_password_required' });
     }
     if (password.length < 8) {
-        throw Object.assign(new Error('Password must be at least 8 characters'), { statusCode: 400 });
+        throw Object.assign(new Error('Password must be at least 8 characters'), { statusCode: 400, code: 'password_too_short' });
     }
 
     const userId = `usr_${crypto.randomBytes(6).toString('hex')}`;
@@ -163,7 +164,7 @@ async function createUser({ username, password, role = 'user', status = 'active'
         });
     } catch (err) {
         if (isUniqueViolation(err)) {
-            throw Object.assign(new Error('Username already exists'), { statusCode: 400 });
+            throw Object.assign(new Error('Username already exists'), { statusCode: 400, code: 'username_exists' });
         }
         throw err;
     }
@@ -203,10 +204,10 @@ async function createUser({ username, password, role = 'user', status = 'active'
 
 async function registerUser({ username, password }) {
     if (!username || !password) {
-        throw Object.assign(new Error('username and password are required'), { statusCode: 400 });
+        throw Object.assign(new Error('username and password are required'), { statusCode: 400, code: 'username_password_required' });
     }
     if (password.length < 8) {
-        throw Object.assign(new Error('Password must be at least 8 characters'), { statusCode: 400 });
+        throw Object.assign(new Error('Password must be at least 8 characters'), { statusCode: 400, code: 'password_too_short' });
     }
 
     const mode = await platformSettings.getRegistrationMode();
@@ -238,7 +239,7 @@ async function updateUser(userId, patch, actorId) {
         if (user.role === 'admin' && patch.role !== 'admin') {
             const admins = await countActiveAdmins(userId);
             if (admins < 1) {
-                throw Object.assign(new Error('Cannot demote the last active administrator'), { statusCode: 400 });
+                throw Object.assign(new Error('Cannot demote the last active administrator'), { statusCode: 400, code: 'cannot_demote_last_admin' });
             }
         }
         updates.role = patch.role;
@@ -248,7 +249,7 @@ async function updateUser(userId, patch, actorId) {
         if (user.role === 'admin' && patch.status !== 'active') {
             const admins = await countActiveAdmins(userId);
             if (admins < 1) {
-                throw Object.assign(new Error('Cannot suspend the last active administrator'), { statusCode: 400 });
+                throw Object.assign(new Error('Cannot suspend the last active administrator'), { statusCode: 400, code: 'cannot_suspend_last_admin' });
             }
         }
         updates.status = patch.status;
@@ -449,7 +450,7 @@ async function revokeAgent(userId, agentId, actorId) {
 
 async function resetPassword(userId, newPassword, actorId) {
     if (!newPassword || newPassword.length < 8) {
-        throw Object.assign(new Error('Password must be at least 8 characters'), { statusCode: 400 });
+        throw Object.assign(new Error('Password must be at least 8 characters'), { statusCode: 400, code: 'password_too_short' });
     }
     const user = await getUserById(userId);
     if (!user) return null;
@@ -473,7 +474,7 @@ async function resetPassword(userId, newPassword, actorId) {
 async function loginUser(username, password, deviceName = null) {
     const users = await db.select().from(schema.users).where(eq(schema.users.username, username));
     if (users.length === 0 || !auth.verifyPassword(password, users[0].passwordHash)) {
-        throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
+        throw Object.assign(new Error('Invalid credentials'), { statusCode: 401, code: 'invalid_credentials' });
     }
     const user = users[0];
     const status = user.status || 'active';

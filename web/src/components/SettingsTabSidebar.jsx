@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Settings2,
   Container,
@@ -7,6 +8,7 @@ import {
   Globe,
   GitBranch,
   Gauge,
+  Languages,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
@@ -16,20 +18,22 @@ import {
 import { SidebarAccountMenu } from './AppSidebar';
 
 const ALL_TABS = [
-  { id: 'general', label: 'General', icon: Settings2, route: '/settings', adminOnly: true },
-  { id: 'git', label: 'Git', icon: GitBranch, route: '/settings', adminOnly: false },
-  { id: 'quota', label: 'Quota', icon: Gauge, route: '/settings', adminOnly: false },
-  { id: 'images', label: 'Images', icon: Container, route: '/custom-images', adminOnly: true },
-  { id: 'agents', label: 'Agents', icon: Bot, route: '/admin/agents', adminOnly: true },
-  { id: 'users', label: 'Users', icon: Users, route: '/admin/users', adminOnly: true },
-  { id: 'gateway', label: 'Gateway', icon: Globe, route: '/admin/gateway', adminOnly: true },
+  { id: 'general', labelKey: 'settings:tabs.general', icon: Settings2, route: '/settings', adminOnly: true },
+  { id: 'git', labelKey: 'settings:tabs.git_providers', icon: GitBranch, route: '/settings', adminOnly: false },
+  { id: 'quota', labelKey: 'settings:tabs.quota', icon: Gauge, route: '/settings', adminOnly: false },
+  { id: 'language', labelKey: 'settings:tabs.language', icon: Languages, route: '/settings', adminOnly: false },
+  { id: 'images', labelKey: 'images:agent_images', icon: Container, route: '/custom-images', adminOnly: true },
+  { id: 'agents', labelKey: 'agents:title', icon: Bot, route: '/admin/agents', adminOnly: true },
+  { id: 'users', labelKey: 'users:title', icon: Users, route: '/admin/users', adminOnly: true },
+  { id: 'gateway', labelKey: 'gateway:title', icon: Globe, route: '/admin/gateway', adminOnly: true },
 ];
 
 export default function SettingsTabSidebar({ activeTab, onSectionChange, user, onOpenSettings, onLogout }) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const isAdmin = user?.role === 'admin';
 
-  const visibleTabs = ALL_TABS.filter((t) => !t.adminOnly || isAdmin);
+  const visibleTabs = ALL_TABS.filter((tab) => !tab.adminOnly || isAdmin);
 
   return (
     <aside className="h-full w-48 shrink-0 flex flex-col border-r border-zinc-200 bg-zinc-50 select-none">
@@ -38,7 +42,7 @@ export default function SettingsTabSidebar({ activeTab, onSectionChange, user, o
           const Icon = tab.icon;
           const isActive = tab.id === activeTab;
           const handleClick = () => {
-            if (tab.id === 'general' || tab.id === 'git' || tab.id === 'quota') {
+            if (tab.id === 'general' || tab.id === 'git' || tab.id === 'quota' || tab.id === 'language') {
               onSectionChange?.(tab.id);
             } else if (tab.route) {
               navigate(tab.route);
@@ -57,7 +61,7 @@ export default function SettingsTabSidebar({ activeTab, onSectionChange, user, o
               )}
             >
               <Icon className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
-              {tab.label}
+              {t(tab.labelKey, { defaultValue: tab.id })}
             </button>
           );
         })}

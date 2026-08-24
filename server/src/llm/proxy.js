@@ -12,6 +12,7 @@ const { db } = require('../db/index');
 const schema = require('../db/schema');
 const { eq } = require('drizzle-orm');
 const agentGatewayConfig = require('../admin/AgentGatewayConfig');
+const { t } = require('../i18n');
 
 const LLM_PROXY_PREFIX = '/api/v1/llm';
 
@@ -186,13 +187,13 @@ async function proxyLlmRequest(request, reply) {
     const rawToken = extractBearerToken(request.raw);
     if (!rawToken) {
         request.log.warn({ path: request.url, hasAuth: !!request.headers.authorization, hasApiKey: !!request.headers['x-api-key'] }, '[llm-proxy] missing session token');
-        return reply.code(401).send({ error: 'Missing session token (Authorization: Bearer xel_…)' });
+        return reply.code(401).send({ error: t('errors:missing_session_token', {}, request.locale || 'en'), code: 'missing_session_token' });
     }
 
     const claims = verifySessionToken(rawToken);
     if (!claims) {
         request.log.warn({ tokenPrefix: rawToken.slice(0, 20), tokenLen: rawToken.length, path: request.url }, '[llm-proxy] token verification failed');
-        return reply.code(401).send({ error: 'Invalid or expired session token' });
+        return reply.code(401).send({ error: t('errors:invalid_session_token', {}, request.locale || 'en'), code: 'invalid_session_token' });
     }
 
     const authz = await assertSessionAuthorized(claims);
@@ -267,7 +268,7 @@ async function proxyLlmRequest(request, reply) {
         forwardError = err;
         request.log.error(err, '[llm-proxy] forward failed');
         if (!reply.sent && !reply.raw.writableEnded) {
-            return reply.code(502).send({ error: 'LLM proxy error' });
+            return reply.code(502).send({ error: t('errors:llm_proxy_error', {}, request.locale || 'en'), code: 'llm_proxy_error' });
         }
     } finally {
         recordEvent({

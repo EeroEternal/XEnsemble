@@ -1,0 +1,42 @@
+{
+  "title": "Images",
+  "agent_images": "Agent Images",
+  "custom_images": "Custom Images",
+  "build": "Build",
+  "build_log": "Build Log",
+  "build_status": "Build Status",
+  "status": {
+    "queued": "Queued",
+    "building": "Building…",
+    "built": "Built",
+    "failed": "Failed",
+    "deprecated": "Deprecated",
+    "active": "Active",
+    "ready": "Ready"
+  },
+  "action": {
+    "activate": "Activate",
+    "deprecate": "Deprecate",
+    "retry_build": "Retry build",
+    "delete_image": "Delete image",
+    "add_image": "Add Image"
+  },
+  "field": {
+    "components": "Components",
+    "image_ref": "Image Ref",
+    "tag": "Tag",
+    "digest": "Digest"
+  },
+  "empty": {
+    "no_images": "No images",
+    "no_custom_images": "No custom images"
+  },
+  "error": {
+    "load_catalog_failed": "Failed to load catalog",
+    "load_images_failed": "Failed to load images",
+    "create_image_failed": "Failed to create image",
+    "rebuild_image_failed": "Failed to rebuild image",
+    "delete_image_failed": "Failed to delete image",
+    "load_build_log_failed": "Failed to load build log"
+  }
+}

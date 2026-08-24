@@ -3,6 +3,7 @@ import { Loader2, X } from 'lucide-react';
 import { DiffEditor } from '@monaco-editor/react';
 import { consoleButtonFocusClass } from '@/lib/consoleTokens';
 import '@/lib/monacoSetup'; // Configure Monaco to load from local bundle, not CDN
+import { useTranslation } from 'react-i18next';
 
 const LANG_MAP = {
   js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
@@ -27,6 +28,7 @@ export default function DiffViewer({
   binary = false,
   truncated = false,
 }) {
+  const { t } = useTranslation();
   const displayName = path ? path.split('/').pop() : '';
   const language = inferLanguage(path);
   const [diffReady, setDiffReady] = useState(false);
@@ -43,8 +45,8 @@ export default function DiffViewer({
     // early.  The timeout is a last-resort fallback only.
     const isEmptyOriginal = !original || original.length === 0;
     const delay = isEmptyOriginal ? 300 : 5000;
-    const t = setTimeout(() => setDiffReady(true), delay);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setDiffReady(true), delay);
+    return () => clearTimeout(timer);
   }, [original, modified]);
 
   const handleMount = useCallback((editor) => {
@@ -66,9 +68,9 @@ export default function DiffViewer({
     return (
       <div className="flex flex-col h-full w-full">
         <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-200 bg-zinc-50">
-            <span className="text-sm text-zinc-600">Compare: {displayName}</span>
+            <span className="text-sm text-zinc-600">{t('workspace:label.compare', { defaultValue: 'Compare: {{name}}', name: displayName })}</span>
           <button
-            aria-label="Close compare"
+            aria-label={t('workspace:aria.close_compare', { defaultValue: 'Close compare' })}
             onClick={onClose}
             className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
           >
@@ -91,9 +93,9 @@ export default function DiffViewer({
   return (
     <div className="flex flex-col h-full w-full">
       <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-200 bg-zinc-50">
-        <span className="text-sm text-zinc-600">Compare: {displayName}</span>
+        <span className="text-sm text-zinc-600">{t('workspace:label.compare', { defaultValue: 'Compare: {{name}}', name: displayName })}</span>
         <button
-          aria-label="Close compare"
+          aria-label={t('workspace:aria.close_compare', { defaultValue: 'Close compare' })}
           onClick={onClose}
           className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
         >
@@ -102,11 +104,11 @@ export default function DiffViewer({
       </div>
       {binary ? (
         <div className="flex-1 flex items-center justify-center text-sm text-zinc-400" data-testid="diff-binary">
-          Binary file, cannot display text diff
+          {t('workspace:label.binary_diff', { defaultValue: 'Binary file, cannot display text diff' })}
         </div>
       ) : noDiff ? (
         <div className="flex-1 flex items-center justify-center text-sm text-zinc-400">
-          No differences
+          {t('workspace:label.no_differences', { defaultValue: 'No differences' })}
         </div>
       ) : (
         <div className="flex-1 min-h-0 relative">
@@ -135,7 +137,7 @@ export default function DiffViewer({
           )}
           {truncated && (
             <div className="absolute bottom-3 left-3 right-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2" data-testid="diff-truncated">
-              Content too large, truncated
+              {t('workspace:label.content_too_large', { defaultValue: 'Content too large, truncated' })}
             </div>
           )}
         </div>

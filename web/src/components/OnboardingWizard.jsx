@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, X, Plus } from 'lucide-react';
 import { ConsoleDialogShell } from './ConsoleDialog';
 import SelectMenu from './SelectMenu';
@@ -34,6 +35,7 @@ export default function OnboardingWizard({
   launching,
   launchError,
 }) {
+  const { t } = useTranslation();
   const isSession = mode === 'session';
 
   const sortedAgents = useMemo(
@@ -93,7 +95,7 @@ export default function OnboardingWizard({
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-3 shrink-0">
         <h2 className="font-bold text-lg text-zinc-900">
-          {isSession ? 'New agent session' : 'Create workspace'}
+          {isSession ? t('sessions:launch.title') : t('sessions:launch.create_workspace')}
         </h2>
         <button
           type="button"
@@ -109,7 +111,7 @@ export default function OnboardingWizard({
       <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 space-y-5">
         {!isSession && (
           <div className="space-y-1.5">
-            <label className={consoleFormLabelClass}>Repository</label>
+            <label className={consoleFormLabelClass}>{t('sessions:launch.repository')}</label>
             <ProjectSourceSelect
               importedProject={importedProject}
               onImported={(pid) => { onRepoImported?.(pid); }}
@@ -119,14 +121,14 @@ export default function OnboardingWizard({
         )}
 
         <div className="space-y-1.5">
-          <label className={consoleFormLabelClass}>Agent</label>
+          <label className={consoleFormLabelClass}>{t('sessions:launch.agent')}</label>
           <SelectMenu
             value={agentValue}
             onChange={handleAgentChange}
             options={agentOptions}
-            placeholder="Select agent"
+            placeholder={t('sessions:launch.select_agent')}
             searchable
-            searchPlaceholder="Search agents…"
+            searchPlaceholder={t('sessions:launch.search_agents')}
             maxHeight={200}
           />
         </div>
@@ -145,7 +147,7 @@ export default function OnboardingWizard({
           onClick={onClose}
           className={`${buttonClass('secondary', 'sm')} ${consoleButtonFocusClass}`}
         >
-          Cancel
+          {t('common:action.cancel')}
         </button>
         <button
           type="button"
@@ -156,12 +158,12 @@ export default function OnboardingWizard({
           {launching ? (
             <>
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              Starting…
+              {t('sessions:launch.starting')}
             </>
           ) : (
             <>
               <Plus className="h-3.5 w-3.5" />
-              {isSession ? 'Start agent' : 'Create workspace'}
+              {isSession ? t('sessions:launch.start_agent') : t('sessions:launch.create_workspace')}
             </>
           )}
         </button>

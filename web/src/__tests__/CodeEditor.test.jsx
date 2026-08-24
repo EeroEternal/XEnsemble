@@ -36,7 +36,7 @@ describe('CodeEditor', () => {
 
   it('shows binary placeholder when isBinary=true', () => {
     render(<CodeEditor content="" isBinary path="image.png" />);
-    expect(screen.getByText(/二进制文件/)).toBeInTheDocument();
+    expect(screen.getByText(/Binary file/)).toBeInTheDocument();
     expect(screen.queryByTestId('monaco-editor')).not.toBeInTheDocument();
   });
 
@@ -81,7 +81,7 @@ describe('CodeEditor', () => {
   it('shows large file warning when content exceeds 1MB', () => {
     const largeContent = 'x'.repeat(1024 * 1024 + 1);
     render(<CodeEditor content={largeContent} path="app.js" />);
-    expect(screen.getByText(/文件较大/)).toBeInTheDocument();
+    expect(screen.getByText(/File is large/)).toBeInTheDocument();
   });
 
   it('hides status toolbar when file is clean', () => {
@@ -99,6 +99,6 @@ describe('CodeEditor', () => {
 
   it('shows saving status when saving=true', () => {
     render(<CodeEditor content="hello" originalContent="world" path="app.js" saving />);
-    expect(screen.getByText('保存中…')).toBeInTheDocument();
+    expect(screen.getByText('Saving…')).toBeInTheDocument();
   });
 });

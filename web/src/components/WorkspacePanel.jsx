@@ -20,6 +20,7 @@ import { consoleButtonFocusClass, consoleInputClass } from '@/lib/consoleTokens'
 import { consoleDropdownPanelClass, consoleMenuDropdownZClass } from '@/lib/consoleTokens';
 import { buttonClass } from '@/lib/buttonStyles';
 import { pathBasename, pathJoin } from '@/lib/workspaceFileTree';
+import { useTranslation } from 'react-i18next';
 
 const DiffViewer = lazy(() => import('./DiffViewer'));
 
@@ -113,6 +114,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   deployContent,
   previewDeployInfo,
 }, ref) {
+  const { t } = useTranslation();
   const [showNewFile, setShowNewFile] = useState(false);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newName, setNewName] = useState('');

@@ -12,6 +12,7 @@ const schema = require('../db/schema');
 const crypto = require('crypto');
 const policy = require('../auth/PolicyService');
 const { sendPublicError, sanitizePublicError } = require('../http/publicError');
+const { t } = require('../i18n');
 const { RuntimeError } = require('../runtime/interfaces');
 const auth = require('../auth');
 const { injectSecretsIntoTemplate } = require('../deployments/injectSecrets');
@@ -21,7 +22,7 @@ const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
     fastify.get('/api/v1/projects/:projectId/preflight', { preValidation: [fastify.authenticate] }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.projectId);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
         const agentId = request.query?.agent_id || request.query?.agentId || null;
         try {
@@ -38,7 +39,7 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
 
     fastify.post('/api/v1/projects/:projectId/agents/setup', { preValidation: [fastify.authenticate] }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.projectId);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
         const force = Boolean(request.body?.force);
         try {
@@ -46,8 +47,9 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
             const status = await ensureAgentBootstrap(project, workspacePath, { force });
             if (status?.status === 'failed') {
                 return reply.code(500).send({
-                    error: 'Workspace setup failed',
+                    error: t('errors:workspace_setup_failed', { defaultValue: 'Workspace setup failed' }, request.locale || 'en'),
                     setup: status,
+                    code: 'workspace_setup_failed',
                 });
             }
             return reply.code(200).send({ ok: true, setup: status });
@@ -59,7 +61,7 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
 
     fastify.post('/api/v1/projects/:projectId/agents/resume', { preValidation: [fastify.authenticate] }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.projectId);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
         const force = Boolean(request.body?.force);
         const ensurePreview = request.body?.ensure_preview !== false;
@@ -81,7 +83,7 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
 
     fastify.post('/api/v1/projects/:projectId/agents/ensure-preview', { preValidation: [fastify.authenticate] }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.projectId);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
         const previewQuota = await policy.checkQuota(request.user.id, 'previews', request.user.role);
         if (!previewQuota.ok) return policy.quotaErrorReply(reply, previewQuota);
@@ -98,10 +100,10 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
 
     fastify.post('/api/v1/projects/:projectId/agents/log', { preValidation: [fastify.authenticate] }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.projectId);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
         const message = request.body?.message;
-        if (!message) return reply.code(400).send({ error: 'message is required' });
+        if (!message) return reply.code(400).send({ error: t('errors:message_required', { defaultValue: 'message is required' }, request.locale || 'en'), code: 'message_required' });
 
         const level = request.body?.level || 'log';
         const tag = request.body?.source || 'browser';
@@ -117,7 +119,7 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
 
     fastify.post('/api/v1/projects/:projectId/analyze-deploy', { preValidation: [fastify.authenticate, fastify.requireActive] }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.projectId);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
         try {
             const ready = await ensureProjectRuntime(project);
@@ -134,11 +136,11 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
     // 不走 DeploymentService.createPreview（避免 checkpoint+restore 杀 agent）。
     fastify.post('/api/v1/projects/:projectId/tunnel-preview', { preValidation: [fastify.authenticate, fastify.requireActive] }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.projectId);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
         const vmPort = Number(request.body?.port);
         if (!vmPort || vmPort < 1 || vmPort > 65535) {
-            return reply.code(400).send({ error: 'valid port is required' });
+            return reply.code(400).send({ error: t('errors:valid_port_required', { defaultValue: 'valid port is required' }, request.locale || 'en'), code: 'valid_port_required' });
         }
 
         try {
@@ -191,11 +193,11 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
     // 不写盘——前端拿到新 template 后用现有的 PUT /api/v1/workspace/file 写入。
     fastify.post('/api/v1/projects/:projectId/deploy/inject-secrets', { preValidation: [fastify.authenticate, fastify.requireActive] }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.projectId);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
         const configFile = request.body?.configFile;
         if (!configFile || typeof configFile.template !== 'string') {
-            return reply.code(400).send({ error: 'configFile.template is required' });
+            return reply.code(400).send({ error: t('errors:config_template_required', { defaultValue: 'configFile.template is required' }, request.locale || 'en'), code: 'config_template_required' });
         }
         const keys = Array.isArray(configFile.keys) ? configFile.keys : [];
 
@@ -225,7 +227,7 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
     // 一键部署：中止当前部署——abort 进行中的 auto-deploy（verify agent 会尽快停止）+ 停掉 tunnel。
     fastify.post('/api/v1/projects/:projectId/deploy/cancel', { preValidation: [fastify.authenticate, fastify.requireActive] }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.projectId);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try { abortDeploy(project.id); } catch (_) { /* ignore */ }
         try { stopByProjectId(project.id); } catch (_) { /* ignore */ }
         return { ok: true };

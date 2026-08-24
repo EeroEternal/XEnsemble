@@ -1,0 +1,32 @@
+{
+  "title": "Gateway",
+  "provider": "Provider",
+  "base_url": "Base URL",
+  "api_key": "API Key",
+  "model": "Model",
+  "models": "Models",
+  "add_provider": "Add Provider",
+  "delete_provider": "Delete Provider",
+  "verify": "Verify",
+  "control_plane_url": "Control plane public URL",
+  "external_unigateway_url": "External UniGateway URL",
+  "error": {
+    "verify_failed": "Provider verification failed.",
+    "load_key_failed": "Failed to load API Key.",
+    "fetch_models_failed": "Failed to fetch models.",
+    "update_failed": "Failed to update provider",
+    "save_failed": "Failed to save provider",
+    "save_settings_failed": "Failed to save gateway process settings.",
+    "delete_failed": "Failed to delete provider",
+    "provider_not_found": "Provider \"{{name}}\" not found.",
+    "no_api_key": "No API Key configured.",
+    "no_base_url": "Provider has no Base URL configured."
+  },
+  "toast": {
+    "models_fetched_one": "Fetched {{count}} model",
+    "models_fetched_other": "Fetched {{count}} models",
+    "provider_saved": "Provider saved.",
+    "provider_deleted": "Provider deleted.",
+    "settings_saved": "Gateway settings saved."
+  }
+}

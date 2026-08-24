@@ -1,3 +1,5 @@
+import i18next from 'i18next';
+
 /** Platform-wide keys (gateway / router; not tied to a single agent's env_required). */
 export const PLATFORM_SECRET_KEYS = ['LLM_ROUTER_URL', 'LLM_ROUTER_API_KEY'];
 
@@ -38,9 +40,9 @@ export function getSecretLabel(key) {
 }
 
 export function getSecretPlaceholder(key, { saved = false } = {}) {
-  if (saved) return 'Unchanged if blank';
+  if (saved) return i18next.t('settings:secret.unchanged_if_blank');
   if (SECRET_PLACEHOLDERS[key]) return SECRET_PLACEHOLDERS[key];
-  return `Enter ${getSecretLabel(key)}`;
+  return i18next.t('settings:secret.enter_label', { label: getSecretLabel(key) });
 }
 
 export function isSecretPasswordField(key) {

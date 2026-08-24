@@ -1,9 +1,11 @@
-import { ipcMain, dialog, shell, app } from 'electron';
+import { ipcMain, dialog, shell, app, Menu, BrowserWindow } from 'electron';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { IPC_CHANNELS } from '@shared/ipc';
 import * as config from '@main/services/config';
 import * as secureStore from '@main/services/secureStore';
+import { i18next, setLocale } from '@main/i18n';
+import { createMenu } from '@main/app/menu';
 
 export function registerIPCHandlers(): void {
   ipcMain.on(IPC_CHANNELS.GET_BACKEND_URL, (event) => {
@@ -50,5 +52,13 @@ export function registerIPCHandlers(): void {
 
   ipcMain.on(IPC_CHANNELS.GET_APP_VERSION, (event) => {
     event.returnValue = app.getVersion();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SET_LOCALE, async (_event, locale: string) => {
+    setLocale(locale);
+    const windows = BrowserWindow.getAllWindows();
+    if (windows.length > 0) {
+      Menu.setApplicationMenu(createMenu(windows[0]));
+    }
   });
 }

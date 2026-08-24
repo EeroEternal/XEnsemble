@@ -10,6 +10,7 @@ export interface DesktopAPI {
   saveFile(file: { name: string; content: string }): Promise<boolean>;
   openExternal(url: string): void;
   getAppVersion(): string;
+  setLocale(locale: string): Promise<void>;
 }
 
 export const IPC_CHANNELS = {
@@ -23,7 +24,8 @@ export const IPC_CHANNELS = {
   SELECT_FILE: 'dialog:selectFile',
   SAVE_FILE: 'dialog:saveFile',
   OPEN_EXTERNAL: 'shell:openExternal',
-  GET_APP_VERSION: 'app:getVersion'
+  GET_APP_VERSION: 'app:getVersion',
+  SET_LOCALE: 'i18n:setLocale'
 } as const;
 
 declare global {

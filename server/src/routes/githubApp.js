@@ -9,6 +9,7 @@
 
 const { GitHubAppService } = require('../git/GitHubAppService');
 const { handleWebhookEvent } = require('../git/webhookHandler');
+const { t } = require('../i18n');
 
 function registerGitHubAppRoutes(fastify) {
     const appService = new GitHubAppService();
@@ -23,7 +24,7 @@ function registerGitHubAppRoutes(fastify) {
         const deliveryId = request.headers['x-github-delivery'];
 
         if (!event) {
-            return reply.code(400).send({ error: 'Missing X-GitHub-Event header' });
+            return reply.code(400).send({ error: t('errors:missing_github_event_header', { defaultValue: 'Missing X-GitHub-Event header' }, request.locale || 'en'), code: 'missing_github_event_header' });
         }
 
         // Verify signature
@@ -35,12 +36,12 @@ function registerGitHubAppRoutes(fastify) {
             const valid = await appService.verifyWebhook(rawBody, signature);
             if (!valid) {
                 request.log.warn({ deliveryId, event }, 'Webhook signature verification failed');
-                return reply.code(401).send({ error: 'Invalid signature' });
+                return reply.code(401).send({ error: t('errors:invalid_signature', { defaultValue: 'Invalid signature' }, request.locale || 'en'), code: 'invalid_signature' });
             }
         } catch (err) {
             if (err.statusCode === 503) {
                 request.log.error('Webhook secret not configured; rejecting unsigned webhook');
-                return reply.code(503).send({ error: 'GitHub webhook is not configured' });
+                return reply.code(503).send({ error: t('errors:github_webhook_not_configured', { defaultValue: 'GitHub webhook is not configured' }, request.locale || 'en'), code: 'github_webhook_not_configured' });
             }
             throw err;
         }
@@ -55,7 +56,7 @@ function registerGitHubAppRoutes(fastify) {
             return { ok: true, event, delivery_id: deliveryId, ...result };
         } catch (err) {
             request.log.error({ err, deliveryId, event }, 'Webhook handler error');
-            return reply.code(500).send({ error: 'Webhook processing failed' });
+            return reply.code(500).send({ error: t('errors:webhook_processing_failed', { defaultValue: 'Webhook processing failed' }, request.locale || 'en'), code: 'webhook_processing_failed' });
         }
     });
 

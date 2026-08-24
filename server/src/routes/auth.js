@@ -4,6 +4,7 @@ const { db } = require('../db/index');
 const schema = require('../db/schema');
 const { eq } = require('drizzle-orm');
 const { sendPublicError } = require('../http/publicError');
+const { t } = require('../i18n');
 
 function sanitizeDeviceName(deviceName) {
     if (typeof deviceName !== 'string') return null;
@@ -20,7 +21,7 @@ function registerAuthRoutes(fastify) {
             const { user, status, autoLogin } = await userAdmin.registerUser({ username, password });
             if (!autoLogin) {
                 return reply.code(201).send({
-                    message: 'Registration submitted. Await administrator approval.',
+                    message: t('auth:error.registration_submitted', {}, request.locale || 'en'),
                     user: { id: user.id, username: user.username, status },
                 });
             }
@@ -32,7 +33,7 @@ function registerAuthRoutes(fastify) {
                 quotas: login.quotas,
             };
         } catch (err) {
-            return sendPublicError(reply, err, 'Registration failed', 500);
+            return sendPublicError(reply, err, 'Registration failed', 500, request.locale || 'en');
         }
     });
 
@@ -48,7 +49,7 @@ function registerAuthRoutes(fastify) {
                 quotas: result.quotas,
             };
         } catch (err) {
-            return sendPublicError(reply, err, 'Login failed', 500);
+            return sendPublicError(reply, err, 'Login failed', 500, request.locale || 'en');
         }
     });
 
@@ -56,7 +57,7 @@ function registerAuthRoutes(fastify) {
         const { refresh_token, device_name } = request.body || {};
         const deviceName = sanitizeDeviceName(device_name);
         if (!refresh_token) {
-            return reply.code(400).send({ error: 'refresh_token is required' });
+            return reply.code(400).send({ error: t('errors:refresh_token_required', { defaultValue: 'refresh_token is required' }, request.locale || 'en') });
         }
         let userId = null;
         try {
@@ -65,22 +66,22 @@ function registerAuthRoutes(fastify) {
                 .from(schema.refreshTokens)
                 .where(eq(schema.refreshTokens.tokenHash, tokenHash));
             if (rows.length === 0) {
-                return reply.code(401).send({ error: 'Invalid or expired refresh token' });
+                return reply.code(401).send({ error: t('errors:invalid_refresh_token', { defaultValue: 'Invalid or expired refresh token' }, request.locale || 'en') });
             }
             userId = rows[0].userId;
             const user = await userAdmin.getUserById(userId);
             if (!user || user.status !== 'active') {
-                return reply.code(403).send({ error: 'Account is inactive', code: 'account_inactive' });
+                return reply.code(403).send({ error: t('errors:account_inactive', {}, request.locale || 'en'), code: 'account_inactive' });
             }
             const newRefreshToken = await userAdmin.rotateRefreshToken(refresh_token, user.id, deviceName);
             if (!newRefreshToken) {
-                return reply.code(401).send({ error: 'Invalid or expired refresh token' });
+                return reply.code(401).send({ error: t('errors:invalid_refresh_token', { defaultValue: 'Invalid or expired refresh token' }, request.locale || 'en') });
             }
             const accessToken = auth.generateAccessToken(user);
             return { access_token: accessToken, refresh_token: newRefreshToken };
         } catch (err) {
             if (reply.sent) return;
-            return sendPublicError(reply, err, 'Token refresh failed', 500);
+            return sendPublicError(reply, err, 'Token refresh failed', 500, request.locale || 'en');
         }
     });
 
@@ -91,18 +92,18 @@ function registerAuthRoutes(fastify) {
     fastify.put('/api/v1/auth/password', { preValidation: [fastify.authenticate] }, async (request, reply) => {
         const { current_password, new_password } = request.body || {};
         if (!new_password || new_password.length < 8) {
-            return reply.code(400).send({ error: 'New password must be at least 8 characters' });
+            return reply.code(400).send({ error: t('errors:password_too_short', {}, request.locale || 'en') });
         }
         const user = await userAdmin.getUserById(request.user.id);
         if (!user || !auth.verifyPassword(current_password, user.passwordHash)) {
-            return reply.code(401).send({ error: 'Current password is incorrect' });
+            return reply.code(401).send({ error: t('errors:current_password_incorrect', { defaultValue: 'Current password is incorrect' }, request.locale || 'en') });
         }
         try {
             await userAdmin.resetPassword(request.user.id, new_password, request.user.id);
             await userAdmin.revokeAllUserRefreshTokens(request.user.id);
             return { ok: true };
         } catch (err) {
-            return sendPublicError(reply, err, 'Failed to update password', 500);
+            return sendPublicError(reply, err, 'Failed to update password', 500, request.locale || 'en');
         }
     });
 }

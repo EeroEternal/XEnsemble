@@ -1,3 +1,5 @@
+const { t } = require('../i18n');
+
 /**
  * 将 Drizzle/PostgreSQL 原始错误转为对用户安全的文案，避免泄露 SQL。
  */
@@ -31,20 +33,20 @@ function mapPostgresError(err) {
 
     if (isUniqueViolation(err)) {
         if (/users_username_unique|username/i.test(detail)) {
-            return { statusCode: 400, message: 'Username already exists' };
+            return { statusCode: 400, code: 'username_exists' };
         }
-        return { statusCode: 400, message: 'Record already exists' };
+        return { statusCode: 400, code: 'record_exists' };
     }
 
     switch (code) {
         case '23503':
-            return { statusCode: 400, message: 'Related record not found' };
+            return { statusCode: 400, code: 'related_not_found' };
         case '23502':
-            return { statusCode: 400, message: 'Required field is missing' };
+            return { statusCode: 400, code: 'required_field_missing' };
         case '42501':
-            return { statusCode: 403, message: 'Operation not permitted' };
+            return { statusCode: 403, code: 'operation_not_permitted' };
         case '42P01':
-            return { statusCode: 500, message: 'Database schema is not ready' };
+            return { statusCode: 500, code: 'db_not_ready' };
         default:
             return null;
     }
@@ -53,35 +55,41 @@ function mapPostgresError(err) {
 /**
  * @param {Error & { statusCode?: number, code?: string }} err
  * @param {string} [fallback='Request failed']
+ * @param {string} [locale='en']
  * @returns {{ statusCode: number, message: string, code?: string }}
  */
-function sanitizePublicError(err, fallback = 'Request failed') {
+function sanitizePublicError(err, fallback = 'Request failed', locale = 'en') {
     if (!err) {
-        return { statusCode: 500, message: fallback };
+        return { statusCode: 500, message: t('errors:request_failed', {}, locale) };
     }
 
     if (isDatabaseError(err)) {
         const mapped = mapPostgresError(err);
         if (mapped) {
-            return err.code ? { ...mapped, code: err.code } : mapped;
+            const message = t('errors:' + mapped.code, mapped.params || {}, locale);
+            const result = { statusCode: mapped.statusCode, message };
+            if (err.code) result.code = err.code;
+            return result;
         }
+        const message = t('errors:request_failed', {}, locale);
         return err.code
-            ? { statusCode: 500, message: fallback, code: err.code }
-            : { statusCode: 500, message: fallback };
+            ? { statusCode: 500, message, code: err.code }
+            : { statusCode: 500, message };
     }
 
     if (err.statusCode) {
         const result = {
             statusCode: err.statusCode,
-            message: err.message || fallback,
+            message: err.message || t('errors:request_failed', {}, locale),
         };
         if (err.code) result.code = err.code;
         return result;
     }
 
+    const message = t('errors:request_failed', {}, locale);
     return err.code
-        ? { statusCode: 500, message: fallback, code: err.code }
-        : { statusCode: 500, message: fallback };
+        ? { statusCode: 500, message, code: err.code }
+        : { statusCode: 500, message };
 }
 
 /**
@@ -89,9 +97,10 @@ function sanitizePublicError(err, fallback = 'Request failed') {
  * @param {Error & { statusCode?: number, code?: string }} err
  * @param {string} [fallback='Request failed']
  * @param {number} [defaultCode=500]
+ * @param {string} [locale='en']
  */
-function sendPublicError(reply, err, fallback = 'Request failed', defaultCode = 500) {
-    const sanitized = sanitizePublicError(err, fallback);
+function sendPublicError(reply, err, fallback = 'Request failed', defaultCode = 500, locale = 'en') {
+    const sanitized = sanitizePublicError(err, fallback, locale);
     const statusCode = err.statusCode || sanitized.statusCode || defaultCode;
     const body = { error: sanitized.message };
     if (sanitized.code || err.code) body.code = sanitized.code || err.code;

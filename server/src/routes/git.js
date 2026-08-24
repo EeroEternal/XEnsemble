@@ -18,6 +18,7 @@ const { projectDir } = require('../workspace');
 const policy = require('../auth/PolicyService');
 const { scaffoldXEnsembleWithFs } = require('../repositories/RepositoryEnvironmentService');
 const { getRuntime } = require('../runtime/registry');
+const { t } = require('../i18n');
 
 function escapeHtml(str) {
     return String(str)
@@ -108,7 +109,7 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const connection = await connectionService.getConnection(request.user.id, request.params.provider);
-        if (!connection) return reply.code(404).send({ error: `${request.params.provider} not connected` });
+        if (!connection) return reply.code(404).send({ error: t('errors:provider_not_connected', { defaultValue: '{{provider}} not connected', provider: request.params.provider }, request.locale || 'en'), code: 'provider_not_connected' });
         return connection;
     });
 
@@ -161,7 +162,7 @@ function registerGitRoutes(fastify) {
             return { ok: true };
         } catch (err) {
             request.log.error(err);
-            return reply.code(500).send({ error: 'Failed to disconnect' });
+            return reply.code(500).send({ error: t('errors:disconnect_failed', { defaultValue: 'Failed to disconnect' }, request.locale || 'en'), code: 'disconnect_failed' });
         }
     });
 
@@ -170,7 +171,7 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const { token } = request.body || {};
         if (!token || typeof token !== 'string' || !token.trim()) {
-            return reply.code(400).send({ error: 'A personal access token is required' });
+            return reply.code(400).send({ error: t('errors:pat_required', { defaultValue: 'A personal access token is required' }, request.locale || 'en'), code: 'pat_required' });
         }
         try {
             return await connectionService.connectWithPat(request.user.id, request.params.provider, token);
@@ -201,7 +202,7 @@ function registerGitRoutes(fastify) {
         } catch (err) {
             request.log.error(err);
             if (err.message.includes('not_connected')) {
-                return reply.code(400).send({ error: `${providerName} account not connected` });
+                return reply.code(400).send({ error: t('errors:provider_account_not_connected', { defaultValue: '{{provider}} account not connected', provider: providerName }, request.locale || 'en'), code: 'provider_account_not_connected' });
             }
             const isAuthError = err.code === 'token_expired' || err.status === 401;
             if (isAuthError) {
@@ -217,7 +218,7 @@ function registerGitRoutes(fastify) {
         const providerName = request.query?.provider || 'github';
         // Wildcard captures the full path: owner/repo (GitHub, Gitea) or group/subgroup/repo (GitLab)
         const repoPath = request.params['*'];
-        if (!repoPath) return reply.code(400).send({ error: 'repo path is required' });
+        if (!repoPath) return reply.code(400).send({ error: t('errors:repo_path_required', { defaultValue: 'repo path is required' }, request.locale || 'en'), code: 'repo_path_required' });
         try {
             const token = await connectionService.getDecryptedToken(request.user.id, providerName);
             const provider = getProvider(providerName);
@@ -227,7 +228,7 @@ function registerGitRoutes(fastify) {
         } catch (err) {
             request.log.error(err);
             if (err.message.includes('not_connected')) {
-                return reply.code(400).send({ error: `${providerName} account not connected` });
+                return reply.code(400).send({ error: t('errors:provider_account_not_connected', { defaultValue: '{{provider}} account not connected', provider: providerName }, request.locale || 'en'), code: 'provider_account_not_connected' });
             }
             const isAuthError = err.code === 'token_expired' || err.status === 401;
             if (isAuthError) {
@@ -255,21 +256,21 @@ function registerGitRoutes(fastify) {
         } = request.body || {};
 
         if (!repo_full_name) {
-            return reply.code(400).send({ error: 'repo_full_name is required' });
+            return reply.code(400).send({ error: t('errors:repo_full_name_required', { defaultValue: 'repo_full_name is required' }, request.locale || 'en'), code: 'repo_full_name_required' });
         }
         if (!hasProvider(providerName)) {
-            return reply.code(400).send({ error: `Unknown provider: ${providerName}` });
+            return reply.code(400).send({ error: t('errors:unknown_provider', { defaultValue: 'Unknown provider: {{provider}}', provider: providerName }, request.locale || 'en'), code: 'unknown_provider' });
         }
 
         const projectName = String(name || repo_full_name.split('/').pop() || 'project').trim();
-        if (!projectName) return reply.code(400).send({ error: 'name is required' });
+        if (!projectName) return reply.code(400).send({ error: t('errors:name_required', { defaultValue: 'name is required' }, request.locale || 'en'), code: 'name_required' });
 
         let token;
         let connection;
         let repoInfo;
         try {
             connection = await connectionService.getConnection(request.user.id, providerName);
-            if (!connection) return reply.code(400).send({ error: `${providerName} account not connected` });
+            if (!connection) return reply.code(400).send({ error: t('errors:provider_account_not_connected', { defaultValue: '{{provider}} account not connected', provider: providerName }, request.locale || 'en'), code: 'provider_account_not_connected' });
             token = await connectionService.getDecryptedToken(request.user.id, providerName);
             const provider = getProvider(providerName);
             const { getProviderConfig } = require('../git/GitConnectionService');
@@ -278,7 +279,7 @@ function registerGitRoutes(fastify) {
         } catch (err) {
             request.log.error(err);
             if (err.message.includes('not_connected')) {
-                return reply.code(400).send({ error: `${providerName} account not connected` });
+                return reply.code(400).send({ error: t('errors:provider_account_not_connected', { defaultValue: '{{provider}} account not connected', provider: providerName }, request.locale || 'en'), code: 'provider_account_not_connected' });
             }
             const isAuthError = err.code === 'token_expired' || err.status === 401;
             if (isAuthError) {
@@ -320,7 +321,7 @@ function registerGitRoutes(fastify) {
             await db.insert(schema.projects).values(projectRow);
         } catch (err) {
             request.log.error(err);
-            return reply.code(500).send({ error: 'Failed to create project record' });
+            return reply.code(500).send({ error: t('errors:create_project_record_failed', { defaultValue: 'Failed to create project record' }, request.locale || 'en'), code: 'create_project_record_failed' });
         }
 
         const { ensureProjectRuntime } = require('../runtime/RuntimeService');
@@ -383,7 +384,7 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try {
             await mergeRequestService.syncAll(project);
         } catch (_) {}
@@ -397,7 +398,7 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try {
             const record = await mergeRequestService.create(
                 project, request.body || {}, request.user.id);
@@ -422,10 +423,10 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         const record = await mergeRequestService.get(request.params.mrId);
         if (!record || record.projectId !== project.id) {
-            return reply.code(404).send({ error: 'Merge request not found' });
+            return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
         }
         const permissions = await mergeRequestService.getCurrentUserPermissions(project, request.user.id);
         return { ...record, permissions };
@@ -435,11 +436,11 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try {
             const record = await mergeRequestService.sync(project, request.params.mrId);
             if (!record || record.projectId !== project.id) {
-                return reply.code(404).send({ error: 'Merge request not found' });
+                return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
             }
             return record;
         } catch (err) {
@@ -452,7 +453,7 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try {
             const result = await mergeRequestService.syncAll(project);
             const rows = await mergeRequestService.list(project.id);
@@ -467,7 +468,7 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try {
             const result = await mergeRequestService.mergePR(project, request.params.mrId);
             return result;
@@ -482,7 +483,7 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try {
             const result = await mergeRequestService.closePR(project, request.params.mrId);
             return result;
@@ -497,7 +498,7 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try {
             const result = await mergeRequestService.reopenPR(project, request.params.mrId);
             return result;
@@ -512,7 +513,7 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try {
             const result = await mergeRequestService.approvePR(project, request.params.mrId);
             return result;
@@ -527,10 +528,10 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         const body = request.body?.body;
         if (!body || !String(body).trim()) {
-            return reply.code(400).send({ error: 'Comment body is required' });
+            return reply.code(400).send({ error: t('errors:comment_body_required', { defaultValue: 'Comment body is required' }, request.locale || 'en'), code: 'comment_body_required' });
         }
         try {
             const result = await mergeRequestService.addComment(project, request.params.mrId, String(body).trim());
@@ -547,10 +548,10 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         const body = request.body?.body;
         if (!body || !String(body).trim()) {
-            return reply.code(400).send({ error: 'Comment body is required' });
+            return reply.code(400).send({ error: t('errors:comment_body_required', { defaultValue: 'Comment body is required' }, request.locale || 'en'), code: 'comment_body_required' });
         }
         try {
             const result = await mergeRequestService.replyToReviewComment(
@@ -570,10 +571,10 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         const body = request.body?.body;
         if (!body || !String(body).trim()) {
-            return reply.code(400).send({ error: 'Comment body is required' });
+            return reply.code(400).send({ error: t('errors:comment_body_required', { defaultValue: 'Comment body is required' }, request.locale || 'en'), code: 'comment_body_required' });
         }
         const commentType = request.query?.type || 'issue';
         try {
@@ -594,7 +595,7 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         const commentType = request.query?.type || 'issue';
         try {
             const result = await mergeRequestService.deleteComment(
@@ -614,13 +615,13 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try {
             const reviews = await mergeRequestService.listReviews(project, request.params.mrId);
             return { reviews };
         } catch (err) {
             request.log.error(err);
-            return reply.code(500).send({ error: 'Failed to fetch reviews' });
+            return reply.code(500).send({ error: t('errors:fetch_reviews_failed', { defaultValue: 'Failed to fetch reviews' }, request.locale || 'en'), code: 'fetch_reviews_failed' });
         }
     });
 
@@ -628,7 +629,7 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try {
             const page = request.query?.page ? Number(request.query.page) : 1;
             const perPage = request.query?.per_page ? Number(request.query.per_page) : 30;
@@ -636,7 +637,7 @@ function registerGitRoutes(fastify) {
             return { comments };
         } catch (err) {
             request.log.error(err);
-            return reply.code(500).send({ error: 'Failed to fetch review comments' });
+            return reply.code(500).send({ error: t('errors:fetch_review_comments_failed', { defaultValue: 'Failed to fetch review comments' }, request.locale || 'en'), code: 'fetch_review_comments_failed' });
         }
     });
 
@@ -644,7 +645,7 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try {
             const page = request.query?.page ? Number(request.query.page) : 1;
             const perPage = request.query?.per_page ? Number(request.query.per_page) : 30;
@@ -652,7 +653,7 @@ function registerGitRoutes(fastify) {
             return { comments };
         } catch (err) {
             request.log.error(err);
-            return reply.code(500).send({ error: 'Failed to fetch issue comments' });
+            return reply.code(500).send({ error: t('errors:fetch_issue_comments_failed', { defaultValue: 'Failed to fetch issue comments' }, request.locale || 'en'), code: 'fetch_issue_comments_failed' });
         }
     });
 
@@ -660,13 +661,13 @@ function registerGitRoutes(fastify) {
         preValidation: [fastify.authenticate, fastify.requireActive],
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
-        if (!project) return reply.code(404).send({ error: 'Project not found' });
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try {
             const files = await mergeRequestService.listMrFiles(project, request.params.mrId);
             return { files };
         } catch (err) {
             request.log.error(err);
-            return reply.code(500).send({ error: 'Failed to fetch MR files' });
+            return reply.code(500).send({ error: t('errors:fetch_mr_files_failed', { defaultValue: 'Failed to fetch MR files' }, request.locale || 'en'), code: 'fetch_mr_files_failed' });
         }
     });
 }

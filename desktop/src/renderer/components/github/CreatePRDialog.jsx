@@ -12,6 +12,7 @@ import SelectMenu from '../SelectMenu';
 import { useToast } from '../Toast';
 import * as githubApi from '../../lib/githubApi.js';
 import { consoleDialogMdClass } from '../../lib/consoleTheme';
+import { useTranslation } from 'react-i18next';
 
 export default function CreatePRDialog({
   open,
@@ -22,6 +23,7 @@ export default function CreatePRDialog({
   onCreated,
 }) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [branches, setBranches] = useState([]);
   const [targetBranch, setTargetBranch] = useState(defaultTargetBranch || 'main');
   const [title, setTitle] = useState('');
@@ -88,7 +90,7 @@ export default function CreatePRDialog({
         source_branch: sourceBranch,
         target_branch: targetBranch,
       });
-      showToast('success', 'Pull request created.');
+      showToast('success', t('git:toast.pr_created'));
       if (pr?.remoteMrUrl || pr?.remote_mr_url || pr?.github_pr_url || pr?.githubPrUrl) {
         githubApi.openExternal(pr.remoteMrUrl || pr.remote_mr_url || pr.github_pr_url || pr.githubPrUrl);
       }
@@ -112,8 +114,8 @@ export default function CreatePRDialog({
   return (
     <ConsoleDialogShell onClose={onClose} panelClassName={`${consoleDialogMdClass} max-h-[calc(100vh-2rem)]`}>
       <ConsoleStructuredDialogHeader
-        title="Create Pull Request"
-        subtitle={`From ${sourceBranch || 'current branch'}`}
+        title={t('git:dialog.create_pr_title', { defaultValue: 'Create Pull Request' })}
+        subtitle={t('git:dialog.pr_from_subtitle', { source: sourceBranch || t('git:dialog.current_branch_fallback', { defaultValue: 'current branch' }), defaultValue: 'From {{source}}' })}
       />
       <ConsoleStructuredDialogBody>
         <div className="grid grid-cols-2 gap-3">

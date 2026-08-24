@@ -54,7 +54,7 @@ describe('EditorTabs', () => {
     const onCloseTab = vi.fn();
     const tabs = [makeTab('src/a.js', 'same', 'same')];
     render(<EditorTabs tabs={tabs} activePath="src/a.js" onCloseTab={onCloseTab} />);
-    fireEvent.click(screen.getByLabelText('关闭 src/a.js'));
+    fireEvent.click(screen.getByLabelText('Close src/a.js'));
     expect(onCloseTab).toHaveBeenCalledWith('src/a.js');
   });
 
@@ -65,9 +65,9 @@ describe('EditorTabs', () => {
       makeTab('src/b.js', 'b'),
     ];
     render(<EditorTabs tabs={tabs} activePath="src/a.js" onCloseTab={onCloseTab} />);
-    fireEvent.click(screen.getByLabelText('关闭 src/a.js'));
-    expect(screen.getByText('保存')).toBeInTheDocument();
-    expect(screen.getByText('不保存')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Close src/a.js'));
+    expect(screen.getByText('Save')).toBeInTheDocument();
+    expect(screen.getByText("Don't Save")).toBeInTheDocument();
     expect(onCloseTab).not.toHaveBeenCalled();
   });
 
@@ -86,8 +86,8 @@ describe('EditorTabs', () => {
         onSaveTab={onSaveTab}
       />
     );
-    fireEvent.click(screen.getByLabelText('关闭 src/a.js'));
-    fireEvent.click(screen.getByText('不保存'));
+    fireEvent.click(screen.getByLabelText('Close src/a.js'));
+    fireEvent.click(screen.getByText("Don't Save"));
     expect(onCloseTab).toHaveBeenCalledWith('src/a.js');
     expect(onSaveTab).not.toHaveBeenCalled();
   });
@@ -106,8 +106,8 @@ describe('EditorTabs', () => {
         onSaveTab={onSaveTab}
       />
     );
-    fireEvent.click(screen.getByLabelText('关闭 src/a.js'));
-    fireEvent.click(screen.getByText('保存'));
+    fireEvent.click(screen.getByLabelText('Close src/a.js'));
+    fireEvent.click(screen.getByText('Save'));
     await waitFor(() => {
       expect(onSaveTab).toHaveBeenCalledWith('src/a.js');
       expect(onCloseTab).toHaveBeenCalledWith('src/a.js');
@@ -121,8 +121,8 @@ describe('EditorTabs', () => {
       makeTab('src/b.js', 'b'),
     ];
     render(<EditorTabs tabs={tabs} activePath="src/a.js" onCloseTab={onCloseTab} />);
-    fireEvent.click(screen.getByLabelText('关闭 src/a.js'));
-    fireEvent.click(screen.getByText('取消'));
+    fireEvent.click(screen.getByLabelText('Close src/a.js'));
+    fireEvent.click(screen.getByText('Cancel'));
     expect(onCloseTab).not.toHaveBeenCalled();
     expect(screen.getByText('a.js')).toBeInTheDocument();
   });

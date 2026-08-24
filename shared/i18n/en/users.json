@@ -1,0 +1,69 @@
+{
+  "title": "Users",
+  "add_user": "Add User",
+  "status": {
+    "active": "Active",
+    "pending": "Pending",
+    "suspended": "Suspended"
+  },
+  "tier": {
+    "basic": "Basic",
+    "standard": "Standard",
+    "pro": "Pro",
+    "enterprise": "Enterprise"
+  },
+  "dialog": {
+    "create_user": "Create user",
+    "edit_user": "Edit {{username}}"
+  },
+  "empty": {
+    "no_users": "No users yet.",
+    "no_match": "No users match your search."
+  },
+  "field": {
+    "username": "Username",
+    "user": "User",
+    "password": "Password",
+    "role": "Role",
+    "status": "Status",
+    "usage": "Usage",
+    "tier": "Tier",
+    "tier_hint": "Resource tier — controls LLM request rate",
+    "last_login": "Last login",
+    "quota": "Quota",
+    "agent_auth": "Agent authorization",
+    "reset_password": "Reset password",
+    "reset_password_optional": "Reset password (optional)",
+    "leave_blank": "Leave blank to keep current",
+    "projects": "Projects",
+    "sessions": "Sessions",
+    "previews": "Previews",
+    "max_projects": "Max workspaces",
+    "max_sessions": "Max sessions",
+    "max_previews": "Max previews",
+    "resource_tier": "Resource tier"
+  },
+  "role": {
+    "admin": "Admin",
+    "user": "User"
+  },
+  "action": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "actions_for": "Actions for {{username}}"
+  },
+  "error": {
+    "password_too_short": "Password must be at least 8 characters.",
+    "cannot_demote_last_admin": "Cannot demote the last active administrator."
+  },
+  "toast": {
+    "user_created": "User created.",
+    "user_activated": "User activated.",
+    "user_suspended": "User suspended.",
+    "user_updated": "User updated.",
+    "user_deleted": "User deleted.",
+    "password_reset": "Password reset.",
+    "quota_updated": "Quota updated.",
+    "agents_granted": "Agent authorization updated."
+  }
+}

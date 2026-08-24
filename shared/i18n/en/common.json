@@ -1,0 +1,96 @@
+{
+  "menu": {
+    "file": "File",
+    "edit": "Edit",
+    "view": "View",
+    "window": "Window"
+  },
+  "action": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "close": "Close",
+    "delete": "Delete",
+    "edit": "Edit",
+    "add": "Add",
+    "remove": "Remove",
+    "refresh": "Refresh",
+    "search": "Search",
+    "copy": "Copy",
+    "retry": "Retry",
+    "back": "Back",
+    "next": "Next",
+    "finish": "Finish",
+    "open": "Open",
+    "rename": "Rename",
+    "download": "Download",
+    "upload": "Upload",
+    "stop": "Stop",
+    "start": "Start",
+    "restart": "Restart",
+    "install": "Install",
+    "uninstall": "Uninstall",
+    "update": "Update",
+    "check_update": "Check update",
+    "activate": "Activate",
+    "deprecate": "Deprecate",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "authorize": "Authorize",
+    "approve": "Approve",
+    "reject": "Reject"
+  },
+  "state": {
+    "loading": "Loading…",
+    "ready": "Ready",
+    "error": "Error",
+    "success": "Success",
+    "pending": "Pending",
+    "running": "Running",
+    "stopped": "Stopped",
+    "failed": "Failed",
+    "building": "Building",
+    "queued": "Queued",
+    "expired": "Expired",
+    "active": "Active",
+    "suspended": "Suspended",
+    "installed": "Installed",
+    "not_installed": "Not installed",
+    "unlimited": "Unlimited"
+  },
+  "table": {
+    "name": "Name",
+    "status": "Status",
+    "actions": "Actions",
+    "type": "Type",
+    "created": "Created",
+    "updated": "Updated",
+    "version": "Version",
+    "path": "Path",
+    "model": "Model",
+    "role": "Role",
+    "description": "Description"
+  },
+  "dialog": {
+    "confirm_title": "Are you sure?",
+    "cannot_undo": "This action cannot be undone.",
+    "confirm_delete": "Are you sure you want to delete {{name}}?"
+  },
+  "empty": {
+    "no_data": "No data",
+    "no_results": "No results found"
+  },
+  "pagination": {
+    "more": "More",
+    "show_fewer": "Show fewer"
+  },
+  "select": {
+    "placeholder": "Select…",
+    "search_placeholder": "Search…",
+    "no_matches": "No matches",
+    "recently_used": "Recently used",
+    "all_agents": "All agents",
+    "select_all": "Select all",
+    "close": "Close"
+  }
+}

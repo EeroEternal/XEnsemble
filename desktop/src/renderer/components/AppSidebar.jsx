@@ -45,6 +45,7 @@ import {
   consoleMenuDropdownZClass,
   consoleDropdownPanelClass,
 } from '../lib/consoleTheme.js';
+import { useTranslation } from 'react-i18next';
 
 const SESSION_PREVIEW_LIMIT = 5;
 const RECENT_DISPLAY_LIMIT = 2;
@@ -95,6 +96,7 @@ function buildWorkspaces(projects, sessions, prefs) {
 }
 
 function UserProfile({ user, onOpenSettings, onLogout }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [menuRect, setMenuRect] = useState(null);
   const rootRef = useRef(null);
@@ -169,7 +171,7 @@ function UserProfile({ user, onOpenSettings, onLogout }) {
           className={`flex w-full items-center gap-2 px-3 py-2 text-xs text-[#5F6368] hover:bg-[#F4F5F6] hover:text-[#202124] ${transitionBase}`}
         >
           <Settings2 className="w-3.5 h-3.5 shrink-0" />
-          Settings
+          {t('settings:title')}
         </button>
       )}
       <button
@@ -179,7 +181,7 @@ function UserProfile({ user, onOpenSettings, onLogout }) {
         className={`flex w-full items-center gap-2 px-3 py-2 text-xs text-[#5F6368] hover:bg-[#F4F5F6] hover:text-[#202124] ${transitionBase}`}
       >
         <LogOut className="w-3.5 h-3.5 shrink-0" />
-        Log out
+        {t('common:action.logout', { defaultValue: 'Log out' })}
       </button>
     </div>
   ) : null;
@@ -191,7 +193,7 @@ function UserProfile({ user, onOpenSettings, onLogout }) {
           <CircleUser className="w-4 h-4" strokeWidth={1.75} />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-medium text-[#202124]">{user?.username || 'User'}</p>
+          <p className="truncate text-xs font-medium text-[#202124]">{user?.username || t('users:role.user', { defaultValue: 'User' })}</p>
           <p className="truncate text-[10px] text-[#5F6368]">{user?.email || ''}</p>
         </div>
       </div>
@@ -201,7 +203,7 @@ function UserProfile({ user, onOpenSettings, onLogout }) {
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
           aria-haspopup="menu"
-          aria-label="Account menu"
+          aria-label={t('common:action.account_menu', { defaultValue: 'Account menu' })}
           title="Account"
           className={`flex items-center justify-center rounded-md p-1.5 ${textPlaceholder} hover:text-[#202124] hover:bg-[#E8EAED] ${transitionBase} ${
             open ? 'bg-[#E8EAED] text-[#202124]' : ''
@@ -235,6 +237,7 @@ export default function AppSidebar({
   onOpenSettings,
   onLogout,
 }) {
+  const { t } = useTranslation();
   const [sidebarPrefs, setSidebarPrefs] = useState(() => loadSidebarPrefs());
   const [expandedWorkspaces, setExpandedWorkspaces] = useState(() => {
     const ids = new Set();
@@ -378,7 +381,7 @@ export default function AppSidebar({
         body: JSON.stringify({ name: trimmed }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Rename failed');
+      if (!res.ok) throw new Error(data.error || t('sessions:error.rename_failed', { defaultValue: 'Rename failed' }));
       fetchWorkspaces?.();
       showToast('success', 'Workspace renamed');
     } catch (err) {
@@ -447,7 +450,7 @@ export default function AppSidebar({
           {!compact && (
             <button
               type="button"
-              title={isLive ? 'Stop and remove' : 'Remove'}
+              title={isLive ? t('sessions:action.stop_and_remove') : t('sessions:action.remove')}
               onClick={(e) => {
                 e.stopPropagation();
                 onRequestDeleteSession?.(s, ws);

@@ -1,0 +1,47 @@
+{
+  "title": "设置",
+  "close": "关闭设置",
+  "tabs": {
+    "general": "通用",
+    "terminal": "终端",
+    "agent": "Agent",
+    "github": "GitHub",
+    "git_providers": "Git 提供商",
+    "quota": "配额",
+    "gateway": "网关",
+    "language": "语言"
+  },
+  "language": {
+    "label": "语言",
+    "en": "English",
+    "zh": "中文"
+  },
+  "secret": {
+    "unchanged_if_blank": "留空则不修改",
+    "enter_label": "输入 {{label}}"
+  },
+  "quota": {
+    "title": "我的配额",
+    "projects": "工作区",
+    "sessions": "会话",
+    "previews": "预览"
+  },
+  "toast": {
+    "saved": "已保存。",
+    "save_failed": "保存失败。",
+    "config_saved": "配置已保存。",
+    "save_keys_failed": "保存密钥失败",
+    "save_config_failed": "保存配置失败"
+  },
+  "agent": {
+    "title": "Agent 设置",
+    "byok_config": "BYOK 配置",
+    "gateway_config": "网关配置"
+  },
+  "terminal": {
+    "title": "终端设置",
+    "theme": "主题",
+    "font_size": "字号",
+    "font_family": "字体"
+  }
+}

@@ -12,6 +12,7 @@ import CreatePRDialog from './github/CreatePRDialog';
 import { ConflictFileItem } from './git/ConflictResolutionPanel';
 import { getGitFileDiff } from '@/lib/githubApi';
 import { useToast } from './Toast';
+import { useTranslation } from 'react-i18next';
 
 const GIT_STATUS_LABELS = {
   'M ': 'M', ' M': 'M', 'MM': 'M',
@@ -29,16 +30,29 @@ const GIT_STATUS_COLORS = {
   'R ': 'text-[#5B8DB8]',
 };
 
-const GIT_STATUS_DESC = {
-  'M ': 'Modified', ' M': 'Modified', 'MM': 'Modified',
-  'A ': 'Added', 'AM': 'Added',
-  'D ': 'Deleted',
-  '??': 'Untracked',
-  'R ': 'Renamed',
-};
+function getGitStatusDesc(status, t) {
+  switch (status) {
+    case 'M ':
+    case ' M':
+    case 'MM':
+      return t('git:status.modified', { defaultValue: 'Modified' });
+    case 'A ':
+    case 'AM':
+      return t('git:status.added', { defaultValue: 'Added' });
+    case 'D ':
+      return t('git:status.deleted', { defaultValue: 'Deleted' });
+    case '??':
+      return t('git:status.untracked', { defaultValue: 'Untracked' });
+    case 'R ':
+      return t('git:status.renamed', { defaultValue: 'Renamed' });
+    default:
+      return '';
+  }
+}
 
 export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile, onCollapse, provider, sessionLive }) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [commitMessage, setCommitMessage] = useState('');
   const [committing, setCommitting] = useState(false);
   const [pushing, setPushing] = useState(false);
@@ -154,26 +168,26 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   const [discarding, setDiscarding] = useState(false);
 
   const handleDiscardFile = useCallback(async (path) => {
-    if (!window.confirm(`Discard changes to ${path}? This cannot be undone.`)) return;
+    if (!window.confirm(t('git:dialog.discard_confirm', { path, defaultValue: 'Discard changes to {{path}}? This cannot be undone.' }))) return;
     setFileDiffs((prev) => { const next = { ...prev }; delete next[path]; return next; });
     await gitChanges?.discard([path]);
-  }, [gitChanges]);
+  }, [gitChanges, t]);
 
   const handleDiscardAll = useCallback(async () => {
     const allPaths = [...gitStagedFiles, ...gitUnstagedFiles].map((f) => f.path).filter(Boolean);
     if (allPaths.length === 0) return;
-    if (!window.confirm(`Discard all ${allPaths.length} change(s)? This cannot be undone.`)) return;
+    if (!window.confirm(t('git:dialog.discard_all_confirm', { count: allPaths.length, defaultValue: 'Discard all {{count}} change(s)? This cannot be undone.' }))) return;
     setDiscarding(true);
     try {
       setFileDiffs({});
       await gitChanges?.discard(allPaths);
-      showToast('success', 'All changes discarded.');
+      showToast('success', t('git:toast.discarded', { defaultValue: 'All changes discarded.' }));
     } catch (err) {
-      showToast('error', err.message || 'Discard failed');
+      showToast('error', err.message || t('git:toast.discard_failed', { defaultValue: 'Discard failed' }));
     } finally {
       setDiscarding(false);
     }
-  }, [gitStagedFiles, gitUnstagedFiles, gitChanges, showToast]);
+  }, [gitStagedFiles, gitUnstagedFiles, gitChanges, showToast, t]);
 
   const handleCommit = useCallback(async () => {
     if (!commitMessage.trim()) return;
@@ -204,13 +218,13 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     setPulling(true);
     try {
       await gitChanges?.pull();
-      showToast('success', 'Pulled latest changes.');
+      showToast('success', t('git:toast.pulled', { defaultValue: 'Pulled latest changes.' }));
     } catch (err) {
-      showToast('error', err.message || 'Pull failed');
+      showToast('error', err.message || t('git:toast.pull_failed', { defaultValue: 'Pull failed' }));
     } finally {
       setPulling(false);
     }
-  }, [gitChanges, showToast]);
+  }, [gitChanges, showToast, t]);
 
   const handleAuthorConfirm = useCallback(async () => {
     if (!authorName.trim() || !authorEmail.trim()) return;
@@ -233,13 +247,13 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     setPushing(true);
     try {
       await gitChanges?.push();
-      showToast('success', 'Pushed');
+      showToast('success', t('git:toast.pushed', { defaultValue: 'Pushed' }));
     } catch (err) {
-      showToast('error', err.message || 'Push failed');
+      showToast('error', err.message || t('git:toast.push_failed', { defaultValue: 'Push failed' }));
     } finally {
       setPushing(false);
     }
-  }, [gitChanges, showToast]);
+  }, [gitChanges, showToast, t]);
 
   const handleOpenCreatePR = useCallback(() => {
     setActionMenuOpen(false);
@@ -262,7 +276,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   }, []);
 
   const renderDiffLines = useCallback((raw) => {
-    if (!raw) return <span className="text-zinc-400">No changes</span>;
+    if (!raw) return <span className="text-zinc-400">{t('git:empty.no_changes')}</span>;
     const lines = raw.split('\n');
     return lines.map((line, i) => {
       if (line.startsWith('---') || line.startsWith('+++')) {
@@ -304,14 +318,14 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
         } catch (_) {
           setFileDiffs((prev) => ({
             ...prev,
-            [filePath]: normalizeDiffEntry({ diff: 'Failed to load diff' }),
+            [filePath]: normalizeDiffEntry({ diff: t('git:empty.load_diff_failed', { defaultValue: 'Failed to load diff' }) }),
           }));
         } finally {
           setLoadingDiff(null);
         }
       }
     }
-  }, [expandedFiles, fileDiffs, projectId, normalizeDiffEntry]);
+  }, [expandedFiles, fileDiffs, projectId, normalizeDiffEntry, t]);
 
   const allFiles = [...gitStagedFiles, ...gitUnstagedFiles];
   const allExpanded = allFiles.length > 0 && allFiles.every((f) => expandedFiles.has(f.path));
@@ -330,7 +344,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       const results = await Promise.all(
         toFetch.map((p) => getGitFileDiff(projectId, p)
           .then((d) => [p, normalizeDiffEntry(d)])
-          .catch(() => [p, normalizeDiffEntry({ diff: 'Failed to load diff' })])),
+          .catch(() => [p, normalizeDiffEntry({ diff: t('git:empty.load_diff_failed', { defaultValue: 'Failed to load diff' }) })])),
       );
       setFileDiffs((prev) => {
         const next = { ...prev };
@@ -340,12 +354,12 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     } finally {
       setLoadingDiff(null);
     }
-  }, [allExpanded, allFiles, fileDiffs, projectId, normalizeDiffEntry]);
+  }, [allExpanded, allFiles, fileDiffs, projectId, normalizeDiffEntry, t]);
 
   const renderGitFile = (f, stageAction) => {
     const label = GIT_STATUS_LABELS[f.status] || f.status;
     const colorCls = GIT_STATUS_COLORS[f.status] || 'text-zinc-400';
-    const desc = GIT_STATUS_DESC[f.status] || '';
+    const desc = getGitStatusDesc(f.status, t);
     const fileName = f.path.split('/').pop();
     const dirPath = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '';
     const isExpanded = expandedFiles.has(f.path);
@@ -380,7 +394,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           {stageAction && (
             <button
               onClick={() => stageAction(f.path)}
-              title={stageAction === handleStageFile ? 'Stage' : 'Unstage'}
+              title={stageAction === handleStageFile ? t('git:action.stage', { defaultValue: 'Stage' }) : t('git:action.unstage', { defaultValue: 'Unstage' })}
               className={`shrink-0 p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#DADCE0] transition-opacity ${consoleButtonFocusClass}`}
             >
               {stageAction === handleStageFile ? (
@@ -392,7 +406,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           )}
           <button
             onClick={() => handleDiscardFile(f.path)}
-            title="Discard changes"
+            title={t('git:action.discard_changes', { defaultValue: 'Discard changes' })}
             className={`shrink-0 p-1 rounded text-zinc-400 hover:text-[#C06C5D] hover:bg-[#DADCE0] transition-opacity ${consoleButtonFocusClass}`}
           >
             <RotateCcw className="h-3 w-3" />
@@ -407,7 +421,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             ) : diffEntry != null ? (
               diffBinary ? (
                 <div className="px-3 py-3 text-[11px] text-zinc-500" data-testid="inline-diff-binary">
-                  Binary file, cannot display text diff
+                  {t('git:empty.binary_file', { defaultValue: 'Binary file, cannot display text diff' })}
                 </div>
               ) : (
                 <div className="text-[11px] leading-relaxed overflow-x-auto font-mono select-text"
@@ -415,7 +429,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                   {renderDiffLines(diffText)}
                   {diffTruncated && (
                     <div className="px-2 py-1 text-amber-700 bg-amber-50 border-t border-amber-200" data-testid="inline-diff-truncated">
-                      Content too large, truncated
+                      {t('git:empty.content_truncated', { defaultValue: 'Content too large, truncated' })}
                     </div>
                   )}
                 </div>
@@ -447,7 +461,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
         <div className="flex items-center gap-0.5 shrink-0">
           {gitHasChanges && (
             <button
-              title={allExpanded ? 'Collapse all' : 'Expand all'}
+              title={allExpanded ? t('git:action.collapse_all', { defaultValue: 'Collapse all' }) : t('git:action.expand_all', { defaultValue: 'Expand all' })}
               onClick={toggleExpandAll}
               className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED] ${consoleButtonFocusClass}`}
             >
@@ -456,7 +470,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           )}
           {gitHasChanges && (
             <button
-              title="File list"
+              title={t('git:action.file_list', { defaultValue: 'File list' })}
               onClick={() => setShowFileList((v) => !v)}
               className={`p-1 rounded ${showFileList ? 'text-[#202124] bg-[#E8EAED]' : 'text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED]'} ${consoleButtonFocusClass}`}
             >
@@ -464,7 +478,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             </button>
           )}
           <button
-            title="Refresh"
+            title={t('common:action.refresh')}
             onClick={() => gitChanges?.fetchStatus()}
             className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED] ${consoleButtonFocusClass}`}
           >
@@ -472,7 +486,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           </button>
           {onCollapse && (
             <button
-              title="Collapse sidebar"
+              title={t('git:action.collapse_sidebar', { defaultValue: 'Collapse sidebar' })}
               onClick={onCollapse}
               className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-[#E8EAED] ${consoleButtonFocusClass}`}
             >
@@ -491,7 +505,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               </div>
               <div className="py-1">
                 {gitStagedFiles.length > 0 && (
-                  <div className="text-[9px] text-zinc-400 px-3 py-0.5">Staged</div>
+                  <div className="text-[9px] text-zinc-400 px-3 py-0.5">{t('git:staged')}</div>
                 )}
                 {gitStagedFiles.map((f) => {
                   const name = f.path.split('/').pop();
@@ -510,7 +524,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                   );
                 })}
                 {gitUnstagedFiles.length > 0 && (
-                  <div className="text-[9px] text-zinc-400 px-3 py-0.5 mt-0.5">Changes</div>
+                  <div className="text-[9px] text-zinc-400 px-3 py-0.5 mt-0.5">{t('git:changes')}</div>
                 )}
                 {gitUnstagedFiles.map((f) => {
                   const name = f.path.split('/').pop();
@@ -537,7 +551,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-[#E8EAED] bg-amber-50">
                   <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" />
                   <span className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider">
-                    Conflicts ({conflictFiles.length})
+                    {t('git:conflicts', { count: conflictFiles.length, defaultValue: 'Conflicts ({{count}})' })}
                   </span>
                 </div>
                 <div className="p-2 space-y-1.5">
@@ -555,7 +569,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             {!gitHasChanges && conflictFiles.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 gap-2 text-zinc-400">
                 <GitCommit className="h-6 w-6" />
-                <p className="text-[10px]">No saved changes</p>
+                <p className="text-[10px]">{t('git:empty.no_saved_changes', { defaultValue: 'No saved changes' })}</p>
               </div>
             ) : (
               <div className="flex flex-col">
@@ -563,7 +577,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                   <>
                     <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#E8EAED]">
                       <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
-                        Staged ({gitStagedFiles.length})
+                        {t('git:staged', { count: gitStagedFiles.length, defaultValue: 'Staged ({{count}})' })}
                       </span>
                       <button
                         onClick={handleUnstageAll}

@@ -145,6 +145,8 @@ export default function GitProvidersSettingsPanel() {
               </button>
             ))}
           </div>
+        </div>
+      </section>
       <div className="border-t border-zinc-200" />
       {/* OAuth Application Configuration */}
       <section className="space-y-4">

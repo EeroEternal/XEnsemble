@@ -19,6 +19,7 @@ import AgentRegisterDialog from '../components/admin/AgentRegisterDialog';
 import AgentEditDialog from '../components/admin/AgentEditDialog';
 import AgentConfigDialog from '../components/admin/AgentConfigDialog';
 import AgentDetailsDialog from '../components/admin/AgentDetailsDialog';
+import { useTranslation } from 'react-i18next';
 
 function normalizeModels(model) {
   if (Array.isArray(model)) return model.map((m) => String(m || '').trim()).filter(Boolean);
@@ -36,6 +37,7 @@ function getModelSummary(agent) {
 }
 
 export default function AgentsAdmin() {
+  const { t } = useTranslation();
   const [agents, setAgents] = useState(() => loadAdminAgentsCache());
   const [gatewayProviders, setGatewayProviders] = useState([]);
   const [loading, setLoading] = useState(() => loadAdminAgentsCache().length === 0);
@@ -91,17 +93,17 @@ export default function AgentsAdmin() {
 
   return (
     <div className={consoleAdminPageClass}>
-      <PageHeader title="Agents" />
+      <PageHeader title={t('agents:title')} />
 
       <div className="flex items-center justify-between gap-3">
-        <span className="text-xs text-zinc-500 shrink-0">{agents.length} agents</span>
+        <span className="text-xs text-zinc-500 shrink-0">{t('agents:count', { count: agents.length })}</span>
         <div className="flex items-center gap-2">
           <div className="relative w-64 shrink-0">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
             <Input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search agents…"
+              placeholder={t('agents:search_placeholder')}
               className="w-full pl-8"
             />
           </div>
@@ -110,13 +112,13 @@ export default function AgentsAdmin() {
             onClick={() => fetchAgents({ silent: true })}
             disabled={refreshing}
             className={consoleIconButtonClass}
-            title="Refresh"
+            title={t('agents:refresh')}
           >
             {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           </button>
           <Button type="button" onClick={() => setRegisterOpen(true)} size="md" className="shrink-0">
             <Plus className="w-4 h-4" />
-            Add Agent
+            {t('agents:add_agent')}
           </Button>
         </div>
       </div>
@@ -156,23 +158,23 @@ export default function AgentsAdmin() {
             </colgroup>
             <thead>
               <tr className={consoleTableHeadRowClass}>
-                <th className={consoleTableHeadCellClass}>Name</th>
-                <th className={consoleTableHeadCellClass}>Provider</th>
-                <th className={consoleTableHeadCellClass}>Model</th>
-                <th className={consoleTableHeadCellClass}>Actions</th>
+                <th className={consoleTableHeadCellClass}>{t('agents:field.name')}</th>
+                <th className={consoleTableHeadCellClass}>{t('agents:field.provider')}</th>
+                <th className={consoleTableHeadCellClass}>{t('agents:field.model')}</th>
+                <th className={consoleTableHeadCellClass}>{t('agents:field.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {loading && agents.length === 0 ? (
                 <tr>
                   <td colSpan={4} className={`${consoleTableBodyCellClass} text-zinc-500`}>
-                    Loading...
+                    {t('common:state.loading')}
                   </td>
                 </tr>
               ) : filteredAgents.length === 0 ? (
                 <tr>
                   <td colSpan={4} className={`${consoleTableBodyCellClass} text-zinc-500`}>
-                    {agents.length === 0 ? 'No agents registered yet.' : 'No agents match your search.'}
+                    {agents.length === 0 ? t('agents:empty.none_registered') : t('agents:empty.no_match')}
                   </td>
                 </tr>
               ) : filteredAgents.map((agent) => {
@@ -197,20 +199,20 @@ export default function AgentsAdmin() {
                         <div className="flex flex-col items-start gap-0.5">
                           <span className="text-xs font-mono text-zinc-600">{model.modelText}</span>
                           <span className={`text-xs font-medium ${model.ready ? 'text-emerald-600' : 'text-amber-600'}`}>
-                            {model.ready ? 'Ready' : 'Needs model'}
+                            {model.ready ? t('agents:status.ready') : t('agents:status.needs_model')}
                           </span>
                         </div>
                       ) : (
-                        <span className="text-xs text-amber-600 font-medium">Needs model</span>
+                        <span className="text-xs text-amber-600 font-medium">{t('agents:status.needs_model')}</span>
                       )}
                     </td>
                     <td className={consoleTableBodyCellClass}>
                       <RowActionsMenu
-                        label={`Actions for ${agent.name}`}
+                        label={t('agents:action.actions_for', { name: agent.name })}
                         items={[
-                          { icon: Info, label: 'View details', onClick: () => setDetailsAgent(agent) },
-                          { icon: Pencil, label: 'Edit executable', onClick: () => setEditAgent(agent) },
-                          { icon: KeyRound, label: 'Configure', onClick: () => setKeysAgent(agent) },
+                          { icon: Info, label: t('agents:action.view_details'), onClick: () => setDetailsAgent(agent) },
+                          { icon: Pencil, label: t('agents:action.edit_executable'), onClick: () => setEditAgent(agent) },
+                          { icon: KeyRound, label: t('agents:action.configure'), onClick: () => setKeysAgent(agent) },
                         ]}
                       />
                     </td>

@@ -66,6 +66,7 @@ import {
   hoverTextPrimary,
 } from '../lib/consoleTokens';
 import { pathParent, pathJoin } from '../lib/workspaceFileTree';
+import { useTranslation } from 'react-i18next';
 
 const DEFAULT_AGENT_ID = 'kimi-code';
 
@@ -105,6 +106,7 @@ export default React.forwardRef(function Sessions({
 }, ref) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useTranslation();
   const goToSessions = useCallback(() => {
     if (location.pathname !== '/sessions') navigate('/sessions');
   }, [location.pathname, navigate]);
@@ -343,13 +345,13 @@ export default React.forwardRef(function Sessions({
       });
       const data = await res.json();
       if (!res.ok) {
-        if (res.status === 401 || data.error === 'Unauthorized') {
-          throw new Error('Session expired, please log in again.');
+        if (res.status === 401 || data.code === 'unauthorized') {
+          throw new Error(t('auth:error.session_expired'));
         }
-        if (data.error === 'quota_exceeded') {
+        if (data.code === 'quota_exceeded') {
           throw new Error(formatQuotaExceeded(data.dimension || 'max_projects', data.current, data.limit));
         }
-        throw new Error(data.error || 'Failed to create workspace');
+        throw new Error(data.error || t('sessions:error.create_workspace_failed'));
       }
       return { id: data.id, name: data.name || name };
     } catch (err) {
@@ -363,7 +365,7 @@ export default React.forwardRef(function Sessions({
   const handleStartSession = async (projectId, projectName, { closeLaunchModal = true } = {}) => {
     if (!selectedAgentId || !selectedAgent) return false;
     if (!projectId) {
-      setLaunchModalError('Could not create workspace for this session.');
+      setLaunchModalError(t('sessions:error.no_workspace'));
       return false;
     }
     setIsLoading(true);
@@ -372,7 +374,7 @@ export default React.forwardRef(function Sessions({
     try {
       const ready = await ensureAgentSecrets(selectedAgent);
       if (!ready) {
-        setLaunchModalError('Configure required API keys before launching.');
+        setLaunchModalError(t('sessions:error.configure_keys'));
         return false;
       }
 
@@ -401,16 +403,16 @@ export default React.forwardRef(function Sessions({
       });
       const data = await response.json();
       if (!response.ok) {
-        const msg = data.detail || data.error || data.message || 'Failed to start session';
-        if (response.status === 401 || msg === 'Unauthorized') {
-          setLaunchModalError('Session expired, please log in again.');
+        const msg = data.detail || data.error || data.message || t('sessions:error.start_failed');
+        if (response.status === 401 || data.code === 'unauthorized') {
+          setLaunchModalError(t('auth:error.session_expired'));
           return false;
         }
-        if (data.error === 'agent_not_granted') {
-          setLaunchModalError('You do not have permission to use this agent.');
+        if (data.code === 'agent_not_granted') {
+          setLaunchModalError(t('sessions:error.not_granted'));
           return false;
         }
-        if (data.error === 'quota_exceeded') {
+        if (data.code === 'quota_exceeded') {
           setLaunchModalError(formatQuotaExceeded(data.dimension, data.current, data.limit));
           fetchWorkspaces();
           return false;
@@ -561,14 +563,14 @@ export default React.forwardRef(function Sessions({
                 resolve();
               } else if (res?.clone_status === 'failed') {
                 clearInterval(pollId);
-                reject(new Error(res.clone_error || 'Clone failed.'));
+                reject(new Error(res.clone_error || t('git:error.clone_failed')));
               }
             } catch {
               /* keep polling */
             }
             if (attempts >= 150) {
               clearInterval(pollId);
-              reject(new Error('Clone is taking longer than expected.'));
+              reject(new Error(t('git:error.clone_timeout')));
             }
           }, 2000);
         });
@@ -576,7 +578,7 @@ export default React.forwardRef(function Sessions({
         await handleStartSession(result.id, repo.full_name || repo.name, { closeLaunchModal: true });
       } catch (err) {
         creationFailed = true;
-        setLaunchModalError(err.message || 'Import failed.');
+        setLaunchModalError(err.message || t('git:error.import_failed'));
       } finally {
         if (!creationFailed) {
           await new Promise((r) => setTimeout(r, 800));
@@ -616,7 +618,7 @@ export default React.forwardRef(function Sessions({
           return;
         }
         if (!launchWorkspaceId) {
-          setLaunchModalError('Select a workspace first.');
+          setLaunchModalError(t('sessions:error.select_workspace', { defaultValue: 'Select a workspace first.' }));
           return;
         }
         const ws = projects.find((p) => p.id === launchWorkspaceId);
@@ -696,13 +698,13 @@ export default React.forwardRef(function Sessions({
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to save keys');
+      if (!res.ok) throw new Error(data.error || t('sessions:error.save_keys_failed'));
       setSavedConfigKeys((prev) => {
         const next = { ...prev };
         Object.keys(payload).forEach((k) => { next[k] = true; });
         return next;
       });
-      showToast('success', 'Configuration saved.');
+      showToast('success', t('sessions:toast.config_saved'));
       setShowLaunchConfigModal(false);
       setLaunchModalError(null);
     } catch (err) {
@@ -721,7 +723,7 @@ export default React.forwardRef(function Sessions({
       const res = await apiFetch(withSessionId(`/api/v1/workspace/files?${qs}`));
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to load workspace files');
+        throw new Error(data.error || t('sessions:error.load_files_failed'));
       }
     } catch (err) {
       if (notifyError) showToast('error', err.message);
@@ -738,7 +740,7 @@ export default React.forwardRef(function Sessions({
       );
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to read file');
+        throw new Error(data.error || t('sessions:error.read_file_failed'));
       }
       setViewingFile(file);
       setFileContent(data.content || '');
@@ -810,7 +812,7 @@ export default React.forwardRef(function Sessions({
       editorTabs.closeTabByPath(path);
       editorTabs.bumpTreeRefresh();
       gitChanges?.fetchStatus?.({ silent: true });
-      showToast('success', 'File deleted.');
+      showToast('success', t('sessions:toast.file_deleted'));
     } catch (e) {
       showToast('error', e.message);
     }
@@ -818,14 +820,14 @@ export default React.forwardRef(function Sessions({
 
   const handleDeleteDir = useCallback(async (projectId, path) => {
     if (!path || path === '.' || path === '') {
-      showToast('error', 'Cannot delete root directory.');
+      showToast('error', t('sessions:error.cannot_delete_root', { defaultValue: 'Cannot delete root directory.' }));
       return;
     }
     try {
       await editorTabs.deleteDir(projectId, path);
       editorTabs.bumpTreeRefresh();
       gitChanges?.fetchStatus?.({ silent: true });
-      showToast('success', 'Folder deleted.');
+      showToast('success', t('sessions:toast.folder_deleted', { defaultValue: 'Folder deleted.' }));
     } catch (e) {
       showToast('error', e.message);
     }
@@ -839,7 +841,7 @@ export default React.forwardRef(function Sessions({
       editorTabs.renameTabPath(oldPath, newPath);
       editorTabs.bumpTreeRefresh();
       gitChanges?.fetchStatus?.({ silent: true });
-      showToast('success', 'Renamed.');
+      showToast('success', t('sessions:toast.renamed', { defaultValue: 'Renamed.' }));
     } catch (e) {
       showToast('error', e.message);
     }
@@ -848,9 +850,9 @@ export default React.forwardRef(function Sessions({
   const handleCopyPath = useCallback(async (path) => {
     try {
       await navigator.clipboard.writeText(path);
-      showToast('success', 'Path copied.');
+      showToast('success', t('sessions:toast.path_copied'));
     } catch {
-      showToast('error', 'Failed to copy path.');
+      showToast('error', t('sessions:error.copy_path_failed', { defaultValue: 'Failed to copy path.' }));
     }
   }, [showToast]);
 
@@ -886,7 +888,7 @@ export default React.forwardRef(function Sessions({
     const projectId = sess.projectId;
     const projectName = sess.projectName;
     if (!agentId || !projectId) {
-      showToast('error', 'Cannot start: missing agent or workspace.');
+      showToast('error', t('sessions:error.missing_agent_or_workspace', { defaultValue: 'Cannot start: missing agent or workspace.' }));
       return;
     }
     const agent = agents.find((a) => a.id === agentId);
@@ -903,7 +905,7 @@ export default React.forwardRef(function Sessions({
     try {
       const ready = await ensureAgentSecrets(agent);
       if (!ready) {
-        showToast('error', 'Configure required API keys before starting.');
+        showToast('error', t('sessions:error.configure_keys'));
         return;
       }
 
@@ -911,7 +913,7 @@ export default React.forwardRef(function Sessions({
         if (targetAlive) {
           const stopRes = await apiFetch(`/api/v1/sessions/${encodeURIComponent(oldSessionId)}/stop`, { method: 'POST' });
           const stopData = await stopRes.json();
-          if (!stopRes.ok) throw new Error(stopData.error || 'Failed to pause session');
+          if (!stopRes.ok) throw new Error(stopData.error || t('sessions:error.pause_failed', { defaultValue: 'Failed to pause session' }));
           handleSessionIdle(oldSessionId);
         }
         const response = await apiFetch(`/api/v1/sessions/${encodeURIComponent(oldSessionId)}/resume`, {
@@ -919,18 +921,18 @@ export default React.forwardRef(function Sessions({
           body: JSON.stringify({ terminal_theme_id: themeId }),
         });
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || data.detail || 'Failed to resume session');
+        if (!response.ok) throw new Error(data.error || data.detail || t('sessions:error.resume_failed'));
         setSessions((prev) => prev.map((s) => (
           s.id === oldSessionId ? { ...s, alive: true, status: 'running', memoryStatus: 'running' } : s
         )));
         setReconnectVersion((v) => v + 1);
         fetchWorkspaces();
-        showToast('success', targetAlive ? 'Session restarted.' : 'Session resumed.');
+        showToast('success', targetAlive ? t('sessions:toast.session_restarted') : t('sessions:toast.session_resumed', { defaultValue: 'Session resumed.' }));
         return;
       }
 
       const deleteRes = await apiFetch(`/api/v1/sessions/${encodeURIComponent(oldSessionId)}`, { method: 'DELETE' });
-      if (!deleteRes.ok) throw new Error('Failed to release previous session');
+      if (!deleteRes.ok) throw new Error(t('sessions:error.release_failed', { defaultValue: 'Failed to release previous session' }));
       archiveSession(oldSessionId);
 
       const response = await apiFetch('/api/v1/session/start', {
@@ -943,7 +945,7 @@ export default React.forwardRef(function Sessions({
         }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Failed to start session');
+      if (!response.ok) throw new Error(data.error || t('sessions:error.start_failed'));
 
       replaceRecentSessionId(oldSessionId, data.session_id, {
         agentId, projectId, projectName, createdAt: Date.now(),
@@ -964,7 +966,7 @@ export default React.forwardRef(function Sessions({
         return [...withoutOld, { id: data.session_id, projectId, agentId, status: 'running', alive: true, projectName, createdAt: now }];
       });
       fetchWorkspaces();
-      showToast('success', 'Session restarted.');
+      showToast('success', t('sessions:toast.session_restarted'));
     } catch (err) {
       showToast('error', err.message);
     } finally {
@@ -976,7 +978,7 @@ export default React.forwardRef(function Sessions({
     setDeletingSessionId(sessionId);
     try {
       const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete session');
+      if (!res.ok) throw new Error(t('sessions:error.delete_session_failed', { defaultValue: 'Failed to delete session' }));
       archiveSession(sessionId);
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       if (activeSession?.sessionId === sessionId) setActiveSession(null);
@@ -994,7 +996,7 @@ export default React.forwardRef(function Sessions({
       sessionId: session.id,
       isLive: session.alive === true,
       agentLabel: getAgentLabel(session.agentId),
-      workspaceName: ws?.name || 'Unassigned',
+      workspaceName: ws?.name || t('sessions:label.unassigned'),
     });
   };
 
@@ -1011,7 +1013,7 @@ export default React.forwardRef(function Sessions({
         const res = await apiFetch(`/api/v1/projects/${encodeURIComponent(workspaceId)}`, { method: 'DELETE' });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || 'Failed to delete workspace');
+          throw new Error(data.error || t('sessions:error.delete_workspace_failed'));
         }
         if (activeSession?.projectId === workspaceId) setActiveSession(null);
       }
@@ -1022,7 +1024,7 @@ export default React.forwardRef(function Sessions({
       }
       setDeleteConfirmWorkspace(null);
       fetchWorkspaces();
-      showToast('success', workspaceId === '_orphan' ? 'Unassigned sessions cleared.' : 'Workspace deleted.');
+      showToast('success', workspaceId === '_orphan' ? t('sessions:toast.unassigned_cleared', { defaultValue: 'Unassigned sessions cleared.' }) : t('sessions:toast.workspace_deleted'));
     } catch (err) {
       showToast('error', err.message);
       fetchWorkspaces();
@@ -1086,11 +1088,11 @@ export default React.forwardRef(function Sessions({
       {/* Simple delete confirm */}
       {deleteConfirmSession && (
         <ConsoleInlineDialog onClose={() => setDeleteConfirmSession(null)} panelClassName={`${consoleDialogPanelClass} w-full max-w-md`}>
-          <div className={`${consoleStructuredDialogHeaderClass}`}>Confirm</div>
-          <div className="p-5 text-sm">Remove this session?</div>
+          <div className={`${consoleStructuredDialogHeaderClass}`}>{t('common:dialog.confirm_title', { defaultValue: 'Confirm' })}</div>
+          <div className="p-5 text-sm">{t('sessions:dialog.remove_session', { defaultValue: 'Remove this session?' })}</div>
           <div className={consoleStructuredDialogFooterClass}>
-            <button onClick={() => setDeleteConfirmSession(null)} className="h-9 px-4 border rounded-md">Cancel</button>
-            <button onClick={() => handleDeleteSession(deleteConfirmSession.sessionId)} className="h-9 px-4 bg-red-600 text-white rounded-md">Remove</button>
+            <button onClick={() => setDeleteConfirmSession(null)} className="h-9 px-4 border rounded-md">{t('common:action.cancel')}</button>
+            <button onClick={() => handleDeleteSession(deleteConfirmSession.sessionId)} className="h-9 px-4 bg-red-600 text-white rounded-md">{t('sessions:action.remove')}</button>
           </div>
         </ConsoleInlineDialog>
       )}
@@ -1103,41 +1105,39 @@ export default React.forwardRef(function Sessions({
           <div className={`${consoleStructuredDialogHeaderClass} flex items-center gap-3`}>
             <Trash2 className={`w-5 h-5 shrink-0 ${textPlaceholder}`} />
             <h3 className={`font-semibold text-sm ${textPrimary}`}>
-              {deleteConfirmWorkspace.isOrphan ? 'Clear unassigned sessions' : 'Delete workspace'}
+              {deleteConfirmWorkspace.isOrphan ? t('sessions:dialog.clear_unassigned', { defaultValue: 'Clear unassigned sessions' }) : t('sessions:dialog.delete_workspace', { defaultValue: 'Delete workspace' })}
             </h3>
           </div>
           <div className={`p-5 text-sm ${textSecondary}`}>
             {deleteConfirmWorkspace.isOrphan ? (
               <>
-                Remove all sessions in <span className={`font-medium ${textPrimary}`}>Unassigned</span>?
+                {t('sessions:dialog.remove_all_sessions_in', { defaultValue: 'Remove all sessions in' })} <span className={`font-medium ${textPrimary}`}>{t('sessions:label.unassigned')}</span>?
                 {deleteConfirmWorkspace.sessionCount > 0 && (
                   <span>
                     {' '}
-                    This will remove {deleteConfirmWorkspace.sessionCount} session
-                    {deleteConfirmWorkspace.sessionCount === 1 ? '' : 's'}
+                    {t('sessions:dialog.this_will_remove', { defaultValue: 'This will remove' })} {deleteConfirmWorkspace.sessionCount} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount, defaultValue: 'session' })}
                     {deleteConfirmWorkspace.liveCount > 0 && (
-                      <> (including {deleteConfirmWorkspace.liveCount} running)</>
+                      <> ({t('sessions:dialog.including_running', { count: deleteConfirmWorkspace.liveCount, defaultValue: 'including {{count}} running' })})</>
                     )}
                     .
                   </span>
                 )}
-                <p className={`mt-2 text-xs ${textPlaceholder}`}>Unassigned is not a workspace — it groups sessions without a project. Clearing it removes those sessions from history.</p>
+                <p className={`mt-2 text-xs ${textPlaceholder}`}>{t('sessions:dialog.unassigned_description', { defaultValue: 'Unassigned is not a workspace — it groups sessions without a project. Clearing it removes those sessions from history.' })}</p>
               </>
             ) : (
               <>
-                Permanently delete <span className={`font-medium ${textPrimary}`}>{deleteConfirmWorkspace.workspaceName}</span>?
+                {t('sessions:dialog.permanently_delete', { defaultValue: 'Permanently delete' })} <span className={`font-medium ${textPrimary}`}>{deleteConfirmWorkspace.workspaceName}</span>?
                 {deleteConfirmWorkspace.sessionCount > 0 && (
                   <span>
                     {' '}
-                    This will remove {deleteConfirmWorkspace.sessionCount} session
-                    {deleteConfirmWorkspace.sessionCount === 1 ? '' : 's'}
+                    {t('sessions:dialog.this_will_remove', { defaultValue: 'This will remove' })} {deleteConfirmWorkspace.sessionCount} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount, defaultValue: 'session' })}
                     {deleteConfirmWorkspace.liveCount > 0 && (
-                      <> (including {deleteConfirmWorkspace.liveCount} running)</>
+                      <> ({t('sessions:dialog.including_running', { count: deleteConfirmWorkspace.liveCount, defaultValue: 'including {{count}} running' })})</>
                     )}
                     .
                   </span>
                 )}
-                <p className={`mt-2 text-xs ${textPlaceholder}`}>All workspace files on the server will be deleted. This frees your workspace quota.</p>
+                <p className={`mt-2 text-xs ${textPlaceholder}`}>{t('sessions:dialog.workspace_files_deleted', { defaultValue: 'All workspace files on the server will be deleted. This frees your workspace quota.' })}</p>
               </>
             )}
           </div>
@@ -1156,10 +1156,10 @@ export default React.forwardRef(function Sessions({
               className={`h-9 px-4 flex items-center justify-center gap-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700 disabled:opacity-50 ${transitionBase}`}
             >
               {deletingWorkspaceId === deleteConfirmWorkspace.workspaceId
-                ? <><Loader2 className="w-4 h-4 animate-spin" /> Removing…</>
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('sessions:action.removing', { defaultValue: 'Removing…' })}</>
                 : deleteConfirmWorkspace.isOrphan
-                  ? 'Clear all'
-                  : 'Delete workspace'}
+                  ? t('sessions:action.clear_all', { defaultValue: 'Clear all' })
+                  : t('sessions:dialog.delete_workspace', { defaultValue: 'Delete workspace' })}
             </button>
           </div>
         </ConsoleInlineDialog>
@@ -1174,7 +1174,7 @@ export default React.forwardRef(function Sessions({
           <div className={`${consoleStructuredDialogHeaderClass} flex items-center gap-2.5`}>
             <Settings2 className={`w-4 h-4 shrink-0 ${textPlaceholder}`} />
             <h3 className={`font-semibold text-sm ${textPrimary}`}>
-              Agent Configuration{activeSession?.agentName ? ` - ${activeSession.agentName}` : ''}
+              {t('sessions:dialog.agent_configuration', { defaultValue: 'Agent Configuration' })}{activeSession?.agentName ? ` - ${activeSession.agentName}` : ''}
             </h3>
           </div>
           <div className="p-4 space-y-3">
@@ -1184,7 +1184,7 @@ export default React.forwardRef(function Sessions({
             <ByokConfigForm
               agentId={activeSession.agentId}
               loading={false}
-              onSave={() => { setShowSessionConfigModal(false); setSessionConfigError(null); showToast('success', 'Configuration saved.'); }}
+              onSave={() => { setShowSessionConfigModal(false); setSessionConfigError(null); showToast('success', t('sessions:toast.config_saved')); }}
             />
           </div>
           <div className={consoleStructuredDialogFooterClass}>
@@ -1207,11 +1207,11 @@ export default React.forwardRef(function Sessions({
         >
           <div className={`${consoleStructuredDialogHeaderClass} flex items-center gap-2.5`}>
             <Power className={`w-4 h-4 shrink-0 ${textPlaceholder}`} />
-            <h3 className={`font-semibold text-sm ${textPrimary}`}>Configuration Updated</h3>
+            <h3 className={`font-semibold text-sm ${textPrimary}`}>{t('sessions:dialog.configuration_updated', { defaultValue: 'Configuration Updated' })}</h3>
           </div>
           <div className="p-4 space-y-2">
             <p className={`text-sm ${textSecondary}`}>
-              Configuration has been updated. Restart this session for the changes to take effect.
+              {t('sessions:dialog.configuration_updated_desc', { defaultValue: 'Configuration has been updated. Restart this session for the changes to take effect.' })}
             </p>
           </div>
           <div className={consoleStructuredDialogFooterClass}>
@@ -1220,14 +1220,14 @@ export default React.forwardRef(function Sessions({
               onClick={() => setShowRestartPrompt(false)}
               className={`h-9 px-3 ${bgCanvas} border ${borderHairline} ${textPrimary} rounded-md text-sm font-medium ${hoverBgSecondary} ${transitionBase}`}
             >
-              Later
+              {t('sessions:action.later', { defaultValue: 'Later' })}
             </button>
             <button
               type="button"
               onClick={() => { setShowRestartPrompt(false); handleRestartSession(); }}
               className={`h-9 px-3 flex items-center justify-center gap-2 bg-black text-white rounded-md text-sm font-medium hover:bg-zinc-700 ${transitionBase}`}
             >
-              <Power className="w-4 h-4" /> Restart Now
+              <Power className="w-4 h-4" /> {t('sessions:action.restart_now', { defaultValue: 'Restart Now' })}
             </button>
           </div>
         </ConsoleInlineDialog>
@@ -1264,8 +1264,8 @@ export default React.forwardRef(function Sessions({
                         onClick={() => handleRestartSession()}
                         disabled={sessionControlPending}
                         className={`${consoleIconButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
-                        title={restartingSession ? (sessionAlive ? 'Restarting…' : 'Starting…') : (sessionAlive ? 'Restart session' : 'Start session')}
-                        aria-label={restartingSession ? (sessionAlive ? 'Restarting session' : 'Starting session') : (sessionAlive ? 'Restart session' : 'Start session')}
+                        title={restartingSession ? (sessionAlive ? t('sessions:action.restarting', { defaultValue: 'Restarting…' }) : t('sessions:action.starting', { defaultValue: 'Starting…' })) : (sessionAlive ? t('sessions:action.restart_session', { defaultValue: 'Restart session' }) : t('sessions:action.start_session', { defaultValue: 'Start session' }))}
+                        aria-label={restartingSession ? (sessionAlive ? t('sessions:action.restarting_session', { defaultValue: 'Restarting session' }) : t('sessions:action.starting_session', { defaultValue: 'Starting session' })) : (sessionAlive ? t('sessions:action.restart_session', { defaultValue: 'Restart session' }) : t('sessions:action.start_session', { defaultValue: 'Start session' }))}
                       >
                         {restartingSession ? (
                           <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.75} />
@@ -1288,8 +1288,8 @@ export default React.forwardRef(function Sessions({
                       <button
                         type="button"
                         onClick={() => setPanelOpen((p) => !p)}
-                        title={panelOpen ? 'Hide side panel' : 'Show side panel'}
-                        aria-label={panelOpen ? 'Hide side panel' : 'Show side panel'}
+                        title={panelOpen ? t('sessions:action.hide_side_panel', { defaultValue: 'Hide side panel' }) : t('sessions:action.show_side_panel', { defaultValue: 'Show side panel' })}
+                        aria-label={panelOpen ? t('sessions:action.hide_side_panel', { defaultValue: 'Hide side panel' }) : t('sessions:action.show_side_panel', { defaultValue: 'Show side panel' })}
                         className={consoleIconButtonClass}
                       >
                         {panelOpen ? <PanelRightClose className="w-4 h-4" strokeWidth={1.75} /> : <PanelRightOpen className="w-4 h-4" strokeWidth={1.75} />}
@@ -1306,9 +1306,9 @@ export default React.forwardRef(function Sessions({
             (sessionPending && !skipPendingSpinner) ? (
               <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-white p-8 text-center">
                 <Loader2 className="w-8 h-8 text-zinc-400 animate-spin mb-4" strokeWidth={1.5} />
-                <h3 className="text-lg font-semibold text-zinc-900 mb-1.5">Preparing your environment…</h3>
+                <h3 className="text-lg font-semibold text-zinc-900 mb-1.5">{t('sessions:state.preparing_environment', { defaultValue: 'Preparing your environment…' })}</h3>
                 <p className="text-sm text-zinc-400 max-w-sm">
-                  Pulling image and starting virtual machine. This usually takes less than a minute.
+                  {t('sessions:state.preparing_environment_desc', { defaultValue: 'Pulling image and starting virtual machine. This usually takes less than a minute.' })}
                 </p>
               </div>
             ) : sessionFailed ? (
@@ -1316,9 +1316,9 @@ export default React.forwardRef(function Sessions({
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 mb-5">
                   <X className="w-7 h-7 text-red-600" strokeWidth={1.5} />
                 </div>
-                <h3 className="text-lg font-semibold text-zinc-900 mb-1.5">Session failed to start</h3>
+                <h3 className="text-lg font-semibold text-zinc-900 mb-1.5">{t('sessions:state.session_failed', { defaultValue: 'Session failed to start' })}</h3>
                 <p className="text-sm text-zinc-400 max-w-md mb-5">
-                  {activeSessionMeta?.provisioningError || 'An unexpected error occurred during provisioning.'}
+                  {activeSessionMeta?.provisioningError || t('sessions:state.provisioning_error', { defaultValue: 'An unexpected error occurred during provisioning.' })}
                 </p>
                 <div className="flex items-center gap-2">
                   <button
@@ -1327,14 +1327,14 @@ export default React.forwardRef(function Sessions({
                     className="h-9 px-4 flex items-center gap-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700 disabled:opacity-50 transition-colors"
                   >
                     <Trash2 className="w-4 h-4" strokeWidth={1.75} />
-                    Delete session
+                    {t('sessions:action.delete_session', { defaultValue: 'Delete session' })}
                   </button>
                   <button
                     type="button"
                     onClick={() => setActiveSession(null)}
                     className="h-9 px-4 flex items-center gap-2 bg-white border border-zinc-200 text-zinc-900 rounded-md text-sm font-medium hover:bg-zinc-100 transition-colors"
                   >
-                    Dismiss
+                    {t('sessions:action.dismiss', { defaultValue: 'Dismiss' })}
                   </button>
                 </div>
               </div>
@@ -1359,8 +1359,8 @@ export default React.forwardRef(function Sessions({
                   <button
                     type="button"
                     onClick={() => setPanelOpen(true)}
-                    title="Open workspace panel"
-                    aria-label="Open workspace panel"
+                    title={t('sessions:action.open_workspace_panel', { defaultValue: 'Open workspace panel' })}
+                    aria-label={t('sessions:action.open_workspace_panel', { defaultValue: 'Open workspace panel' })}
                     className="absolute right-0 top-0 h-full w-1.5 shrink-0 bg-zinc-200/40 hover:bg-zinc-400 transition-colors z-10"
                   />
                 )}
@@ -1370,7 +1370,7 @@ export default React.forwardRef(function Sessions({
                 <div
                   onMouseDown={startPanelResize}
                   className="w-1 shrink-0 cursor-col-resize bg-zinc-200 hover:bg-black transition-colors"
-                  title="Click to hide · drag to resize"
+                  title={t('workspace:action.click_to_hide_drag_to_resize', { defaultValue: 'Click to hide · drag to resize' })}
                 />
                 <div className="flex min-h-0 shrink-0 flex-col border-l border-zinc-200 bg-white" style={{ width: panelWidth }}>
                   <WorkspacePanel
@@ -1440,11 +1440,11 @@ export default React.forwardRef(function Sessions({
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-100 mb-5">
                 <TerminalSquare className="w-7 h-7 text-zinc-400" strokeWidth={1.25} />
               </div>
-              <h3 className="text-lg font-semibold text-zinc-900 mb-1.5">No active session</h3>
+              <h3 className="text-lg font-semibold text-zinc-900 mb-1.5">{t('sessions:empty.no_active_session', { defaultValue: 'No active session' })}</h3>
               <p className="text-sm text-zinc-400 max-w-sm">
                 {projects.length === 0
-                  ? 'Create a workspace, then use New Agent in the sidebar to get started.'
-                  : 'Select a session from the sidebar, or use New Agent to start one in a workspace.'}
+                  ? t('sessions:empty.create_workspace_hint', { defaultValue: 'Create a workspace, then use New Agent in the sidebar to get started.' })
+                  : t('sessions:empty.select_session_hint', { defaultValue: 'Select a session from the sidebar, or use New Agent to start one in a workspace.' })}
               </p>
             </div>
           )}
@@ -1502,7 +1502,7 @@ export default React.forwardRef(function Sessions({
                 setFileContent('');
               }}
               className={`shrink-0 rounded-md p-1.5 ${textPlaceholder} ${hoverBgTertiary} ${hoverTextPrimary} ${transitionBase}`}
-              aria-label="Close"
+              aria-label={t('common:action.close')}
             >
               <X className="w-4 h-4" />
             </button>

@@ -8,6 +8,7 @@ import {
   consoleToolbarInputClass,
   consoleDropdownPanelClass,
 } from '../lib/consoleTokens';
+import { useTranslation } from 'react-i18next';
 
 function OptionRow({ opt, isSelected, onPick }) {
   return (
@@ -44,14 +45,17 @@ export default function SelectMenu({
   value,
   onChange,
   options = [],
-  placeholder = 'Select…',
+  placeholder,
   disabled = false,
   className = '',
   searchable = false,
-  searchPlaceholder = 'Search…',
+  searchPlaceholder,
   recentValues = [],
   maxHeight = 240,
 }) {
+  const { t } = useTranslation();
+  const effectivePlaceholder = placeholder || t('common:select.placeholder');
+  const effectiveSearchPlaceholder = searchPlaceholder || t('common:select.search_placeholder');
   const [open, setOpen] = useState(false);
   const [menuRect, setMenuRect] = useState(null);
   const [query, setQuery] = useState('');
@@ -156,7 +160,7 @@ export default function SelectMenu({
     if (filteredOptions.length === 0) {
       return (
         <li role="presentation" className="px-3 py-3 text-sm text-zinc-400 text-center">
-          No matches
+          {t('common:select.no_matches')}
         </li>
       );
     }
@@ -164,7 +168,7 @@ export default function SelectMenu({
     if (showSections) {
       return (
         <>
-          <SectionLabel>Recently used</SectionLabel>
+          <SectionLabel>{t('common:select.recently_used')}</SectionLabel>
           {recentOptions.map((opt) => (
             <OptionRow
               key={`recent-${opt.value}`}
@@ -173,7 +177,7 @@ export default function SelectMenu({
               onPick={pick}
             />
           ))}
-          <SectionLabel>All agents</SectionLabel>
+          <SectionLabel>{t('common:select.all_agents')}</SectionLabel>
           {otherOptions.map((opt) => (
             <OptionRow
               key={opt.value}
@@ -234,7 +238,7 @@ export default function SelectMenu({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={searchPlaceholder}
+            placeholder={effectiveSearchPlaceholder}
             className="w-full bg-transparent pl-8 pr-8 text-sm text-zinc-700 placeholder:text-zinc-400 outline-none"
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
@@ -246,7 +250,7 @@ export default function SelectMenu({
           <button
             type="button"
             onClick={() => { setOpen(false); setQuery(''); }}
-            aria-label="Close"
+            aria-label={t('common:select.close')}
             className="absolute right-2.5 w-4 h-4 flex items-center justify-center text-zinc-400 hover:text-zinc-600"
           >
             <ChevronDown className="w-4 h-4" />
@@ -266,7 +270,7 @@ export default function SelectMenu({
           )}
         >
           <span className={selected ? 'text-zinc-900' : 'text-zinc-400'}>
-            {selected?.label ?? placeholder}
+            {selected?.label ?? effectivePlaceholder}
           </span>
           <ChevronDown
             className={`absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none transition-transform ${open ? 'rotate-180' : ''}`}

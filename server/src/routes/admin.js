@@ -21,6 +21,7 @@ const {
 } = require('../runtime/AgentBoxImageService');
 const { listBuildableAgentImages } = require('../runtime/agentBoxImages');
 const { sendPublicError } = require('../http/publicError');
+const { t } = require('../i18n');
 
 function isValidUrl(value) {
     const trimmed = String(value ?? '').trim();
@@ -63,92 +64,92 @@ function registerAdminRoutes(fastify) {
             }, request.user.id);
             return reply.code(201).send(user);
         } catch (err) {
-            return sendPublicError(reply, err, 'Request failed', 400);
+            return sendPublicError(reply, err, 'Request failed', 400, request.locale || 'en');
         }
     });
 
     fastify.get('/api/v1/admin/users/:id', { preValidation: adminPre }, async (request, reply) => {
         const user = await userAdmin.getUserDetail(request.params.id);
-        if (!user) return reply.code(404).send({ error: 'User not found' });
+        if (!user) return reply.code(404).send({ error: t('errors:user_not_found', { defaultValue: 'User not found' }, request.locale || 'en'), code: 'user_not_found' });
         return user;
     });
 
     fastify.patch('/api/v1/admin/users/:id', { preValidation: adminPre }, async (request, reply) => {
         try {
             const user = await userAdmin.updateUser(request.params.id, request.body || {}, request.user.id);
-            if (!user) return reply.code(404).send({ error: 'User not found' });
+            if (!user) return reply.code(404).send({ error: t('errors:user_not_found', { defaultValue: 'User not found' }, request.locale || 'en'), code: 'user_not_found' });
             return user;
         } catch (err) {
-            return sendPublicError(reply, err, 'Request failed', 400);
+            return sendPublicError(reply, err, 'Request failed', 400, request.locale || 'en');
         }
     });
 
     fastify.delete('/api/v1/admin/users/:id', { preValidation: adminPre }, async (request, reply) => {
         try {
             const user = await userAdmin.suspendUser(request.params.id, request.user.id);
-            if (!user) return reply.code(404).send({ error: 'User not found' });
+            if (!user) return reply.code(404).send({ error: t('errors:user_not_found', { defaultValue: 'User not found' }, request.locale || 'en'), code: 'user_not_found' });
             return user;
         } catch (err) {
-            return sendPublicError(reply, err, 'Request failed', 400);
+            return sendPublicError(reply, err, 'Request failed', 400, request.locale || 'en');
         }
     });
 
     fastify.get('/api/v1/admin/users/:id/quota', { preValidation: adminPre }, async (request, reply) => {
         const user = await userAdmin.getUserById(request.params.id);
-        if (!user) return reply.code(404).send({ error: 'User not found' });
+        if (!user) return reply.code(404).send({ error: t('errors:user_not_found', { defaultValue: 'User not found' }, request.locale || 'en'), code: 'user_not_found' });
         const policy = require('../auth/PolicyService');
         return policy.getEffectiveQuota(request.params.id, user.role);
     });
 
     fastify.put('/api/v1/admin/users/:id/quota', { preValidation: adminPre }, async (request, reply) => {
         const user = await userAdmin.getUserById(request.params.id);
-        if (!user) return reply.code(404).send({ error: 'User not found' });
+        if (!user) return reply.code(404).send({ error: t('errors:user_not_found', { defaultValue: 'User not found' }, request.locale || 'en'), code: 'user_not_found' });
         try {
             return await userAdmin.setUserQuota(request.params.id, request.body || {}, request.user.id);
         } catch (err) {
-            return sendPublicError(reply, err, 'Request failed', 400);
+            return sendPublicError(reply, err, 'Request failed', 400, request.locale || 'en');
         }
     });
 
     fastify.put('/api/v1/admin/users/:id/agents', { preValidation: adminPre }, async (request, reply) => {
         const user = await userAdmin.getUserById(request.params.id);
-        if (!user) return reply.code(404).send({ error: 'User not found' });
+        if (!user) return reply.code(404).send({ error: t('errors:user_not_found', { defaultValue: 'User not found' }, request.locale || 'en'), code: 'user_not_found' });
         try {
             const agentIds = request.body?.agent_ids || [];
             await userAdmin.setUserAgents(request.params.id, agentIds, request.user.id);
             return { agent_ids: agentIds };
         } catch (err) {
-            return sendPublicError(reply, err, 'Request failed', 400);
+            return sendPublicError(reply, err, 'Request failed', 400, request.locale || 'en');
         }
     });
 
     fastify.post('/api/v1/admin/users/:id/agents/:agentId', { preValidation: adminPre }, async (request, reply) => {
         const user = await userAdmin.getUserById(request.params.id);
-        if (!user) return reply.code(404).send({ error: 'User not found' });
+        if (!user) return reply.code(404).send({ error: t('errors:user_not_found', { defaultValue: 'User not found' }, request.locale || 'en'), code: 'user_not_found' });
         try {
             await userAdmin.grantAgent(request.params.id, request.params.agentId, request.user.id);
             return { ok: true };
         } catch (err) {
-            return sendPublicError(reply, err, 'Request failed', 400);
+            return sendPublicError(reply, err, 'Request failed', 400, request.locale || 'en');
         }
     });
 
     fastify.delete('/api/v1/admin/users/:id/agents/:agentId', { preValidation: adminPre }, async (request, reply) => {
         const user = await userAdmin.getUserById(request.params.id);
-        if (!user) return reply.code(404).send({ error: 'User not found' });
+        if (!user) return reply.code(404).send({ error: t('errors:user_not_found', { defaultValue: 'User not found' }, request.locale || 'en'), code: 'user_not_found' });
         await userAdmin.revokeAgent(request.params.id, request.params.agentId, request.user.id);
         return { ok: true };
     });
 
     fastify.post('/api/v1/admin/users/:id/reset-password', { preValidation: adminPre }, async (request, reply) => {
         const user = await userAdmin.getUserById(request.params.id);
-        if (!user) return reply.code(404).send({ error: 'User not found' });
+        if (!user) return reply.code(404).send({ error: t('errors:user_not_found', { defaultValue: 'User not found' }, request.locale || 'en'), code: 'user_not_found' });
         const newPassword = request.body?.password || request.body?.new_password;
         try {
             await userAdmin.resetPassword(request.params.id, newPassword, request.user.id);
             return { ok: true };
         } catch (err) {
-            return sendPublicError(reply, err, 'Request failed', 400);
+            return sendPublicError(reply, err, 'Request failed', 400, request.locale || 'en');
         }
     });
 
@@ -167,47 +168,47 @@ function registerAdminRoutes(fastify) {
         const mode = request.body?.registration_mode;
         const allowedModes = ['open', 'invite_only', 'admin_only', 'approval'];
         if (mode !== undefined && !allowedModes.includes(mode)) {
-            return reply.code(400).send({ error: 'Invalid registration_mode' });
+            return reply.code(400).send({ error: t('errors:invalid_registration_mode', { defaultValue: 'Invalid registration_mode' }, request.locale || 'en'), code: 'invalid_registration_mode' });
         }
         const llmMode = request.body?.llm_auth_mode;
         if (llmMode !== undefined && !['gateway', 'byok'].includes(llmMode)) {
-            return reply.code(400).send({ error: 'Invalid llm_auth_mode' });
+            return reply.code(400).send({ error: t('errors:invalid_llm_auth_mode', { defaultValue: 'Invalid llm_auth_mode' }, request.locale || 'en'), code: 'invalid_llm_auth_mode' });
         }
         const terminalThemes = require('../config/terminalThemes');
         const defaultThemeId = request.body?.default_terminal_theme_id;
         if (defaultThemeId !== undefined) {
             if (typeof defaultThemeId !== 'string' || !terminalThemes.getThemeById(defaultThemeId)) {
-                return reply.code(400).send({ error: 'Invalid default_terminal_theme_id' });
+                return reply.code(400).send({ error: t('errors:invalid_default_terminal_theme_id', { defaultValue: 'Invalid default_terminal_theme_id' }, request.locale || 'en'), code: 'invalid_default_terminal_theme_id' });
             }
         }
         const disabledIds = request.body?.disabled_terminal_theme_ids;
         if (disabledIds !== undefined) {
             if (!Array.isArray(disabledIds)) {
-                return reply.code(400).send({ error: 'disabled_terminal_theme_ids must be an array' });
+                return reply.code(400).send({ error: t('errors:disabled_theme_ids_must_be_array', { defaultValue: 'disabled_terminal_theme_ids must be an array' }, request.locale || 'en'), code: 'disabled_theme_ids_must_be_array' });
             }
             for (const id of disabledIds) {
                 if (typeof id !== 'string' || !terminalThemes.getThemeById(id)) {
-                    return reply.code(400).send({ error: `Invalid disabled terminal theme id: ${id}` });
+                    return reply.code(400).send({ error: t('errors:invalid_disabled_theme_id', { defaultValue: `Invalid disabled terminal theme id: ${id}`, id }, request.locale || 'en'), code: 'invalid_disabled_theme_id' });
                 }
             }
         }
         if (request.body?.GITHUB_CALLBACK_URL && !isValidUrl(request.body.GITHUB_CALLBACK_URL)) {
-            return reply.code(400).send({ error: 'invalid_url', field: 'GITHUB_CALLBACK_URL' });
+            return reply.code(400).send({ error: t('errors:invalid_url', { defaultValue: 'invalid_url' }, request.locale || 'en'), code: 'invalid_url', field: 'GITHUB_CALLBACK_URL' });
         }
         if (request.body?.GITHUB_API_BASE && !isValidUrl(request.body.GITHUB_API_BASE)) {
-            return reply.code(400).send({ error: 'invalid_url', field: 'GITHUB_API_BASE' });
+            return reply.code(400).send({ error: t('errors:invalid_url', { defaultValue: 'invalid_url' }, request.locale || 'en'), code: 'invalid_url', field: 'GITHUB_API_BASE' });
         }
         if (request.body?.GITLAB_CALLBACK_URL && !isValidUrl(request.body.GITLAB_CALLBACK_URL)) {
-            return reply.code(400).send({ error: 'invalid_url', field: 'GITLAB_CALLBACK_URL' });
+            return reply.code(400).send({ error: t('errors:invalid_url', { defaultValue: 'invalid_url' }, request.locale || 'en'), code: 'invalid_url', field: 'GITLAB_CALLBACK_URL' });
         }
         if (request.body?.GITLAB_API_BASE && !isValidUrl(request.body.GITLAB_API_BASE)) {
-            return reply.code(400).send({ error: 'invalid_url', field: 'GITLAB_API_BASE' });
+            return reply.code(400).send({ error: t('errors:invalid_url', { defaultValue: 'invalid_url' }, request.locale || 'en'), code: 'invalid_url', field: 'GITLAB_API_BASE' });
         }
         if (request.body?.GITEA_CALLBACK_URL && !isValidUrl(request.body.GITEA_CALLBACK_URL)) {
-            return reply.code(400).send({ error: 'invalid_url', field: 'GITEA_CALLBACK_URL' });
+            return reply.code(400).send({ error: t('errors:invalid_url', { defaultValue: 'invalid_url' }, request.locale || 'en'), code: 'invalid_url', field: 'GITEA_CALLBACK_URL' });
         }
         if (request.body?.GITEA_API_BASE && !isValidUrl(request.body.GITEA_API_BASE)) {
-            return reply.code(400).send({ error: 'invalid_url', field: 'GITEA_API_BASE' });
+            return reply.code(400).send({ error: t('errors:invalid_url', { defaultValue: 'invalid_url' }, request.locale || 'en'), code: 'invalid_url', field: 'GITEA_API_BASE' });
         }
         const body = { ...(request.body || {}) };
         const MASK = '••••••••';
@@ -262,7 +263,7 @@ function registerAdminRoutes(fastify) {
             settings.GITHUB_APP_WEBHOOK_SECRET = settings.GITHUB_APP_WEBHOOK_SECRET ? MASK : '';
             return settings;
         } catch (err) {
-            return sendPublicError(reply, err, 'Request failed', 400);
+            return sendPublicError(reply, err, 'Request failed', 400, request.locale || 'en');
         }
     });
 
@@ -316,7 +317,7 @@ function registerAdminRoutes(fastify) {
             await platformSecrets.merge(request.body || {});
             return { ok: true, secrets: await platformSecrets.getHints() };
         } catch (err) {
-            return sendPublicError(reply, err, 'Failed to save agent secrets', 500);
+            return sendPublicError(reply, err, 'Failed to save agent secrets', 500, request.locale || 'en');
         }
     });
 
@@ -340,14 +341,14 @@ function registerAdminRoutes(fastify) {
                 : undefined;
             return { ok: true, config, warning };
         } catch (err) {
-            return sendPublicError(reply, err, 'Failed to save agent gateway config', 500);
+            return sendPublicError(reply, err, 'Failed to save agent gateway config', 500, request.locale || 'en');
         }
     });
 
     fastify.get('/api/v1/admin/agents/:id/gateway-spawn-preview', { preValidation: adminPre }, async (request, reply) => {
         const { previewGatewaySpawnEnv } = require('../agents/agentEnv');
         const rows = await db.select().from(schema.agents).where(eq(schema.agents.id, request.params.id));
-        if (rows.length === 0) return reply.code(404).send({ error: 'Agent not found' });
+        if (rows.length === 0) return reply.code(404).send({ error: t('errors:agent_not_found', {}, request.locale || 'en'), code: 'agent_not_found' });
         const row = rows[0];
         const draftModel = request.query?.model;
         const draftProvider = request.query?.provider;
@@ -362,13 +363,13 @@ function registerAdminRoutes(fastify) {
                 draftAuthMode: typeof draftAuthMode === 'string' ? draftAuthMode : undefined,
             });
         } catch (err) {
-            return sendPublicError(reply, err, 'Failed to preview gateway spawn env', 500);
+            return sendPublicError(reply, err, 'Failed to preview gateway spawn env', 500, request.locale || 'en');
         }
     });
 
     fastify.get('/api/v1/admin/agents/:id/vm-resources', { preValidation: adminPre }, async (request, reply) => {
         const rows = await db.select().from(schema.agents).where(eq(schema.agents.id, request.params.id));
-        if (rows.length === 0) return reply.code(404).send({ error: 'Agent not found' });
+        if (rows.length === 0) return reply.code(404).send({ error: t('errors:agent_not_found', {}, request.locale || 'en'), code: 'agent_not_found' });
         return {
             agent_id: rows[0].id,
             vm_resources: rows[0].vmResources || null,
@@ -377,22 +378,22 @@ function registerAdminRoutes(fastify) {
 
     fastify.put('/api/v1/admin/agents/:id/vm-resources', { preValidation: adminPre }, async (request, reply) => {
         const rows = await db.select().from(schema.agents).where(eq(schema.agents.id, request.params.id));
-        if (rows.length === 0) return reply.code(404).send({ error: 'Agent not found' });
+        if (rows.length === 0) return reply.code(404).send({ error: t('errors:agent_not_found', {}, request.locale || 'en'), code: 'agent_not_found' });
         const body = request.body || {};
         const resources = {};
         if (body.disk_size_gb != null) {
             const v = Number(body.disk_size_gb);
-            if (!Number.isFinite(v) || v < 1) return reply.code(400).send({ error: 'disk_size_gb must be >= 1' });
+            if (!Number.isFinite(v) || v < 1) return reply.code(400).send({ error: t('errors:disk_size_gb_must_be_positive', { defaultValue: 'disk_size_gb must be >= 1' }, request.locale || 'en'), code: 'disk_size_gb_must_be_positive' });
             resources.disk_size_gb = v;
         }
         if (body.cpus != null) {
             const v = Number(body.cpus);
-            if (!Number.isFinite(v) || v < 1) return reply.code(400).send({ error: 'cpus must be >= 1' });
+            if (!Number.isFinite(v) || v < 1) return reply.code(400).send({ error: t('errors:cpus_must_be_positive', { defaultValue: 'cpus must be >= 1' }, request.locale || 'en'), code: 'cpus_must_be_positive' });
             resources.cpus = v;
         }
         if (body.memory_mib != null) {
             const v = Number(body.memory_mib);
-            if (!Number.isFinite(v) || v < 1) return reply.code(400).send({ error: 'memory_mib must be >= 1' });
+            if (!Number.isFinite(v) || v < 1) return reply.code(400).send({ error: t('errors:memory_mib_must_be_positive', { defaultValue: 'memory_mib must be >= 1' }, request.locale || 'en'), code: 'memory_mib_must_be_positive' });
             resources.memory_mib = v;
         }
         const json = Object.keys(resources).length > 0 ? JSON.stringify(resources) : null;
@@ -429,7 +430,7 @@ function registerAdminRoutes(fastify) {
             return { ok: true, version };
         } catch (err) {
             const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
-            return sendPublicError(reply, err, 'Failed to register image version', statusCode);
+            return sendPublicError(reply, err, 'Failed to register image version', statusCode, request.locale || 'en');
         }
     };
 
@@ -439,7 +440,7 @@ function registerAdminRoutes(fastify) {
             return { ok: true, version };
         } catch (err) {
             const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
-            return sendPublicError(reply, err, 'Failed to activate image version', statusCode);
+            return sendPublicError(reply, err, 'Failed to activate image version', statusCode, request.locale || 'en');
         }
     };
 
@@ -449,7 +450,7 @@ function registerAdminRoutes(fastify) {
             return { ok: true, version };
         } catch (err) {
             const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
-            return sendPublicError(reply, err, 'Failed to deprecate image version', statusCode);
+            return sendPublicError(reply, err, 'Failed to deprecate image version', statusCode, request.locale || 'en');
         }
     };
 
@@ -459,7 +460,7 @@ function registerAdminRoutes(fastify) {
             return result;
         } catch (err) {
             const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
-            return sendPublicError(reply, err, 'Failed to delete image version', statusCode);
+            return sendPublicError(reply, err, 'Failed to delete image version', statusCode, request.locale || 'en');
         }
     };
 
@@ -475,7 +476,7 @@ function registerAdminRoutes(fastify) {
             return reply.code(201).send({ build });
         } catch (err) {
             const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
-            return sendPublicError(reply, err, 'Failed to build image', statusCode);
+            return sendPublicError(reply, err, 'Failed to build image', statusCode, request.locale || 'en');
         }
     };
 
@@ -484,7 +485,7 @@ function registerAdminRoutes(fastify) {
             const builds = await getBuilds(request.params.agentId);
             return { builds };
         } catch (err) {
-            return reply.code(500).send({ error: 'Failed to list builds' });
+            return reply.code(500).send({ error: t('errors:failed_to_list_builds', { defaultValue: 'Failed to list builds' }, request.locale || 'en'), code: 'failed_to_list_builds' });
         }
     };
 
@@ -494,7 +495,7 @@ function registerAdminRoutes(fastify) {
             return result;
         } catch (err) {
             const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
-            return sendPublicError(reply, err, 'Failed to get build logs', statusCode);
+            return sendPublicError(reply, err, 'Failed to get build logs', statusCode, request.locale || 'en');
         }
     };
 
@@ -504,7 +505,7 @@ function registerAdminRoutes(fastify) {
             return reply.code(201).send({ build });
         } catch (err) {
             const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
-            return sendPublicError(reply, err, 'Failed to retry build', statusCode);
+            return sendPublicError(reply, err, 'Failed to retry build', statusCode, request.locale || 'en');
         }
     };
 
@@ -514,7 +515,7 @@ function registerAdminRoutes(fastify) {
             return result;
         } catch (err) {
             const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
-            return sendPublicError(reply, err, 'Failed to delete build', statusCode);
+            return sendPublicError(reply, err, 'Failed to delete build', statusCode, request.locale || 'en');
         }
     };
 
