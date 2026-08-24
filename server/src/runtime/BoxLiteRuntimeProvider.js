@@ -81,7 +81,7 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         if (fs.existsSync(path.join(wtDir, '.git'))) return wtDir;
 
         fs.mkdirSync(path.dirname(wtDir), { recursive: true });
-        const branchName = `session/${runtimeId.slice(-8)}`;
+        const branchName = `agentharness/session-${runtimeId.slice(-4)}`;
         const baseBranch = project.repoDefaultBranch || 'main';
         try {
             await execFileAsync('git', ['-C', mainDir, 'fetch', 'origin', baseBranch]);

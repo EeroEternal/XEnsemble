@@ -36,6 +36,7 @@ function extractContent(body, providerType) {
     return String(
         message.content
         || message.reasoning_content
+        || message.reasoning
         || message.text
         || '',
     ).trim();
@@ -99,7 +100,7 @@ async function testProviderConnectivity({ base_url, api_key, model, default_mode
         body = JSON.stringify({
             model: modelName,
             messages: [{ role: 'user', content: 'Reply with the single word OK.' }],
-            max_tokens: 32,
+            max_tokens: 256,
             temperature: 0,
         });
     }
