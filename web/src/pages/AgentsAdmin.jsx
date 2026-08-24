@@ -149,12 +149,14 @@ export default function AgentsAdmin() {
           <table className="w-full min-w-[640px] table-fixed text-left text-sm">
             <colgroup>
               <col className="w-48" />
-              <col className="w-56" />
+              <col className="w-36" />
+              <col className="w-auto" />
               <col className="w-16" />
             </colgroup>
             <thead className="border-b border-zinc-200 bg-white">
               <tr>
                 <th className={consoleTableHeadCellClass}>Name</th>
+                <th className={consoleTableHeadCellClass}>Provider</th>
                 <th className={consoleTableHeadCellClass}>Model</th>
                 <th className={`${consoleTableHeadCellClass} w-16`}>Actions</th>
               </tr>
@@ -162,13 +164,13 @@ export default function AgentsAdmin() {
             <tbody className="divide-y divide-zinc-100">
               {loading && agents.length === 0 ? (
                 <tr>
-                  <td colSpan={3} className={`${consoleTableBodyCellClass} text-zinc-500`}>
+                  <td colSpan={4} className={`${consoleTableBodyCellClass} text-zinc-500`}>
                     Loading...
                   </td>
                 </tr>
               ) : filteredAgents.length === 0 ? (
                 <tr>
-                  <td colSpan={3} className={`${consoleTableBodyCellClass} text-zinc-500`}>
+                  <td colSpan={4} className={`${consoleTableBodyCellClass} text-zinc-500`}>
                     {agents.length === 0 ? 'No agents registered yet.' : 'No agents match your search.'}
                   </td>
                 </tr>
@@ -183,14 +185,16 @@ export default function AgentsAdmin() {
                       </div>
                     </td>
                     <td className={consoleTableBodyCellClass}>
-                      {model.provider || model.modelText ? (
+                      {model.provider ? (
+                        <span className="text-xs font-medium text-zinc-700">{model.provider}</span>
+                      ) : (
+                        <span className="text-xs text-zinc-400">—</span>
+                      )}
+                    </td>
+                    <td className={consoleTableBodyCellClass}>
+                      {model.modelText ? (
                         <div className="flex flex-col items-start gap-0.5">
-                          <span className="text-xs text-zinc-700">
-                            <span className="font-medium">{model.provider}</span>
-                            {model.modelText ? (
-                              <span className="text-zinc-500"> / {model.modelText}</span>
-                            ) : null}
-                          </span>
+                          <span className="text-xs font-mono text-zinc-600">{model.modelText}</span>
                           <span className={`text-xs font-medium ${model.ready ? 'text-emerald-600' : 'text-amber-600'}`}>
                             {model.ready ? 'Ready' : 'Needs model'}
                           </span>
