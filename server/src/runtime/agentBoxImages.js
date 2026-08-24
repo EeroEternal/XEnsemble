@@ -1,4 +1,4 @@
-const { getManifest } = require('../agents/agentLifecycle');
+const { getManifest } = require('../agents/agentInstallManifest');
 const { RuntimeError } = require('./interfaces');
 
 const DEFAULT_REGISTRY = 'xensemble';

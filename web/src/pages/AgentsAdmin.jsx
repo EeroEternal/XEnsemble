@@ -1,13 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, Download, KeyRound, Pencil, Trash2, RefreshCw, Info, CheckCircle, Clock, Loader2, Search } from 'lucide-react';
+import { Plus, KeyRound, Pencil, RefreshCw, Info, Loader2, Search } from 'lucide-react';
 
 import Button from '../components/Button';
 import Input from '../components/Input';
 import RowActionsMenu from '../components/RowActionsMenu';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
-import { useToast } from '../components/Toast';
-import { confirm } from '../components/ConfirmDialog';
+import { getBuildState } from '../lib/imageBuildStates';
 import {
   consoleAdminPageClass,
   consoleIconButtonClass,
@@ -22,27 +21,6 @@ import AgentEditDialog from '../components/admin/AgentEditDialog';
 import AgentConfigDialog from '../components/admin/AgentConfigDialog';
 import AgentDetailsDialog from '../components/admin/AgentDetailsDialog';
 
-const ACTION_PROGRESS_LABEL = {
-  install: 'Installing',
-  uninstall: 'Removing',
-  update: 'Updating',
-};
-
-const ACTION_LOADING_HINT = {
-  install: 'This may take several minutes.',
-};
-
-function statusBadge(installed) {
-  return installed
-    ? { tone: 'success', icon: CheckCircle, label: 'Installed' }
-    : { tone: 'warning', icon: Clock, label: 'Not installed' };
-}
-
-function formatLifecycleTime(ts) {
-  if (!ts) return '';
-  return new Date(ts).toLocaleString();
-}
-
 function getAuthSummary(agent) {
   return {
     mode: 'Gateway',
@@ -51,60 +29,31 @@ function getAuthSummary(agent) {
   };
 }
 
-function LifecycleInfoDot({ lifecycle }) {
-  if (!lifecycle) return null;
-  const label = lifecycle.ok
-    ? `${lifecycle.action} OK`
-    : `${lifecycle.action} failed`;
-  const when = formatLifecycleTime(lifecycle.finished_at);
-
-  return (
-    <span className="relative inline-flex group/lifecycle">
-      <button
-        type="button"
-        tabIndex={-1}
-        className={`ml-1.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border ${
-          lifecycle.ok
-            ? 'border-zinc-300 bg-zinc-50 text-zinc-400 hover:border-zinc-400 hover:text-zinc-600'
-            : 'border-red-200 bg-red-50 text-red-500 hover:border-red-300'
-        }`}
-        aria-label={`${label}, ${when}`}
-      >
-        <span className="h-1 w-1 rounded-full bg-current" />
-      </button>
-      <span
-        role="tooltip"
-        className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1.5 hidden w-max max-w-xs -translate-x-1/2 rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs shadow-sm group-hover/lifecycle:block"
-      >
-        <span className={`block font-medium ${lifecycle.ok ? 'text-zinc-700' : 'text-red-600'}`}>
-          {label}
-        </span>
-        {!lifecycle.ok && lifecycle.message ? (
-          <span className="mt-0.5 block text-zinc-500">{lifecycle.message}</span>
-        ) : null}
-        <span className="mt-0.5 block text-zinc-400">{when}</span>
-      </span>
-    </span>
-  );
-}
-
-function patchAgentLifecycle(agents, agentId, lastLifecycle) {
-  if (!lastLifecycle) return agents;
-  return agents.map((agent) => (
-    agent.id === agentId ? { ...agent, last_lifecycle: lastLifecycle } : agent
-  ));
+function runtimeBadge(entry) {
+  if (entry?.active_version) {
+    return { ...getBuildState('ready'), tag: entry.active_version.tag || 'latest' };
+  }
+  if (entry?.build_state === 'building' || entry?.build_state === 'queued') {
+    return getBuildState(entry.build_state);
+  }
+  if (entry?.build_state === 'failed') {
+    return { ...getBuildState('failed'), label: 'Build failed' };
+  }
+  if (entry?.buildable === false) {
+    return { tone: 'neutral', icon: null, label: 'Not buildable' };
+  }
+  return { tone: 'warning', icon: null, label: 'No image', title: "Build this agent's image under Images" };
 }
 
 export default function AgentsAdmin() {
-  const { showToast } = useToast();
   const [agents, setAgents] = useState(() => loadAdminAgentsCache());
+  const [imageCatalog, setImageCatalog] = useState({});
   const [gatewayProviders, setGatewayProviders] = useState([]);
   const [loading, setLoading] = useState(() => loadAdminAgentsCache().length === 0);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [registerOpen, setRegisterOpen] = useState(false);
   const [keysAgent, setKeysAgent] = useState(null);
-  const [actionLoading, setActionLoading] = useState(null);
   const [editAgent, setEditAgent] = useState(null);
   const [detailsAgent, setDetailsAgent] = useState(null);
 
@@ -126,6 +75,20 @@ export default function AgentsAdmin() {
       });
   }, []);
 
+  const fetchAgentImages = useCallback(() => {
+    return apiFetch('/api/v1/admin/agent-images')
+      .then((res) => res.json())
+      .then((data) => {
+        const list = Array.isArray(data?.agents) ? data.agents : [];
+        const map = {};
+        for (const entry of list) {
+          if (entry?.agent_id) map[entry.agent_id] = entry;
+        }
+        setImageCatalog(map);
+      })
+      .catch(() => {});
+  }, []);
+
   const filteredAgents = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return agents;
@@ -134,7 +97,8 @@ export default function AgentsAdmin() {
 
   useEffect(() => {
     fetchAgents({ silent: agents.length > 0 });
-  }, [fetchAgents]);
+    fetchAgentImages();
+  }, [fetchAgents, fetchAgentImages]);
 
   const fetchGatewayProviders = useCallback(async () => {
     try {
@@ -150,103 +114,6 @@ export default function AgentsAdmin() {
   useEffect(() => {
     fetchGatewayProviders();
   }, [fetchGatewayProviders]);
-
-  const runAgentAction = async (agentId, action, { agentName, method = 'POST', successMsg, onSuccess } = {}) => {
-    const label = ACTION_PROGRESS_LABEL[action] || 'Processing';
-    const name = agentName || agentId;
-    const hint = ACTION_LOADING_HINT[action];
-    showToast('loading', hint ? `${label} ${name}... ${hint}` : `${label} ${name}...`);
-    setActionLoading(`${agentId}:${action}`);
-    try {
-      const res = await apiFetch(`/api/v1/admin/agents/${agentId}/${action}`, {
-        method,
-        ...(method !== 'GET' ? { body: '{}' } : {}),
-      });
-      const data = await res.json();
-      if (data.last_lifecycle) {
-        setAgents((prev) => {
-          const next = patchAgentLifecycle(prev, agentId, data.last_lifecycle);
-          saveAdminAgentsCache(next);
-          return next;
-        });
-      }
-      if (!res.ok) throw new Error(data.error);
-      if (onSuccess) onSuccess(data);
-      else if (successMsg) showToast('success', successMsg);
-      fetchAgents({ silent: true });
-      return data;
-    } catch (err) {
-      showToast('error', err.message || 'Action failed.');
-      return null;
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleInstall = (agent) => runAgentAction(agent.id, 'install', {
-    agentName: agent.name,
-    onSuccess: (data) => showToast(
-      'success',
-      data.already_installed ? `${agent.name} is already installed.` : `${agent.name} installed.`,
-    ),
-  });
-
-  const handleUninstall = async (agent) => {
-    if (!await confirm({ title: 'Uninstall Agent', message: `Uninstall ${agent.name} from this server?`, confirmLabel: 'Uninstall', variant: 'danger' })) return;
-    await runAgentAction(agent.id, 'uninstall', {
-      agentName: agent.name,
-      onSuccess: (data) => showToast(
-        'success',
-        data.already_removed ? `${agent.name} is already removed.` : `${agent.name} uninstalled.`,
-      ),
-    });
-  };
-
-  const handleCheckAndUpdate = async (agent) => {
-    setActionLoading(`${agent.id}:update`);
-    try {
-      const checkRes = await apiFetch(`/api/v1/admin/agents/${agent.id}/check-update`);
-      const check = await checkRes.json();
-      if (!checkRes.ok) throw new Error(check.error);
-      if (!check.installed) {
-        showToast('error', `${agent.name} is not installed.`);
-        return;
-      }
-
-      const shouldUpdate = check.update_available || !check.latest_version;
-      if (!shouldUpdate) {
-        showToast('success', `${agent.name} is up to date (${check.local_version}).`);
-        return;
-      }
-
-      showToast('loading', `Updating ${agent.name}...`);
-      const updateRes = await apiFetch(`/api/v1/admin/agents/${agent.id}/update`, {
-        method: 'POST',
-        body: '{}',
-      });
-      const updated = await updateRes.json();
-      if (updated.last_lifecycle) {
-        setAgents((prev) => {
-          const next = patchAgentLifecycle(prev, agent.id, updated.last_lifecycle);
-          saveAdminAgentsCache(next);
-          return next;
-        });
-      }
-      if (!updateRes.ok) throw new Error(updated.error);
-
-      const newVersion = updated.local_version || check.latest_version;
-      if (check.update_available && check.local_version && newVersion) {
-        showToast('success', `${agent.name} updated (${check.local_version} -> ${newVersion}).`);
-      } else {
-        showToast('success', newVersion ? `${agent.name} updated to ${newVersion}.` : `${agent.name} updated.`);
-      }
-      fetchAgents({ silent: true });
-    } catch (err) {
-      showToast('error', err.message || 'Update failed.');
-    } finally {
-      setActionLoading(null);
-    }
-  };
 
   return (
     <div className={consoleAdminPageClass}>
@@ -266,7 +133,7 @@ export default function AgentsAdmin() {
           </div>
           <button
             type="button"
-            onClick={() => fetchAgents({ silent: true })}
+            onClick={() => { fetchAgents({ silent: true }); fetchAgentImages(); }}
             disabled={refreshing}
             className={consoleIconButtonClass}
             title="Refresh"
@@ -318,7 +185,7 @@ export default function AgentsAdmin() {
             <thead className="border-b border-zinc-200 bg-white">
               <tr>
                 <th className={consoleTableHeadCellClass}>Name</th>
-                <th className={consoleTableHeadCellClass}>Status</th>
+                <th className={consoleTableHeadCellClass}>Runtime</th>
                 <th className={consoleTableHeadCellClass}>Version</th>
                 <th className={consoleTableHeadCellClass}>Executable</th>
                 <th className={consoleTableHeadCellClass}>Auth</th>
@@ -340,6 +207,8 @@ export default function AgentsAdmin() {
                 </tr>
               ) : filteredAgents.map((agent) => {
                 const authSummary = getAuthSummary(agent);
+                const imageEntry = imageCatalog[agent.id];
+                const runtime = runtimeBadge(imageEntry);
                 const executable = [agent.cmd, ...(agent.args || [])].filter(Boolean).join(' ');
                 return (
                   <tr key={agent.id} className="hover:bg-zinc-50/50">
@@ -350,14 +219,16 @@ export default function AgentsAdmin() {
                       </div>
                     </td>
                     <td className={consoleTableBodyCellClass}>
-                      <div className="flex items-center">
-                        <StatusBadge tone={statusBadge(agent.installed).tone} icon={statusBadge(agent.installed).icon} label={statusBadge(agent.installed).label} />
-                        <LifecycleInfoDot lifecycle={agent.last_lifecycle} />
+                      <div className="flex flex-col items-start gap-1">
+                        <StatusBadge tone={runtime.tone} icon={runtime.icon} spinning={runtime.spinning} label={runtime.label} title={runtime.title} />
+                        {runtime.tag ? (
+                          <span className="font-mono text-xs text-zinc-500">{runtime.tag}</span>
+                        ) : null}
                       </div>
                     </td>
                     <td className={consoleTableBodyCellClass}>
                       <span className="font-mono text-xs text-zinc-600">
-                        {agent.local_version ? `v${agent.local_version}` : '-'}
+                        {imageEntry?.active_version ? (imageEntry.active_version.tag || 'latest') : '-'}
                       </span>
                     </td>
                     <td className={`${consoleTableBodyCellClass} min-w-0 max-w-[16rem]`}>
@@ -387,15 +258,8 @@ export default function AgentsAdmin() {
                         label={`Actions for ${agent.name}`}
                         items={[
                           { icon: Info, label: 'View details', onClick: () => setDetailsAgent(agent) },
-                          { icon: Pencil, label: 'Edit executable', onClick: () => setEditAgent(agent), disabled: Boolean(actionLoading?.startsWith(`${agent.id}:`)) },
-                          { icon: KeyRound, label: 'Configure', onClick: () => setKeysAgent(agent), disabled: Boolean(actionLoading?.startsWith(`${agent.id}:`)) },
-                          { separator: true },
-                          ...(!agent.installed
-                            ? [{ icon: Download, label: 'Install on server', onClick: () => handleInstall(agent), busy: actionLoading === `${agent.id}:install`, busyLabel: 'Installing…' }]
-                            : [
-                                { icon: RefreshCw, label: 'Check and update', onClick: () => handleCheckAndUpdate(agent), busy: actionLoading === `${agent.id}:update`, busyLabel: 'Updating…' },
-                                { icon: Trash2, label: 'Uninstall', danger: true, onClick: () => handleUninstall(agent), busy: actionLoading === `${agent.id}:uninstall`, busyLabel: 'Removing…' },
-                              ]),
+                          { icon: Pencil, label: 'Edit executable', onClick: () => setEditAgent(agent) },
+                          { icon: KeyRound, label: 'Configure', onClick: () => setKeysAgent(agent) },
                         ]}
                       />
                     </td>

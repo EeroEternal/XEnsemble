@@ -5,6 +5,8 @@ import SelectMenu from '../SelectMenu';
 import MultiSelectMenu from '../MultiSelectMenu';
 import { ConsoleDialogShell } from '../ConsoleDialog';
 import { useToast } from '../Toast';
+import StatusBadge from '../StatusBadge';
+import { getBuildState } from '../../lib/imageBuildStates';
 import {
   consoleDialogAdminFormPanelClass,
   consoleSectionLabelClass,
@@ -25,6 +27,22 @@ function normalizeModels(model) {
   return [];
 }
 
+function imageBadge(info) {
+  if (info?.active_version) {
+    return { ...getBuildState('ready'), tag: info.active_version.tag || 'latest' };
+  }
+  if (info?.build_state === 'building' || info?.build_state === 'queued') {
+    return getBuildState(info.build_state);
+  }
+  if (info?.build_state === 'failed') {
+    return { ...getBuildState('failed'), label: 'Build failed' };
+  }
+  if (info?.buildable === false) {
+    return { tone: 'neutral', icon: null, label: 'Not buildable' };
+  }
+  return { tone: 'warning', icon: null, label: 'No image' };
+}
+
 export default function AgentConfigDialog({ agent, gatewayProviders, onClose, onSaved }) {
   const { showToast } = useToast();
   const [authDraft, setAuthDraft] = useState({ provider: '', model: [] });
@@ -32,6 +50,27 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
   const [gatewayPreview, setGatewayPreview] = useState(null);
   const [gatewayPreviewLoading, setGatewayPreviewLoading] = useState(false);
   const [vmResources, setVmResources] = useState({ disk_size_gb: '', cpus: '', memory_mib: '' });
+  const [imageInfo, setImageInfo] = useState(undefined);
+
+  useEffect(() => {
+    if (!agent) {
+      setImageInfo(undefined);
+      return undefined;
+    }
+    let cancelled = false;
+    setImageInfo(undefined);
+    apiFetch('/api/v1/admin/agent-images')
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        const list = Array.isArray(data?.agents) ? data.agents : [];
+        setImageInfo(list.find((e) => e?.agent_id === agent.id) || null);
+      })
+      .catch(() => {
+        if (!cancelled) setImageInfo(null);
+      });
+    return () => { cancelled = true; };
+  }, [agent]);
 
   useEffect(() => {
     if (!agent) return;
@@ -166,6 +205,8 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
 
   if (!agent) return null;
 
+  const badge = imageInfo ? imageBadge(imageInfo) : null;
+
   return (
     <ConsoleDialogShell
       fitContent
@@ -178,6 +219,22 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
       <p className="text-sm text-zinc-500 mb-4">
         Route this agent through the shared gateway and select the model(s) users can use.
       </p>
+      <div className="mb-4 flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50/70 px-3 py-2">
+        <span className={consoleSectionLabelClass}>Image</span>
+        {badge === null ? (
+          <span className="text-xs text-zinc-400">Loading…</span>
+        ) : (
+          <>
+            <StatusBadge tone={badge.tone} icon={badge.icon} spinning={badge.spinning} label={badge.label} />
+            {badge.tag ? (
+              <span className="font-mono text-xs text-zinc-500">{badge.tag}</span>
+            ) : null}
+            {badge.label === 'No image' ? (
+              <span className="text-xs text-zinc-400">No image yet — build one under Images.</span>
+            ) : null}
+          </>
+        )}
+      </div>
       <form onSubmit={handleSave} className="space-y-4">
         {/* Section: Gateway config */}
         <SectionDivider>

@@ -5,15 +5,6 @@ const platformSecrets = require('../admin/PlatformSecrets');
 const agentGatewayConfig = require('../admin/AgentGatewayConfig');
 const { db } = require('../db/index');
 const schema = require('../db/schema');
-const { probeAgent, formatHomePath } = require('../agents/agentProbe');
-const {
-    installAgent,
-    uninstallAgent,
-    updateAgent,
-    checkUpdate,
-    getLocalVersion,
-} = require('../agents/agentLifecycle');
-const agentLifecycleState = require('../agents/agentLifecycleState');
 const { RuntimeError } = require('../runtime/interfaces');
 const {
     listAgentBoxImageCatalog,
@@ -29,46 +20,7 @@ const {
     resolveBoxBaseImage,
 } = require('../runtime/AgentBoxImageService');
 const { listBuildableAgentImages } = require('../runtime/agentBoxImages');
-const { sendPublicError, sanitizePublicError } = require('../http/publicError');
-
-function lifecycleSuccessMessage(action, agent, result) {
-    if (action === 'install') {
-        return result.already_installed ? `${agent.name} was already installed.` : `${agent.name} installed.`;
-    }
-    if (action === 'uninstall') {
-        return result.already_removed ? `${agent.name} was already removed.` : `${agent.name} uninstalled.`;
-    }
-    if (action === 'update') {
-        return result.local_version ? `${agent.name} updated to ${result.local_version}.` : `${agent.name} updated.`;
-    }
-    return `${agent.name} ${action} completed.`;
-}
-
-async function runRecordedLifecycle(agent, action, fn) {
-    const startedAt = Date.now();
-    try {
-        const result = await fn();
-        agentLifecycleState.record(agent.id, {
-            action,
-            ok: true,
-            message: lifecycleSuccessMessage(action, agent, result),
-            started_at: startedAt,
-            finished_at: Date.now(),
-            duration_ms: Date.now() - startedAt,
-        });
-        return result;
-    } catch (err) {
-        agentLifecycleState.record(agent.id, {
-            action,
-            ok: false,
-            message: err.message || `${action} failed`,
-            started_at: startedAt,
-            finished_at: Date.now(),
-            duration_ms: Date.now() - startedAt,
-        });
-        throw err;
-    }
-}
+const { sendPublicError } = require('../http/publicError');
 
 function isValidUrl(value) {
     const trimmed = String(value ?? '').trim();
@@ -326,8 +278,6 @@ function registerAdminRoutes(fastify) {
         const gatewayConfigs = await agentGatewayConfig.getAll();
         const agents = await Promise.all(rows.map(async (row) => {
             const envRequired = JSON.parse(row.envRequired);
-            const probe = probeAgent(row.cmd);
-            const localVersion = probe.installed ? await getLocalVersion(row.cmd) : null;
             const cfg = gatewayConfigs[row.id] || null;
             const llmAuthMode = await agentGatewayConfig.getAgentAuthMode(row.id);
             let keysReady = true;
@@ -345,18 +295,12 @@ function registerAdminRoutes(fastify) {
                 cmd: row.cmd,
                 args: JSON.parse(row.args),
                 env_required: envRequired,
-                installed: probe.installed,
-                executable_path: probe.path,
-                executable_path_display: formatHomePath(probe.path),
-                local_version: localVersion,
-                installable: true,
                 llm_auth_mode: llmAuthMode,
                 keys_ready: keysReady,
                 secrets_configured: Object.fromEntries(
                     envRequired.map((k) => [k, Boolean(secretHints[k])]),
                 ),
                 gateway_config: cfg,
-                last_lifecycle: agentLifecycleState.get(row.id),
             };
         }));
         agents.sort((a, b) => a.name.localeCompare(b.name));
@@ -419,96 +363,6 @@ function registerAdminRoutes(fastify) {
             });
         } catch (err) {
             return sendPublicError(reply, err, 'Failed to preview gateway spawn env', 500);
-        }
-    });
-
-    function agentFromRow(row) {
-        return { id: row.id, name: row.name, cmd: row.cmd };
-    }
-
-    fastify.post('/api/v1/admin/agents/:id/install', { preValidation: adminPre }, async (request, reply) => {
-        const rows = await db.select().from(schema.agents).where(eq(schema.agents.id, request.params.id));
-        if (rows.length === 0) return reply.code(404).send({ error: 'Agent not found' });
-        const agent = agentFromRow(rows[0]);
-        try {
-            const result = await runRecordedLifecycle(agent, 'install', () => installAgent(agent));
-            const probe = probeAgent(agent.cmd);
-            const localVersion = probe.installed ? await getLocalVersion(agent.cmd) : null;
-            let grantsSynced = { granted_count: 0, user_count: 0 };
-            if (probe.installed) {
-                grantsSynced = await userAdmin.grantAgentToAllNonAdminUsers(
-                    agent.id,
-                    request.user.id,
-                );
-            }
-            return {
-                ...result,
-                installed: probe.installed,
-                executable_path: probe.path,
-                local_version: localVersion,
-                grants_synced: grantsSynced,
-                last_lifecycle: agentLifecycleState.get(agent.id),
-            };
-        } catch (err) {
-            const { message, statusCode } = sanitizePublicError(err, 'Agent install failed');
-            return reply.code(err.statusCode || statusCode || 500).send({
-                error: message,
-                last_lifecycle: agentLifecycleState.get(agent.id),
-            });
-        }
-    });
-
-    fastify.post('/api/v1/admin/agents/:id/uninstall', { preValidation: adminPre }, async (request, reply) => {
-        const rows = await db.select().from(schema.agents).where(eq(schema.agents.id, request.params.id));
-        if (rows.length === 0) return reply.code(404).send({ error: 'Agent not found' });
-        const agent = agentFromRow(rows[0]);
-        try {
-            const result = await runRecordedLifecycle(agent, 'uninstall', () => uninstallAgent(agent));
-            const probe = probeAgent(agent.cmd);
-            return {
-                ...result,
-                installed: probe.installed,
-                last_lifecycle: agentLifecycleState.get(agent.id),
-            };
-        } catch (err) {
-            const { message, statusCode } = sanitizePublicError(err, 'Agent install failed');
-            return reply.code(err.statusCode || statusCode || 500).send({
-                error: message,
-                last_lifecycle: agentLifecycleState.get(agent.id),
-            });
-        }
-    });
-
-    fastify.post('/api/v1/admin/agents/:id/update', { preValidation: adminPre }, async (request, reply) => {
-        const rows = await db.select().from(schema.agents).where(eq(schema.agents.id, request.params.id));
-        if (rows.length === 0) return reply.code(404).send({ error: 'Agent not found' });
-        const agent = agentFromRow(rows[0]);
-        try {
-            const result = await runRecordedLifecycle(agent, 'update', () => updateAgent(agent));
-            const probe = probeAgent(agent.cmd);
-            return {
-                ...result,
-                installed: probe.installed,
-                executable_path: probe.path,
-                last_lifecycle: agentLifecycleState.get(agent.id),
-            };
-        } catch (err) {
-            const { message, statusCode } = sanitizePublicError(err, 'Agent install failed');
-            return reply.code(err.statusCode || statusCode || 500).send({
-                error: message,
-                last_lifecycle: agentLifecycleState.get(agent.id),
-            });
-        }
-    });
-
-    fastify.get('/api/v1/admin/agents/:id/check-update', { preValidation: adminPre }, async (request, reply) => {
-        const rows = await db.select().from(schema.agents).where(eq(schema.agents.id, request.params.id));
-        if (rows.length === 0) return reply.code(404).send({ error: 'Agent not found' });
-        const agent = agentFromRow(rows[0]);
-        try {
-            return await checkUpdate(agent);
-        } catch (err) {
-            return sendPublicError(reply, err, 'Failed to check for agent updates', 500);
         }
     });
 
