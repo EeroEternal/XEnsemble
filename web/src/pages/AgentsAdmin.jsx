@@ -149,9 +149,9 @@ export default function AgentsAdmin() {
         <div className="overflow-auto max-h-[calc(100vh-200px)]">
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
-              <col className="w-1/3" />
-              <col className="w-1/3" />
-              <col className="w-1/3" />
+              <col className="w-auto" />
+              <col className="w-32" />
+              <col className="w-44" />
               <col className="w-24" />
             </colgroup>
             <thead>
