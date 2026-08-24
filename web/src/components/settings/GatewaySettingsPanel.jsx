@@ -928,7 +928,7 @@ export default function GatewaySettingsPanel() {
             </p>
           ) : (
             <div className={consoleTableShellClass}>
-              <table className="w-full table-fixed border-collapse text-left text-sm">
+              <table className="w-full table-auto border-collapse text-left text-sm">
                 <colgroup>
                   <col className="w-40" />
                   <col className="w-auto" />
