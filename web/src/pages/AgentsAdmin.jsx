@@ -147,7 +147,7 @@ export default function AgentsAdmin() {
 
       <div className={consoleTableShellClass}>
         <div className="overflow-auto max-h-[calc(100vh-200px)]">
-          <table className="w-full table-auto border-collapse text-left text-sm">
+          <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
               <col className="w-1/3" />
               <col className="w-1/3" />

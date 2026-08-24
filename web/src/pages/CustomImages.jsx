@@ -326,7 +326,7 @@ export function CustomImagesContent() {
       {showCreate && (
       <ConsoleDialogShell onClose={resetForm} fitContent>
         <form onSubmit={handleCreate}>
-          <div className={cn(consoleDialogPanelClass, 'w-[680px] max-w-[calc(100vw-2rem)] max-h-[90vh]')}>
+          <div className={cn(consoleStructuredDialogPanelClass, 'w-[680px] max-w-[calc(100vw-2rem)] h-[560px]')}>
             <ConsoleStructuredDialogHeader
               title="New Image"
               subtitle="Select components and versions to build your image"
@@ -334,7 +334,7 @@ export function CustomImagesContent() {
             <ConsoleStructuredDialogBody>
               <div className="flex flex-col gap-4">
                 <div>
-                  <div className={consoleSectionLabelClass}>Image Name</div>
+                  <div className={consoleSectionLabelClass}>Image Name<span className="text-red-500 ml-0.5">*</span></div>
                   <Input
                     ref={nameRef}
                     value={imageName}
@@ -345,10 +345,10 @@ export function CustomImagesContent() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-[2fr_3fr] gap-4">
                   {/* Component library */}
                   <div className="min-w-0">
-                    <div className={consoleSectionLabelClass}>Components</div>
+                    <div className={consoleSectionLabelClass}>Components<span className="text-red-500 ml-0.5">*</span></div>
                     <div className="relative mt-1.5">
                       <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
                       <Input
@@ -449,11 +449,6 @@ export function CustomImagesContent() {
                                     <span className="flex-1 min-w-0 truncate text-sm text-zinc-800">
                                       {comp.name}
                                     </span>
-                                    {comp.versions?.length > 0 && (
-                                      <span className="shrink-0 text-[11px] text-zinc-400">
-                                        {comp.versions.length} versions
-                                      </span>
-                                    )}
                                   </label>
                                 );
                               })}
@@ -484,9 +479,6 @@ export function CustomImagesContent() {
                             >
                               <div className="min-w-0 flex-1">
                                 <span className="block truncate text-sm text-zinc-800">{comp.name}</span>
-                                <span className="text-[11px] text-zinc-400">
-                                  {CATEGORY_LABELS[comp.category] || comp.category}
-                                </span>
                               </div>
                               {comp.versions?.length > 0 ? (
                                 <SelectMenu
@@ -589,11 +581,11 @@ export function CustomImagesContent() {
 
       {/* Image List */}
       <div className={cn(consoleTableShellClass, 'overflow-x-auto')}>
-        <table className="w-full table-auto border-collapse text-left text-sm">
+        <table className="w-full table-fixed border-collapse text-left text-sm">
           <colgroup>
-            <col className="w-auto" />
+            <col className="w-1/4" />
             <col className="w-36" />
-            <col className="w-auto" />
+            <col className="w-1/4" />
             <col className="w-28" />
             <col className="w-28" />
             <col className="w-24" />
