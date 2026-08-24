@@ -146,10 +146,10 @@ export default function AgentsAdmin() {
 
       <div className={consoleTableShellClass}>
         <div className="overflow-auto max-h-[calc(100vh-200px)]">
-          <table className="w-full min-w-[640px] table-fixed text-left text-sm">
+          <table className="w-full min-w-[860px] table-fixed text-left text-sm">
             <colgroup>
-              <col className="w-48" />
-              <col className="w-36" />
+              <col className="w-60" />
+              <col className="w-40" />
               <col className="w-auto" />
               <col className="w-16" />
             </colgroup>
