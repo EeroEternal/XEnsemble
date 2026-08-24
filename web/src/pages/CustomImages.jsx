@@ -23,6 +23,7 @@ import {
   consoleStructuredDialogPanelClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
+  consoleTableHeadRowClass,
   consoleTableShellClass,
 } from '../lib/consoleTokens';
 import { formatDuration, getBuildState } from '../lib/imageBuildStates';
@@ -588,17 +589,17 @@ export function CustomImagesContent() {
 
       {/* Image List */}
       <div className={cn(consoleTableShellClass, 'overflow-x-auto')}>
-        <table className="w-full min-w-[640px] table-fixed border-collapse text-left">
+        <table className="w-full table-fixed border-collapse text-left text-sm">
           <colgroup>
             <col className="w-auto" />
             <col className="w-36" />
             <col className="w-auto" />
             <col className="w-20" />
             <col className="w-28" />
-            <col className="w-20" />
+            <col className="w-24" />
           </colgroup>
           <thead>
-            <tr className="border-b border-zinc-200">
+            <tr className={consoleTableHeadRowClass}>
               <th className={consoleTableHeadCellClass}>Name</th>
               <th className={consoleTableHeadCellClass}>Status</th>
               <th className={consoleTableHeadCellClass}>Components</th>

@@ -10,6 +10,7 @@ import {
   consoleIconButtonClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
+  consoleTableHeadRowClass,
   consoleTableShellClass,
 } from '../lib/consoleTokens';
 import { loadAdminAgentsCache, saveAdminAgentsCache } from '../lib/adminAgentsCache';
@@ -146,15 +147,15 @@ export default function AgentsAdmin() {
 
       <div className={consoleTableShellClass}>
         <div className="overflow-auto max-h-[calc(100vh-200px)]">
-          <table className="w-full table-fixed text-left text-sm">
+          <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
               <col className="w-1/3" />
               <col className="w-1/3" />
               <col className="w-1/3" />
-              <col className="w-20" />
+              <col className="w-24" />
             </colgroup>
-            <thead className="border-b border-zinc-200 bg-white">
-              <tr>
+            <thead>
+              <tr className={consoleTableHeadRowClass}>
                 <th className={consoleTableHeadCellClass}>Name</th>
                 <th className={consoleTableHeadCellClass}>Provider</th>
                 <th className={consoleTableHeadCellClass}>Model</th>

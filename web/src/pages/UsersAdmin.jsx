@@ -17,6 +17,7 @@ import {
   consoleSectionLabelClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
+  consoleTableHeadRowClass,
   consoleTableShellClass,
 } from '../lib/consoleTokens';
 
@@ -257,17 +258,17 @@ export default function UsersAdmin() {
 
       <div className={consoleTableShellClass}>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] table-fixed text-left text-sm">
+          <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
               <col className="w-44" />
               <col className="w-28" />
               <col className="w-40" />
               <col className="w-20" />
               <col className="w-36" />
-              <col className="w-20" />
+              <col className="w-24" />
             </colgroup>
-            <thead className="border-b border-zinc-200 bg-white">
-              <tr>
+            <thead>
+              <tr className={consoleTableHeadRowClass}>
                 <th className={consoleTableHeadCellClass}>User</th>
                 <th className={consoleTableHeadCellClass}>Status</th>
                 <th className={consoleTableHeadCellClass}>Usage</th>
