@@ -3,6 +3,8 @@
  * (local disk, or BoxLite virtiofs mount).
  */
 const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 const { resolveRuntimeProvider } = require('../config/runtimeProvider');
 
 /** Providers whose workspace lives on (or is virtiofs-mounted from) the host. */
@@ -22,12 +24,13 @@ function usesHostWorkspace() {
  */
 function hostGit(cwd, args, options = {}) {
     return new Promise((resolve, reject) => {
-        // -c safe.directory=* 绕过 "dubious ownership"：server 常以 root 运行，
-        // 而 workspace 目录可能属主为运行服务用户（administrator），git 默认拒绝访问，
-        // 导致分支/status 拉取失败。
         let gitArgs = ['-c', 'safe.directory=*'];
         if (options.gitDir && options.workTree) {
             gitArgs.push('--git-dir', options.gitDir, '--work-tree', options.workTree);
+            const lockFile = path.join(options.gitDir, 'index.lock');
+            try {
+                if (fs.existsSync(lockFile)) fs.unlinkSync(lockFile);
+            } catch { /* best-effort */ }
         }
         gitArgs.push(...args);
         const child = spawn('git', gitArgs, {
