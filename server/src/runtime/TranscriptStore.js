@@ -13,7 +13,7 @@ const FLUSH_SIZE_BYTES = Number(process.env.TRANSCRIPT_FLUSH_SIZE_BYTES) || 6553
 const MAX_FRAMES = Number(process.env.TRANSCRIPT_MAX_FRAMES) || 50000;
 const TAIL_BYTES = Number(process.env.TRANSCRIPT_TAIL_BYTES) || 1048576;
 const ALT_SCREEN_TAIL_BYTES = Number(process.env.TRANSCRIPT_ALT_SCREEN_TAIL_BYTES) || 20971520;
-const ALT_SCREEN_ENTER_RE = /\x1b\[\?(?:1049|47|1047)h/;
+const TUI_ENTER_RE = /\x1b\[\?(?:1049|47|1047)h|\x1b\[\?2026h/;
 
 function safeRef(ref) {
     return String(ref || '').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -204,7 +204,12 @@ class TranscriptStore {
      * Uses a generous byte cap (20MB) to prevent unbounded memory on extreme
      * sessions while covering virtually all real-world TUI conversations.
      *
-     * CLI agents (claude code) have no alt screen — use byte-capped tail.
+     * Some TUI agents (kimi-code) use sync-term (\x1b[?2026h) for atomic
+     * screen updates in the primary buffer without alt screen. Detecting
+     * sync-term enter triggers the same 20MB cap so their incremental
+     * redraws replay correctly.
+     *
+     * CLI agents (claude code) have neither — use byte-capped tail (1MB).
      *
      * Returns { frames, omittedCount }.
      */
@@ -218,7 +223,7 @@ class TranscriptStore {
 
         for (let i = 0; i < state.frames.length; i++) {
             const f = state.frames[i];
-            if (f.kind === 'out' && typeof f.data === 'string' && ALT_SCREEN_ENTER_RE.test(f.data)) {
+            if (f.kind === 'out' && typeof f.data === 'string' && TUI_ENTER_RE.test(f.data)) {
                 return this._readTailFromIndex(state, i, ALT_SCREEN_TAIL_BYTES);
             }
         }
