@@ -299,9 +299,9 @@ export default function UsersAdmin() {
                   </td>
                   <td className={consoleTableBodyCellClass}>
                     <div className="flex flex-col gap-0.5 text-xs text-zinc-600">
-                      <span>Workspaces {user.projects_count}/{user.quotas?.max_projects ?? '-'}</span>
-                      <span>Sessions {user.active_sessions}/{user.quotas?.max_sessions ?? '-'}</span>
-                      <span>Previews {user.active_previews}/{user.quotas?.max_previews ?? '-'}</span>
+                      <span>Workspaces {user.projects_count}/{user.quotas?.max_projects == null ? 'Unlimited' : user.quotas.max_projects}</span>
+                      <span>Sessions {user.active_sessions}/{user.quotas?.max_sessions == null ? 'Unlimited' : user.quotas.max_sessions}</span>
+                      <span>Previews {user.active_previews}/{user.quotas?.max_previews == null ? 'Unlimited' : user.quotas.max_previews}</span>
                     </div>
                   </td>
                   <td className={consoleTableBodyCellClass}>

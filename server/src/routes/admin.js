@@ -97,7 +97,7 @@ function registerAdminRoutes(fastify) {
         const user = await userAdmin.getUserById(request.params.id);
         if (!user) return reply.code(404).send({ error: 'User not found' });
         const policy = require('../auth/PolicyService');
-        return policy.getEffectiveQuota(request.params.id);
+        return policy.getEffectiveQuota(request.params.id, user.role);
     });
 
     fastify.put('/api/v1/admin/users/:id/quota', { preValidation: adminPre }, async (request, reply) => {

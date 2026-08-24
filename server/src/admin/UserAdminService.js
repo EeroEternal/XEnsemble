@@ -107,15 +107,15 @@ async function listUsers() {
     const result = [];
     for (const user of users) {
         const usage = await getUsageSummary(user.id);
-        const quota = await policy.ensureUserQuota(user.id);
+        const quota = await policy.getEffectiveQuota(user.id, user.role);
         const grantedIds = await policy.listGrantedAgentIds(user.id, user.role);
         result.push(formatUserRow(user, {
             ...usage,
             quotas: {
-                max_projects: quota.maxProjects,
-                max_sessions: quota.maxSessions,
-                max_previews: quota.maxPreviews,
-                resource_tier: quota.resourceTier,
+                max_projects: quota.max_projects,
+                max_sessions: quota.max_sessions,
+                max_previews: quota.max_previews,
+                resource_tier: quota.resource_tier,
             },
             granted_agents_count: user.role === 'admin' ? null : grantedIds.length,
         }));
@@ -126,7 +126,7 @@ async function listUsers() {
 async function getUserDetail(userId) {
     const user = await getUserById(userId);
     if (!user) return null;
-    const quota = await policy.getEffectiveQuota(userId);
+    const quota = await policy.getEffectiveQuota(userId, user.role);
     const grants = await policy.listGrantedAgentIds(userId, user.role);
     return {
         ...formatUserRow(user, await getUsageSummary(userId)),
@@ -504,7 +504,7 @@ async function loginUser(username, password, deviceName = null) {
     });
 
     const accessToken = auth.generateAccessToken(user);
-    const quotas = await policy.getEffectiveQuota(user.id);
+    const quotas = await policy.getEffectiveQuota(user.id, user.role);
     const llmAuthMode = await platformSettings.getLlmAuthMode();
     return {
         access_token: accessToken,
@@ -524,7 +524,7 @@ async function getMe(userId) {
     const user = await getUserById(userId);
     if (!user) return null;
     const [quotas, granted, llmAuthMode] = await Promise.all([
-        policy.getEffectiveQuota(userId),
+        policy.getEffectiveQuota(userId, user.role),
         policy.listGrantedAgentIds(userId, user.role),
         platformSettings.getLlmAuthMode(),
     ]);

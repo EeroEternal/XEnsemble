@@ -79,12 +79,19 @@ function formatQuota(quotaRow, usage) {
     };
 }
 
-async function getEffectiveQuota(userId) {
+async function getEffectiveQuota(userId, role) {
     const [quotaRow, usage] = await Promise.all([
         ensureUserQuota(userId),
         getUsage(userId),
     ]);
-    return formatQuota(quotaRow, usage);
+    const formatted = formatQuota(quotaRow, usage);
+    if (role === 'admin') {
+        formatted.max_projects = null;
+        formatted.max_sessions = null;
+        formatted.max_previews = null;
+        formatted.max_runtimes = null;
+    }
+    return formatted;
 }
 
 async function checkQuota(userId, dimension, role) {
