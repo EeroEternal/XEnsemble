@@ -567,7 +567,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
             {sidebarOpen && (
               <div className="w-44 shrink-0 border-r border-zinc-200 bg-zinc-100 flex flex-col min-h-0">
                 <div className="flex-1 min-h-0 overflow-y-auto px-2 py-1">
-                  <WorkspaceFileTree lazy projectId={projectId} onFetchDir={onFetchDir}
+                  <WorkspaceFileTree lazy projectId={projectId} sessionId={sessionId} onFetchDir={onFetchDir}
                     selectedPath={activePath} onOpenFile={handleOpenFile}
                     refreshTrigger={refreshTrigger} onContextMenu={handleContextMenu} />
                 </div>

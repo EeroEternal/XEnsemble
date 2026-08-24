@@ -83,7 +83,7 @@ const TreeNode = memo(function TreeNode({ node, depth, expanded, selectedPath, o
   );
 });
 
-function LazyTree({ selectedPath, onOpenFile, projectId, onFetchDir, refreshTrigger = 0, onContextMenu }) {
+function LazyTree({ selectedPath, onOpenFile, projectId, sessionId, onFetchDir, refreshTrigger = 0, onContextMenu }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const [loadedDirs, setLoadedDirs] = useState(() => new Set());
   const [loadingDirs, setLoadingDirs] = useState(() => new Set());
@@ -101,16 +101,21 @@ function LazyTree({ selectedPath, onOpenFile, projectId, onFetchDir, refreshTrig
   useEffect(() => {
     if (!projectId || !onFetchDir) return;
     let cancelled = false;
+    setInitialLoading(true);
     const attempt = (attemptNo) => {
       onFetchDir(projectId, '.').then((files) => {
         if (cancelled) return;
         if (Array.isArray(files) && files.length > 0) {
           setDirChildren({ '.': files });
           setLoadedDirs(new Set(['.']));
+          setExpanded(new Set());
           setInitialLoading(false);
         } else if (attemptNo < 2) {
           setTimeout(() => attempt(attemptNo + 1), 2000 * (attemptNo + 1));
         } else {
+          setDirChildren({});
+          setLoadedDirs(new Set());
+          setExpanded(new Set());
           setInitialLoading(false);
         }
       }).catch(() => {
@@ -124,7 +129,7 @@ function LazyTree({ selectedPath, onOpenFile, projectId, onFetchDir, refreshTrig
     };
     attempt(0);
     return () => { cancelled = true; };
-  }, [projectId, onFetchDir]);
+  }, [projectId, sessionId, onFetchDir]);
 
   // Silent refresh when refreshTrigger changes: re-fetch root + all expanded dirs,
   // preserving expanded state. Dirs that fail to fetch (deleted) are collapsed.
@@ -280,13 +285,14 @@ function LazyTree({ selectedPath, onOpenFile, projectId, onFetchDir, refreshTrig
   );
 }
 
-export default function WorkspaceFileTree({ items, selectedPath, onOpenFile, showHidden = false, lazy, projectId, onFetchDir, refreshTrigger, onContextMenu }) {
+export default function WorkspaceFileTree({ items, selectedPath, onOpenFile, showHidden = false, lazy, projectId, sessionId, onFetchDir, refreshTrigger, onContextMenu }) {
   if (lazy) {
     return (
       <LazyTree
         selectedPath={selectedPath}
         onOpenFile={onOpenFile}
         projectId={projectId}
+        sessionId={sessionId}
         onFetchDir={onFetchDir}
         refreshTrigger={refreshTrigger}
         onContextMenu={onContextMenu}
