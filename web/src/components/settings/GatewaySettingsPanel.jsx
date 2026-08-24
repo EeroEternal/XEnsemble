@@ -930,67 +930,92 @@ export default function GatewaySettingsPanel() {
             <div className={consoleTableShellClass}>
               <table className="w-full table-fixed border-collapse text-left">
                 <colgroup>
-                  <col className="w-auto" />
                   <col className="w-40" />
+                  <col className="w-auto" />
+                  <col className="w-44" />
+                  <col className="w-28" />
                   <col className="w-20" />
                 </colgroup>
                 <thead>
                   <tr className={consoleTableHeadRowClass}>
                     <th className={consoleTableHeadCellClass}>Name</th>
+                    <th className={consoleTableHeadCellClass}>Endpoint</th>
+                    <th className={consoleTableHeadCellClass}>Models</th>
                     <th className={consoleTableHeadCellClass}>Status</th>
                     <th className={`${consoleTableHeadCellClass}`}>Actions</th>
                   </tr>
                 </thead>
                 <tbody className={consoleTableBodyDivideClass}>
                   {filteredProviders.map((p) => {
-                    const detailTitle = [
-                      p.base_url,
-                      p.models?.length ? `Models: ${p.models.join(', ')}` : null,
-                    ].filter(Boolean).join('\n');
+                    const models = Array.isArray(p.models) ? p.models.filter(Boolean) : [];
+                    const max = 2;
                     return (
-                      <tr key={p.name} className={consoleTableBodyRowClass}>
-                        <td className={`${consoleTableBodyCellClass} min-w-0`}>
-                          <div
-                            className="font-medium text-zinc-900 truncate"
-                            title={p.name}
-                          >
-                            {p.name}
-                          </div>
-                          <div
-                            className="text-xs text-zinc-400 truncate"
-                            title={detailTitle || undefined}
-                          >
-                            {p.models?.length > 0 ? `${p.models.length} model${p.models.length === 1 ? '' : 's'}` : 'No models'}
-                          </div>
-                        </td>
-                        <td className={`${consoleTableBodyCellClass} align-middle`}>
-                          <ProviderStatusBadge health={providerHealth[p.name]} />
-                        </td>
-                        <td className={consoleTableBodyCellClass}>
-                          <RowActionsMenu
-                            label={`Actions for ${p.name}`}
-                            items={[
-                              {
-                                icon: Activity,
-                                label: 'Test connection',
-                                onClick: () => runProviderTest(p.name),
-                                busy: testingProvider === p.name || providerHealth[p.name]?.status === 'testing',
-                                busyLabel: 'Verifying…',
-                              },
-                              { icon: Pencil, label: 'Edit', onClick: () => openEditProviderDialog(p) },
-                              { separator: true },
-                              {
-                                icon: Trash2,
-                                label: 'Remove',
-                                danger: true,
-                                onClick: () => handleDelete(p.name),
-                                busy: deleting === p.name,
-                                busyLabel: 'Removing…',
-                              },
-                            ]}
-                          />
-                        </td>
-                      </tr>
+                  <tr key={p.name} className={consoleTableBodyRowClass}>
+                    <td className={`${consoleTableBodyCellClass} min-w-0`}>
+                      <div
+                        className="font-medium text-zinc-900 truncate"
+                        title={p.name}
+                      >
+                        {p.name}
+                      </div>
+                    </td>
+                    <td className={`${consoleTableBodyCellClass} min-w-0`}>
+                      {p.base_url ? (
+                        <span className="block truncate font-mono text-xs text-zinc-600" title={p.base_url}>
+                          {p.base_url}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-zinc-400">—</span>
+                      )}
+                    </td>
+                    <td className={`${consoleTableBodyCellClass} min-w-0`}>
+                      {models.length === 0 ? (
+                        <span className="text-xs text-zinc-400">No models</span>
+                      ) : models.length <= max ? (
+                        <div className="flex flex-wrap gap-1">
+                          {models.map((m, i) => (
+                            <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">{m}</span>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {models.slice(0, max).map((m, i) => (
+                            <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">{m}</span>
+                          ))}
+                          <span className="text-xs text-zinc-400" title={models.slice(max).join(', ')}>
+                            +{models.length - max} more
+                          </span>
+                        </div>
+                      )}
+                    </td>
+                    <td className={`${consoleTableBodyCellClass} align-middle`}>
+                      <ProviderStatusBadge health={providerHealth[p.name]} />
+                    </td>
+                    <td className={consoleTableBodyCellClass}>
+                      <RowActionsMenu
+                        label={`Actions for ${p.name}`}
+                        items={[
+                          {
+                            icon: Activity,
+                            label: 'Test connection',
+                            onClick: () => runProviderTest(p.name),
+                            busy: testingProvider === p.name || providerHealth[p.name]?.status === 'testing',
+                            busyLabel: 'Verifying…',
+                          },
+                          { icon: Pencil, label: 'Edit', onClick: () => openEditProviderDialog(p) },
+                          { separator: true },
+                          {
+                            icon: Trash2,
+                            label: 'Remove',
+                            danger: true,
+                            onClick: () => handleDelete(p.name),
+                            busy: deleting === p.name,
+                            busyLabel: 'Removing…',
+                          },
+                        ]}
+                      />
+                    </td>
+                  </tr>
                     );
                   })}
                 </tbody>
