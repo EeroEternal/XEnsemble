@@ -520,23 +520,38 @@ class GitOperationService {
             const statusOut = await this._execGit(project, ['status', '--porcelain=v1', '--', ...safePaths]);
             const lines = statusOut.stdout.split('\n').filter(Boolean);
 
-            const trackedPaths = [];
-            const untrackedPaths = [];
+            const checkoutPaths = [];
+            const cleanPaths = [];
+            const rmCachedPaths = [];
             for (const line of lines) {
-                const status = line.slice(0, 2);
-                const path = line.slice(3).trim();
-                if (status[0] === '?' && status[1] === '?') {
-                    untrackedPaths.push(path);
+                const x = line[0];
+                const y = line[1];
+                const filePath = line.slice(3).trim();
+                if (x === '?' && y === '?') {
+                    cleanPaths.push(filePath);
+                } else if (x === 'A' && y === ' ') {
+                    // Staged new file (added to index, not yet committed).
+                    // git checkout -- won't work; remove from index + delete from worktree.
+                    rmCachedPaths.push(filePath);
+                    cleanPaths.push(filePath);
                 } else {
-                    trackedPaths.push(path);
+                    checkoutPaths.push(filePath);
+                    // If the file has staged changes (x != ' ' and x !== '?'),
+                    // also restore the index version to HEAD.
+                    if (x !== ' ' && x !== '?' && x !== 'A') {
+                        rmCachedPaths.push(filePath);
+                    }
                 }
             }
 
-            if (trackedPaths.length > 0) {
-                await this._execGit(project, ['checkout', '--', ...trackedPaths]);
+            if (checkoutPaths.length > 0) {
+                await this._execGit(project, ['checkout', '--', ...checkoutPaths]);
             }
-            if (untrackedPaths.length > 0) {
-                await this._execGit(project, ['clean', '-fd', '--', ...untrackedPaths]);
+            if (rmCachedPaths.length > 0) {
+                await this._execGit(project, ['rm', '--cached', '--force', '--', ...rmCachedPaths]);
+            }
+            if (cleanPaths.length > 0) {
+                await this._execGit(project, ['clean', '-fd', '--', ...cleanPaths]);
             }
         });
     }
