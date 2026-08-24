@@ -21,6 +21,8 @@ async function waitForAgentExit(runtime, runtimeRef, agentId) {
     // → SIGTERM → SIGKILL.  TUI agents like opencode only checkpoint their
     // SQLite state on SIGINT; SIGTERM kills them immediately and loses
     // uncommitted conversation history.
+    // After the process exits, `sync` waits for all pending filesystem
+    // writes (including SQLite WAL) to be flushed to disk before returning.
     const maxTries = 10;
     const script = isLinux
         ? [
@@ -38,7 +40,7 @@ async function waitForAgentExit(runtime, runtimeRef, agentId) {
             '    [ "$p" = "$$" ] && continue',
             '    cat "$f" 2>/dev/null | tr "\\0" " " | grep -q "$1" && { found=1; break; }',
             '  done',
-            '  [ "$found" = "0" ] && exit 0',
+            `  [ "$found" = "0" ] && timeout 5 sync && exit 0`,
             '  sleep 0.5',
             '  i=$((i+1))',
             'done',
@@ -53,23 +55,25 @@ async function waitForAgentExit(runtime, runtimeRef, agentId) {
             '  [ "$p" = "$$" ] && continue',
             '  cat "$f" 2>/dev/null | tr "\\0" " " | grep -q "$1" && kill -KILL "$p" 2>/dev/null',
             'done',
+            'timeout 5 sync',
         ].join('\n')
         : [
             `pkill -INT -x "$1" 2>/dev/null || pkill -INT -f "$1" 2>/dev/null || true`,
             'sleep 1',
             'i=0',
             `while [ $i -lt ${maxTries} ]; do`,
-            `  pgrep -x "$1" >/dev/null 2>&1 || pgrep -f "$1" >/dev/null 2>&1 || exit 0`,
+            `  pgrep -x "$1" >/dev/null 2>&1 || pgrep -f "$1" >/dev/null 2>&1 || { timeout 5 sync; exit 0; }`,
             '  sleep 0.5',
             '  i=$((i+1))',
             'done',
             `pkill -TERM -x "$1" 2>/dev/null || pkill -TERM -f "$1" 2>/dev/null || true`,
             'sleep 1',
             `pkill -KILL -x "$1" 2>/dev/null || pkill -KILL -f "$1" 2>/dev/null || true`,
+            'timeout 5 sync',
         ].join('\n');
 
     try {
-        await runtime.exec.exec('sh', ['-c', script, 'sh', agentCmd], {}, { runtimeRef, cwd: '/' });
+        await runtime.exec.exec('sh', ['-c', script, 'sh', agentCmd], {}, { runtimeRef, cwd: '/', timeoutMs: AGENT_EXIT_TIMEOUT_MS });
     } catch (_) {
         await new Promise((r) => setTimeout(r, 3000));
     }
