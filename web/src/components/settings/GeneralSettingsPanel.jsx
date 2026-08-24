@@ -4,7 +4,7 @@ import Button from '../Button';
 import Input from '../Input';
 import SelectMenu from '../SelectMenu';
 import { useToast } from '../Toast';
-import { consoleSectionLabelClass } from '../../lib/consoleTokens';
+import { consoleSectionLabelClass, consoleCardClass } from '../../lib/consoleTokens';
 
 import { apiFetch } from '../../lib/api';
 
@@ -63,24 +63,27 @@ export default function GeneralSettingsPanel() {
 
     return (
       <form onSubmit={handleSave} className="h-full flex flex-col">
-        <div className="flex-1 min-h-0 space-y-4">
-          <div>
-            <label className={`block mb-1 ${consoleSectionLabelClass}`}>Registration mode</label>
-            <SelectMenu
-              value={settings.registration_mode}
-              onChange={(v) => setSettings({ ...settings, registration_mode: v })}
-              options={[
-                { value: 'open', label: 'Open' },
-                { value: 'approval', label: 'Approval required' },
-                { value: 'admin_only', label: 'Admin only' },
-                { value: 'invite_only', label: 'Invite only' },
-              ]}
-            />
-          </div>
+        <div className="flex-1 min-h-0 overflow-y-auto console-scroll-hidden">
+          <div className={`${consoleCardClass} p-6`}>
+            <div className="mb-3"><h3 className={consoleSectionLabelClass}>Registration</h3></div>
+            <div className="mb-6">
+              <label className="block mb-1 text-xs text-zinc-500">Registration mode</label>
+              <SelectMenu
+                value={settings.registration_mode}
+                onChange={(v) => setSettings({ ...settings, registration_mode: v })}
+                options={[
+                  { value: 'open', label: 'Open' },
+                  { value: 'approval', label: 'Approval required' },
+                  { value: 'admin_only', label: 'Admin only' },
+                  { value: 'invite_only', label: 'Invite only' },
+                ]}
+              />
+            </div>
 
-          <div className="space-y-2">
-            <h3 className={consoleSectionLabelClass}>Default user quota</h3>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="border-t border-zinc-100 my-4" />
+
+            <div className="mb-3"><h3 className={consoleSectionLabelClass}>Default user quota</h3></div>
+            <div className="grid grid-cols-2 gap-3 mb-6">
               <div>
                 <label className="text-xs text-zinc-500">Workspaces</label>
                 <Input
@@ -136,24 +139,27 @@ export default function GeneralSettingsPanel() {
                 />
               </div>
             </div>
-          </div>
 
-          <div>
-            <label className={`block mb-1 ${consoleSectionLabelClass}`}>Session TTL (hours)</label>
-            <Input
-              type="number"
-              min={1}
-              value={settings.session_ttl_hours ?? 24}
-              onChange={(e) => setSettings({ ...settings, session_ttl_hours: e.target.value })}
-              className="h-8 py-1 w-32"
-            />
-          </div>
-        </div>
+            <div className="border-t border-zinc-100 my-4" />
 
-        <div className="pt-4 flex justify-end shrink-0">
-          <Button type="submit" size="md" disabled={saving}>
-            {saving ? 'Saving…' : 'Save'}
-          </Button>
+            <div className="mb-3"><h3 className={consoleSectionLabelClass}>Session</h3></div>
+            <div>
+              <label className="block mb-1 text-xs text-zinc-500">Session TTL (hours)</label>
+              <Input
+                type="number"
+                min={1}
+                value={settings.session_ttl_hours ?? 24}
+                onChange={(e) => setSettings({ ...settings, session_ttl_hours: e.target.value })}
+                className="h-8 py-1 w-32"
+              />
+            </div>
+
+            <div className="pt-6 flex justify-start">
+              <Button type="submit" size="md" disabled={saving}>
+                {saving ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+          </div>
         </div>
       </form>
     );
