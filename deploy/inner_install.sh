@@ -29,10 +29,21 @@ echo "==> [inner] App root: $APP_ROOT"
 # 1. SELinux: Enforcing blocks systemd from reading user_home_t files (env
 #    file, working dir, node under ~/.nvm). Switch to Permissive and persist.
 # ---------------------------------------------------------------------------
-if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" = "Enforcing" ]; then
-  echo "==> [inner] SELinux Enforcing -> Permissive"
-  setenforce 0
-  sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config 2>/dev/null || true
+if command -v getenforce >/dev/null 2>&1; then
+  if [ "$(getenforce)" = "Enforcing" ]; then
+    echo "==> [inner] SELinux runtime Enforcing -> Permissive"
+    setenforce 0
+  fi
+  # Always persist to config — even if runtime is already Permissive, the
+  # config file may still say "enforcing" and a reboot would restore it.
+  if grep -q '^SELINUX=enforcing' /etc/selinux/config 2>/dev/null; then
+    sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config
+    echo "==> [inner] SELinux config persisted -> Permissive"
+  fi
+fi
+# Also allow nginx to bind :8088 in case SELinux is re-enabled later.
+if command -v semanage >/dev/null 2>&1; then
+  semanage port -a -t http_port_t -p tcp 8088 2>/dev/null || semanage port -m -t http_port_t -p tcp 8088 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------
