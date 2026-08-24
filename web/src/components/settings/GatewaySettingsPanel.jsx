@@ -959,7 +959,7 @@ export default function GatewaySettingsPanel() {
                   <col className="w-auto" />
                   <col className="w-96" />
                   <col className="w-64" />
-                  <col className="w-24" />
+                  <col className="w-48" />
                 </colgroup>
                 <thead>
                   <tr className={consoleTableHeadRowClass}>

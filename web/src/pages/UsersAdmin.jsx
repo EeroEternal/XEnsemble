@@ -265,7 +265,7 @@ export default function UsersAdmin() {
               <col className="w-[352px]" />
               <col className="w-40" />
               <col className="w-80" />
-              <col className="w-24" />
+              <col className="w-48" />
             </colgroup>
             <thead>
               <tr className={consoleTableHeadRowClass}>

@@ -152,7 +152,7 @@ export default function AgentsAdmin() {
               <col className="w-auto" />
               <col className="w-64" />
               <col className="w-[352px]" />
-              <col className="w-24" />
+              <col className="w-48" />
             </colgroup>
             <thead>
               <tr className={consoleTableHeadRowClass}>

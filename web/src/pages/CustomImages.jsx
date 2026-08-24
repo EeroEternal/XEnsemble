@@ -588,7 +588,7 @@ export function CustomImagesContent() {
             <col className="w-auto" />
             <col className="w-28" />
             <col className="w-28" />
-            <col className="w-24" />
+            <col className="w-48" />
           </colgroup>
           <thead>
             <tr className={consoleTableHeadRowClass}>
