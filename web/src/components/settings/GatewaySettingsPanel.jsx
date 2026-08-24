@@ -182,6 +182,15 @@ function hasApiKeyForActions(dialog) {
   return Boolean(getEffectiveApiKey(dialog));
 }
 
+async function fetchSavedApiKey(name) {
+  const res = await apiFetch(`/api/v1/admin/gateway/providers/${encodeURIComponent(name)}/api-key`);
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to load API Key.');
+  }
+  return String(data.data?.api_key || '').trim();
+}
+
 function ProviderFormFields({
   form,
   onChange,
@@ -255,7 +264,7 @@ function ProviderFormFields({
               disabled={
                 !form.base_url.trim()
                 || !hasApiKey
-                || (!resolveFormTestModel(form) && !isEdit)
+                || !resolveFormTestModel(form)
               }
               onClick={onTestConnection}
             />
@@ -516,6 +525,17 @@ export default function GatewaySettingsPanel() {
     setProviderDialog((prev) => (prev ? { ...prev, apiKeyRevealed: true } : prev));
   };
 
+  const resolveApiKeyForAction = async () => {
+    if (!providerDialog) return '';
+    const direct = getEffectiveApiKey(providerDialog);
+    if (direct) return direct;
+    if (!usesSavedApiKey(providerDialog)) return '';
+    const name = providerDialog.form.name.trim();
+    const key = await fetchSavedApiKey(name);
+    setProviderDialog((prev) => (prev ? { ...prev, apiKeyFull: key } : prev));
+    return key;
+  };
+
   const handleTestConnection = async () => {
     if (!providerDialog) return;
     const { form } = providerDialog;
@@ -524,23 +544,14 @@ export default function GatewaySettingsPanel() {
       return;
     }
     const testModel = resolveFormTestModel(form);
-    if (!testModel && !usesSavedApiKey(providerDialog)) {
+    if (!testModel) {
       showToast('error', 'Default model is required to verify provider.');
       return;
     }
     setTestingConnection(true);
     setFormConnectionHealth({ status: 'testing' });
     try {
-      if (usesSavedApiKey(providerDialog)) {
-        const result = await runProviderTest(form.name.trim(), { silent: true });
-        if (result) setFormConnectionHealth(result);
-        showToast(
-          result?.status === 'ok' ? 'success' : 'error',
-          result?.message || (result?.status === 'ok' ? 'Provider available.' : 'Provider unavailable.'),
-        );
-        return;
-      }
-      const apiKey = getEffectiveApiKey(providerDialog);
+      const apiKey = await resolveApiKeyForAction();
       if (!apiKey) {
         setFormConnectionHealth({ status: 'unknown' });
         showToast('error', 'API Key is required to verify provider.');
@@ -595,23 +606,18 @@ export default function GatewaySettingsPanel() {
     }
     setFetchingModels(true);
     try {
-      let res;
-      if (usesSavedApiKey(providerDialog)) {
-        res = await apiFetch(`/api/v1/admin/gateway/providers/${encodeURIComponent(form.name.trim())}/fetch-models`, {
-          method: 'POST',
-          
-          body: '{}',
-        });
-      } else {
-        res = await apiFetch('/api/v1/admin/gateway/providers/fetch-models', {
-          method: 'POST',
-          
-          body: JSON.stringify({
-            base_url: form.base_url.trim(),
-            api_key: getEffectiveApiKey(providerDialog),
-          }),
-        });
+      const apiKey = await resolveApiKeyForAction();
+      if (!apiKey) {
+        showToast('error', 'API Key is required to fetch models. Enter it above or fill the list manually.');
+        return;
       }
+      const res = await apiFetch('/api/v1/admin/gateway/providers/fetch-models', {
+        method: 'POST',
+        body: JSON.stringify({
+          base_url: form.base_url.trim(),
+          api_key: apiKey,
+        }),
+      });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || 'Failed to fetch models.');
