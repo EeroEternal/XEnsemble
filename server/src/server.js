@@ -1,7 +1,7 @@
 const TRUSTED_PROXIES = process.env.TRUSTED_PROXIES
     ? process.env.TRUSTED_PROXIES.split(',').map((s) => s.trim()).filter(Boolean)
     : false;
-const fastify = require('fastify')({ logger: true, trustProxy: TRUSTED_PROXIES });
+const fastify = require('fastify')({ logger: true, trustProxy: TRUSTED_PROXIES, bodyLimit: 10485760 });
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
