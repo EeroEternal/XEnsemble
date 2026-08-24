@@ -146,19 +146,19 @@ export default function AgentsAdmin() {
 
       <div className={consoleTableShellClass}>
         <div className="overflow-auto max-h-[calc(100vh-200px)]">
-          <table className="w-full min-w-[860px] table-fixed text-left text-sm">
+          <table className="w-full table-fixed text-left text-sm">
             <colgroup>
-              <col className="w-60" />
-              <col className="w-40" />
-              <col className="w-auto" />
-              <col className="w-16" />
+              <col className="w-1/3" />
+              <col className="w-1/3" />
+              <col className="w-1/3" />
+              <col className="w-20" />
             </colgroup>
             <thead className="border-b border-zinc-200 bg-white">
               <tr>
                 <th className={consoleTableHeadCellClass}>Name</th>
                 <th className={consoleTableHeadCellClass}>Provider</th>
                 <th className={consoleTableHeadCellClass}>Model</th>
-                <th className={`${consoleTableHeadCellClass} w-16`}>Actions</th>
+                <th className={consoleTableHeadCellClass}>Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
@@ -203,7 +203,7 @@ export default function AgentsAdmin() {
                         <span className="text-xs text-amber-600 font-medium">Needs model</span>
                       )}
                     </td>
-                    <td className={`${consoleTableBodyCellClass} w-16`}>
+                    <td className={consoleTableBodyCellClass}>
                       <RowActionsMenu
                         label={`Actions for ${agent.name}`}
                         items={[
