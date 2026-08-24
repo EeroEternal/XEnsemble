@@ -5,8 +5,6 @@ import Button from '../components/Button';
 import Input from '../components/Input';
 import RowActionsMenu from '../components/RowActionsMenu';
 import PageHeader from '../components/PageHeader';
-import StatusBadge from '../components/StatusBadge';
-import { getBuildState } from '../lib/imageBuildStates';
 import {
   consoleAdminPageClass,
   consoleIconButtonClass,
@@ -21,33 +19,23 @@ import AgentEditDialog from '../components/admin/AgentEditDialog';
 import AgentConfigDialog from '../components/admin/AgentConfigDialog';
 import AgentDetailsDialog from '../components/admin/AgentDetailsDialog';
 
-function getAuthSummary(agent) {
-  return {
-    mode: 'Gateway',
-    hint: agent.keys_ready ? 'Ready' : 'Needs model',
-    hintClass: agent.keys_ready ? 'text-emerald-600' : 'text-amber-600',
-  };
+function normalizeModels(model) {
+  if (Array.isArray(model)) return model.map((m) => String(m || '').trim()).filter(Boolean);
+  if (model) return [String(model).trim()];
+  return [];
 }
 
-function runtimeBadge(entry) {
-  if (entry?.active_version) {
-    return { ...getBuildState('ready'), tag: entry.active_version.tag || 'latest' };
-  }
-  if (entry?.build_state === 'building' || entry?.build_state === 'queued') {
-    return getBuildState(entry.build_state);
-  }
-  if (entry?.build_state === 'failed') {
-    return { ...getBuildState('failed'), label: 'Build failed' };
-  }
-  if (entry?.buildable === false) {
-    return { tone: 'neutral', icon: null, label: 'Not buildable' };
-  }
-  return { tone: 'warning', icon: null, label: 'No image', title: "Build this agent's image under Images" };
+function getModelSummary(agent) {
+  const cfg = agent.gateway_config;
+  const provider = cfg?.provider || '';
+  const models = normalizeModels(cfg?.model);
+  const modelText = models.join(', ');
+  const ready = Boolean(agent.keys_ready);
+  return { provider, modelText, ready };
 }
 
 export default function AgentsAdmin() {
   const [agents, setAgents] = useState(() => loadAdminAgentsCache());
-  const [imageCatalog, setImageCatalog] = useState({});
   const [gatewayProviders, setGatewayProviders] = useState([]);
   const [loading, setLoading] = useState(() => loadAdminAgentsCache().length === 0);
   const [refreshing, setRefreshing] = useState(false);
@@ -75,20 +63,6 @@ export default function AgentsAdmin() {
       });
   }, []);
 
-  const fetchAgentImages = useCallback(() => {
-    return apiFetch('/api/v1/admin/agent-images')
-      .then((res) => res.json())
-      .then((data) => {
-        const list = Array.isArray(data?.agents) ? data.agents : [];
-        const map = {};
-        for (const entry of list) {
-          if (entry?.agent_id) map[entry.agent_id] = entry;
-        }
-        setImageCatalog(map);
-      })
-      .catch(() => {});
-  }, []);
-
   const filteredAgents = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return agents;
@@ -97,8 +71,7 @@ export default function AgentsAdmin() {
 
   useEffect(() => {
     fetchAgents({ silent: agents.length > 0 });
-    fetchAgentImages();
-  }, [fetchAgents, fetchAgentImages]);
+  }, [fetchAgents]);
 
   const fetchGatewayProviders = useCallback(async () => {
     try {
@@ -133,7 +106,7 @@ export default function AgentsAdmin() {
           </div>
           <button
             type="button"
-            onClick={() => { fetchAgents({ silent: true }); fetchAgentImages(); }}
+            onClick={() => fetchAgents({ silent: true })}
             disabled={refreshing}
             className={consoleIconButtonClass}
             title="Refresh"
@@ -176,40 +149,31 @@ export default function AgentsAdmin() {
           <table className="w-full min-w-[640px] table-fixed text-left text-sm">
             <colgroup>
               <col className="w-48" />
-              <col className="w-36" />
-              <col className="w-20" />
-              <col className="w-44" />
-              <col className="w-36" />
+              <col className="w-56" />
               <col className="w-16" />
             </colgroup>
             <thead className="border-b border-zinc-200 bg-white">
               <tr>
                 <th className={consoleTableHeadCellClass}>Name</th>
-                <th className={consoleTableHeadCellClass}>Runtime</th>
-                <th className={consoleTableHeadCellClass}>Version</th>
-                <th className={consoleTableHeadCellClass}>Executable</th>
-                <th className={consoleTableHeadCellClass}>Auth</th>
+                <th className={consoleTableHeadCellClass}>Model</th>
                 <th className={`${consoleTableHeadCellClass} w-16`}>Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {loading && agents.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className={`${consoleTableBodyCellClass} text-zinc-500`}>
+                  <td colSpan={3} className={`${consoleTableBodyCellClass} text-zinc-500`}>
                     Loading...
                   </td>
                 </tr>
               ) : filteredAgents.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className={`${consoleTableBodyCellClass} text-zinc-500`}>
+                  <td colSpan={3} className={`${consoleTableBodyCellClass} text-zinc-500`}>
                     {agents.length === 0 ? 'No agents registered yet.' : 'No agents match your search.'}
                   </td>
                 </tr>
               ) : filteredAgents.map((agent) => {
-                const authSummary = getAuthSummary(agent);
-                const imageEntry = imageCatalog[agent.id];
-                const runtime = runtimeBadge(imageEntry);
-                const executable = [agent.cmd, ...(agent.args || [])].filter(Boolean).join(' ');
+                const model = getModelSummary(agent);
                 return (
                   <tr key={agent.id} className="hover:bg-zinc-50/50">
                     <td className={`${consoleTableBodyCellClass} min-w-0`}>
@@ -219,39 +183,21 @@ export default function AgentsAdmin() {
                       </div>
                     </td>
                     <td className={consoleTableBodyCellClass}>
-                      <div className="flex flex-col items-start gap-1">
-                        <StatusBadge tone={runtime.tone} icon={runtime.icon} spinning={runtime.spinning} label={runtime.label} title={runtime.title} />
-                        {runtime.tag ? (
-                          <span className="font-mono text-xs text-zinc-500">{runtime.tag}</span>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td className={consoleTableBodyCellClass}>
-                      <span className="font-mono text-xs text-zinc-600">
-                        {imageEntry?.active_version ? (imageEntry.active_version.tag || 'latest') : '-'}
-                      </span>
-                    </td>
-                    <td className={`${consoleTableBodyCellClass} min-w-0 max-w-[16rem]`}>
-                      <span className="block truncate font-mono text-xs text-zinc-600" title={executable}>
-                        {executable}
-                      </span>
-                    </td>
-                    <td className={consoleTableBodyCellClass}>
-                      <span className="text-xs text-zinc-700">
-                        <span className="font-medium">{authSummary.mode}</span>
-                        <span
-                          className={`ml-1 ${authSummary.hintClass}`}
-                          title={
-                            agent.llm_auth_mode === 'gateway'
-                              ? (agent.keys_ready
-                                ? 'Gateway model configured; agent can launch.'
-                                : 'Select a model under Configure.')
-                              : 'Users supply API keys before launching.'
-                          }
-                        >
-                          ({authSummary.hint})
-                        </span>
-                      </span>
+                      {model.provider || model.modelText ? (
+                        <div className="flex flex-col items-start gap-0.5">
+                          <span className="text-xs text-zinc-700">
+                            <span className="font-medium">{model.provider}</span>
+                            {model.modelText ? (
+                              <span className="text-zinc-500"> / {model.modelText}</span>
+                            ) : null}
+                          </span>
+                          <span className={`text-xs font-medium ${model.ready ? 'text-emerald-600' : 'text-amber-600'}`}>
+                            {model.ready ? 'Ready' : 'Needs model'}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-amber-600 font-medium">Needs model</span>
+                      )}
                     </td>
                     <td className={`${consoleTableBodyCellClass} w-16`}>
                       <RowActionsMenu
