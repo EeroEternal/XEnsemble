@@ -50,7 +50,7 @@ const AGENT_BOX_IMAGE_CATALOG = {
     // engines: >=18
     'minimax-cli': { tag: 'minimax-cli', buildable: true, minNodeVersion: '18' },
     // engines: >=22.19.0
-    'pi': { tag: 'pi', buildable: true, minNodeVersion: '22', install: 'npm install -g --ignore-scripts @earendil-works/pi-coding-agent' },
+    'pi': { tag: 'pi', buildable: true, minNodeVersion: '22', install: 'npm install -g --ignore-scripts @earendil-works/pi-coding-agent && curl -fsSL --retry 3 --http1.1 https://ghfast.top/https://github.com/sharkdp/fd/releases/download/v10.1.0/fd-v10.1.0-x86_64-unknown-linux-musl.tar.gz | tar -xzf - -C /tmp && mv /tmp/fd-v10.1.0-x86_64-unknown-linux-musl/fd /usr/local/bin/fd && curl -fsSL --retry 3 --http1.1 https://ghfast.top/https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz | tar -xzf - -C /tmp && mv /tmp/ripgrep-14.1.1-x86_64-unknown-linux-musl/rg /usr/local/bin/rg' },
     // prebuilt standalone binary — no Node.js version requirement
     'github-copilot': { tag: 'github-copilot', buildable: true },
     'cursor': { tag: 'cursor', buildable: true, install: 'curl https://cursor.com/install -fsS | bash' },
