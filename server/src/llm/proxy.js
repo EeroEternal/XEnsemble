@@ -185,11 +185,13 @@ function forwardToGateway(request, reply, { targetBaseUrl, gatewayKey, path }) {
 async function proxyLlmRequest(request, reply) {
     const rawToken = extractBearerToken(request.raw);
     if (!rawToken) {
+        request.log.warn({ path: request.url, hasAuth: !!request.headers.authorization, hasApiKey: !!request.headers['x-api-key'] }, '[llm-proxy] missing session token');
         return reply.code(401).send({ error: 'Missing session token (Authorization: Bearer xel_…)' });
     }
 
     const claims = verifySessionToken(rawToken);
     if (!claims) {
+        request.log.warn({ tokenPrefix: rawToken.slice(0, 20), tokenLen: rawToken.length, path: request.url }, '[llm-proxy] token verification failed');
         return reply.code(401).send({ error: 'Invalid or expired session token' });
     }
 
