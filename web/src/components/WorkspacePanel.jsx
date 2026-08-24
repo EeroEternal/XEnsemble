@@ -52,9 +52,11 @@ function migrateTabKey(key) {
   return key;
 }
 
-function readExtraTabs() {
+function readExtraTabs(sessionId) {
   try {
-    const raw = sessionStorage.getItem('xe_extra_tabs');
+    const raw = sessionId
+      ? sessionStorage.getItem(`xe_extra_tabs_${sessionId}`)
+      : sessionStorage.getItem('xe_extra_tabs');
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
@@ -65,12 +67,15 @@ function readExtraTabs() {
   } catch {
     // ignore
   }
-  const legacy = migrateTabKey(sessionStorage.getItem('xe_main_tab') || '');
-  return legacy && ADDABLE_KEYS.has(legacy) && legacy !== 'deploy' ? [legacy] : [];
+  return [];
 }
 
-function readMainTab(extraTabs) {
-  const stored = migrateTabKey(sessionStorage.getItem('xe_main_tab') || 'files');
+function readMainTab(sessionId, extraTabs) {
+  const stored = migrateTabKey(
+    (sessionId
+      ? sessionStorage.getItem(`xe_main_tab_${sessionId}`)
+      : sessionStorage.getItem('xe_main_tab')) || 'files'
+  );
   if (stored === 'files' || stored === 'changes') return stored;
   if (extraTabs.includes(stored)) return stored;
   return 'files';
@@ -127,18 +132,21 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
     setSelectedMR(null);
   }, [projectId, sessionId]);
 
-  // 进入（或切换）session 时默认切到文件界面，避免停留在上次的 tab（如 preview / deploy）
+  // 切换 session 时恢复该 session 上次的 tab 状态（而非强制切回 files）
   useEffect(() => {
-    if (!projectId) return;
-    setMainTab('files');
-  }, [projectId, sessionId]);
+    if (!sessionId) return;
+    const savedExtra = readExtraTabs(sessionId);
+    const savedMain = readMainTab(sessionId, savedExtra);
+    setExtraTabs(savedExtra);
+    setMainTab(savedMain);
+  }, [sessionId]);
 
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     const stored = sessionStorage.getItem('xe_sidebar_open');
     return stored !== null ? stored === 'true' : true;
   });
-  const [extraTabs, setExtraTabs] = useState(readExtraTabs);
-  const [mainTab, setMainTab] = useState(() => readMainTab(readExtraTabs()));
+  const [extraTabs, setExtraTabs] = useState(() => readExtraTabs(sessionId));
+  const [mainTab, setMainTab] = useState(() => readMainTab(sessionId, readExtraTabs(sessionId)));
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [addMenuRect, setAddMenuRect] = useState(null);
   const addBtnRef = useRef(null);
@@ -150,13 +158,17 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   }, [sidebarOpen]);
 
   useEffect(() => {
-    sessionStorage.setItem('xe_main_tab', mainTab);
+    if (sessionId) {
+      sessionStorage.setItem(`xe_main_tab_${sessionId}`, mainTab);
+    }
     if (changesTabActiveRef) changesTabActiveRef.current = (mainTab === 'changes');
-  }, [mainTab, changesTabActiveRef]);
+  }, [mainTab, sessionId, changesTabActiveRef]);
 
   useEffect(() => {
-    sessionStorage.setItem('xe_extra_tabs', JSON.stringify(extraTabs));
-  }, [extraTabs]);
+    if (sessionId) {
+      sessionStorage.setItem(`xe_extra_tabs_${sessionId}`, JSON.stringify(extraTabs));
+    }
+  }, [extraTabs, sessionId]);
 
   useEffect(() => {
     if (showNewFile && newFileInputRef.current) {
@@ -394,8 +406,10 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
     setExtraTabs([]);
     setMainTab('files');
     try {
-      sessionStorage.removeItem('xe_main_tab');
-      sessionStorage.removeItem('xe_extra_tabs');
+      if (sessionId) {
+        sessionStorage.removeItem(`xe_main_tab_${sessionId}`);
+        sessionStorage.removeItem(`xe_extra_tabs_${sessionId}`);
+      }
     } catch { /* ignore */ }
   }, []);
 
