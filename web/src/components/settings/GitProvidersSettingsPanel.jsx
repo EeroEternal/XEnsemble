@@ -126,12 +126,7 @@ export default function GitProvidersSettingsPanel() {
     <div className="space-y-8">
       {/* Git Account Configuration */}
       <section className="space-y-4">
-        <div>
-          <h3 className={consoleSectionLabelClass}>Git Account</h3>
-          <p className="text-xs text-zinc-500 mt-1">
-            Connect your personal Git account for repository import and pull requests.
-          </p>
-        </div>
+        <h3 className={consoleSectionLabelClass}>Git Account</h3>
 
         <div className="space-y-4">
           <div className="flex gap-1 border-b border-zinc-200 pb-0">
@@ -150,36 +145,10 @@ export default function GitProvidersSettingsPanel() {
               </button>
             ))}
           </div>
-
-          {(git.error || providerOAuthConfigured[activeProvider] === false) && (
-            <GitOAuthAlert
-              message={git.error || `${activeProvider} OAuth is not configured`}
-              provider={activeProvider}
-            />
-          )}
-
-          <GitConnectButton
-            provider={activeProvider}
-            connection={git.connection}
-            loading={git.loading}
-            onConnect={git.connect}
-            onDisconnect={git.disconnect}
-            disabled={providerOAuthConfigured[activeProvider] === false}
-          />
-        </div>
-      </section>
-
       <div className="border-t border-zinc-200" />
-
       {/* OAuth Application Configuration */}
       <section className="space-y-4">
-        <div>
-          <h3 className={consoleSectionLabelClass}>OAuth Apps</h3>
-          <p className="text-xs text-zinc-500 mt-1">
-            Configure the OAuth application credentials used by all users for Git authentication.
-          </p>
-        </div>
-
+        <h3 className={consoleSectionLabelClass}>OAuth Apps</h3>
         {error ? (
           <div className="space-y-4">
             <p className="text-sm text-red-600">{error}</p>
