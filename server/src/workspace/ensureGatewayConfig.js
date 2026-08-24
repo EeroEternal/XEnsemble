@@ -290,18 +290,16 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             };
 
         case 'opencode': {
-            const safeModelId = (t) => t.replace('/', ':');
             const ocModels = {};
             for (const t of targets) {
-                const id = safeModelId(t);
-                ocModels[id] = { name: id };
+                ocModels[t] = { name: t };
             }
             return {
                 dirPath: '/root/.config/opencode',
                 filePath: '/root/.config/opencode/opencode.json',
                 content: JSON.stringify({
                     autoupdate: false,
-                    model: `gateway/${safeModelId(def)}`,
+                    model: def,
                     provider: {
                         gateway: {
                             npm: '@ai-sdk/openai-compatible',

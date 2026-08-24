@@ -180,14 +180,12 @@ function applyOpencodeGatewayEnv(env, modelTargets, defaultTarget) {
     if (!routerUrl || !routerKey || targets.length === 0) return env;
     const defaultModel = ((defaultTarget ?? targets[0]) ?? '').trim();
     const models = {};
-    const safeModelId = (target) => target.replace('/', ':');
     for (const target of targets) {
-        const id = safeModelId(target);
-        models[id] = { name: id };
+        models[target] = { name: target };
     }
     const config = {
         autoupdate: false,
-        model: `gateway/${safeModelId(defaultModel)}`,
+        model: defaultModel,
         provider: {
             gateway: {
                 npm: '@ai-sdk/openai-compatible',
