@@ -216,6 +216,18 @@ class SessionManager {
         return session;
     }
 
+    forceClear(sessionId) {
+        const session = this.sessions.get(sessionId);
+        if (!session) return null;
+        session.status = 'idle';
+        session.handle = null;
+        session.hibernating = false;
+        session.exitListeners.clear();
+        session.outputListeners.clear();
+        session.activeTerminalSubscribers = 0;
+        return session;
+    }
+
     deleteSession(sessionId) {
         const session = this.sessions.get(sessionId);
         if (session) {

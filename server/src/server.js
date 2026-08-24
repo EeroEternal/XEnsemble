@@ -1214,16 +1214,20 @@ fastify.post('/api/v1/sessions/:sessionId/resume', { preValidation: [fastify.aut
     const session = rows[0];
     if (sessionManager.isAlive(sessionId)) {
         const live = sessionManager.getSession(sessionId);
-        return {
-            session_id: sessionId,
-            status: 'running',
-            runtime_id: session.runtimeId || null,
-            stream_ref: live?.streamRef || session.streamRef || null,
-            recoverable: Boolean(session.recoverable),
-            terminal_theme_id: terminal_theme_id || null,
-            spawn_env_preview: null,
-            state_dir_ref: session.stateDirRef || null,
-        };
+        if (session.status === 'idle' || session.status === 'exited') {
+            sessionManager.forceClear(sessionId);
+        } else {
+            return {
+                session_id: sessionId,
+                status: 'running',
+                runtime_id: session.runtimeId || null,
+                stream_ref: live?.streamRef || session.streamRef || null,
+                recoverable: Boolean(session.recoverable),
+                terminal_theme_id: terminal_theme_id || null,
+                spawn_env_preview: null,
+                state_dir_ref: session.stateDirRef || null,
+            };
+        }
     }
     if (session.status !== 'exited' && session.status !== 'idle' && session.status !== 'running') {
         return reply.code(409).send({ error: 'session not resumable - please start a new session' });
