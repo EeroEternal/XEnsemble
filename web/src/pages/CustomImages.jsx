@@ -595,7 +595,7 @@ export function CustomImagesContent() {
             <col className="w-auto" />
             <col className="w-20" />
             <col className="w-28" />
-            <col className="w-32" />
+            <col className="w-20" />
           </colgroup>
           <thead>
             <tr className="border-b border-zinc-200">
