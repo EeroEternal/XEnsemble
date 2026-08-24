@@ -80,16 +80,27 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         const wtDir = workspace.worktreeDir(project.userId, project.id, runtimeId);
         if (fs.existsSync(path.join(wtDir, '.git'))) return wtDir;
 
+        fs.mkdirSync(path.dirname(wtDir), { recursive: true });
+        const branchName = `session/${runtimeId.slice(-8)}`;
+        const baseBranch = project.repoDefaultBranch || 'main';
         try {
-            fs.mkdirSync(path.dirname(wtDir), { recursive: true });
-            await execFileAsync('git', ['-C', mainDir, 'worktree', 'add', '--detach', wtDir]);
-            // The .git pointer remains as the host path. Host-side git uses
-            // --git-dir/--work-tree explicitly (bypassing the pointer). VM-side
-            // git is fixed up by _initFreshSessionExecs which rewrites the
-            // pointer to /workspace.git/worktrees/<rtId> after the VM boots.
+            await execFileAsync('git', ['-C', mainDir, 'fetch', 'origin', baseBranch]);
+        } catch { /* offline or no remote */ }
+        try {
+            await execFileAsync('git', ['-C', mainDir, 'worktree', 'add', '-b', branchName, wtDir, `origin/${baseBranch}`]);
             return wtDir;
         } catch {
-            return null;
+            try {
+                await execFileAsync('git', ['-C', mainDir, 'worktree', 'add', '-b', branchName, wtDir]);
+                return wtDir;
+            } catch {
+                try {
+                    await execFileAsync('git', ['-C', mainDir, 'worktree', 'add', '--detach', wtDir]);
+                    return wtDir;
+                } catch {
+                    return null;
+                }
+            }
         }
     }
 
