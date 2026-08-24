@@ -17,7 +17,7 @@ const BYOK_FIELDS = {
             { key: 'api_key', label: 'API Key', tooltip: 'Moonshot/Kimi API 密钥', type: 'secret', defaultValue: '', required: true },
             { key: 'base_url', label: 'Base URL', tooltip: 'API 基础地址', type: 'string', defaultValue: 'https://api.moonshot.cn/v1', required: false },
             { key: 'model', label: 'Model', tooltip: '模型 ID', type: 'string', defaultValue: 'kimi-k2.5', required: false },
-            { key: 'max_context_size', label: 'Max Context Size', tooltip: '最大上下文窗口（token 数）', type: 'number', defaultValue: 256000, required: false },
+            { key: 'max_context_size', label: 'Max Context Size', tooltip: '最大上下文窗口（token 数）', type: 'number', defaultValue: 1048576, required: false },
         ],
     },
     'claude-code': {
@@ -281,7 +281,7 @@ function generateKimiCode(values) {
     const apiKey = str(values.api_key);
     const baseUrl = str(values.base_url) || 'https://api.moonshot.cn/v1';
     const model = str(values.model) || 'kimi-k2.5';
-    const maxContext = str(values.max_context_size) || '256000';
+    const maxContext = str(values.max_context_size) || '1048576';
     // Use kimi type for Moonshot default, openai type for custom endpoints
     const isDefaultUrl = baseUrl === 'https://api.moonshot.cn/v1';
     const providerType = isDefaultUrl ? 'kimi' : 'openai';

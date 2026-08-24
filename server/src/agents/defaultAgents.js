@@ -31,7 +31,7 @@ const DEFAULT_AGENTS = [
                     '[models.kimi-default]',
                     'provider = "kimi"',
                     'model = "kimi-k2.5"',
-                    'max_context_size = 256000',
+                    'max_context_size = 1048576',
                 ].join('\n'),
             }],
         },

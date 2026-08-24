@@ -5,6 +5,8 @@
  * Only runs when authMode === 'gateway'.  BYOK mode is never affected.
  */
 
+const { guessContextLength } = require('../llm/modelContext');
+
 const GATEWAY_CONFIG_AGENTS = new Set([
     'qwen-code',
     'droid',
@@ -239,7 +241,7 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                 `[models.gateway-${i}]`,
                 'provider = "gateway"',
                 `model = ${JSON.stringify(t)}`,
-                'max_context_size = 256000',
+                `max_context_size = ${guessContextLength(t)}`,
             ].join('\n'));
             return {
                 dirPath: stateDirPath,

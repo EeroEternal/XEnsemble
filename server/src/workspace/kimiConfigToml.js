@@ -1,3 +1,5 @@
+const { guessContextLength } = require('../llm/modelContext');
+
 const DEFAULT_KIMI_BASE_URL = 'https://api.moonshot.cn/v1';
 const DEFAULT_KIMI_MODEL = 'kimi-k2.5';
 
@@ -14,7 +16,7 @@ function buildKimiConfigToml({ apiKey, baseUrl, model }) {
         '[models.kimi-default]',
         'provider = "kimi"',
         `model = ${JSON.stringify(model)}`,
-        'max_context_size = 256000',
+        `max_context_size = ${guessContextLength(model)}`,
         '',
     ];
     return `${lines.join('\n')}\n`;

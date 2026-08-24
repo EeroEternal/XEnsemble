@@ -87,15 +87,14 @@ function isModelsDiscoveryPath(path) {
     return pathname === '/v1/models' || pathname.startsWith('/v1/models/');
 }
 
+const { guessContextLength } = require('./modelContext');
+
 async function serveAgentModelsCatalog(claims, reply) {
     if (!claims?.aid) return false;
     const cfg = await agentGatewayConfig.getForAgent(claims.aid);
     const models = agentGatewayConfig.allModels(cfg);
     if (models.length === 0) return false;
     const provider = (cfg?.provider ?? '').trim();
-    // Return a combined Anthropic+OpenAI format: claude-code validates the
-    // Anthropic shape (type/display_name/created_at), while OpenAI-compatible
-    // clients read object/created/owned_by. Including all fields satisfies both.
     const data = models.map((m) => {
         const id = provider ? `${provider}/${m}` : m;
         return {
@@ -106,6 +105,7 @@ async function serveAgentModelsCatalog(claims, reply) {
             created: 0,
             created_at: '2025-01-01T00:00:00Z',
             owned_by: provider || 'xensemble',
+            context_length: guessContextLength(m),
         };
     });
     reply.code(200).send({ object: 'list', data });

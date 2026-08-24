@@ -38,7 +38,7 @@ const GATEWAY_MODEL_ENV_KEYS = [
 ];
 
 const KIMI_CODE_AGENT_IDS = new Set(['kimi-code']);
-const KIMI_CODE_DEFAULT_MAX_CONTEXT = String(256 * 1024);
+const KIMI_CODE_DEFAULT_MAX_CONTEXT = String(1024 * 1024);
 const OPENCODE_AGENT_IDS = new Set(['opencode']);
 const CLAUDE_CODE_AGENT_IDS = new Set(['claude-code']);
 
