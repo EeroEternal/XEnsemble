@@ -594,7 +594,7 @@ export function CustomImagesContent() {
             <col className="w-auto" />
             <col className="w-36" />
             <col className="w-auto" />
-            <col className="w-20" />
+            <col className="w-28" />
             <col className="w-28" />
             <col className="w-24" />
           </colgroup>
