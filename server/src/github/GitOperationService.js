@@ -324,7 +324,15 @@ class GitOperationService {
             if (x !== ' ' && x !== '?') stagedFiles.push(entry);
             if (y !== ' ') unstagedFiles.push(entry);
         }
-        return { files, stagedFiles, unstagedFiles, dirty };
+
+        const branchOut = await this._execGit(project, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => ({ stdout: 'HEAD' }));
+        let branch = branchOut.stdout.trim();
+        if (branch === 'HEAD') branch = null;
+
+        const aheadResult = await this._execGit(project, ['rev-list', '--count', 'HEAD', '--not', '--remotes']).catch(() => ({ stdout: '0' }));
+        const ahead = Number(aheadResult.stdout.trim()) || 0;
+
+        return { files, stagedFiles, unstagedFiles, dirty, branch, ahead };
     }
 
     async getStatus(project) {

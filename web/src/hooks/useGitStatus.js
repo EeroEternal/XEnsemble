@@ -11,6 +11,7 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
   const [loading, setLoading] = useState(false);
   const [operation, setOperation] = useState(null);
   const lastFullAtRef = useRef(0);
+  const prevFullEnabledRef = useRef(false);
 
   // Reset status and trigger refetch when sessionId changes (same project, different worktree)
   useEffect(() => {
@@ -19,6 +20,18 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
     setOperation(null);
     lastFullAtRef.current = 0;
   }, [sessionId]);
+
+  // Switching to Changes tab (fullPollEnabledRef goes false→true) triggers
+  // an immediate full fetch so the user sees fresh ahead/behind after git
+  // operations done in the terminal.
+  useEffect(() => {
+    const current = !fullPollEnabledRef || fullPollEnabledRef.current;
+    if (current && !prevFullEnabledRef.current && projectId) {
+      fetchStatusFull({ silent: true });
+      lastFullAtRef.current = Date.now();
+    }
+    prevFullEnabledRef.current = current;
+  });
 
   const fetchStatusFull = useCallback(async ({ silent = false, skipIfFreshMs = 0 } = {}) => {
     if (!projectId) return null;
