@@ -363,7 +363,7 @@ async function ensureGatewayConfig({ runtime, runtimeRef, agentId, authMode, sta
     // minimax-cli and pi use $HOME (no state dir); codebuddy prefers the
     // state dir (CODEBUDDY_CONFIG_DIR) but falls back to $HOME/.codebuddy;
     // all others require a state dir path.
-    if (agentId !== 'minimax-cli' && agentId !== 'pi' && agentId !== 'codebuddy' && agentId !== 'kimi-code' && !stateDirPath) {
+    if (agentId !== 'minimax-cli' && agentId !== 'pi' && agentId !== 'codebuddy' && agentId !== 'kimi-code' && agentId !== 'opencode' && !stateDirPath) {
         return { skipped: true, reason: 'no_state_dir' };
     }
 
