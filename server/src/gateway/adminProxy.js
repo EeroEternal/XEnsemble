@@ -10,6 +10,9 @@ const { testProviderConnectivity } = require('./testProviderConnectivity');
 const { readProviderCredentials } = require('./readProviderSecrets');
 const { maskApiKey } = require('./maskApiKey');
 
+// Intentionally in-memory (hot path, not persisted).
+const lastProviderTests = new Map();
+
 function httpRequestOnce(url, { method = 'GET', headers = {}, timeoutMs = 2500 } = {}) {
     const client = url.protocol === 'https:' ? https : http;
     return new Promise((resolve) => {
@@ -284,6 +287,7 @@ function registerGatewayAdminRoutes(fastify) {
                         ...provider,
                         has_api_key: Boolean(apiKey),
                         api_key_masked: apiKey ? maskApiKey(apiKey) : '',
+                        last_test: lastProviderTests.get(provider.name) || null,
                     };
                 });
             }
@@ -370,6 +374,12 @@ function registerGatewayAdminRoutes(fastify) {
                 api_key: creds.api_key,
                 default_model: creds.default_model,
                 models: creds.models,
+            });
+            lastProviderTests.set(name, {
+                status: result.ok ? 'ok' : 'error',
+                message: result.message || '',
+                latency_ms: result.latency_ms ?? null,
+                tested_at: Date.now(),
             });
             return { success: true, data: result };
         } catch (err) {

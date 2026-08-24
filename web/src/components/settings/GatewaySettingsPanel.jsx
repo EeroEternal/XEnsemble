@@ -363,7 +363,20 @@ export default function GatewaySettingsPanel() {
         const { host, port } = splitBindAddr(statusData.bindAddr);
         setProcessConfig((prev) => ({ ...prev, host, port }));
       }
-      setProviders(providersData?.data || []);
+      const providers = providersData?.data || [];
+      setProviders(providers);
+      const initialHealth = {};
+      for (const p of providers) {
+        if (p?.last_test && (p.last_test.status === 'ok' || p.last_test.status === 'error')) {
+          initialHealth[p.name] = {
+            status: p.last_test.status,
+            message: p.last_test.message,
+            latency_ms: p.last_test.latency_ms,
+            tested_at: p.last_test.tested_at,
+          };
+        }
+      }
+      setProviderHealth((prev) => ({ ...prev, ...initialHealth }));
     } catch {
       showToast('error', 'Failed to load gateway settings.');
     } finally {
@@ -538,7 +551,7 @@ export default function GatewaySettingsPanel() {
 
   const handleTestConnection = async () => {
     if (!providerDialog) return;
-    const { form } = providerDialog;
+    const { form, mode } = providerDialog;
     if (!form.base_url.trim()) {
       showToast('error', 'Base URL is required.');
       return;
@@ -581,12 +594,18 @@ export default function GatewaySettingsPanel() {
         tested_at: testedAt,
       };
       setFormConnectionHealth(next);
+      if (mode === 'edit') {
+        setProviderHealth((prev) => ({ ...prev, [form.name.trim()]: next }));
+      }
       showToast(
         result.ok ? 'success' : 'error',
         result.message || (result.ok ? 'Provider available.' : 'Provider unavailable.'),
       );
     } catch (err) {
       setFormConnectionHealth({ status: 'error', message: err.message, tested_at: Date.now() });
+      if (mode === 'edit') {
+        setProviderHealth((prev) => ({ ...prev, [form.name.trim()]: { status: 'error', message: err.message, tested_at: Date.now() } }));
+      }
       showToast('error', err.message);
     } finally {
       setTestingConnection(false);
