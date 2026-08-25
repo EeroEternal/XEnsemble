@@ -201,9 +201,19 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         // points to a host path that doesn't exist inside the VM. Rewrite it to
         // the VM mount path so git inside the VM works. Host-side git bypasses
         // the pointer via --git-dir/--work-tree (see hostGit).
+        //
+        // Also set safe.directory for /workspace and /workspace.git: virtiofs
+        // uses a swap UID idmap (host 0 ↔ guest 1000), so worktree gitdir files
+        // written by host-side git (root) appear as UID 1000 inside the VM.
+        // git's dubious-ownership check rejects this, breaking `git log` etc.
+        // in the VM terminal after any host-side git op (branch switch, UI commit).
+        // safe.directory skips the ownership check; /root/.gitconfig is VM-local
+        // (image layer, not a mounted volume), so this is per-VM isolated.
         if (hostWorkspacePath && guestWorkspacePath) {
             try {
                 await this.client.execForResult(name, 'sh', ['-c',
+                    `git config --global safe.directory /workspace 2>/dev/null || true; ` +
+                    `git config --global safe.directory /workspace.git 2>/dev/null || true; ` +
                     `if [ -f "${guestWorkspacePath}/.git" ]; then ` +
                     `GITDIR=$(cat "${guestWorkspacePath}/.git" | sed 's/^gitdir: //'); ` +
                     `if [ ! -d "$GITDIR" ] && [ -d /workspace.git ]; then ` +
