@@ -1076,6 +1076,20 @@ export default React.forwardRef(function Sessions({
     && activeSessionMeta?.status === 'idle';
   const sessionControlPending = restartingSession;
 
+  // Auto-resume idle recoverable sessions (e.g. after server restart).
+  // Without this, TUI agents like Kimi Code show a blank gray screen because
+  // their alternate-screen output is stripped during idle replay, and the
+  // idle-replay branch never opens a WebSocket to trigger server-side wake.
+  const autoResumeTriedRef = useRef(new Set());
+  useEffect(() => {
+    if (!sessionWakeable || restartingSession) return;
+    const sessionId = activeSession?.sessionId;
+    if (!sessionId || autoResumeTriedRef.current.has(sessionId)) return;
+    autoResumeTriedRef.current.add(sessionId);
+    handleRestartSession(activeSession);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionWakeable, activeSession?.sessionId, restartingSession]);
+
   const handleSessionConnected = useCallback((sessionId) => {
     setSessions((prev) => prev.map((s) => (
       s.id === sessionId ? { ...s, alive: true, status: 'running', memoryStatus: 'running' } : s
