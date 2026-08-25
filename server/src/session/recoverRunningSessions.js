@@ -87,6 +87,26 @@ async function recoverRunningSessions({
             if (!handle || typeof handle.onData !== 'function' || typeof handle.onExit !== 'function') {
                 throw new Error('runtime attachSession did not return a stream handle');
             }
+            // Attach 到已结束的 execution 时，blink 会立即回放 exit 帧。
+            // 与 resumeSession 一致：短暂等待 800ms，若 attach 后马上
+            // 触发 exit，视为死进程，直接降级为 idle。
+            let aliveSub;
+            const alive = await new Promise((resolve) => {
+                const timer = setTimeout(() => {
+                    aliveSub?.dispose?.();
+                    resolve(true);
+                }, 800);
+                aliveSub = handle.onExit(() => {
+                    clearTimeout(timer);
+                    aliveSub?.dispose?.();
+                    resolve(false);
+                });
+            });
+            if (!alive) {
+                fastifyLog.info({ sessionId: session.id }, '[sessions] reattached session exited within grace period — demoting to idle');
+                await settleUnrecovered(session);
+                continue;
+            }
             const runtimeRows = session.runtimeId
                 ? await db.select().from(schema.runtimes).where(eq(schema.runtimes.id, session.runtimeId))
                 : [];
