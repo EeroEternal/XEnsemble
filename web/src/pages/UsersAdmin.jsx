@@ -350,7 +350,7 @@ export default function UsersAdmin() {
               <form onSubmit={handleSave} className="space-y-4">
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
-                    <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('users:field.username')}</label>
+                    <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('users:field.username')}<span className="text-red-500 ml-0.5">*</span></label>
                     <Input
                       required
                       disabled={dialogMode === 'edit'}
@@ -361,7 +361,7 @@ export default function UsersAdmin() {
                   </div>
                   {dialogMode === 'create' && (
                     <div>
-                      <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('users:field.password')}</label>
+                      <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('users:field.password')}<span className="text-red-500 ml-0.5">*</span></label>
                       <Input
                         required
                         type="password"
