@@ -69,8 +69,9 @@ async function fetchProviderModels({ base_url, api_key }) {
 
     if (!response.ok) {
         const detail = body?.error?.message || body?.message || body?.error || raw?.slice(0, 200);
+        const isAuthError = response.status === 401 || response.status === 403;
         const error = new Error(detail ? `Provider returned ${response.status}: ${detail}` : `Provider returned ${response.status}.`);
-        error.statusCode = response.status >= 400 && response.status < 500 ? response.status : 502;
+        error.statusCode = isAuthError ? 502 : (response.status >= 400 && response.status < 500 ? response.status : 502);
         throw error;
     }
 
