@@ -173,14 +173,6 @@ export default function CreatePRDialog({
         <div>
           <div className="flex items-center justify-between">
             <FormLabel htmlFor="pr-title">Title</FormLabel>
-            {(diffLoading || aiLoading) && (
-              <span className="flex items-center gap-1 text-[10px] text-zinc-400">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                {diffLoading
-                  ? t('git:pr.loading_diff', { defaultValue: 'Loading diff…' })
-                  : t('git:pr.ai_generating', { defaultValue: 'AI generating…' })}
-              </span>
-            )}
           </div>
           <Input
             id="pr-title"

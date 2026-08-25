@@ -83,7 +83,10 @@ async function recoverRunningSessions({
         }
 
         try {
-            const handle = await runtime.provider.attachSession(session.id, session.streamRef, { after: cursor });
+            const handle = await runtime.provider.attachSession(session.id, session.streamRef, {
+                after: cursor,
+                reattachMaxAttempts: 0,
+            });
             if (!handle || typeof handle.onData !== 'function' || typeof handle.onExit !== 'function') {
                 throw new Error('runtime attachSession did not return a stream handle');
             }

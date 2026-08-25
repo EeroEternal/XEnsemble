@@ -37,8 +37,8 @@ async function getGitService(request) {
 
 // Generate a commit message from the working-tree diff using the configured
 // DeepSeek-compatible LLM (same env as session titleService).
-async function generateCommitMessage(project, gitOperationService) {
-    const result = await generateAIDescription(project, gitOperationService, 'commit');
+async function generateCommitMessage(project, gitOperationService, { locale } = {}) {
+    const result = await generateAIDescription(project, gitOperationService, 'commit', { locale });
     return result;
 }
 
@@ -225,7 +225,7 @@ function registerProjectGitRoutes(fastify) {
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         const gitOperationService = await getGitService(request);
         try {
-            const result = await generateCommitMessage(project, gitOperationService);
+            const result = await generateCommitMessage(project, gitOperationService, { locale: request.locale });
             return result;
         } catch (err) {
             request.log.error(err);
