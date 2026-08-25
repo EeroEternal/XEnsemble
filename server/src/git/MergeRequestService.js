@@ -78,6 +78,35 @@ class MergeRequestService {
         return rows.find((row) => this._sameBranch(row.sourceBranch, src) && this._sameBranch(row.targetBranch, tgt)) || null;
     }
 
+    async _findLocalOpenSynced(project, providerName, src, tgt) {
+        const localOpen = await this._findLocalOpen(project.id, providerName, src, tgt);
+        if (!localOpen) return null;
+
+        const provider = getProvider(providerName);
+        const config = await getProviderConfig(providerName);
+        const repoFullName = project.remoteFullName || project.githubFullName;
+        const token = await this.gitConnectionService.getDecryptedToken(project.userId, providerName);
+        try {
+            const prInfo = await provider.getPR(token, repoFullName, localOpen.remoteMrNumber, {
+                apiBase: config?.apiBase,
+            });
+            const mappedStatus = this._mapStatus({ state: prInfo.state, merged: prInfo.merged });
+            if (mappedStatus !== 'open') {
+                await db.update(schema.mergeRequests)
+                    .set({
+                        status: mappedStatus,
+                        remoteState: prInfo.state,
+                        mergeSha: prInfo.mergeCommitSha ?? null,
+                        updatedAt: Date.now(),
+                        lastSyncedAt: Date.now(),
+                    })
+                    .where(eq(schema.mergeRequests.id, localOpen.id));
+                return null;
+            }
+        } catch { /* best-effort: treat as open if sync fails */ }
+        return localOpen;
+    }
+
     async _findRemoteOpen(provider, token, repoFullName, src, tgt, apiBase) {
         const open = await provider.listPRs(token, repoFullName, {
             state: provider.name === 'gitlab' ? 'opened' : 'open',
@@ -158,7 +187,7 @@ class MergeRequestService {
             if (!src) throw new Error('sourceBranch is required and project.currentBranch is not set');
             if (!title) throw new Error('title is required');
 
-            const localOpen = await this._findLocalOpen(project.id, providerName, src, tgt);
+            const localOpen = await this._findLocalOpenSynced(project, providerName, src, tgt);
             if (localOpen) return localOpen;
 
             const remoteOpen = await this._findRemoteOpen(
