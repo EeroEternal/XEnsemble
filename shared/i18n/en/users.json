@@ -35,7 +35,7 @@
     "reset_password": "Reset password",
     "reset_password_optional": "Reset password (optional)",
     "leave_blank": "Leave blank to keep current",
-    "projects": "Projects",
+    "projects": "Workspaces",
     "sessions": "Sessions",
     "previews": "Previews",
     "max_projects": "Max workspaces",

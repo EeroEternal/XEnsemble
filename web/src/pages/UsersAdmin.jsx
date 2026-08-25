@@ -31,7 +31,7 @@ const emptyForm = {
   role: 'user',
   status: 'active',
   max_projects: 5,
-  max_sessions: 2,
+  max_sessions: 20,
   max_previews: 1,
   resource_tier: 'basic',
 };

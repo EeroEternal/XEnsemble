@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Loader2, Search } from 'lucide-react';
+import { Loader2, Search, Settings2 } from 'lucide-react';
 
-import Button from '../components/Button';
 import Input from '../components/Input';
 import PageHeader from '../components/PageHeader';
 import {
   consoleAdminPageClass,
+  consoleIconButtonClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
   consoleTableHeadRowClass,
@@ -168,9 +168,15 @@ export default function AgentsAdmin() {
                       )}
                     </td>
                     <td className={consoleTableBodyCellClass}>
-                      <Button type="button" variant="secondary" size="sm" onClick={() => setKeysAgent(agent)}>
-                        {t('agents:action.configure')}
-                      </Button>
+                      <button
+                        type="button"
+                        onClick={() => setKeysAgent(agent)}
+                        className={consoleIconButtonClass}
+                        title={t('agents:action.configure')}
+                        aria-label={t('agents:action.configure')}
+                      >
+                        <Settings2 className="h-4 w-4" />
+                      </button>
                     </td>
                   </tr>
                 );
