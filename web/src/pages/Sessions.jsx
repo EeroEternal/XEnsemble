@@ -174,14 +174,36 @@ export default React.forwardRef(function Sessions({
   const gitChanges = useGitChanges(activeSession?.projectId || null, changesTabActiveRef, activeSession?.sessionId, sessionAlive || skipPendingSpinner);
   const preview = usePreview(activeSession?.projectId, Boolean(activeSession?.projectId), activeSession?.sessionId);
   const { showToast } = useToast();
+  // 跨 session 部署完成提示（由 useWorkspaces 的 SSE 转发）：即使不在该 session 页也提示
+  useEffect(() => {
+    const onDeployFinished = (e) => {
+      const d = e.detail;
+      if (!d || typeof d.ok !== 'boolean') return;
+      showToast(d.ok ? 'success' : 'error', d.ok ? '部署完成' : (d.aborted ? '部署已中止' : '部署失败'));
+    };
+    window.addEventListener('xensemble:deploy_finished', onDeployFinished);
+    return () => window.removeEventListener('xensemble:deploy_finished', onDeployFinished);
+  }, [showToast]);
   const panelRef = useRef(null);
+  const deployPanelRef = useRef(null);
   const shellRef = useRef(null);
   // 每次点小火箭自增，用于强制 DeployPanel remount（重新分析），而不是复用上次内容
   const [deployVersion, setDeployVersion] = useState(0);
+  // 切换项目时重置部署版本：不把上次的"主动部署"信号带到新项目（避免跨 session 误触发部署）
+  useEffect(() => {
+    setDeployVersion(0);
+  }, [activeSession?.projectId]);
+  // 切换 session 时重置部署状态：右上角状态/Stop 按钮属于当前 session 的部署
+  useEffect(() => {
+    setDeployStatus('idle');
+    setAbortRequested(false);
+  }, [activeSession?.sessionId]);
   // 最近一次自动部署成功后的结果摘要，展示在 Preview 面板的"部署详情"里
   const [lastDeployInfo, setLastDeployInfo] = useState(null);
   // 当前会话的部署状态（idle/running/finished/aborted），驱动右上角状态与中止按钮
   const [deployStatus, setDeployStatus] = useState('idle');
+  // 中止信号：点 Stop 时置 true，让 DeployPanel 立即显示"已中止"（不等后端 abort 返回）
+  const [abortRequested, setAbortRequested] = useState(false);
   // 自动部署成功 → 关闭 Deploy tab，跳转到 Preview tab（Preview 面板常驻，可展开部署详情）
   const onDeploySuccess = useCallback((info) => {
     setLastDeployInfo(info);
@@ -191,13 +213,14 @@ export default React.forwardRef(function Sessions({
     preview.loadDeployments();
   }, [preview.loadDeployments]);
 
-  // 中止部署：通知后端 abort（杀 verify agent / 停隧道），前端把状态置为 aborted（右上角不再显示状态与按钮）
+  // 中止部署：通知后端 abort（杀 verify agent / 停隧道），前端立即置 aborted（界面立即显示"已中止"）
   const handleCancelDeploy = useCallback(async () => {
     const pid = activeSession?.projectId;
     setDeployStatus('aborted');
+    setAbortRequested(true);
     if (!pid) return;
     try {
-      await apiFetch(`/api/v1/projects/${encodeURIComponent(pid)}/deploy/cancel`, {
+      await apiFetch(withSessionId(`/api/v1/projects/${encodeURIComponent(pid)}/deploy/cancel`), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
       });
     } catch { /* ignore */ }
@@ -1295,7 +1318,7 @@ export default React.forwardRef(function Sessions({
                   {activeSession.projectId ? (
                     <>
                       <div className="mx-0.5 h-5 w-px bg-zinc-200" />
-                      <PreviewControlGroup {...preview} deployStatus={deployStatus} onCancelDeploy={handleCancelDeploy} onAnalyze={() => { panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); }} />
+                      <PreviewControlGroup {...preview} deployStatus={deployStatus} onCancelDeploy={handleCancelDeploy} onAnalyze={() => { setAbortRequested(false); panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); setTimeout(() => deployPanelRef.current?.requestDeploy?.(), 0); }} />
                     </>
                   ) : null}
                   {activeSession && (
@@ -1414,13 +1437,15 @@ export default React.forwardRef(function Sessions({
                     sessionLive={sessionAlive}
                     shellContent={<WorkspaceShell ref={shellRef} projectId={activeSession.projectId} sessionId={activeSession.sessionId} />}
                     deployContent={activeSession?.projectId ? (
-                      <DeployPanel
-                        key={`${activeSession.projectId}-${activeSession.sessionId}-${deployVersion}`}
-                        projectId={activeSession.projectId}
-                        sessionId={activeSession.sessionId}
-                        onSuccess={onDeploySuccess}
-                        onDeployStatus={setDeployStatus}
-                      />
+                       <DeployPanel
+                         key={`${activeSession.projectId}-${activeSession.sessionId}-${deployVersion}`}
+                         ref={deployPanelRef}
+                         projectId={activeSession.projectId}
+                         sessionId={activeSession.sessionId}
+                         onSuccess={onDeploySuccess}
+                         onDeployStatus={setDeployStatus}
+                         abortRequested={abortRequested}
+                       />
                     ) : null}
                     previewDeployInfo={lastDeployInfo}
                     refreshTrigger={editorTabs.treeRefreshTrigger}

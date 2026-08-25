@@ -78,6 +78,13 @@
       "when": 1787300000000,
       "tag": "0010_drop_runtime_agent_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787400000000,
+      "tag": "0011_deploy_session_binding",
+      "breakpoints": true
     }
   ]
 }

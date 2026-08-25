@@ -2,8 +2,10 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # 仅绑定 loopback：宿主 node server（经 nginx/本机）访问即可，绝不向沙箱/内网暴露。
+    # 沙箱 guest 有出站网络（gvproxy NAT），若绑 0.0.0.0 会直连宿主库导致预览实例与宿主共享用户表。
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_USER: xensemble
       POSTGRES_PASSWORD: xensemble
@@ -16,6 +18,8 @@ services:
       retries: 10
     volumes:
       - xensemble_pg_data:/var/lib/postgresql/data
+      # 数据卷重建时也收紧 pg_hba（仅允许 loopback），纵深防御
+      - ./deploy/pg-hba-secure.sh:/docker-entrypoint-initdb.d/01-secure-pg-hba.sh:ro
 
 volumes:
   xensemble_pg_data:

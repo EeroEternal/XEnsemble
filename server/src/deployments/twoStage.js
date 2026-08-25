@@ -15,10 +15,12 @@ const { getRuntime } = require('../runtime/registry');
 const { ensureProjectRuntime } = require('../runtime/RuntimeService');
 const { analyzeProjectDeploy } = require('./analyzeDeploy');
 const { analyzeProjectVerify } = require('./analyzeVerify');
-const { createTunnel, stopByProjectId } = require('../preview/tunnelServer');
+const { createTunnel, stopTunnel } = require('../preview/tunnelServer');
 const deploymentService = require('./DeploymentService');
 const workspace = require('../workspace');
-const { registerDeploy, isAborted } = require('./activeDeploys');
+const { registerDeploy, unregisterDeploy, isAborted, countByUser } = require('./activeDeploys');
+const { ensureUserQuota, getUsage } = require('../auth/PolicyService');
+const { broadcastSse } = require('../session/sseManager');
 const { db } = require('../db');
 const schema = require('../db/schema');
 
@@ -40,9 +42,26 @@ function repairHostWorkspaceOwnership(hostPath) {
         const wrongDeep = wrongTop
             ? hostPath
             : execSync(`find ${JSON.stringify(hostPath)} -maxdepth 3 ! -user ${uid} -print -quit 2>/dev/null`).toString().trim();
-        if (!wrongDeep) return;
-        console.error(`[twoStage] fixing workspace ownership: ${hostPath} -> ${uid}:${gid}`);
-        execSync(`chown -R ${uid}:${gid} ${JSON.stringify(hostPath)}`, { stdio: 'ignore', timeout: 180000 });
+        if (wrongDeep) {
+            console.error(`[twoStage] fixing workspace ownership: ${hostPath} -> ${uid}:${gid}`);
+            execSync(`chown -R ${uid}:${gid} ${JSON.stringify(hostPath)}`, { stdio: 'ignore', timeout: 180000 });
+        }
+        // opencode 等 agent 的 worktree 在 `proj_xxx.wt/<runtimeId>`（workspace.worktreeDir），
+        // 是 server 以 root 创建（root:root），guest 无 idmapped 映射到 1000 时无法写入
+        // （verify 被迫复制到 /tmp、脱离 git 仓库）。部署前置统一 chown 到 guest 映射用户。
+        const worktreesRoot = `${hostPath}.wt`;
+        if (fs.existsSync(worktreesRoot)) {
+            for (const wt of fs.readdirSync(worktreesRoot)) {
+                const wtPath = path.join(worktreesRoot, wt);
+                try {
+                    const wtSt = fs.statSync(wtPath);
+                    if (wtSt.uid !== uid || wtSt.gid !== gid) {
+                        console.error(`[twoStage] fixing worktree ownership: ${wtPath} -> ${uid}:${gid}`);
+                        execSync(`chown -R ${uid}:${gid} ${JSON.stringify(wtPath)}`, { stdio: 'ignore', timeout: 180000 });
+                    }
+                } catch { /* ignore */ }
+            }
+        }
     } catch (e) {
         console.error(`[twoStage] repairHostWorkspaceOwnership: ${e.message}`);
     }
@@ -152,7 +171,7 @@ async function ensureFrontendServed({ runtimeRef, workspacePath, port, onLog }) 
         // 以及由后端 serve 的 frontend 产物（如 fastapi 模板的 backend/app/frontend）。
         const probe = await runtime.exec.exec(
             'sh',
-            ['-c', 'ls -d web/dist frontend/dist client/dist dist backend/app/frontend backend/templates/frontend app/frontend 2>/dev/null | head -1'],
+            ['-c', 'ls -d web/dist frontend/dist client/dist apps/web/dist apps/cli/dist dist backend/app/frontend backend/templates/frontend app/frontend 2>/dev/null | head -1'],
             {},
             { runtimeRef, cwd: workspacePath, timeoutMs: 15000 },
         );
@@ -231,8 +250,9 @@ done
     let proxyPath = null;
     try {
         const script = require('fs').readFileSync(path.join(__dirname, '../preview/previewProxyServer.js'), 'utf8');
-        await runtime.fs.fsWrite(workspacePath, '.agents/previewProxyServer.js', script, { runtimeRef });
-        proxyPath = '.agents/previewProxyServer.js';
+        // .cjs 强制 CommonJS，避免项目 package.json "type":"module" 导致 require 崩溃
+        await runtime.fs.fsWrite(workspacePath, '.agents/previewProxyServer.cjs', script, { runtimeRef });
+        proxyPath = '.agents/previewProxyServer.cjs';
     } catch (e) {
         if (onLog) onLog(`write proxy script failed: ${e.message}`);
     }
@@ -288,15 +308,129 @@ done
     return { ok: true, port: listenPort, dist, backendOk, backendPort };
 }
 
-async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onProgress, resume, sessionId }) {
+// 在 guest 里给 verify 已 serve 的"完整应用"（upstream，如 bin.js web / uvicorn）起一个改写反代：
+// 原样反代全部请求（保留 /plugins、后端 API 等运行时资源），仅把 upstream 返回的 HTML 里的
+// 绝对资源路径改写为相对路径（/assets/… → ./assets/…），适配 /preview/<id>/ 子路径，
+// 避免绝对路径泄漏到宿主源（否则 /assets 落到宿主 SPA fallback 变 text-html、/api 落宿主接口 401）。
+async function startRewriteProxy({ runtimeRef, workspacePath, upstreamPort, listenPort, onLog }) {
+    const runtime = getRuntime();
+    let proxyPath = null;
+    try {
+        const script = require('fs').readFileSync(path.join(__dirname, '../preview/previewProxyServer.js'), 'utf8');
+        // .cjs 强制 CommonJS，避免项目 package.json "type":"module" 导致 require 崩溃
+        await runtime.fs.fsWrite(workspacePath, '.agents/previewProxyServer.cjs', script, { runtimeRef });
+        proxyPath = '.agents/previewProxyServer.cjs';
+    } catch (e) {
+        if (onLog) onLog(`write rewrite proxy script failed: ${e.message}`);
+        return false;
+    }
+    try {
+        await runtime.exec.spawn(
+            'node',
+            [proxyPath, '--upstream', String(upstreamPort), String(listenPort)],
+            { HOME: process.env.HOME || '/root', PATH: process.env.PATH || '/usr/bin:/bin' },
+            { runtimeRef, cwd: workspacePath },
+        );
+    } catch (e) {
+        if (onLog) onLog(`spawn rewrite proxy failed: ${e.message}`);
+        return false;
+    }
+    // 等改写反代真正就绪（能对 / 返回 2xx）。端口被占用时 previewProxyServer 会 exit(1)，超时判失败。
+    for (let i = 0; i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 600));
+        try {
+            const check = await runtime.exec.exec(
+                'sh',
+                ['-c', `curl -s -m 2 -o /dev/null -w "%{http_code}" http://127.0.0.1:${listenPort}/`],
+                {},
+                { runtimeRef, cwd: workspacePath, timeoutMs: 8000 },
+            );
+            if (String(check.stdout || '').startsWith('2')) return true;
+        } catch { /* retry */ }
+    }
+    if (onLog) onLog(`rewrite proxy did not come up on :${listenPort}`);
+    return false;
+}
+
+async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUser, onProgress, resume, sessionId }) {
     const project = await getProjectForUser(userId, projectId);
     if (!project) return { ok: false, error: 'Project not found' };
     if (!process.env.LLM_ANALYZE_API_KEY && !process.env.LLM_ANALYZE_API_URL) {
         return { ok: false, error: 'LLM_ANALYZE_* env not configured.' };
     }
-    // 注册为进行中（供「中止部署」abort）；verify agent 每轮检查 aborted。
-    registerDeploy(project.id);
+    // per-user 并发闸门：进行中的部署 + 运行中的预览 ≤ 该用户个人配额（admin 同普通用户，
+    // 均在用户管理/个人配额里配置，避免无限制并发部署同时跑多个 VM 耗尽沙箱资源）。
+    // 先注册（内存计数原子）再校验，避免多个并发请求同时通过；超限则注销并拒绝。
+    registerDeploy(project.id, userId, sessionId);
+    try {
+        const limit = Number((await ensureUserQuota(userId)).maxPreviews ?? 0);
+        const usage = await getUsage(userId);
+        const current = countByUser(userId) + usage.previews;
+        if (current > limit) {
+            unregisterDeploy(project.id, sessionId);
+            return {
+                ok: false,
+                error: `已达并发部署上限（${current}/${limit}），请等待其他部署或预览完成后再试`,
+                code: 'quota_exceeded',
+                dimension: 'max_previews',
+                limit,
+                current,
+            };
+        }
+    } catch (e) {
+        console.error('[twoStage] concurrency gate error (ignored):', e.message);
+    }
     const startedAt = Date.now();
+    // 持久化"进行中部署"记录（kind='deploy'）的 id；report 用它实时更新阶段
+    const deployRef = { id: null };
+    // onProgress 包装：实时把阶段写进 deployment（跨 session 可恢复），再透传前端。
+    // 用 promise 队列串行写库，避免阶段 A/B 的异步 update 乱序完成导致 DB stage 回退
+    // （否则部署已到阶段 2，刷新后却恢复显示阶段 1）。
+    let reportQueue = Promise.resolve();
+    const report = (p) => {
+        if (p?.stage && deployRef.id) {
+            const status = p.stage === 'done' ? 'running' : 'building';
+            const stageVal = p.stage === 'done' ? null : p.stage;
+            const msg = p.message || null;
+            reportQueue = reportQueue
+                .then(() => db.update(schema.deployments)
+                    .set({ stage: stageVal, stageMessage: msg, status, updatedAt: Date.now() })
+                    .where(eq(schema.deployments.id, deployRef.id)))
+                .catch(() => {});
+        }
+        if (onProgress) onProgress(p);
+    };
+    let result;
+    try {
+        result = await runDeployInner({ project, userId, projectId, sessionId, resume, report, startedAt, deployRef });
+        return result;
+    } finally {
+        unregisterDeploy(project.id, sessionId);
+        if (deployRef.id) {
+            const finalStatus = result?.ok ? 'running' : (result?.aborted ? 'stopped' : 'failed');
+            // 先等阶段写库完成（串行队列），再落终态，避免终态与阶段乱序
+            await reportQueue.catch(() => {});
+            db.update(schema.deployments)
+                .set({ status: finalStatus, updatedAt: Date.now() })
+                .where(eq(schema.deployments.id, deployRef.id))
+                .catch((e) => console.error('[twoStage] persist deploy final:', e.message));
+        }
+        // 部署完成跨 session 提示：前端全局 EventSource 监听，即使不在该 session 页也能看到
+        try {
+            broadcastSse({
+                type: 'deploy_finished',
+                sessionId: sessionId || null,
+                projectId: project.id,
+                userId,
+                ok: !!result?.ok,
+                aborted: !!result?.aborted,
+            });
+        } catch (e) { /* ignore */ }
+    }
+}
+
+// 实际的两阶段部署逻辑（编排层负责并发闸门 + 注册表 + 持久化终态）
+async function runDeployInner({ project, userId, projectId, sessionId, resume, report, startedAt, deployRef }) {
 
     // A new deploy attempt supersedes any existing 'running' deployment for
     // this project. Mark them 'stopped' so a failed retry doesn't leave a
@@ -305,9 +439,11 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
     // success (stopByProjectId below) or expire by TTL; only the DB status
     // is corrected here so the preview badge reflects the latest attempt.
     try {
+        const oldConds = [eq(schema.deployments.projectId, projectId), eq(schema.deployments.status, 'running')];
+        if (sessionId) oldConds.push(eq(schema.deployments.sessionId, sessionId));
         await db.update(schema.deployments)
             .set({ status: 'stopped', updatedAt: Date.now() })
-            .where(and(eq(schema.deployments.projectId, projectId), eq(schema.deployments.status, 'running')));
+            .where(and(...oldConds));
     } catch (e) {
         console.error('[twoStage] failed to mark old deployments stopped:', e.message);
     }
@@ -334,6 +470,20 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
     const hostWs = ready.hostWorkspacePath;
     const wsPath = ready.workspacePath;
 
+    // 持久化"进行中部署"记录（kind='deploy'，绑定 session）：前端跨 session 据此恢复，避免重复部署
+    const now0 = Date.now();
+    const deployId = `dep_${crypto.randomBytes(8).toString('hex')}`;
+    try {
+        await db.insert(schema.deployments).values({
+            id: deployId, userId, projectId: project.id, sessionId: sessionId || null,
+            runtimeId, kind: 'deploy', status: 'building', stage: 'A',
+            createdAt: now0, updatedAt: now0, createdBy: userId,
+        });
+        deployRef.id = deployId;
+    } catch (e) {
+        console.error('[twoStage] failed to persist deploy record:', e.message);
+    }
+
     // 部署前置：确保 host workspace 对 guest 可写（修复 root 属主导致的 write failed）。
     // 注意：boxlite 下 ensureProjectRuntime 返回的 hostWorkspacePath 可能是 undefined，
     // 必须用 workspace.projectDir(userId, projectId) 计算真实的 host 路径。
@@ -352,15 +502,15 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
                 source: resumeState.plan.source || 'resume',
                 warning: resumeState.plan.warning,
             };
-            if (onProgress) onProgress({ stage: 'A', message: `断点续修：复用上次分析计划（${plan.steps.length} 步）` });
+            report({ stage: 'A', message: `断点续修：复用上次分析计划（${plan.steps.length} 步）` });
         } else {
             resumeState = null;
         }
     }
 
     if (!plan) {
-        if (onProgress) onProgress({ stage: 'A', message: '阶段 1：调用 LLM 1 出部署计划' });
-        const planResult = await analyzeProjectDeploy({ workspacePath: wsPath, hostWorkspacePath: hostWs, runtimeRef: ref, isAborted: () => isAborted(project.id) });
+        report({ stage: 'A', message: '阶段 1：调用 LLM 1 出部署计划' });
+        const planResult = await analyzeProjectDeploy({ workspacePath: wsPath, hostWorkspacePath: hostWs, runtimeRef: ref, isAborted: () => isAborted(project.id, sessionId) });
         if (planResult?.aborted) {
             return { ok: false, aborted: true, error: '部署已中止', elapsedMs: Date.now() - startedAt };
         }
@@ -368,12 +518,12 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
             return { ok: false, error: '阶段 1 失败：未生成计划', planResult };
         }
         plan = { steps: planResult.steps, configFiles: planResult.configFiles || [], source: planResult.source, warning: planResult.warning };
-        if (onProgress) onProgress({ stage: 'A', message: `阶段 1 完成: ${plan.steps.length} 步, ${plan.configFiles.length} configs (${planResult.source || 'fallback'})` });
+        report({ stage: 'A', message: `阶段 1 完成: ${plan.steps.length} 步, ${plan.configFiles.length} configs (${planResult.source || 'fallback'})` });
     }
 
-    if (onProgress) onProgress({ stage: 'B', message: resumeState ? '阶段 2：续修（接回上次对话继续修复）' : '阶段 2：调用 LLM 2（agent）准备环境 + 测试 + 自动修复' });
+    report({ stage: 'B', message: resumeState ? '阶段 2：续修（接回上次对话继续修复）' : '阶段 2：调用 LLM 2（agent）准备环境 + 测试 + 自动修复' });
     const detected = hostWs ? detectProjectType(hostWs) : { type: 'unknown', defaultPort: 3000 };
-    if (isAborted(project.id)) {
+    if (isAborted(project.id, sessionId)) {
         return { ok: false, aborted: true, error: '部署已中止', elapsedMs: Date.now() - startedAt };
     }
     const verify = await analyzeProjectVerify({
@@ -383,12 +533,12 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
         plan,
         projectType: detected,
         resume: resumeState ? { messages: resumeState.messages, trail: resumeState.trail, roundsUsed: resumeState.roundsUsed } : undefined,
-        isAborted: () => isAborted(project.id),
+        isAborted: () => isAborted(project.id, sessionId),
     });
     if (verify.aborted) {
         return { ok: false, aborted: true, error: '部署已中止', elapsedMs: Date.now() - startedAt };
     }
-    if (onProgress) onProgress({
+    report({
         stage: 'B',
         message: `阶段 2 ${verify.ok ? '✓ 通过' : '✗ 失败'}（agent: ${verify.source || 'opencode'}）`,
     });
@@ -408,20 +558,53 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
     // 通过 → 清理可续状态
     await clearVerifyState(project.id);
 
-    if (onProgress) onProgress({ stage: 'preview', message: '阶段 2 通过，创建预览隧道' });
+    report({ stage: 'preview', message: '阶段 2 通过，创建预览隧道' });
     let preview = null;
     try {
-        try { stopByProjectId(project.id); } catch { /* ignore */ }
+        // 只停"该 session"的旧 preview 隧道（多 session 并发部署互不干扰，不误停其它 session）
+        try {
+            const oldConds = [eq(schema.deployments.projectId, project.id), eq(schema.deployments.status, 'running')];
+            if (sessionId) oldConds.push(eq(schema.deployments.sessionId, sessionId));
+            const oldRows = await db.select({ id: schema.deployments.id }).from(schema.deployments).where(and(...oldConds));
+            for (const r of oldRows) { try { stopTunnel(r.id); } catch { /* ignore */ } }
+        } catch { /* ignore */ }
         const now = Date.now();
         const deploymentId = `dep_${crypto.randomBytes(8).toString('hex')}`;
         // 用 verify 探测到的真实应用端口（agent 可能在非默认端口上 serve），兜底回退 defaultPort。
         let port = verify?.appPort || detected.defaultPort || 3000;
-        // 系统侧在前端产物上起一个持久静态服务，确保 preview 稳定可连（不依赖 verify 的短命进程）。
-        const served = await ensureFrontendServed({ runtimeRef: ref, workspacePath: wsPath, port, onLog: (m) => console.error(`[twoStage] ${m}`) });
-        if (served.ok) port = served.port;
+        let served = null;
+        console.error(`[twoStage] preview: verify.ok=${verify.ok} verify.appPort=${verify?.appPort ?? 'null'} -> using port ${port}`);
+        // verify 已通过健康检查且有 appPort：verify serve 的就是完整应用（自包含，如 deepseek 的
+        // bin.js web、fastapi 的 uvicorn 都是 serve 前端+后端）。tunnel 前先套一层"改写反代"：
+        // 保留完整应用（含 /plugins、后端 API），只把 HTML 里的绝对资源路径改写为相对路径，
+        // 适配 /preview/<id>/ 子路径，避免 /assets、/api 泄漏到宿主源（否则 401 / MIME text-html）。
+        // 若改写反代起不来（端口竞争等）再退化为直接 tunnel verify 端口。
+        // 仅当 verify 无 appPort（纯静态或 verify 未真正起服务）时才用聚合 serve dist 兜底。
+        if (verify?.appPort) {
+            const proxyPort = (await getGuestFreePort(ref)) || 0;
+            if (proxyPort) {
+                const proxyOk = await startRewriteProxy({
+                    runtimeRef: ref, workspacePath: wsPath,
+                    upstreamPort: verify.appPort, listenPort: proxyPort,
+                    onLog: (m) => console.error(`[twoStage] ${m}`),
+                });
+                if (proxyOk) {
+                    port = proxyPort;
+                    console.error(`[twoStage] preview: rewrite proxy :${proxyPort} -> verify app :${verify.appPort}`);
+                } else {
+                    console.error(`[twoStage] preview: rewrite proxy failed on :${proxyPort}, tunneling verify port ${verify.appPort} directly`);
+                }
+            } else {
+                console.error(`[twoStage] preview: no free guest port for rewrite proxy, tunneling verify port ${verify.appPort} directly`);
+            }
+        } else {
+            served = await ensureFrontendServed({ runtimeRef: ref, workspacePath: wsPath, port, onLog: (m) => console.error(`[twoStage] ${m}`) });
+            if (served.ok) port = served.port;
+            console.error(`[twoStage] preview: verify had NO appPort, fell back to aggregate serve port ${port}`);
+        }
         const tunnel = await createTunnel({ deploymentId, workspacePath: wsPath, runtimeRef: ref, vmPort: port, projectId: project.id });
         await db.insert(schema.deployments).values({
-            id: deploymentId, userId, projectId: project.id, runtimeId,
+            id: deploymentId, userId, projectId: project.id, sessionId: sessionId || null, runtimeId,
             kind: 'preview', status: 'running', revision: 'live',
             publicUrl: tunnel.publicUrl, internalRef: tunnel.internalRef,
             expiresAt: now + PREVIEW_TTL_MS, createdAt: now, updatedAt: now, createdBy: userId,
@@ -434,7 +617,7 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
         return { ok: false, stage: 'preview', plan, verify, error: `preview failed: ${e.message}`, elapsedMs: Date.now() - startedAt };
     }
 
-    if (onProgress) onProgress({ stage: 'done', message: '✓ 两阶段通过，preview ready' });
+    report({ stage: 'done', message: '✓ 两阶段通过，preview ready' });
     return {
         ok: true, plan, verify,
         previewUrl: preview.publicUrl, deploymentId: preview.deploymentId, previewToken: preview.previewToken,
@@ -444,18 +627,34 @@ async function runAutoTwoStageDeploy({ projectId, userId, getProjectForUser, onP
 
 function registerAutoDeployRoutes(fastify, { getProjectForUser }) {
     fastify.post('/api/v1/projects/:projectId/auto-deploy', { preValidation: [fastify.authenticate, fastify.requireActive] }, async (request, reply) => {
+        // SSE 流式返回：实时推送部署阶段（stage A 分析 / B 部署 / preview），
+        // 让前端分阶段展示（阶段 1 结束有明确提示）。最终结果作为最后一个事件。
+        reply.raw.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+        });
+        reply.raw.write(': ok\n\n');
+        const send = (payload) => {
+            try { reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`); } catch (_) { /* client closed */ }
+        };
         try {
             const result = await runAutoTwoStageDeploy({
                 projectId: request.params.projectId,
                 userId: request.user.id,
+                role: request.user.role,
                 getProjectForUser,
                 resume: Boolean(request.body?.resume),
                 sessionId: request.query?.session_id || request.body?.session_id,
+                onProgress: (p) => send({ type: 'progress', ...p }),
             });
-            return reply.send(result);
+            send({ type: 'result', result });
         } catch (err) {
             request.log.error(err);
-            return reply.code(err.statusCode || 500).send({ ok: false, error: err.message });
+            send({ type: 'error', error: err.message || String(err) });
+        } finally {
+            try { reply.raw.end(); } catch (_) {}
         }
     });
 }

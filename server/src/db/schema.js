@@ -148,6 +148,10 @@ const deployments = pgTable('deployments', {
   userId: text('user_id').notNull().references(() => users.id),
   projectId: text('project_id').notNull().references(() => projects.id),
   runtimeId: text('runtime_id').references(() => runtimes.id),
+  // 与创建它的 session 强绑定（0011）：session 删除时记录级联清理；部署阶段持久化
+  sessionId: text('session_id').references(() => sessions.id, { onDelete: 'cascade' }),
+  stage: text('stage'),
+  stageMessage: text('stage_message'),
   kind: text('kind').notNull().default('preview'),
   status: text('status').notNull().default('pending'),
   publicUrl: text('public_url'),

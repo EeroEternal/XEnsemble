@@ -1,5 +1,5 @@
 const httpProxy = require('http-proxy');
-const { eq } = require('drizzle-orm');
+const { eq, sql } = require('drizzle-orm');
 const deploymentService = require('../deployments/DeploymentService');
 const previewRegistry = require('../runtime/localPreviewRegistry');
 const { appendInboxLog } = require('../workspace/logInbox');
@@ -24,6 +24,18 @@ function loadAllowedPreviewHosts() {
             if (u.hostname) hosts.add(u.hostname);
         } catch {
             /* ignore invalid public url */
+        }
+    }
+    // 预览专用端口（PREVIEW_PUBLIC_URL，如 http://IP:8089）也纳入允许 host，
+    // 否则 preview 请求带该 Host 会被 isAllowedPreviewHost 拒绝。
+    const previewUrl = process.env.PREVIEW_PUBLIC_URL?.trim();
+    if (previewUrl) {
+        try {
+            const u = new URL(previewUrl);
+            if (u.host) hosts.add(u.host);
+            if (u.hostname) hosts.add(u.hostname);
+        } catch {
+            /* ignore invalid preview url */
         }
     }
     return hosts;
@@ -192,18 +204,59 @@ async function handleDevConsole(request, reply) {
     return reply.code(204).send();
 }
 
+// 预览专用端口（PREVIEW_PUBLIC_URL）的默认路由目标：最新 running 部署。
+// 被预览的应用可能是"绝对路径 history 路由"SPA（如 react-router BrowserRouter 无 basename），
+// 在 /preview/<id>/ 子路径下前端会把 URL 跳到无前缀的 /login、/api/...，脱离 /preview/ 前缀。
+// 这些无前缀请求（Host = 预览专用端口）默认路由到最新部署，让此类 SPA 也能预览。
+// 只返回 previewRegistry 里有真实 tunnel 条目的部署，避免重启后内存条目丢失的孤儿部署。
+async function findLatestRunningPreview() {
+    try {
+        const rows = await db.select({ id: schema.deployments.id })
+            .from(schema.deployments)
+            .where(eq(schema.deployments.status, 'running'))
+            .orderBy(sql`${schema.deployments.createdAt} desc`)
+            .limit(5);
+        for (const r of rows) {
+            if (previewRegistry.get(r.id)) return r.id;
+        }
+        return null;
+    } catch (e) {
+        console.error('[gateway] findLatestRunningPreview error:', e.message);
+        return null;
+    }
+}
+
 async function registerPreviewGateway(fastify) {
     // 宿主根路径 + Referer/Origin 来自某个 preview 页面 → 转发到该 preview 的 tunnel。
     // 兼容前端使用根相对 API 地址（baseURL=/api 等）在 /preview/<id>/ 子路径下部署的场景。
     // 用 onRequest 钩子而非注册 '*' 路由，避免与已有通配路由冲突。
     fastify.addHook('onRequest', async (request, reply) => {
+        console.error(`[gateway] onRequest HIT url=${request.url} ref=${String(request.headers.referer || '').slice(0, 60)}`);
         if (request.url.startsWith('/preview/')) return;
+        let deploymentId = null;
         const referer = request.headers.referer || request.headers.origin || '';
         const m = referer.match(/\/preview\/([^/?#]+)/);
-        if (!m) return;
-        const deploymentId = m[1];
+        const previewHost = process.env.PREVIEW_PUBLIC_URL
+            ? process.env.PREVIEW_PUBLIC_URL.replace(/^https?:\/\//, '').replace(/\/+$/, '')
+            : '';
+        const isPreviewPort = !!previewHost && request.headers.host === previewHost;
+        if (m) {
+            deploymentId = m[1];
+        } else if (isPreviewPort) {
+            // 预览专用端口：SPA 绝对路由产生的无前缀请求（/login、/api/...）默认路由到最新部署。
+            deploymentId = await findLatestRunningPreview();
+        }
+        if (!deploymentId) {
+            // 预览专用端口上的无前缀请求若无法路由，返回 404，绝不落入宿主控制台（8088）。
+            if (isPreviewPort) return reply.code(404).send({ error: 'Preview not found' });
+            return;
+        }
         const entry = previewRegistry.get(deploymentId);
-        if (!entry) return;
+        if (!entry) {
+            console.error(`[gateway] onRequest NO ENTRY url=${request.url} dep=${deploymentId} ref=${String(referer).slice(0, 80)} registry=${previewRegistry.listIds().join(',')}`);
+            if (isPreviewPort) return reply.code(404).send({ error: 'Preview not running' });
+            return;
+        }
         const target = `http://127.0.0.1:${entry.port}`;
         await new Promise((resolve, reject) => {
             reply.hijack();

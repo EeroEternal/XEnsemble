@@ -23,6 +23,8 @@ const { issueSessionToken } = require('./llm/sessionToken');
 const agentGatewayConfig = require('./admin/AgentGatewayConfig');
 const userAdmin = require('./admin/UserAdminService');
 const { startPreviewLifecycle } = require('./preview/lifecycle');
+const { stopTunnel } = require('./preview/tunnelServer');
+const { abortDeploy } = require('./deployments/activeDeploys');
 const sessionManager = require('./session/SessionManager');
 const { WorkspaceShellManager, subscribeWorkspaceShell } = require('./session/workspaceShell');
 const { reconcileRunningSessions } = require('./session/reconcileRunningSessions');
@@ -1093,6 +1095,34 @@ fastify.delete('/api/v1/sessions/:sessionId', { preValidation: [fastify.authenti
     }
 
     sessionManager.deleteSession(sessionId);
+
+    // session 强绑定：删除 session 时，中止并清理它名下所有 deploy/preview 进程。
+    // DB 记录由 deployments.session_id 的 ON DELETE CASCADE 级联清理；这里显式停 tunnel/abort。
+    try {
+        const depRows = await db.select({
+            id: schema.deployments.id,
+            projectId: schema.deployments.projectId,
+            sessionId: schema.deployments.sessionId,
+            kind: schema.deployments.kind,
+        })
+            .from(schema.deployments)
+            .where(and(
+                eq(schema.deployments.sessionId, sessionId),
+                ne(schema.deployments.status, 'stopped'),
+            ));
+        for (const d of depRows) {
+            try { stopTunnel(d.id); } catch (_) { /* ignore */ }
+            if (d.kind === 'deploy') {
+                try { abortDeploy(d.projectId, d.sessionId); } catch (_) { /* ignore */ }
+            }
+            await db.update(schema.deployments)
+                .set({ status: 'stopped', updatedAt: Date.now(), stoppedBy: 'session_delete' })
+                .where(eq(schema.deployments.id, d.id))
+                .catch(() => {});
+        }
+    } catch (err) {
+        request.log.warn({ err, sessionId }, '[sessions] failed to stop preview/deploy on session delete');
+    }
 
     // Destroy the boxlite/blink VM if no other live session for this project still
     // uses the same runtime. Without this, deleting a session leaves an orphan VM
@@ -2653,7 +2683,10 @@ async function startServer() {
         fastify.log.warn(err, '[agents] failed to sync installed agent grants');
     }
 
-    await fastify.listen({ port, host: '0.0.0.0' });
+    // 默认仅监听 loopback：对外统一走 nginx(:8088 → 127.0.0.1:3888)。
+    // 监听 0.0.0.0 会让沙箱 guest（gvproxy 出站网络）直连宿主控制面 API，破坏隔离；
+    // 如需外部直连控制面，请显式设置 LISTEN_HOST=0.0.0.0 并自行防护。
+    await fastify.listen({ port, host: process.env.LISTEN_HOST || '127.0.0.1' });
 }
 
 startServer().catch((err) => {

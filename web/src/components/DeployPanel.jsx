@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Loader2, CheckCircle2, AlertCircle, RotateCcw, Copy, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
-import { buttonClass } from '../lib/buttonStyles';
+import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { Loader2, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Rocket } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { withSessionId } from '../lib/sessionContext';
 
@@ -15,17 +14,25 @@ import { withSessionId } from '../lib/sessionContext';
  * 成功 → 短暂显示完成状态后回调 onSuccess（父组件跳转到 Preview tab）；
  * 失败 → 显示错误 + 「重新部署」按钮。
  */
-export default function DeployPanel({ projectId, sessionId, onSuccess, onDeployStatus }) {
+const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSuccess, onDeployStatus, abortRequested }, ref) {
     const [runState, setRunState] = useState('idle');
     const [result, setResult] = useState(null);
-    const [latestMessage, setLatestMessage] = useState(null);
-    const autoStartedRef = useRef(false);
+    // 当前部署阶段：null（初始）| 'A'（分析）| 'B'（部署/验证）| 'preview'（开预览）
+    const [phase, setPhase] = useState(null);
+    // 挂载时先查该 session 的部署状态：有进行中/已完成的 kind='deploy' 则恢复展示，不重复触发
+    const [recoveredId, setRecoveredId] = useState(null);
     const jumpTimerRef = useRef(null);
+
+    // 外部中止信号（右上角 Stop）：立即显示"已中止"，不必等后端 abort 返回
+    useEffect(() => {
+        if (abortRequested) setRunState('aborted');
+    }, [abortRequested]);
 
     // 上报部署状态：running / finished / aborted / idle（驱动右上角状态与中止按钮）
     useEffect(() => {
         const s = runState === 'running' ? 'running'
-            : (runState === 'success' || runState === 'failed') ? 'finished'
+            : (runState === 'success') ? 'finished'
+            : (runState === 'failed') ? 'failed'
             : (runState === 'aborted' ? 'aborted' : 'idle');
         onDeployStatus?.(s);
     }, [runState, onDeployStatus]);
@@ -33,14 +40,8 @@ export default function DeployPanel({ projectId, sessionId, onSuccess, onDeployS
     const startRun = useCallback(async (opts = {}) => {
         setRunState('running');
         setResult(null);
-        setLatestMessage(null);
-        try {
-            const res = await apiFetch(
-                withSessionId(`/api/v1/projects/${encodeURIComponent(projectId)}/auto-deploy`),
-                { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resume: !!opts.resume }) },
-            );
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data.error || `Auto-deploy failed (${res.status})`);
+        setPhase(null);
+        const finish = (data) => {
             if (data.ok) {
                 setResult(data);
                 setRunState('success');
@@ -52,65 +53,156 @@ export default function DeployPanel({ projectId, sessionId, onSuccess, onDeployS
                 setResult(data);
                 setRunState('failed');
             }
+        };
+        try {
+            const res = await apiFetch(
+                withSessionId(`/api/v1/projects/${encodeURIComponent(projectId)}/auto-deploy`),
+                { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resume: !!opts.resume }) },
+            );
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.error || `Auto-deploy failed (${res.status})`);
+            }
+            // SSE 流式：progress 事件驱动分阶段展示，result 事件收尾
+            const handleEvent = (evt) => {
+                if (!evt || typeof evt !== 'object') return;
+                if (evt.type === 'progress') {
+                    if (evt.stage === 'A') {
+                        setPhase('A');
+                    } else if (evt.stage === 'B') {
+                        setPhase('B'); // 阶段 1 结束 → 阶段 2，界面显示完成提示
+                    } else if (evt.stage === 'preview') {
+                        setPhase('preview');
+                    }
+                } else if (evt.type === 'result') {
+                    finish(evt.result);
+                } else if (evt.type === 'error') {
+                    finish({ ok: false, error: evt.error });
+                }
+            };
+            const reader = res.body?.getReader?.();
+            if (!reader) {
+                // 无流（兜底）：一次性 JSON
+                handleEvent({ type: 'result', result: await res.json().catch(() => ({})) });
+                return;
+            }
+            const decoder = new TextDecoder();
+            let buffer = '';
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (value) buffer += decoder.decode(value, { stream: !done });
+                let idx;
+                while ((idx = buffer.indexOf('\n\n')) !== -1) {
+                    const chunk = buffer.slice(0, idx);
+                    buffer = buffer.slice(idx + 2);
+                    const dataLine = chunk.split('\n').find((l) => l.startsWith('data: '));
+                    if (!dataLine) continue;
+                    try { handleEvent(JSON.parse(dataLine.slice(6))); } catch { /* skip bad frame */ }
+                }
+                if (done) break;
+            }
         } catch (e) {
-            setResult({ ok: false, error: e.message || String(e) });
-            setRunState('failed');
+            finish({ ok: false, error: e.message || String(e) });
         }
     }, [projectId, sessionId, onSuccess]);
 
-    useEffect(() => {
-        if (autoStartedRef.current) return;
-        autoStartedRef.current = true;
+    // 主动部署请求（父组件"Deploy"按钮触发）：跳过"查状态恢复"，强制重新部署
+    const requestedRef = useRef(false);
+    const requestDeploy = useCallback(() => {
+        requestedRef.current = true;
         startRun();
     }, [startRun]);
+    useImperativeHandle(ref, () => ({ requestDeploy }), [requestDeploy]);
+
+    // 挂载先查该 session 的部署状态：有进行中/已完成的 kind='deploy' 则恢复展示，不重复触发。
+    // 主动部署（requestedRef=true，由 requestDeploy 触发）时跳过本逻辑。
+    // 无该 session 的部署记录 → 保持 idle 空态，等用户点"Deploy"再部署，绝不自动重新部署。
+    useEffect(() => {
+        if (requestedRef.current) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await apiFetch(withSessionId(`/api/v1/deployments?project_id=${encodeURIComponent(projectId)}`));
+                const data = await res.json();
+                if (cancelled || requestedRef.current) return;
+                const list = Array.isArray(data) ? data : (data?.deployments || []);
+                // 部署与 session 强绑定：只查该 session 的部署记录
+                const deployRows = list
+                    .filter((d) => d.kind === 'deploy' && (!sessionId || d.session_id === sessionId))
+                    .sort((a, b) => b.created_at - a.created_at);
+                const active = deployRows.find((d) => d.status === 'building' || d.status === 'pending');
+                if (active) {
+                    setRunState('running');
+                    setPhase(active.stage === 'B' ? 'B' : active.stage === 'preview' ? 'preview' : 'A');
+                    setRecoveredId(active.id);
+                } else if (deployRows.length > 0) {
+                    const last = deployRows[0];
+                    if (last.status === 'running') setRunState('success');
+                    else if (last.status === 'failed') { setRunState('failed'); setResult({ ok: false, error: last.stage_message || '上次部署失败', stage: last.stage }); }
+                    else if (last.status === 'stopped') setRunState('aborted');
+                }
+                // 无该 session 记录 → 保持 idle（空态）
+            } catch {
+                // 查状态失败 → 保持 idle（空态），不自动部署
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [projectId, sessionId]);
+
+    // 恢复"进行中"部署时轮询刷新阶段（SSE 已断开，改轮询 deployment 记录）
+    useEffect(() => {
+        if (!recoveredId) return undefined;
+        const id = setInterval(async () => {
+            try {
+                const res = await apiFetch(withSessionId(`/api/v1/deployments?project_id=${encodeURIComponent(projectId)}`));
+                const data = await res.json();
+                const list = Array.isArray(data) ? data : (data?.deployments || []);
+                const row = list.find((d) => d.kind === 'deploy' && d.id === recoveredId);
+                if (!row) return;
+                if (row.status === 'building' || row.status === 'pending') {
+                    setPhase(row.stage === 'B' ? 'B' : row.stage === 'preview' ? 'preview' : 'A');
+                } else if (row.status === 'running') {
+                    setRunState('success'); setRecoveredId(null);
+                } else if (row.status === 'failed') {
+                    setRunState('failed'); setResult({ ok: false, error: row.stage_message || '部署失败', stage: row.stage }); setRecoveredId(null);
+                } else if (row.status === 'stopped') {
+                    setRunState('aborted'); setRecoveredId(null);
+                }
+            } catch { /* ignore */ }
+        }, 3000);
+        return () => clearInterval(id);
+    }, [recoveredId, projectId, sessionId]);
 
     useEffect(() => () => {
         if (jumpTimerRef.current) clearTimeout(jumpTimerRef.current);
     }, []);
 
-    const friendlyStage = (stage) => {
-        switch (stage) {
-            case 'A': return '正在分析你的项目…';
-            case 'B': return '正在准备运行环境并测试…';
-            case 'preview': return '正在开启预览…';
-            default: return '';
-        }
-    };
-
-    useEffect(() => {
-        if (runState !== 'running' || !result) return;
-        const text = friendlyStage(result?.stage) || (result?.error || '');
-        if (text) setLatestMessage(text);
-    }, [result, runState]);
-
-    const retry = () => {
-        autoStartedRef.current = false;
-        setRunState('idle');
-        setResult(null);
-        setLatestMessage(null);
-        setTimeout(() => { autoStartedRef.current = true; startRun(); }, 0);
-    };
-
-    const resumeRun = () => {
-        autoStartedRef.current = false;
-        setRunState('idle');
-        setResult(null);
-        setLatestMessage(null);
-        setTimeout(() => { autoStartedRef.current = true; startRun({ resume: true }); }, 0);
-    };
-
-    const resumeReady = !!result?.verify?.resumeReady;
-
     return (
         <div className="flex h-full min-h-0 flex-col">
             <div className="flex-1 min-h-0 overflow-y-auto flex items-center justify-center">
+                {runState === 'idle' && (
+                    <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8">
+                        <Rocket className="w-9 h-9 text-zinc-300" />
+                        <div className="text-sm text-zinc-500">尚未部署</div>
+                        <div className="text-xs text-zinc-400">点击右上角「Deploy」按钮开始一键部署</div>
+                    </div>
+                )}
                 {runState === 'running' && (
                     <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8">
                         <Loader2 className="w-9 h-9 animate-spin text-blue-600" />
-                        <div className="text-sm font-medium text-zinc-900">分析部署中…</div>
-                        {latestMessage ? (
-                            <div className="text-xs text-zinc-500 max-w-md truncate" title={latestMessage}>{latestMessage}</div>
-                        ) : null}
+                        {phase === 'B' ? (
+                            <div className="space-y-1 flex flex-col items-center">
+                                <div className="flex items-center gap-1.5 text-sm font-medium text-zinc-900">
+                                    <CheckCircle2 className="w-4 h-4 text-green-600" />
+                                    阶段 1 分析完成
+                                </div>
+                                <div className="text-sm font-medium text-zinc-900">阶段 2：正在部署测试中</div>
+                            </div>
+                        ) : phase === 'preview' ? (
+                            <div className="text-sm font-medium text-zinc-900">正在开启预览…</div>
+                        ) : (
+                            <div className="text-sm font-medium text-zinc-900">阶段 1：正在分析项目…</div>
+                        )}
                     </div>
                 )}
                 {runState === 'success' && result && (
@@ -130,51 +222,9 @@ export default function DeployPanel({ projectId, sessionId, onSuccess, onDeployS
                     <FailureView result={result} />
                 )}
             </div>
-            {runState === 'failed' && (
-                <div className="border-t border-zinc-200 px-5 py-3 bg-zinc-50/80 flex justify-center items-center gap-2 shrink-0">
-                    <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => copyDiagnostics(result)}>
-                        <Copy className="w-3.5 h-3.5" />
-                        复制诊断信息
-                    </button>
-                    {resumeReady && (
-                        <button type="button" className={buttonClass('primary', 'sm')} onClick={resumeRun}>
-                            <RefreshCw className="w-3.5 h-3.5" />
-                            从上次继续修复
-                        </button>
-                    )}
-                    <button type="button" className={buttonClass(resumeReady ? 'secondary' : 'primary', 'sm')} onClick={retry}>
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        重新部署
-                    </button>
-                </div>
-            )}
         </div>
     );
-}
-
-function copyDiagnostics(result) {
-    const lines = [
-        '== AgentHarness 部署诊断 ==',
-        `错误: ${result?.error || ''}`,
-        `警告: ${result?.verify?.warning || ''}`,
-        '',
-        '== 最终输出 ==',
-        result?.finalStderr || result?.verify?.finalStderr || '(无)',
-        '',
-        '== 已尝试的步骤 ==',
-        ...((result?.verify?.tested || []).map((t, i) => `${i + 1}. ${t}`)),
-        '',
-        '== AI 修复过程（最近）==',
-        ...((result?.verify?.trail || []).slice(-20).map((t) => {
-            if (t.action === 'tool') return `[${t.round}] ${t.tool} ${JSON.stringify(t.args || '')} → ${t.out || ''}`;
-            if (t.action === 'invalid_json') return `[${t.round}] 输出超长/截断(truncated=${t.truncated}, ${t.len} chars)，JSON 解析失败`;
-            if (t.action === 'repeat') return `[${t.round}] 重复调用 ${t.tool}，被阻止`;
-            if (t.action === 'final') return `[${t.round}] final ok=${t.ok}`;
-            return `[${t.round}] ${t.action} ${t.name || ''}`;
-        })),
-    ];
-    navigator.clipboard?.writeText(lines.join('\n')).catch(() => {});
-}
+});
 
 function FailureView({ result }) {
     const [showDetails, setShowDetails] = useState(false);
@@ -188,15 +238,12 @@ function FailureView({ result }) {
         <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8 w-full max-w-lg">
             <AlertCircle className="w-9 h-9 text-red-600" />
             <div className="text-sm font-semibold text-red-700">部署失败</div>
-            {result?.verify?.warning ? (
-                <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-1.5">{result.verify.warning}</div>
-            ) : null}
-            <div className="text-xs text-zinc-600 max-w-md break-words px-4 text-left">
-                {result.error ? <div className="mb-2">{result.error}</div> : null}
-                {result.finalStderr || result?.verify?.finalStderr ? (
-                    <pre className="mt-1 bg-white/60 border border-red-200 rounded p-2 font-mono text-[10px] text-red-800 max-h-40 overflow-y-auto whitespace-pre-wrap break-words">{result.finalStderr || result.verify.finalStderr}</pre>
-                ) : null}
-            </div>
+            {(() => {
+                const line = result?.error || result?.verify?.warning || '';
+                return line ? (
+                    <div className="text-xs text-zinc-600 max-w-md break-words px-4">{line}</div>
+                ) : null;
+            })()}
             {hasDetails && (
                 <>
                     <button
@@ -205,7 +252,7 @@ function FailureView({ result }) {
                         className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-900"
                     >
                         {showDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                        {showDetails ? '收起修复过程' : '查看 AI 修复过程'}
+                        {showDetails ? '收起报错详情' : '查看报错详情'}
                     </button>
                     {showDetails && (
                         <div className="w-full text-left">
@@ -246,3 +293,5 @@ function FailureView({ result }) {
         </div>
     );
 }
+
+export default DeployPanel;

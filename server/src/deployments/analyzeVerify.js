@@ -157,16 +157,19 @@ function isDirectoryListing(body) {
         || /\bDirectory listing for \//.test(body);
 }
 
-// box 沙箱默认预览页特征（guest 3000 端口常驻的 "Workspace ready" 页，不是用户应用）。
+// box 沙箱默认预览页特征（guest 常驻的 "Workspace ready" 页，不是用户应用）。
 function isBoxDefaultPage(body) {
     return /Workspace ready/.test(body) && /Edit files here/.test(body);
 }
 
 // 单端口探测：curl 一个端口，判定是否为"真实应用内容"。
-// boxDefaultPort: box 沙箱常驻默认预览页的端口（如 3000）。只有该端口上的"默认欢迎页"
-// 才是沙箱自身的服务；其它端口上即使内容相似，也是 agent serve 出来的项目（可能是默认模板），
-// 不应被当成"沙箱默认页"排除。
-async function probePort({ runtimeRef, workspacePath, port, boxDefaultPort }) {
+// boxDefaultPorts: box 沙箱常驻默认预览端口的集合（[3000, 5173]）。其中：
+//   - 5173 是 box 的默认 preview 服务（preview.json 的 serve . --listen 5173），常驻且
+//     verify 的 pkill npx serve 杀不掉，应用几乎不可能监听它 → 无条件排除，避免误选
+//     box 默认页/workspace 根内容为 appPort；
+//   - 3000 是 box 欢迎页常驻端口，但 agent 也可能把应用 serve 到 3000，因此仅当内容
+//     确为默认欢迎页时才排除。
+async function probePort({ runtimeRef, workspacePath, port, boxDefaultPorts }) {
     const runtime = getRuntime();
     try {
         const r = await runtime.exec.exec(
@@ -188,7 +191,7 @@ async function probePort({ runtimeRef, workspacePath, port, boxDefaultPort }) {
         if (isDirectoryListing(body)) {
             return { ok: false, listen: true, reason: `端口 ${port} 是目录列表` };
         }
-        if (port === Number(boxDefaultPort || 3000) && isBoxDefaultPage(body)) {
+        if (port === 5173 || (boxDefaultPorts.includes(port) && isBoxDefaultPage(body))) {
             return { ok: false, listen: true, reason: `端口 ${port} 是沙箱默认页` };
         }
         if (!body) {
@@ -232,10 +235,11 @@ async function assertAppIsServed({ runtimeRef, workspacePath, preferredPort }) {
     }
     const candidates = [...new Set([...base, ...listenPorts])].slice(0, 40);
     const errors = [];
-    const boxDefaultPort = Number(process.env.BOXLITE_DEFAULT_PREVIEW_PORT || 3000);
+    // box 沙箱常驻默认预览端口：3000（欢迎页）与 5173（preview.json serve . --listen 5173）。
+    const boxDefaultPorts = [Number(process.env.BOXLITE_DEFAULT_PREVIEW_PORT || 3000), 5173];
     const probeDetail = [];
     for (const port of candidates) {
-        const res = await probePort({ runtimeRef, workspacePath, port, boxDefaultPort });
+            const res = await probePort({ runtimeRef, workspacePath, port, boxDefaultPorts });
         probeDetail.push(`${port}=${res.httpCode || (res.listen ? 'listen' : 'down')}${res.ok ? '(app)' : ''}`);
         if (res.ok) {
             return { ok: true, port, httpCode: res.httpCode, snippet: res.snippet };
@@ -259,7 +263,7 @@ function buildSystemPrompt(plan) {
         'CRITICAL execution rules:',
         '- Every run_shell call is a FRESH shell (working dir resets to /workspace each time). Use `cd <dir> && <cmd>` inside ONE call when you need a subdirectory. Background processes started with `&` keep running in the VM.',
         '- The serve command must start the app in the background and stay running. Use e.g. `export PORT=<port>; (cd server && npm start) > /tmp/serve.log 2>&1 & sleep 5; cat /tmp/serve.log`, then health-check with curl.',
-        '- Keep the serve process alive even after your shell exits: start it with nohup / setsid and disown. Use the default port ($PORT) when it is free; if it is busy, pick another free port — the platform auto-detects the real app port for the preview, so do not waste rounds fighting over one specific port.',
+        '- Keep the serve process alive even after your shell exits: start it with nohup / setsid and disown. Pick any free port (export PORT=<port> if the app reads it; prefer the default port when free) — the platform auto-detects the real app port for the preview, so do not waste rounds fighting over one specific port.',
         '- Verify with an actual HTTP request, not just "process started": `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:<port>/`. A 2xx/3xx/expected response means success.',
         '- When a command fails, DO NOT just rerun it. Read the error, inspect files (read_file/list_dir), fix the root cause (edit_file), then retry.',
         'Deploy plan to execute:',
@@ -274,6 +278,7 @@ function buildSystemPrompt(plan) {
         'SERVING RULES (MANDATORY):',
         '- Exception for plain static sites: IF the project really is a static site — its root has a NON-EMPTY index.html and there is NO package.json / build tooling / backend — then serving that directory is CORRECT (e.g. `python3 -m http.server` or `npx serve .`). This is the ONLY case where serving a workspace dir is allowed.',
         '- In EVERY other case: NEVER serve the raw workspace root or source directories (no `npx serve .`, `serve -s .`, `python3 -m http.server`, `caddy file-server` at /workspace or inside src/). That would expose source code and is a FAILURE. Serve ONLY a built artifact directory (e.g. `web/dist`, `build/`, `out/`) or the real app entry; for a monorepo, build and serve the frontend app under the correct subdir, and start the backend too when present.',
+        '- The sandbox may already run its OWN placeholder services on ports 3000 and 5173 — they are NOT your app. Start your app on a free port and confirm YOUR process is the one answering (pgrep -af "<serve cmd>" + curl its port several times).',
         '- A "directory listing" page (titles like "Index of /" or "Directory listing for /") or an EMPTY index.html is NOT a valid app — treat it as FAILURE. Never fake a pass with a static file server.',
         '- Health check must return the REAL application content (HTML with a <title> and app markup, or the backend API JSON). A 200 on a file listing or an empty page is NOT success.',
         '- If you cannot install deps / build / start the app for real, report ok:false with the real reason. Do NOT fake success to satisfy the check.',
@@ -284,8 +289,9 @@ function buildSystemPrompt(plan) {
         '- Create a user + database matching the app config (run psql as the postgres user): CREATE USER myuser WITH PASSWORD mypass; then CREATE DATABASE mydb OWNER myuser;',
         '- Create the tables: look for schema.sql / init.sql / migrations / README "Database Schema" section / the SQL in code (db/*.db.js), and run the DDL so real queries work.',
         '- Point the app at the LOCAL database: edit server/.env (and client env if needed) so POSTGRES_HOST/DATABASE_URL use 127.0.0.1 (or localhost), with the user/password/database you created.',
+        '- SECURITY (MANDATORY) — the sandbox shares a network with the HOST machine. NEVER point the app at a database on the host or anywhere outside the sandbox: no host / LAN IP (e.g. 172.28.x.x, 10.x.x.x, 192.168.x.x), no cloud hostname. The database MUST run INSIDE the sandbox at 127.0.0.1. If a repo .env already contains a DATABASE_URL / POSTGRES_HOST, always re-point its host to 127.0.0.1 and start local PostgreSQL. Using the host database is a hard FAILURE: it breaks isolation and lets the preview authenticate with host accounts.',
         '- Then start the backend and verify a DB-backed endpoint actually returns rows (e.g. GET /api/... that reads from the DB), not just an empty 200 from the root.',
-        'FRONTEND API BASE (MANDATORY): if the frontend calls its backend through an env like VITE_API_URL / REACT_APP_API_URL / NEXT_PUBLIC_API_URL / axios baseURL, set it to a RELATIVE path so it works under the preview sub-path (e.g. build with VITE_API_URL=./api, or use /api if the backend routes are under /api). NEVER leave it as an absolute http://localhost:... address — the user browser cannot reach the sandbox localhost. Check the frontend config (.env / axios.config / build script) and REBUILD the frontend with the correct relative API base if the current dist has no/absolute baseURL. In the sandbox, verify the frontend-to-backend path works: curl -s http://127.0.0.1:<frontendPort>/api/... returns the backend JSON (through the aggregate proxy), not an HTML page.',
+        'FRONTEND API BASE (MANDATORY): if the frontend calls its backend through an env like VITE_API_URL / REACT_APP_API_URL / NEXT_PUBLIC_API_URL / axios baseURL, set it to a RELATIVE path so it works under the preview sub-path (e.g. build with VITE_API_URL=./api, or use /api if the backend routes are under /api). NEVER leave it as an absolute http://localhost:... address — the user browser cannot reach the sandbox localhost. Check the frontend config (.env / axios.config / build script) and REBUILD the frontend with the correct relative API base if the current dist has no/absolute baseURL. In the sandbox, verify the frontend-to-backend path works: curl -s http://127.0.0.1:<frontendPort>/api/... returns the backend JSON, not an HTML page.',
         'SELF-CONTAINED FULLSTACK SERVERS: some backends also serve their own built frontend, so a single port answers both HTML and API. If the project works that way:',
         '- Detect: the backend reads a built frontend dir (dist / public / build) and serves it, and there is no separate frontend dev server needed for the app to be usable.',
         '- Build the frontend into the location the server expects (check its config / README for the expected output dir), then start the backend WITH the config it needs — many servers do NOT auto-load their .env, so source it or export the required DATABASE_URL etc. (e.g. `cd server && set -a && . ./.env && set +a && npm start`).',
@@ -482,8 +488,9 @@ async function runVerifyWithoutLlm({ workspacePath, runtimeRef, plan, projectTyp
             const body = out.replace(/__HTTPCODE__:\d{3}/, '').trim();
             tested.push(`serve probe: http=${code}`);
             const ok2xx = code.startsWith('2') || code.startsWith('3');
-            const isBoxDefaultPort = port === Number(process.env.BOXLITE_DEFAULT_PREVIEW_PORT || 3000);
-            if (ok2xx && (isDirectoryListing(body) || (isBoxDefaultPort && isBoxDefaultPage(body)) || !body)) {
+            const boxDefaultPorts = [Number(process.env.BOXLITE_DEFAULT_PREVIEW_PORT || 3000), 5173];
+            const isBoxDefaultPort = port === 5173 || (boxDefaultPorts.includes(port) && isBoxDefaultPage(body));
+            if (ok2xx && (isDirectoryListing(body) || isBoxDefaultPort || !body)) {
                 const log = await runtime.exec.exec('sh', ['-c', `cat /tmp/serve.log 2>&1 | tail -60`], {}, { runtimeRef, cwd: workspacePath });
                 return { ok: false, source: 'shell', tested, finalStderr: String(log.stdout || '').slice(0, 4000), warning: 'served directory listing / box default page / empty, not the app' };
             }

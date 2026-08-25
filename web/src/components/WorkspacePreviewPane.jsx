@@ -75,7 +75,6 @@ export default function WorkspacePreviewPane({ projectId, deployInfo }) {
     }
   };
 
-  const stepsCount = deployInfo?.plan?.steps?.length;
   const elapsedMs = deployInfo?.elapsedMs;
 
   return (
@@ -148,16 +147,7 @@ export default function WorkspacePreviewPane({ projectId, deployInfo }) {
                 <span className="text-zinc-800">{(elapsedMs / 1000).toFixed(1)} 秒</span>
               </div>
             )}
-            {stepsCount != null && (
-              <div>
-                <span className="text-zinc-500">自动完成步骤：</span>
-                <span className="text-zinc-800">{stepsCount} 步</span>
-              </div>
-            )}
           </div>
-          <p className="text-[11px] text-zinc-500 leading-relaxed">
-            AI 已自动分析你的项目，并帮你准备好运行环境、安装依赖、启动应用并通过了检查。你可以直接在下方预览，也可以点击按钮在浏览器中打开。
-          </p>
         </div>
       )}
 

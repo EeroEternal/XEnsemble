@@ -7,6 +7,7 @@
   "action": {
     "start": "启动",
     "stop": "停止",
+    "stop_preview": "停止当前预览（关闭沙箱中的应用预览）",
     "restart": "重启",
     "delete": "删除",
     "copy_url": "复制 URL",

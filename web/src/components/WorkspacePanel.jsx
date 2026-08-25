@@ -61,8 +61,9 @@ function readExtraTabs(sessionId) {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        // deploy 是临时操作面板（挂载即自动部署），刷新/重新进入时不恢复，避免后台自动部署
-        return parsed.map(migrateTabKey).filter((k) => ADDABLE_KEYS.has(k) && k !== 'deploy');
+        // deploy 面板也恢复：部署进行中时切走/刷新后能找回进度（DeployPanel 挂载会查状态，
+        // 有进行中则恢复、无则才部署，不会因恢复 tab 而重复部署）
+        return parsed.map(migrateTabKey).filter((k) => ADDABLE_KEYS.has(k));
       }
     }
   } catch {
@@ -691,11 +692,9 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
           </div>
         </div>
 
-        {mainTab === 'deploy' && (
-          <div className="flex-1 min-h-0 overflow-hidden">
-            {deployContent || null}
-          </div>
-        )}
+        <div className={mainTab === 'deploy' ? 'flex-1 min-h-0 overflow-hidden' : 'hidden'}>
+          {deployContent || null}
+        </div>
 
         {mainTab === 'preview' && (
           <div className="flex-1 min-h-0 overflow-hidden">

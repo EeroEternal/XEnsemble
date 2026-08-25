@@ -6,9 +6,10 @@ const { appendInboxLog } = require('../workspace/logInbox');
 const deploymentService = require('../deployments/DeploymentService');
 const { abortDeploy } = require('../deployments/activeDeploys');
 const { analyzeProjectDeploy } = require('../deployments/analyzeDeploy');
-const { createTunnel, stopByProjectId } = require('../preview/tunnelServer');
+const { createTunnel, stopByProjectId, stopTunnel } = require('../preview/tunnelServer');
 const { db } = require('../db');
 const schema = require('../db/schema');
+const { eq, and } = require('drizzle-orm');
 const crypto = require('crypto');
 const policy = require('../auth/PolicyService');
 const { sendPublicError, sanitizePublicError } = require('../http/publicError');
@@ -228,8 +229,16 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
     fastify.post('/api/v1/projects/:projectId/deploy/cancel', { preValidation: [fastify.authenticate, fastify.requireActive] }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.projectId);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
-        try { abortDeploy(project.id); } catch (_) { /* ignore */ }
-        try { stopByProjectId(project.id); } catch (_) { /* ignore */ }
+        // 中止"该 session"的部署（activeDeploys 已按 projectId:sessionId 粒度，必须传 sessionId 才能命中）
+        const sessionId = request.query?.session_id || request.body?.session_id;
+        try { abortDeploy(project.id, sessionId); } catch (_) { /* ignore */ }
+        // 停掉该 session 的 preview 隧道（多 session 并发部署互不干扰，不误停其它 session）
+        try {
+            const conds = [eq(schema.deployments.projectId, project.id), eq(schema.deployments.status, 'running')];
+            if (sessionId) conds.push(eq(schema.deployments.sessionId, sessionId));
+            const rows = await db.select({ id: schema.deployments.id }).from(schema.deployments).where(and(...conds));
+            for (const r of rows) { try { stopTunnel(r.id); } catch (_) { /* ignore */ } }
+        } catch (_) { /* ignore */ }
         return { ok: true };
     });
 }

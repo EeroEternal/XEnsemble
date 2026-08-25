@@ -181,6 +181,11 @@ export function useWorkspaces(user) {
         const data = JSON.parse(e.data);
         if (data.type === 'session_status' || data.type === 'session_title') {
           fetchSessions();
+        } else if (data.type === 'deploy_finished') {
+          // 跨 session 部署完成：刷新数据 + 通知页面级监听（toast / 跳转）
+          fetchProjects();
+          fetchSessions();
+          window.dispatchEvent(new CustomEvent('xensemble:deploy_finished', { detail: data }));
         }
       } catch {
         // ignore invalid data

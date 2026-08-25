@@ -125,7 +125,7 @@ function buildMessages(treeText, fileContentsText, feedback) {
         '- kind="prepare": commands that finish on their own (install deps in root AND each subdir if needed, build, lint, generate, db migrate, prisma generate, etc.).',
         '- For monorepos: FIRST step is root install (e.g. `npm install` at repo root; this installs all workspaces via package.json "workspaces"). Skip per-subdir install if root install covers them.',
         '- If the project has native deps that need building (node-pty, sqlite3, bcrypt, sharp, prisma, etc.), the FIRST prepare step should be `apt-get update && apt-get install -y python3 build-essential` so node-gyp can compile them.',
-        '- kind="serve": EXACTLY ONE final step that brings up the FULL STACK (frontend + backend) as a long-running process. Reference the listen port as $PORT (the platform injects a PORT env var for the main web port). Do not suffix with & or nohup.',
+        '- kind="serve": EXACTLY ONE final step that brings up the FULL STACK (frontend + backend) as a long-running process. Listen on the stack\'s default port or a free port, referenced as $PORT in the command (export PORT=<port> if the app reads it). Do not suffix with & or nohup.',
         '- Serve step: prefer a root script that starts BOTH frontend and backend (e.g. `npm run dev` at root if it uses concurrently / turbo / nx / pnpm -r to start all). The final command MUST bring up the full stack so the preview page can actually call the backend API end-to-end.',
         '- CRITICAL — no repeated `cd` or relative-path chaining: Each step runs in the SAME persistent bash shell, so `cd web` from a previous step PERSISTS. NEVER repeat `cd web` in a later step — you will get "No such file or directory". Either: (a) put ALL `cd` AND its commands in ONE step (e.g. `cd web && npm install`), or (b) use absolute paths (e.g. `npm --prefix web run dev`) or npm/pnpm workspace syntax. The same goes for any other directory-changing command — do it once at the start of the step that needs it.',
         '- .agents/preview.json is a platform default hint, NOT authoritative; the project root scripts take priority.',
@@ -321,7 +321,7 @@ async function callLlm(messages) {
 
 const MAX_AGENT_ROUNDS = 15;
 const ALLOWED_RUN_CHECK_PREFIX = [
-    'test -d', 'test -f', 'test -e', 'ls ', 'which ', 'find ',
+    'test -d', 'test -f', 'test -e', 'ls ', 'which ', 'find ', 'cat ',
     'npm view', 'npm run', 'npm ls', 'pnpm run', 'pnpm ls', 'yarn run',
     'node -v', 'npm -v', 'pnpm -v', 'yarn -v', 'node -p', 'node -e',
     'grep ', 'head ', 'wc -',
@@ -338,7 +338,7 @@ const AGENT_SYSTEM_PROMPT = [
     'Critical tool-usage rules:',
     '- Call exactly ONE tool per response. Do NOT bundle multiple commands into one call.',
     '- Do NOT repeat the same tool call twice — if a call returned nothing useful, change approach (different path/tool) or finalize.',
-    '- Explore efficiently: read the root package.json early, check for workspaces/monorepo, then dive into web/ and server/ package.json. After ~3-6 tool calls you should have enough to finalize. Do not over-explore.',
+    '- Explore efficiently: read the root package.json early, check for workspaces/monorepo, then dive into web/ and server/ package.json. Finalize as soon as you are confident — typically 4-10 tool calls for most projects, more for large monorepos. Do not over-explore.',
     'When confident, output your FINAL answer: {"action":"final","result":{"configFiles":[{"path":"...","template":"...","description":"...","keys":[...]}],"steps":[{"id":"step_1","name":"...","command":"...","description":"...","kind":"prepare"|"serve"}]}}',
     'Rules for the final answer:',
     '- configFiles: ALL files (frontend AND backend) the user must fill before deploy. template = full suggested content (copy from .env.example if exists; keep placeholders like YOUR_API_KEY). ALWAYS include the .env / .env.example files you find. Do NOT put real secrets.',

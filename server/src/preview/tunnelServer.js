@@ -53,7 +53,7 @@ async function createTunnel({ deploymentId, workspacePath, runtimeRef, vmPort, p
     const wsPort = await getFreePort();
     const hostIp = getHostIp();
 
-    await runtime.fs.fsWrite(workspacePath, '.agents/tunnelClient.js', TUNNEL_CLIENT_SCRIPT, { runtimeRef });
+    await runtime.fs.fsWrite(workspacePath, '.agents/tunnelClient.cjs', TUNNEL_CLIENT_SCRIPT, { runtimeRef });
 
     let vmSocket = null;
     const pendingBrowsers = new Map();
@@ -100,7 +100,7 @@ async function createTunnel({ deploymentId, workspacePath, runtimeRef, vmPort, p
 
     const child = await runtime.exec.spawn(
         'node',
-        ['.agents/tunnelClient.js', hostIp, String(wsPort), String(vmPort)],
+        ['.agents/tunnelClient.cjs', hostIp, String(wsPort), String(vmPort)],
         { TERM: 'xterm-256color' },
         { name: 'tunnel-client', cwd: workspacePath, runtimeRef },
     );
@@ -117,12 +117,16 @@ async function createTunnel({ deploymentId, workspacePath, runtimeRef, vmPort, p
     const ready = await waitForVmPort(runtimeRef, workspacePath, vmPort);
     if (!ready) throw new Error(`Preview service did not start on port ${vmPort}`);
 
-    const publicUrl = `${resolveControlPlanePublicUrlSync()}/preview/${deploymentId}/`;
+    // 预览专用端口（PREVIEW_PUBLIC_URL）：与宿主控制台(8088)分开，避免地址栏混淆。
+    // 未配置时回退到控制面 URL 的 /preview/<id>/ 路径。
+    const previewBase = (process.env.PREVIEW_PUBLIC_URL || '').trim() || resolveControlPlanePublicUrlSync();
+    const publicUrl = `${previewBase.replace(/\/+$/, '')}/preview/${deploymentId}/`;
     previewRegistry.set(deploymentId, {
         port: browserPort,
         workspacePath,
         startedAt: Date.now(),
     }, { persist: false });
+    console.error(`[tunnelServer] registry set ${deploymentId} port=${browserPort} entries=${previewRegistry.listIds().length}`);
 
     tunnels.set(deploymentId, { browserServer, wsServer, child, browserPort, projectId });
 

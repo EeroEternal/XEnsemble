@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   AppWindow,
   Loader2,
-  RefreshCw,
   Rocket,
   Square,
 } from 'lucide-react';
@@ -13,10 +12,13 @@ import { useTranslation } from 'react-i18next';
 
 function pickActiveDeployment(list) {
   if (!Array.isArray(list) || list.length === 0) return null;
-  const running = list.find((d) => d.status === 'running');
-  if (running) return running;
+  // 部署中（building/pending）优先：右上角显示"部署中"转圈
   const building = list.find((d) => d.status === 'building' || d.status === 'pending');
   if (building) return building;
+  // 运行中的 preview 优先于 kind='deploy' running：Stop 一次即停真正的预览，
+  // 不会先停部署记录、轮询后又切回 running 导致"要按两次"
+  const runningPreview = list.find((d) => d.kind === 'preview' && d.status === 'running');
+  if (runningPreview) return runningPreview;
   return list[0];
 }
 
@@ -60,6 +62,9 @@ export function usePreview(projectId, token, sessionId) {
   useEffect(() => {
     lastFailedToastRef.current = null;
     closePreviewWindow(previewWindowRef);
+    // 切 session 时清空旧 deployment/loading，避免右上角残留旧 session 的"部署中"转圈
+    setDeployment(null);
+    setLoading(false);
   }, [projectId, sessionId]);
 
   useEffect(() => () => closePreviewWindow(previewWindowRef), []);
@@ -73,7 +78,11 @@ export function usePreview(projectId, token, sessionId) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t('deploy:error.load_preview_failed'));
       setDeployment((prev) => {
-        const next = pickActiveDeployment(data);
+        const list = Array.isArray(data) ? data : (data?.deployments || []);
+        // 只关心当前 session 的 deployment：同 project 多 session 并发部署时，
+        // 右上角状态不被其它 session 的 building 部署干扰
+        const mine = sessionId ? list.filter((d) => d.session_id === sessionId) : list;
+        const next = pickActiveDeployment(mine);
         if (prev && next && prev.id === next.id && prev.status === next.status && prev.public_url === next.public_url) return prev;
         return next;
       });
@@ -138,34 +147,6 @@ export function usePreview(projectId, token, sessionId) {
     }
   };
 
-  const restartPreview = async () => {
-    if (!deployment?.id) return;
-    setLoading(true);
-    try {
-      const res = await apiFetch(
-        `/api/v1/deployments/${encodeURIComponent(deployment.id)}/start`,
-        { method: 'POST' },
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.deployment?.last_error_message || t('deploy:error.restart_failed'));
-      const next = data.deployment || data;
-      setDeployment(next);
-      if (next.status === 'running' && next.public_url) {
-        const url = next.preview_token
-          ? `${next.public_url}${next.public_url.includes('?') ? '&' : '?'}preview_token=${encodeURIComponent(next.preview_token)}`
-          : null;
-        if (url && !openPreviewWindow(url, previewWindowRef)) {
-          showToast('error', 'Preview restarted. Allow pop-ups to open the preview window.');
-        }
-      }
-    } catch (e) {
-      showToast('error', e.message);
-      await loadDeployments();
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const previewUrl = deployment?.public_url && deployment?.status === 'running' ? deployment.public_url : null;
 
   const status = deployment?.status || 'none';
@@ -212,7 +193,6 @@ export function usePreview(projectId, token, sessionId) {
     loadDeployments,
     deployPreview,
     stopPreview,
-    restartPreview,
     openPreview,
     resolveEmbedUrl,
   };
@@ -221,17 +201,37 @@ export function usePreview(projectId, token, sessionId) {
 const ICON_BTN =
   'rounded-md p-1.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 disabled:opacity-50';
 
-export function PreviewStatus({ deployStatus }) {
-  // 只显示部署流程状态：running（部署中）/ finished（部署结束）；aborted / idle 不显示
-  if (deployStatus !== 'running' && deployStatus !== 'finished') return null;
+export function PreviewStatus({ deployStatus, status }) {
+  // 部署流程状态：running（部署中）/ failed（失败）；成功(finished)后跟随 deployment
+  // 实际状态 —— 若已被停止则显示 stopped，避免残留 finished。aborted / idle 不显示。
+  if (deployStatus === 'running') {
+    return (
+      <div className="flex items-center gap-1.5 shrink-0">
+        <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
+          running
+        </span>
+      </div>
+    );
+  }
+  if (deployStatus === 'failed') {
+    return (
+      <div className="flex items-center gap-1.5 shrink-0">
+        <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-red-50 text-red-600">
+          failed
+        </span>
+      </div>
+    );
+  }
+  if (deployStatus !== 'finished') return null;
+  const display = status === 'stopped' ? 'stopped' : 'finished';
   return (
     <div className="flex items-center gap-1.5 shrink-0">
       <span
         className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
-          deployStatus === 'running' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-50 text-emerald-600'
+          display === 'stopped' ? 'bg-zinc-100 text-zinc-500' : 'bg-emerald-50 text-emerald-600'
         }`}
       >
-        {deployStatus}
+        {display}
       </span>
     </div>
   );
@@ -239,9 +239,10 @@ export function PreviewStatus({ deployStatus }) {
 
 export function PreviewControlGroup({ deployStatus, onCancelDeploy, ...props }) {
   const { deployment } = props;
+  const status = deployment?.status || 'none';
   return (
     <div className="flex items-center gap-0.5 shrink-0">
-      <PreviewStatus deployStatus={deployStatus} />
+      <PreviewStatus deployStatus={deployStatus} status={status} />
       {deployment && <div className="h-3.5 w-px bg-zinc-200 mx-0.5 shrink-0" aria-hidden />}
       <PreviewActions {...props} deployStatus={deployStatus} onCancelDeploy={onCancelDeploy} />
     </div>
@@ -257,7 +258,6 @@ export function PreviewActions({
   openPreview,
   deployPreview,
   stopPreview,
-  restartPreview,
   onAnalyze,
 }) {
   const { t } = useTranslation();
@@ -290,16 +290,7 @@ export function PreviewActions({
         )}
         <button
           type="button"
-          title={t('deploy:action.restart', { defaultValue: 'Restart preview' })}
-          disabled={isBusy}
-          onClick={restartPreview}
-          className={ICON_BTN}
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          title={t('deploy:action.stop', { defaultValue: 'Stop preview' })}
+          title={t('deploy:action.stop_preview', { defaultValue: 'Stop this preview' })}
           disabled={isBusy}
           onClick={stopPreview}
           className={ICON_BTN}
