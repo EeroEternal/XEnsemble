@@ -1071,9 +1071,15 @@ export default React.forwardRef(function Sessions({
   // so we can gate VM-triggering API calls on session liveness.
   const sessionPending = activeSessionMeta?.status === 'pending';
   const sessionFailed = activeSessionMeta?.status === 'failed';
+  // A recoverable session that is not alive should be woken regardless of DB
+  // status. After a server restart, recoverRunningSessions may reattach to a
+  // box whose agent process has already died. The in-memory handle eventually
+  // fires exit (alive=false), but the DB status may remain 'running' for
+  // 35+ seconds (BoxLiteStreamHandle reattach retries) or indefinitely if the
+  // exit callback's DB update fails. Requiring status==='idle' would leave the
+  // user staring at a gray-blue screen until the DB catches up.
   const sessionWakeable = !sessionAlive && !sessionPending && !sessionFailed
-    && activeSessionMeta?.recoverable === true
-    && activeSessionMeta?.status === 'idle';
+    && activeSessionMeta?.recoverable === true;
   const sessionControlPending = restartingSession;
 
   // Auto-resume idle recoverable sessions (e.g. after server restart).
