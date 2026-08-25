@@ -145,6 +145,22 @@ export default function GitProvidersSettingsPanel() {
             ))}
           </div>
         </div>
+
+        {git.error && (
+          <GitOAuthAlert
+            message={git.error || `${activeProvider} OAuth is not configured`}
+            provider={activeProvider}
+          />
+        )}
+
+        <GitConnectButton
+          provider={activeProvider}
+          connection={git.connection}
+          loading={git.loading}
+          onConnect={git.connect}
+          onDisconnect={git.disconnect}
+          disabled={providerOAuthConfigured[activeProvider] === false}
+        />
       </section>
       <div className="border-t border-zinc-200" />
       {/* OAuth Application Configuration */}
@@ -216,22 +232,6 @@ export default function GitProvidersSettingsPanel() {
           </form>
         )}
       </section>
-
-      {git.error && (
-        <GitOAuthAlert
-          message={git.error || `${activeProvider} OAuth is not configured`}
-          provider={activeProvider}
-        />
-      )}
-
-      <GitConnectButton
-        provider={activeProvider}
-        connection={git.connection}
-        loading={git.loading}
-        onConnect={git.connect}
-        onDisconnect={git.disconnect}
-        disabled={providerOAuthConfigured[activeProvider] === false}
-      />
     </div>
   );
 }
