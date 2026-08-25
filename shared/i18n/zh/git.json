@@ -89,7 +89,8 @@
     "pr_reopened": "Pull request 已重新打开。",
     "pr_merged": "Pull request 已合并。",
     "pr_closed": "Pull request 已关闭。",
-    "pr_approved": "Pull request 已批准。"
+    "pr_approved": "Pull request 已批准。",
+    "already_approved": "您已经批准过此合并请求。"
   },
   "count_one": "{{count}} 个会话",
   "count_other": "{{count}} 个会话",

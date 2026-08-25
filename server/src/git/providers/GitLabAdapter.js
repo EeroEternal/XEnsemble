@@ -356,11 +356,21 @@ class GitLabAdapter extends GitProviderService {
 
     async submitApproval(token, repoIdentifier, mrIid, { apiBase } = {}) {
         const encoded = encodeURIComponent(repoIdentifier);
-        await gitlabFetch(token, apiBase,
-            `/projects/${encoded}/merge_requests/${mrIid}/approve`, {
-            method: 'POST',
-        });
-        return { approved: true };
+        try {
+            await gitlabFetch(token, apiBase,
+                `/projects/${encoded}/merge_requests/${mrIid}/approve`, {
+                method: 'POST',
+            });
+            return { approved: true };
+        } catch (err) {
+            // GitLab returns 401 for both "token expired" and "already approved".
+            // Distinguish the latter so it isn't misclassified as an auth error.
+            if (err.status === 401 && /already\s+approved|approved\s+by/i.test(err.message)) {
+                err.code = 'already_approved';
+                err.status = 409;
+            }
+            throw err;
+        }
     }
 
     async addIssueComment(token, repoIdentifier, mrIid, body, { apiBase } = {}) {

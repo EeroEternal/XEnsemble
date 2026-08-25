@@ -577,11 +577,13 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
       if (err.code === 'REAUTH_REQUIRED') {
         showToast('warning', err.message);
         window.dispatchEvent(new CustomEvent('xe:open-settings'));
+      } else if (err.code === 'already_approved') {
+        showToast('warning', err.message);
       } else {
         showToast('error', err.message);
       }
     } finally {
-      setCommentSending(false);
+      setActionLoading(null);
     }
   };
 

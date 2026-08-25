@@ -1,4 +1,5 @@
 import { apiFetch } from './api';
+import { withSessionId } from './sessionContext';
 
 export function generateWorkBranchName(repoFullName) {
   const repoName = (repoFullName || '').split('/').pop() || 'workspace';
@@ -7,7 +8,7 @@ export function generateWorkBranchName(repoFullName) {
 }
 
 async function request(path, options = {}) {
-  const res = await apiFetch(path, options);
+  const res = await apiFetch(withSessionId(path), options);
   let data = {};
   try {
     data = await res.json();

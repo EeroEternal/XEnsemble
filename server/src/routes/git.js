@@ -520,6 +520,9 @@ function registerGitRoutes(fastify) {
             return result;
         } catch (err) {
             request.log.error(err);
+            if (err.code === 'already_approved') {
+                return reply.code(409).send({ error: t('git:toast.already_approved', { defaultValue: 'You have already approved this merge request.' }, request.locale || 'en'), code: 'already_approved' });
+            }
             const isAuth = err.code === 'token_expired' || err.status === 401;
             return reply.code(isAuth ? 400 : 500).send({ error: err.message, code: isAuth ? 'REAUTH_REQUIRED' : undefined });
         }

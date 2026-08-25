@@ -89,7 +89,8 @@
     "pr_reopened": "Pull request reopened.",
     "pr_merged": "Pull request merged.",
     "pr_closed": "Pull request closed.",
-    "pr_approved": "Pull request approved."
+    "pr_approved": "Pull request approved.",
+    "already_approved": "You have already approved this merge request."
   },
   "count_one": "{{count}} session",
   "count_other": "{{count}} sessions",
