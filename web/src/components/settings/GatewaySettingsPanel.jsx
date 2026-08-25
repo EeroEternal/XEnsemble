@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, Settings2, Play, Square, RotateCw, Loader2, Pencil, Trash2, Activity, List, CheckCircle, XCircle, Clock, Search } from 'lucide-react';
+import { Plus, Settings2, Play, Square, RotateCw, RefreshCw, Loader2, Pencil, Trash2, Activity, List, CheckCircle, XCircle, Clock, Search } from 'lucide-react';
 import Button from '../Button';
 import Input, { FormLabel, Textarea } from '../Input';
 import MaskedApiKeyInput from '../MaskedApiKeyInput';
