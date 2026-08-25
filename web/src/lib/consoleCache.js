@@ -1,3 +1,5 @@
+import { getStoredUser } from './auth';
+
 const STORAGE_PREFIX = 'xensemble.console.snapshot.';
 
 function cacheKey(userId) {
@@ -7,7 +9,7 @@ function cacheKey(userId) {
 export function getCacheUserId(user) {
   if (user?.id) return String(user.id);
   try {
-    const stored = JSON.parse(localStorage.getItem('user'));
+    const stored = JSON.parse(getStoredUser());
     if (stored?.id) return String(stored.id);
   } catch {
     // ignore

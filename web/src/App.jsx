@@ -17,7 +17,7 @@ import { useWorkspaces } from './hooks/useWorkspaces';
 import { cn } from './lib/utils';
 import { APP_SHELL_MAIN_PY_CLASS, APP_SHELL_PAD_CLASS } from './lib/appShellLayout';
 import { bgCanvas, consoleButtonFocusClass } from './lib/consoleTokens';
-import { getAccessToken, setTokens, clearTokens, apiFetch, isStoredAuthStale, setAuthExpiredHandler } from './lib/api';
+import { getAccessToken, setTokens, clearTokens, apiFetch, isStoredAuthStale, setAuthExpiredHandler, getStoredUser, setStoredUser, clearStoredUser } from './lib/api';
 import { TerminalThemeProvider } from './hooks/useTerminalTheme.jsx';
 
 export const AuthContext = React.createContext(null);
@@ -253,7 +253,7 @@ function App() {
 
   React.useEffect(() => {
     setAuthExpiredHandler(() => {
-      localStorage.removeItem('user');
+      clearStoredUser();
       setToken(null);
       setUser(null);
       navigate('/login', { replace: true });
@@ -265,14 +265,14 @@ function App() {
     (async () => {
       const accessToken = getAccessToken();
       let storedUser = null;
-      const userRaw = localStorage.getItem('user');
+      const userRaw = getStoredUser();
       if (userRaw) {
         try { storedUser = JSON.parse(userRaw); } catch { storedUser = null; }
       }
 
       if (accessToken && isStoredAuthStale()) {
         clearTokens();
-        localStorage.removeItem('user');
+        clearStoredUser();
         setToken(null);
         setUser(null);
         setAuthReady(true);
@@ -284,7 +284,7 @@ function App() {
           const res = await apiFetch('/api/v1/auth/me');
           if (!res.ok) {
             clearTokens();
-            localStorage.removeItem('user');
+            clearStoredUser();
             setToken(null);
             setUser(null);
             setAuthReady(true);
@@ -311,7 +311,7 @@ function App() {
 
   const login = async (accessToken, refreshToken, user) => {
     await setTokens(accessToken, refreshToken);
-    localStorage.setItem('user', JSON.stringify(user));
+    setStoredUser(user);
     setToken(accessToken);
     setUser(user);
     navigate('/sessions', { replace: true });
@@ -319,7 +319,7 @@ function App() {
 
   const logout = async () => {
     await clearTokens();
-    localStorage.removeItem('user');
+    clearStoredUser();
     setToken(null);
     setUser(null);
     navigate('/login', { replace: true });

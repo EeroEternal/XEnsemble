@@ -47,4 +47,7 @@ export {
   getCurrentApiBase,
   isStoredAuthStale,
   setAuthExpiredHandler,
+  getStoredUser,
+  setStoredUser,
+  clearStoredUser,
 } from './auth';

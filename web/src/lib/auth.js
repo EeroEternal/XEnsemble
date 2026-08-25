@@ -1,6 +1,23 @@
 const LS_ACCESS = 'xe_access_token';
 const LS_REFRESH = 'xe_refresh_token';
 const LS_API_BASE = 'xe_api_base';
+const LS_USER = 'user';
+
+// Preview deployments (iframe / pop-out) run same-origin as the console but
+// must not share auth tokens with it — the deployed app has its own backend
+// and JWT secret, so a 401 from the deployed app would otherwise trigger
+// clearTokens() and destroy the console session. We isolate auth storage by
+// using sessionStorage inside any preview context: the console's tokens live
+// in localStorage (top window, non-preview URL), and preview contexts use
+// sessionStorage — two distinct storage areas that never collide.
+// Note: same-origin iframes share the parent tab's sessionStorage (per HTML
+// spec, sessionStorage is scoped to origin + top-level browsing context), but
+// the console never stores auth tokens in sessionStorage, so there is no
+// cross-contamination.
+const IS_PREVIEW_CONTEXT = typeof window !== 'undefined'
+  && (window.self !== window.top
+      || /\/preview\/[^/]+/.test(window.location.pathname));
+const store = IS_PREVIEW_CONTEXT ? sessionStorage : localStorage;
 
 export function getCurrentApiBase() {
   const env = import.meta.env.VITE_API_BASE?.trim();
@@ -14,29 +31,41 @@ function apiUrl(path) {
 }
 
 export function isStoredAuthStale() {
-  const storedBase = localStorage.getItem(LS_API_BASE);
+  const storedBase = store.getItem(LS_API_BASE);
   if (!storedBase) return false;
   return storedBase !== getCurrentApiBase();
 }
 
 export function getAccessToken() {
-  return localStorage.getItem(LS_ACCESS);
+  try { return store.getItem(LS_ACCESS); } catch { return null; }
 }
 
 export function getRefreshToken() {
-  return localStorage.getItem(LS_REFRESH);
+  try { return store.getItem(LS_REFRESH); } catch { return null; }
 }
 
 export function setTokens(accessToken, refreshToken) {
-  localStorage.setItem(LS_ACCESS, accessToken);
-  localStorage.setItem(LS_REFRESH, refreshToken);
-  localStorage.setItem(LS_API_BASE, getCurrentApiBase());
+  store.setItem(LS_ACCESS, accessToken);
+  store.setItem(LS_REFRESH, refreshToken);
+  store.setItem(LS_API_BASE, getCurrentApiBase());
 }
 
 export function clearTokens() {
-  localStorage.removeItem(LS_ACCESS);
-  localStorage.removeItem(LS_REFRESH);
-  localStorage.removeItem(LS_API_BASE);
+  store.removeItem(LS_ACCESS);
+  store.removeItem(LS_REFRESH);
+  store.removeItem(LS_API_BASE);
+}
+
+export function getStoredUser() {
+  try { return store.getItem(LS_USER); } catch { return null; }
+}
+
+export function setStoredUser(user) {
+  store.setItem(LS_USER, JSON.stringify(user));
+}
+
+export function clearStoredUser() {
+  store.removeItem(LS_USER);
 }
 
 let refreshPromise = null;
