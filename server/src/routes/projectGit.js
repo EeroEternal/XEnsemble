@@ -38,9 +38,22 @@ async function getGitService(request) {
 // Generate a commit message from the working-tree diff using the configured
 // DeepSeek-compatible LLM (same env as session titleService).
 async function generateCommitMessage(project, gitOperationService) {
-    const result = await gitOperationService.getDiff(project, { base: 'HEAD' });
+    const result = await generateAIDescription(project, gitOperationService, 'commit');
+    return result;
+}
+
+async function generatePRDescription(project, gitOperationService, { sourceBranch, targetBranch } = {}) {
+    const base = targetBranch || 'main';
+    const result = await generateAIDescription(project, gitOperationService, 'pr', { base });
+    return result;
+}
+
+async function generateAIDescription(project, gitOperationService, type, opts = {}) {
+    const diffOpts = type === 'pr'
+        ? { base: opts.base || 'main', head: 'HEAD' }
+        : { base: 'HEAD' };
+    const result = await gitOperationService.getDiff(project, diffOpts);
     let diff = (result?.diff || '').trim();
-    // git diff HEAD 不含未跟踪文件；如果全是新增文件（untracked），回退用 git status 的文件列表
     if (!diff) {
         try {
             const status = await gitOperationService.getStatus(project);
@@ -50,22 +63,25 @@ async function generateCommitMessage(project, gitOperationService) {
             if (changed) diff = changed;
         } catch { /* ignore */ }
     }
-    if (!diff) return { message: '' };
-    // 复用 ai-tokenhub（LLM_ANALYZE_*，与一键部署同一套），缺失时回退到 DeepSeek 官方配置
+    if (!diff) return { title: '', body: '' };
+
     const apiKey = process.env.LLM_ANALYZE_API_KEY || process.env.DEEPSEEK_API_KEY;
     const apiUrl = process.env.LLM_ANALYZE_API_URL || process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
-    // 优先 LLM_VERIFY_MODEL（当前 key 可用的 ai-tokenhub 模型），再回退 LLM_ANALYZE_MODEL
     const model = process.env.LLM_VERIFY_MODEL || process.env.LLM_ANALYZE_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
-    if (!apiKey) return { message: '', error: 'AI not configured' };
+    if (!apiKey) return { title: '', body: '', error: 'AI not configured' };
+
     const truncated = diff.slice(0, 8000);
-    const prompt = 'You are a commit message generator. Given a git diff, output a concise conventional commit message (e.g. "feat: add login form"). Respond with the message only, no quotes, no markdown, no explanation.';
+    const prompts = {
+        commit: 'You are a commit message generator. Given a git diff, output a concise conventional commit message (e.g. "feat: add login form"). Respond with the message only, no quotes, no markdown, no explanation.',
+        pr: 'You are a pull request generator. Given a git diff, output a JSON object with "title" and "body" fields. The title should be a concise conventional commit style summary. The body should be a brief description of what changed and why, in markdown bullet points. Respond with valid JSON only, no markdown code blocks, no explanation.',
+    };
     const res = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({
             model,
             messages: [
-                { role: 'system', content: prompt },
+                { role: 'system', content: prompts[type] || prompts.commit },
                 { role: 'user', content: truncated },
             ],
             max_tokens: 2000,
@@ -74,11 +90,26 @@ async function generateCommitMessage(project, gitOperationService) {
     });
     if (!res.ok) throw new Error(`AI error ${res.status}`);
     const data = await res.json();
-    const content = (data.choices?.[0]?.message?.content || '')
-        .replace(/^["'`]|["'`]$/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    return { message: content };
+    const content = (data.choices?.[0]?.message?.content || '').trim();
+
+    if (type === 'pr') {
+        let parsed;
+        try {
+            const cleaned = content.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '');
+            parsed = JSON.parse(cleaned);
+        } catch {
+            const firstLine = content.split('\n')[0].replace(/^["'`]|["'`]$/g, '').trim();
+            parsed = { title: firstLine, body: content };
+        }
+        return {
+            title: String(parsed.title || '').replace(/^["'`]|["'`]$/g, '').trim(),
+            body: String(parsed.body || '').trim(),
+        };
+    }
+
+    return {
+        message: content.replace(/^["'`]|["'`]$/g, '').replace(/\s+/g, ' ').trim(),
+    };
 }
 
 async function upsertProjectBranch(projectId, branchName, values = {}) {
@@ -191,6 +222,24 @@ function registerProjectGitRoutes(fastify) {
         const gitOperationService = await getGitService(request);
         try {
             const result = await generateCommitMessage(project, gitOperationService);
+            return result;
+        } catch (err) {
+            request.log.error(err);
+            return reply.code(500).send({ error: err.message });
+        }
+    });
+
+    fastify.post('/api/v1/projects/:id/git/pr-description', {
+        preValidation: [fastify.authenticate, fastify.requireActive],
+    }, async (request, reply) => {
+        const project = await getProjectForUser(request.user.id, request.params.id);
+        if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+        const gitOperationService = await getGitService(request);
+        try {
+            const result = await generatePRDescription(project, gitOperationService, {
+                sourceBranch: request.body?.source_branch,
+                targetBranch: request.body?.target_branch,
+            });
             return result;
         } catch (err) {
             request.log.error(err);

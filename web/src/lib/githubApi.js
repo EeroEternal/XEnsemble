@@ -108,6 +108,12 @@ export const createBranch = (projectId, name, baseBranch) => {
   });
 };
 
+export const generatePRDescription = (projectId, { sourceBranch, targetBranch } = {}) =>
+  request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/pr-description`, {
+    method: 'POST',
+    body: JSON.stringify({ source_branch: sourceBranch, target_branch: targetBranch }),
+  });
+
 export const createPullRequest = (projectId, payload) =>
   request(`/api/v1/projects/${encodeURIComponent(projectId)}/merge-requests`, {
     method: 'POST',

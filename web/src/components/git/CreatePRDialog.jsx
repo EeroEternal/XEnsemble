@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ExternalLink, Loader2 } from 'lucide-react';
 import {
@@ -35,6 +35,8 @@ export default function CreatePRDialog({
   const [showDiff, setShowDiff] = useState(false);
   const [diffLoading, setDiffLoading] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const aiLoadedRef = useRef(false);
 
   useEffect(() => {
     if (!open || !projectId) return;
@@ -59,6 +61,7 @@ export default function CreatePRDialog({
       setDiffTruncated(false);
       setShowDiff(false);
       setTargetBranch(defaultTargetBranch || 'main');
+      aiLoadedRef.current = false;
     }
   }, [open, defaultTargetBranch]);
 
@@ -79,6 +82,23 @@ export default function CreatePRDialog({
       })
       .finally(() => setDiffLoading(false));
   }, [open, projectId, sourceBranch, targetBranch]);
+
+  useEffect(() => {
+    if (!open || !projectId || !sourceBranch) return;
+    if (aiLoadedRef.current) return;
+    if (diffLoading) return;
+    if (!diff || diffBinary) return;
+    setAiLoading(true);
+    githubApi
+      .generatePRDescription(projectId, { sourceBranch, targetBranch })
+      .then((data) => {
+        if (data?.title) setTitle(data.title);
+        if (data?.body) setBody(data.body);
+      })
+      .catch(() => {})
+      .finally(() => setAiLoading(false));
+    aiLoadedRef.current = true;
+  }, [open, projectId, sourceBranch, diffLoading, diff, diffBinary]);
 
   const branchOptions = useMemo(
     () => branches.map((b) => ({ value: b.name, label: b.name })),
@@ -151,7 +171,15 @@ export default function CreatePRDialog({
         </div>
 
         <div>
-          <FormLabel htmlFor="pr-title">Title</FormLabel>
+          <div className="flex items-center justify-between">
+            <FormLabel htmlFor="pr-title">Title</FormLabel>
+            {aiLoading && (
+              <span className="flex items-center gap-1 text-[10px] text-zinc-400">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                AI generating…
+              </span>
+            )}
+          </div>
           <Input
             id="pr-title"
             value={title}
