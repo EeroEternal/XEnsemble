@@ -534,7 +534,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 ) : (
                   <Upload className="h-3.5 w-3.5" />
                 )}
-                Push{gitChanges.ahead > 1 ? ` (${gitChanges.ahead})` : ''}
+                Push
               </button>
             ) : (
               <button
@@ -665,7 +665,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               ) : (
                 <Upload className="h-3.5 w-3.5" />
               )}
-              Push{gitChanges?.ahead > 0 ? ` (${gitChanges.ahead})` : ''}
+              Push
             </button>
           )}
           <button
