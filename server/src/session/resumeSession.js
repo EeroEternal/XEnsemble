@@ -63,19 +63,6 @@ async function registerSessionLifecycle({
             .set({ status: nextStatus })
             .where(eq(schema.sessions.id, sessionId))
             .catch((err) => fastifyLog.error(err, 'Failed to persist session exit status'));
-
-        if (project && project.workspaceMode === 'git') {
-            const { GitOperationService } = require('../github/GitOperationService');
-            const gitOps = new GitOperationService({ getToken: () => null, runtimeId: runtimeId || null });
-            // Check for dirty state first (1 VM exec) to skip the 3-exec commitAll
-            // when there's nothing to commit (the common case on clean exit).
-            gitOps._execGit(project, ['status', '--porcelain'])
-                .then((r) => {
-                    if (!r.stdout || !r.stdout.trim()) return null;
-                    return gitOps.commitAll(project, `chore(xensemble): auto-checkpoint session ${sessionId}`);
-                })
-                .catch(() => { /* best-effort: ignore if nothing to commit or workspace missing */ });
-        }
     });
 }
 
