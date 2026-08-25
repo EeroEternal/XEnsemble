@@ -1,13 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, KeyRound, Pencil, RefreshCw, Info, Loader2, Search } from 'lucide-react';
+import { Loader2, Search } from 'lucide-react';
 
 import Button from '../components/Button';
 import Input from '../components/Input';
-import RowActionsMenu from '../components/RowActionsMenu';
 import PageHeader from '../components/PageHeader';
 import {
   consoleAdminPageClass,
-  consoleIconButtonClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
   consoleTableHeadRowClass,
@@ -15,10 +13,7 @@ import {
 } from '../lib/consoleTokens';
 import { loadAdminAgentsCache, saveAdminAgentsCache } from '../lib/adminAgentsCache';
 import { apiFetch } from '../lib/api';
-import AgentRegisterDialog from '../components/admin/AgentRegisterDialog';
-import AgentEditDialog from '../components/admin/AgentEditDialog';
 import AgentConfigDialog from '../components/admin/AgentConfigDialog';
-import AgentDetailsDialog from '../components/admin/AgentDetailsDialog';
 
 function normalizeModels(model) {
   if (Array.isArray(model)) return model.map((m) => String(m || '').trim()).filter(Boolean);
@@ -41,10 +36,7 @@ export default function AgentsAdmin() {
   const [loading, setLoading] = useState(() => loadAdminAgentsCache().length === 0);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [registerOpen, setRegisterOpen] = useState(false);
   const [keysAgent, setKeysAgent] = useState(null);
-  const [editAgent, setEditAgent] = useState(null);
-  const [detailsAgent, setDetailsAgent] = useState(null);
 
   const fetchAgents = useCallback(({ silent = false } = {}) => {
     if (silent) setRefreshing(true);
@@ -105,33 +97,8 @@ export default function AgentsAdmin() {
               className="w-full pl-8"
             />
           </div>
-          <button
-            type="button"
-            onClick={() => fetchAgents({ silent: true })}
-            disabled={refreshing}
-            className={consoleIconButtonClass}
-            title="Refresh"
-          >
-            {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          </button>
-          <Button type="button" onClick={() => setRegisterOpen(true)} size="md" className="shrink-0">
-            <Plus className="w-4 h-4" />
-            Add Agent
-          </Button>
         </div>
       </div>
-
-      <AgentRegisterDialog
-        open={registerOpen}
-        onClose={() => setRegisterOpen(false)}
-        onRegistered={() => fetchAgents({ silent: true })}
-      />
-
-      <AgentEditDialog
-        agent={editAgent}
-        onClose={() => setEditAgent(null)}
-        onSaved={() => fetchAgents({ silent: true })}
-      />
 
       <AgentConfigDialog
         agent={keysAgent}
@@ -140,18 +107,13 @@ export default function AgentsAdmin() {
         onSaved={() => fetchAgents({ silent: true })}
       />
 
-      <AgentDetailsDialog
-        agent={detailsAgent}
-        onClose={() => setDetailsAgent(null)}
-      />
-
       <div className={consoleTableShellClass}>
         <div className="overflow-auto max-h-[calc(100vh-200px)]">
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
-              <col className="w-auto" />
-              <col className="w-64" />
-              <col className="w-[352px]" />
+              <col className="w-1/4" />
+              <col className="w-1/4" />
+              <col className="w-1/4" />
               <col className="w-48" />
             </colgroup>
             <thead>
@@ -180,9 +142,8 @@ export default function AgentsAdmin() {
                 return (
                   <tr key={agent.id} className="hover:bg-zinc-50/50">
                     <td className={`${consoleTableBodyCellClass} min-w-0`}>
-                      <div className="truncate text-zinc-900" title={`${agent.name} (${agent.id})`}>
+                      <div className="truncate text-zinc-900" title={agent.name}>
                         <span className="font-medium">{agent.name}</span>
-                        <span className="ml-1 font-mono text-xs text-zinc-400">({agent.id})</span>
                       </div>
                     </td>
                     <td className={consoleTableBodyCellClass}>
@@ -205,14 +166,9 @@ export default function AgentsAdmin() {
                       )}
                     </td>
                     <td className={consoleTableBodyCellClass}>
-                      <RowActionsMenu
-                        label={`Actions for ${agent.name}`}
-                        items={[
-                          { icon: Info, label: 'View details', onClick: () => setDetailsAgent(agent) },
-                          { icon: Pencil, label: 'Edit executable', onClick: () => setEditAgent(agent) },
-                          { icon: KeyRound, label: 'Configure', onClick: () => setKeysAgent(agent) },
-                        ]}
-                      />
+                      <Button type="button" variant="secondary" size="sm" onClick={() => setKeysAgent(agent)}>
+                        Configure
+                      </Button>
                     </td>
                   </tr>
                 );

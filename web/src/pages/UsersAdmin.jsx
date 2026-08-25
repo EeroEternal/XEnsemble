@@ -260,11 +260,11 @@ export default function UsersAdmin() {
         <div className="overflow-x-auto">
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
-              <col className="w-auto" />
-              <col className="w-64" />
-              <col className="w-[352px]" />
-              <col className="w-40" />
-              <col className="w-80" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
               <col className="w-48" />
             </colgroup>
             <thead>
@@ -435,7 +435,6 @@ export default function UsersAdmin() {
                         onChange={(v) => setForm({ ...form, resource_tier: v })}
                         options={[
                           { value: 'basic', label: 'Basic' },
-                          { value: 'standard', label: 'Standard' },
                           { value: 'pro', label: 'Pro' },
                           { value: 'enterprise', label: 'Enterprise' },
                         ]}

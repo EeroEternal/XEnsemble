@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, Settings2, Play, Square, Power, RefreshCw, Loader2, Pencil, Trash2, Activity, List, CheckCircle, XCircle, Clock, Search } from 'lucide-react';
+import { Plus, Settings2, Play, Square, RotateCw, Loader2, Pencil, Trash2, Activity, List, CheckCircle, XCircle, Clock, Search } from 'lucide-react';
 import Button from '../Button';
 import Input, { FormLabel, Textarea } from '../Input';
 import MaskedApiKeyInput from '../MaskedApiKeyInput';
@@ -847,10 +847,6 @@ export default function GatewaySettingsPanel() {
                   {processConfig.host}:{processConfig.port}
                 </span>
               </p>
-              <p className="text-xs text-zinc-500 mt-1">
-                Agents connect via control plane LLM proxy at{' '}
-                <span className="font-mono">{agentBaseUrl}</span>
-              </p>
               {status?.gateway_upstream_url && (
                 <p className="text-xs text-zinc-500 mt-1">
                   Upstream UniGateway:{' '}
@@ -910,7 +906,7 @@ export default function GatewaySettingsPanel() {
                 {processAction === 'restart' ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  <Power className="w-4 h-4" />
+                  <RotateCw className="w-4 h-4" />
                 )}
               </button>
             </div>
@@ -955,10 +951,10 @@ export default function GatewaySettingsPanel() {
             <div className={consoleTableShellClass}>
               <table className="w-full table-fixed border-collapse text-left text-sm">
                 <colgroup>
-                  <col className="w-[352px]" />
-                  <col className="w-auto" />
-                  <col className="w-96" />
-                  <col className="w-64" />
+                  <col className="w-1/5" />
+                  <col className="w-1/5" />
+                  <col className="w-1/5" />
+                  <col className="w-1/5" />
                   <col className="w-48" />
                 </colgroup>
                 <thead>

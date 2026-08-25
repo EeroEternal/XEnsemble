@@ -345,11 +345,11 @@ export function CustomImagesContent() {
                   />
                 </div>
 
-                <div className="grid grid-cols-[2fr_3fr] gap-4">
+                <div className="grid grid-cols-[2fr_3fr] gap-4 h-72">
                   {/* Component library */}
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex flex-col">
                     <div className={consoleSectionLabelClass}>Components<span className="text-red-500 ml-0.5">*</span></div>
-                    <div className="relative mt-1.5">
+                    <div className="relative mt-1.5 shrink-0">
                       <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
                       <Input
                         value={componentSearch}
@@ -358,7 +358,7 @@ export function CustomImagesContent() {
                         className="w-full pl-8"
                       />
                     </div>
-                    <div className="mt-1.5 border border-zinc-200 rounded-lg h-56 overflow-y-auto console-scroll-hidden">
+                    <div className="mt-1.5 border border-zinc-200 rounded-lg flex-1 min-h-0 overflow-y-auto console-scroll-hidden">
                       {!filteredComponents.length ? (
                         <p className="px-3 py-4 text-xs text-zinc-400">
                           {catalog?.components?.length ? 'No components match your search.' : 'No components available.'}
@@ -461,9 +461,9 @@ export function CustomImagesContent() {
                   </div>
 
                   {/* Selected summary */}
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex flex-col">
                     <div className={consoleSectionLabelClass}>Selected ({selectedComponentIds.length})</div>
-                    <div className="mt-1.5 border border-zinc-200 rounded-lg h-64 overflow-y-auto console-scroll-hidden">
+                    <div className="mt-1.5 border border-zinc-200 rounded-lg flex-1 min-h-0 overflow-y-auto console-scroll-hidden">
                       {selectedComponentIds.length === 0 ? (
                         <p className="px-3 py-4 text-xs text-zinc-400">
                           No components selected yet. Pick from the list to add.
@@ -583,11 +583,11 @@ export function CustomImagesContent() {
       <div className={cn(consoleTableShellClass, 'overflow-x-auto')}>
         <table className="w-full table-fixed border-collapse text-left text-sm">
           <colgroup>
-            <col className="w-auto" />
-            <col className="w-36" />
-            <col className="w-auto" />
-            <col className="w-28" />
-            <col className="w-28" />
+            <col className="w-1/6" />
+            <col className="w-1/6" />
+            <col className="w-1/6" />
+            <col className="w-1/6" />
+            <col className="w-1/6" />
             <col className="w-48" />
           </colgroup>
           <thead>
