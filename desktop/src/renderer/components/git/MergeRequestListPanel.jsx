@@ -16,6 +16,7 @@ import {
   textPlaceholder,
 } from '../../lib/consoleTheme';
 import { useToast } from '../Toast';
+import { useTranslation } from 'react-i18next';
 
 const STATUS_STYLES = {
   open: 'bg-green-100 text-green-800',
@@ -38,13 +39,14 @@ function formatDate(ts) {
 
 export default function MergeRequestListPanel({ projectId, provider, onSelectMR, refreshTrigger }) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [mergeRequests, setMergeRequests] = useState([]);
   const [loading, setLoading] = useState(false);
   const [syncingId, setSyncingId] = useState(null);
   const [statusFilter, setStatusFilter] = useState('open');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const label = provider === 'gitlab' ? 'Merge Requests' : 'Pull Requests';
+  const label = provider === 'gitlab' ? t('git:merge_requests') : t('git:pull_requests');
 
   const fetchMRs = useCallback(async () => {
     if (!projectId) return;
@@ -74,7 +76,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
     try {
       const updated = await gitApi.syncMergeRequest(projectId, mrId);
       setMergeRequests((prev) => prev.map((mr) => (mr.id === mrId ? updated : mr)));
-      showToast('success', `${provider === 'gitlab' ? 'Merge request' : 'Pull request'} synchronized.`);
+      showToast('success', t('git:toast.synchronized', { mrType: provider === 'gitlab' ? t('git:merge_request') : t('git:pull_request'), defaultValue: '{{mrType}} synchronized.' }));
     } catch (err) {
       showToast('error', err.message);
     } finally {
@@ -116,8 +118,8 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
           type="button"
           onClick={fetchMRs}
           disabled={loading}
-          title={`Refresh ${label.toLowerCase()}`}
-          aria-label={`Refresh ${label.toLowerCase()}`}
+          title={t('git:action.refresh_list', { label: label.toLowerCase(), defaultValue: 'Refresh {{label}}' })}
+          aria-label={t('git:action.refresh_list', { label: label.toLowerCase(), defaultValue: 'Refresh {{label}}' })}
           className={consoleIconButtonClass}
         >
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}

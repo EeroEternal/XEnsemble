@@ -9,6 +9,7 @@ const { fetchProviderModels } = require('./fetchProviderModels');
 const { testProviderConnectivity } = require('./testProviderConnectivity');
 const { readProviderCredentials } = require('./readProviderSecrets');
 const { maskApiKey } = require('./maskApiKey');
+const { t } = require('../i18n');
 
 // Intentionally in-memory (hot path, not persisted).
 const lastProviderTests = new Map();
@@ -302,10 +303,10 @@ function registerGatewayAdminRoutes(fastify) {
             const name = String(request.params.name || '').trim();
             const creds = readProviderCredentials(name);
             if (!creds) {
-                return reply.code(404).send({ error: `Provider "${name}" not found.` });
+                return reply.code(404).send({ error: t('errors:provider_not_found', { name }, request.locale || 'en'), code: 'provider_not_found' });
             }
             if (!creds.api_key) {
-                return reply.code(404).send({ error: 'No API Key configured.' });
+                return reply.code(404).send({ error: t('errors:no_api_key_configured', {}, request.locale || 'en'), code: 'no_api_key_configured' });
             }
             return { success: true, data: { api_key: creds.api_key } };
         } catch (err) {
@@ -318,13 +319,13 @@ function registerGatewayAdminRoutes(fastify) {
             const name = String(request.params.name || '').trim();
             const creds = readProviderCredentials(name);
             if (!creds) {
-                return reply.code(404).send({ error: `Provider "${name}" not found.` });
+                return reply.code(404).send({ error: t('errors:provider_not_found', { name }, request.locale || 'en'), code: 'provider_not_found' });
             }
             if (!creds.base_url) {
-                return reply.code(400).send({ error: 'Provider has no Base URL configured.' });
+                return reply.code(400).send({ error: t('errors:no_base_url_configured', {}, request.locale || 'en'), code: 'no_base_url_configured' });
             }
             if (!creds.api_key) {
-                return reply.code(400).send({ error: 'Provider has no API Key configured.' });
+                return reply.code(400).send({ error: t('errors:no_api_key_configured', {}, request.locale || 'en'), code: 'no_api_key_configured' });
             }
             const result = await fetchProviderModels({
                 base_url: creds.base_url,
@@ -361,13 +362,13 @@ function registerGatewayAdminRoutes(fastify) {
             const name = String(request.params.name || '').trim();
             const creds = readProviderCredentials(name);
             if (!creds) {
-                return reply.code(404).send({ error: `Provider "${name}" not found.` });
+                return reply.code(404).send({ error: t('errors:provider_not_found', { name }, request.locale || 'en'), code: 'provider_not_found' });
             }
             if (!creds.base_url) {
-                return reply.code(400).send({ error: 'Provider has no Base URL configured.' });
+                return reply.code(400).send({ error: t('errors:no_base_url_configured', {}, request.locale || 'en'), code: 'no_base_url_configured' });
             }
             if (!creds.api_key) {
-                return reply.code(400).send({ error: 'Provider has no API Key configured.' });
+                return reply.code(400).send({ error: t('errors:no_api_key_configured', {}, request.locale || 'en'), code: 'no_api_key_configured' });
             }
             const result = await testProviderConnectivity({
                 base_url: creds.base_url,

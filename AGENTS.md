@@ -21,3 +21,17 @@
 Agent 领域说明与架构对齐要求见 **`docs/agents.md`**（Gateway 反代见 **`docs/LlmProxy.md`**；内含对 Architecture.md 的引用）。
 
 用户、角色、配额与运维 CLI 见 **`docs/UserManagement.md`**。Desktop / 原生客户端 HTTP+WS 接入见 **`docs/ApiClient.md`**。
+
+## 国际化（i18n）
+
+中英双语支持基于 **i18next + react-i18next**。翻译资源位于 **`shared/i18n/`**，三端（`web/`、`desktop/`、`server/`）共享同一组 JSON 文件。
+
+**强制规则**：
+
+- **新组件必须使用 `t()`**：用户可见文本一律通过 `useTranslation()` 的 `t()` 获取，禁止硬编码英文/中文字符串。
+- **翻译文件位置**：`shared/i18n/en/*.json` 和 `shared/i18n/zh/*.json`，按命名空间分文件（`common`、`auth`、`sessions`、`agents`、`users`、`settings`、`gateway`、`workspace`、`git`、`images`、`deploy`、`errors`）。
+- **key 命名**：点分命名空间，如 `t('sessions:launch.title')`；插值用 `{{name}}`；复数用 `_one`/`_other` 后缀。
+- **不翻译的内容**：Agent 名称（Kimi Code、Claude Code）、API Key 字段名（OPENAI_API_KEY）、品牌名（AgentHarness）、错误 code（`quota_exceeded`）、已是中文的文案（DeployPanel、twoStage 进度消息、REAUTH 消息）。
+- **后端错误**：`error` 字段返回翻译后文本（通过 `t('errors:code', params, locale)`），`code` 字段返回机器可读标识符；前端逻辑分支基于 `code`，展示基于 `error`。
+- **语言切换**：Settings → Language，用 `SelectMenu`（非原生 `<select>`），切换后 `localStorage.setItem('xe_locale', locale)` + `i18n.changeLanguage()`。
+- **API 请求**：`apiFetch` 自动附带 `Accept-Language` header，后端 `preHandler` 解析注入 `request.locale`。

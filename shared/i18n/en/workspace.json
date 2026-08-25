@@ -1,0 +1,37 @@
+{
+  "title": "Workspace",
+  "files": "Files",
+  "tabs": {
+    "editor": "Editor",
+    "preview": "Preview",
+    "deploy": "Deploy",
+    "source_control": "Source Control"
+  },
+  "empty": {
+    "no_files": "No files"
+  },
+  "action": {
+    "open": "Open",
+    "close": "Close",
+    "close_tab": "Close {{name}}",
+    "close_others": "Close others",
+    "close_all": "Close all",
+    "save": "Save",
+    "save_all": "Save all",
+    "new_file": "New File",
+    "new_folder": "New Folder",
+    "upload": "Upload",
+    "download": "Download",
+    "rename": "Rename",
+    "delete": "Delete",
+    "refresh": "Refresh"
+  },
+  "label": {
+    "unsaved_changes": "Unsaved changes",
+    "saved": "Saved."
+  },
+  "error": {
+    "load_files_failed": "Failed to load workspace files",
+    "read_file_failed": "Failed to read file"
+  }
+}

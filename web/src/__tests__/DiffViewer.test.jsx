@@ -22,9 +22,9 @@ describe('DiffViewer', () => {
     expect(screen.getByTestId('diff-modified')).toHaveTextContent('bar');
   });
 
-  it('shows "无差异" when original equals modified', () => {
+  it('shows "No differences" when original equals modified', () => {
     render(<DiffViewer original="same" modified="same" path="src/index.js" />);
-    expect(screen.getByText(/无差异/)).toBeInTheDocument();
+    expect(screen.getByText(/No differences/)).toBeInTheDocument();
     expect(screen.queryByTestId('monaco-diff-editor')).not.toBeInTheDocument();
   });
 
@@ -36,7 +36,7 @@ describe('DiffViewer', () => {
   it('calls onClose when close button clicked', () => {
     const onClose = vi.fn();
     render(<DiffViewer original="a" modified="b" path="src/index.js" onClose={onClose} />);
-    fireEvent.click(screen.getByLabelText('关闭对比'));
+    fireEvent.click(screen.getByLabelText('Close compare'));
     expect(onClose).toHaveBeenCalled();
   });
 

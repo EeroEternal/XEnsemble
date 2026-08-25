@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Globe, RefreshCw } from 'lucide-react';
 import { consoleButtonFocusClass, consoleInputClass } from '@/lib/consoleTokens';
+import { useTranslation } from 'react-i18next';
 
 function normalizeUrl(raw) {
   const trimmed = String(raw || '').trim();
@@ -11,6 +12,7 @@ function normalizeUrl(raw) {
 
 /** Simple in-panel browser with address bar. */
 export default function WorkspaceBrowserPane() {
+  const { t } = useTranslation();
   const [input, setInput] = useState('https://');
   const [activeUrl, setActiveUrl] = useState('');
   const [frameKey, setFrameKey] = useState(0);
@@ -48,12 +50,12 @@ export default function WorkspaceBrowserPane() {
               navigate();
             }
           }}
-          placeholder="Enter URL…"
+          placeholder={t('workspace:placeholder.enter_url', { defaultValue: 'Enter URL…' })}
           className={`${consoleInputClass} h-7 min-h-7 py-1 text-xs font-mono flex-1 min-w-0`}
         />
         <button
           type="button"
-          title="Go"
+          title={t('workspace:action.go', { defaultValue: 'Go' })}
           onClick={navigate}
           className={`p-1.5 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
         >
@@ -61,7 +63,7 @@ export default function WorkspaceBrowserPane() {
         </button>
         <button
           type="button"
-          title="Reload"
+          title={t('workspace:action.reload', { defaultValue: 'Reload' })}
           onClick={reload}
           disabled={!activeUrl}
           className={`p-1.5 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 disabled:opacity-40 ${consoleButtonFocusClass}`}
@@ -74,7 +76,7 @@ export default function WorkspaceBrowserPane() {
         {activeUrl ? (
           <iframe
             key={frameKey}
-            title="Browser"
+            title={t('workspace:label.browser', { defaultValue: 'Browser' })}
             src={activeUrl}
             className="h-full w-full border-0 bg-white"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
@@ -82,7 +84,7 @@ export default function WorkspaceBrowserPane() {
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-zinc-400 px-6 text-center">
             <Globe className="h-10 w-10" />
-            <p className="text-sm">Enter a URL and press Enter to open</p>
+            <p className="text-sm">{t('workspace:empty.enter_url', { defaultValue: 'Enter a URL and press Enter to open' })}</p>
           </div>
         )}
       </div>

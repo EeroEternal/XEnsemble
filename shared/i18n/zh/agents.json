@@ -1,0 +1,47 @@
+{
+  "title": "Agent",
+  "count_one": "{{count}} 个 Agent",
+  "count_other": "{{count}} 个 Agent",
+  "search_placeholder": "搜索 Agent…",
+  "refresh": "刷新",
+  "add_agent": "添加 Agent",
+  "empty": {
+    "none_registered": "暂无已注册的 Agent。",
+    "no_match": "没有匹配的 Agent。"
+  },
+  "status": {
+    "ready": "就绪",
+    "needs_model": "需要模型",
+    "installed": "已安装",
+    "not_installed": "未安装"
+  },
+  "auth": {
+    "byok": "BYOK（用户密钥）",
+    "gateway_ready": "网关（就绪）",
+    "gateway_needs_model": "网关（需要模型）"
+  },
+  "action": {
+    "view_details": "查看详情",
+    "edit_executable": "编辑可执行文件",
+    "configure": "配置",
+    "install": "安装",
+    "uninstall": "卸载",
+    "check_update": "检查更新",
+    "update": "更新",
+    "key": "密钥",
+    "actions_for": "{{name}} 的操作"
+  },
+  "field": {
+    "name": "名称",
+    "provider": "提供商",
+    "model": "模型",
+    "actions": "操作",
+    "version": "版本",
+    "path": "路径",
+    "auth": "认证",
+    "executable": "可执行文件",
+    "cmd": "命令",
+    "args": "参数",
+    "env_required": "必需的环境变量"
+  }
+}

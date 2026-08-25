@@ -1,7 +1,9 @@
 import { Menu, BrowserWindow } from 'electron';
+import { i18next } from '../i18n';
 
 export function createMenu(_mainWindow: BrowserWindow): Menu {
   const isMac = process.platform === 'darwin';
+  const t = i18next.getFixedT(i18next.language, 'common');
 
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(isMac
@@ -23,11 +25,11 @@ export function createMenu(_mainWindow: BrowserWindow): Menu {
         ]
       : []),
     {
-      label: 'File',
+      label: t('menu.file', { defaultValue: 'File' }),
       submenu: [isMac ? { role: 'close' } : { role: 'quit' }]
     },
     {
-      label: 'Edit',
+      label: t('menu.edit', { defaultValue: 'Edit' }),
       submenu: [
         { role: 'undo' },
         { role: 'redo' },
@@ -39,7 +41,7 @@ export function createMenu(_mainWindow: BrowserWindow): Menu {
       ]
     },
     {
-      label: 'View',
+      label: t('menu.view', { defaultValue: 'View' }),
       submenu: [
         { role: 'reload' },
         { role: 'forceReload' },
@@ -53,7 +55,7 @@ export function createMenu(_mainWindow: BrowserWindow): Menu {
       ]
     },
     {
-      label: 'Window',
+      label: t('menu.window', { defaultValue: 'Window' }),
       submenu: [
         { role: 'minimize' },
         { role: 'close' },

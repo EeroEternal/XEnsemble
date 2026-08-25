@@ -1,0 +1,47 @@
+{
+  "title": "Agents",
+  "count_one": "{{count}} agent",
+  "count_other": "{{count}} agents",
+  "search_placeholder": "Search agents…",
+  "refresh": "Refresh",
+  "add_agent": "Add Agent",
+  "empty": {
+    "none_registered": "No agents registered yet.",
+    "no_match": "No agents match your search."
+  },
+  "status": {
+    "ready": "Ready",
+    "needs_model": "Needs model",
+    "installed": "Installed",
+    "not_installed": "Not installed"
+  },
+  "auth": {
+    "byok": "BYOK (User keys)",
+    "gateway_ready": "Gateway (Ready)",
+    "gateway_needs_model": "Gateway (Needs model)"
+  },
+  "action": {
+    "view_details": "View details",
+    "edit_executable": "Edit executable",
+    "configure": "Configure",
+    "install": "Install",
+    "uninstall": "Uninstall",
+    "check_update": "Check update",
+    "update": "Update",
+    "key": "Key",
+    "actions_for": "Actions for {{name}}"
+  },
+  "field": {
+    "name": "Name",
+    "provider": "Provider",
+    "model": "Model",
+    "actions": "Actions",
+    "version": "Version",
+    "path": "Path",
+    "auth": "Auth",
+    "executable": "Executable",
+    "cmd": "Command",
+    "args": "Arguments",
+    "env_required": "Required environment variables"
+  }
+}

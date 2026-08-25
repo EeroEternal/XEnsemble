@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
@@ -105,6 +106,7 @@ function AgentConsole({
   sessionLive = true,
   sessionWakeable = false,
 }) {
+  const { t } = useTranslation();
   const { preset } = useTerminalTheme();
   const xtermTheme = preset?.xterm || FALLBACK_XTERM_THEME;
 
@@ -347,7 +349,7 @@ function AgentConsole({
     resizeObserver.observe(host);
 
     if (!sessionId || (!shouldConnect && !shouldReplayIdle)) {
-      terminal.write('\r\n\x1b[33m[System] Session is not running.\x1b[0m\r\n');
+      terminal.write(`\r\n\x1b[33m${t('sessions:terminal.system_prefix')} ${t('sessions:terminal.not_running')}\x1b[0m\r\n`);
       setEnded(true);
     } else if (shouldReplayIdle) {
       (async () => {
@@ -357,7 +359,7 @@ function AgentConsole({
           const data = await response.json();
           if (!response.ok) throw new Error(data.error || 'Failed to load session history');
           if (data.head != null && data.head > 0) setCachedSeq(sessionId, data.head);
-          const systemMsg = '\r\n\x1b[33m[System] Session paused. Click Start to resume.\x1b[0m\r\n';
+          const systemMsg = `\r\n\x1b[33m${t('sessions:terminal.system_prefix')} ${t('sessions:terminal.paused')}\x1b[0m\r\n`;
           // Use terminal.write callback to hide overlay only AFTER xterm.js
           // has fully processed the transcript data. xterm.js processes write
           // data asynchronously in setTimeout(0) chunks; without the callback,
@@ -382,7 +384,7 @@ function AgentConsole({
           }
         } catch (error) {
           if (!disposed) {
-            terminal.write(`\r\n\x1b[31m[System] ${error?.message || 'Failed to load session history'}\x1b[0m\r\n`);
+            terminal.write(`\r\n\x1b[31m${t('sessions:terminal.system_prefix')} ${error?.message || t('sessions:terminal.load_history_failed')}\x1b[0m\r\n`);
             hideOverlay();
             setEnded(true);
           }
@@ -396,11 +398,11 @@ function AgentConsole({
         if (disposed || serverEnded) return;
         const next = reconnectState.nextReconnect();
         if (next.exhausted) {
-          terminal.write(`\r\n\x1b[31m[System] Terminal could not be restored${reason ? ` (${reason})` : ''}. Click Restart to retry.\x1b[0m\r\n`);
+          terminal.write(`\r\n\x1b[31m${t('sessions:terminal.system_prefix')} ${t('sessions:terminal.restore_failed', { reason: reason ? ` (${reason})` : '' })}\x1b[0m\r\n`);
           setEnded(true);
           return;
         }
-        terminal.write(`\r\n\x1b[33m[System] Reconnecting terminal… (${next.attempt}/${MAX_RECONNECTS})\x1b[0m\r\n`);
+        terminal.write(`\r\n\x1b[33m${t('sessions:terminal.system_prefix')} ${t('sessions:terminal.reconnecting', { attempt: next.attempt, max: MAX_RECONNECTS })}\x1b[0m\r\n`);
         setConnected(false);
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null;
@@ -816,7 +818,7 @@ function AgentConsole({
       >
         <div className="flex items-center gap-2 text-sm text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Loading history…
+          {t('common:state.loading', { defaultValue: 'Loading…' })}
         </div>
       </div>
       <style>{`.xterm{width:100%!important;height:100%!important}.xterm-screen{width:100%!important;height:100%!important}.xterm-viewport{width:100%!important}`}</style>
@@ -824,15 +826,15 @@ function AgentConsole({
       {guideVisible && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-6">
           <div className="pointer-events-auto w-full max-w-md rounded-xl border border-zinc-700/60 bg-zinc-900/95 p-5 shadow-2xl backdrop-blur">
-            <p className="text-sm font-semibold text-zinc-100">Tell the agent what to build</p>
+            <p className="text-sm font-semibold text-zinc-100">{t('sessions:guide.title')}</p>
             <p className="mt-1 text-xs text-zinc-400">
-              Type a task in natural language, or pick an example to get started.
+              {t('sessions:guide.subtitle', { defaultValue: 'Type a task in natural language, or pick an example to get started.' })}
             </p>
             <div className="mt-3 flex flex-col gap-2">
               {[
-                'Build a simple todo app with add and delete',
-                'Explain the structure of this project',
-                'Write unit tests for the existing code',
+                t('sessions:guide.prompt_1'),
+                t('sessions:guide.prompt_2', { defaultValue: 'Explain the structure of this project' }),
+                t('sessions:guide.prompt_3'),
               ].map((prompt) => (
                 <button
                   key={prompt}
@@ -844,7 +846,7 @@ function AgentConsole({
                 </button>
               ))}
             </div>
-            <p className="mt-3 text-[10px] text-zinc-500">Click an example or start typing to dismiss.</p>
+            <p className="mt-3 text-[10px] text-zinc-500">{t('sessions:guide.dismiss_hint', { defaultValue: 'Click an example or start typing to dismiss.' })}</p>
           </div>
         </div>
       )}

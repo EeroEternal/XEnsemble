@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useToast } from '../components/Toast';
 import * as githubApi from '../lib/githubApi';
 
@@ -7,6 +8,7 @@ const FULL_POLL_INTERVAL_MS = 60000;
 
 export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [operation, setOperation] = useState(null);
@@ -116,7 +118,7 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
     setOperation('commit');
     try {
       const result = await githubApi.commitStaged(projectId, message.trim(), author);
-      showToast('success', 'Changes committed.');
+      showToast('success', t('git:toast.committed'));
       if (result.status && result.status.ahead != null) {
         setStatus((prev) => prev ? { ...prev, ...result.status } : null);
       } else {
@@ -139,7 +141,7 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
     setOperation('push');
     try {
       const result = await githubApi.pushBranch(projectId, status?.branch);
-      showToast('success', 'Branch pushed.');
+      showToast('success', t('git:toast.branch_pushed', { defaultValue: 'Branch pushed.' }));
       if (result.status) {
         setStatus(result.status);
       } else {
@@ -159,7 +161,7 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
     setOperation('pull');
     try {
       const result = await githubApi.pullLatest(projectId);
-      showToast('success', 'Pulled latest changes.');
+      showToast('success', t('git:toast.pulled_latest', { defaultValue: 'Pulled latest changes.' }));
       fetchStatusFull({ silent: true });
       return result;
     } catch (err) {
@@ -175,7 +177,7 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
     setOperation('fetch');
     try {
       const result = await githubApi.fetchRemote(projectId);
-      showToast('success', 'Fetched from remote.');
+      showToast('success', t('git:toast.fetched', { defaultValue: 'Fetched from remote.' }));
       if (result.status) {
         setStatus(result.status);
       } else {
@@ -195,7 +197,7 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
     setOperation('switch');
     try {
       await githubApi.switchBranch(projectId, name);
-      showToast('success', `Switched to ${name}.`);
+      showToast('success', t('git:toast.switched_branch', { name, defaultValue: 'Switched to {{name}}.' }));
       fetchStatusFull({ silent: true });
     } catch (err) {
       showToast('error', err.message);
@@ -210,7 +212,7 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
     setOperation('switch');
     try {
       await githubApi.createBranch(projectId, name);
-      showToast('success', `Created and switched to ${name}.`);
+      showToast('success', t('git:toast.created_and_switched', { name, defaultValue: 'Created and switched to {{name}}.' }));
       fetchStatusFull({ silent: true });
     } catch (err) {
       showToast('error', err.message);

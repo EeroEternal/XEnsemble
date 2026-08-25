@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useToast } from '../components/Toast';
 import * as githubApi from '../lib/githubApi.js';
 
 export function usePullRequests(projectId) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [pullRequests, setPullRequests] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -31,7 +33,7 @@ export function usePullRequests(projectId) {
       setPullRequests((prev) =>
         prev.map((pr) => (pr.id === prId ? updated : pr)),
       );
-      showToast('success', 'Pull request synchronized.');
+      showToast('success', t('git:toast.pr_synchronized', { defaultValue: 'Pull request synchronized.' }));
       return updated;
     } catch (err) {
       showToast('error', err.message);

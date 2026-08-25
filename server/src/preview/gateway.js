@@ -3,6 +3,7 @@ const { eq } = require('drizzle-orm');
 const deploymentService = require('../deployments/DeploymentService');
 const previewRegistry = require('../runtime/localPreviewRegistry');
 const { appendInboxLog } = require('../workspace/logInbox');
+const { t } = require('../i18n');
 const { db } = require('../db/index');
 const schema = require('../db/schema');
 
@@ -140,7 +141,7 @@ async function proxyPreviewRequest(request, reply) {
         const isAsset = /\.(js|css|png|jpg|jpeg|gif|svg|webp|woff2?|ttf|ico|map|txt|json)$/i.test(urlPath) || /\/assets\//.test(urlPath);
         if (isAsset) {
             entry = previewRegistry.get(deploymentId);
-            if (!entry) return reply.code(503).send({ error: 'Preview process not found' });
+            if (!entry) return reply.code(503).send({ error: t('errors:preview_not_found', { defaultValue: 'Preview process not found' }, request.locale || 'en'), code: 'preview_not_found' });
         } else {
             const resolved = await resolveDeployment(request.raw, deploymentId);
             if (resolved.error) {
@@ -151,7 +152,7 @@ async function proxyPreviewRequest(request, reply) {
             entry = resolved.entry;
         }
     } catch (e) {
-        return reply.code(500).send({ error: 'Preview proxy error' });
+        return reply.code(500).send({ error: t('errors:preview_proxy_error', { defaultValue: 'Preview proxy error' }, request.locale || 'en'), code: 'preview_proxy_error' });
     }
 
     const target = `http://127.0.0.1:${entry.port}`;

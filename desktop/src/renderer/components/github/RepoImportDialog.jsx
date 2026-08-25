@@ -19,6 +19,7 @@ import {
   textSecondary,
   borderHairline,
 } from '../../lib/consoleTheme';
+import { useTranslation } from 'react-i18next';
 
 const CLONE_POLL_INTERVAL_MS = 2000;
 const MAX_CLONE_POLL_ATTEMPTS = 300; // 10 minutes
@@ -30,6 +31,7 @@ function formatUpdatedAt(ts) {
 }
 
 export default function RepoImportDialog({ open, onClose, onImported, fetchWorkspaces }) {
+  const { t } = useTranslation();
   const { showToast } = useToast();
   const { connection, loading: connectionLoading, connect, disconnect } = useGitHub();
 
@@ -81,7 +83,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
         if (res?.branch) {
           setCloneStatus('ready');
           clearInterval(id);
-          showToast('success', 'Repository imported and ready.');
+          showToast('success', t('git:toast.imported_ready', { defaultValue: 'Repository imported and ready.' }));
           onImported?.(importedProjectId);
           handleClose();
         }
@@ -90,7 +92,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
       }
       if (attempts >= MAX_CLONE_POLL_ATTEMPTS) {
         clearInterval(id);
-        setCloneError('Clone is taking longer than expected. It will continue in the background.');
+        setCloneError(t('git:error.clone_timeout_background', { defaultValue: 'Clone is taking longer than expected. It will continue in the background.' }));
       }
     }, CLONE_POLL_INTERVAL_MS);
     return () => clearInterval(id);
@@ -148,7 +150,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
       });
       setImportedProjectId(result.id);
       setCloneStatus(result.status || 'cloning');
-      showToast('success', 'Import started. Cloning repository…');
+      showToast('success', t('git:toast.import_started', { defaultValue: 'Import started. Cloning repository…' }));
     } catch (err) {
       showToast('error', err.message);
       setImporting(false);
@@ -165,14 +167,14 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
       panelClassName={`${consoleDialogLgClass} max-h-[calc(100vh-2rem)]`}
     >
       <ConsoleStructuredDialogHeader
-        title="Import from GitHub"
-        subtitle={connection ? 'Select a repository to import as a workspace.' : 'Connect your GitHub account to import repositories.'}
+        title={t('git:dialog.import_github_title', { defaultValue: 'Import from GitHub' })}
+        subtitle={connection ? t('git:dialog.import_select_repo', { defaultValue: 'Select a repository to import as a workspace.' }) : t('git:dialog.connect_to_import', { defaultValue: 'Connect your GitHub account to import repositories.' })}
       />
       <ConsoleStructuredDialogBody>
         {!connection ? (
           <div className="space-y-4">
             <p className={textSecondary}>
-              Importing a GitHub repository creates a new workspace and clones the code so an agent can work on it.
+              {t('git:dialog.import_description', { defaultValue: 'Importing a GitHub repository creates a new workspace and clones the code so an agent can work on it.' })}
             </p>
             <GitHubConnectButton
               connection={connection}
@@ -196,12 +198,12 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
                 disabled={connectionLoading}
                 className="text-xs text-zinc-500 hover:text-zinc-900"
               >
-                Disconnect
+                {t('common:action.disconnect')}
               </button>
             </div>
 
             <div>
-              <FormLabel htmlFor="repo-search">Search repositories</FormLabel>
+              <FormLabel htmlFor="repo-search">{t('git:dialog.search_repositories', { defaultValue: 'Search repositories' })}</FormLabel>
               <div className="relative mt-1.5">
                 <Search className={`pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 ${textPlaceholder}`} />
                 <Input
@@ -218,11 +220,11 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
               {reposLoading ? (
                 <div className="flex items-center justify-center gap-2 p-4 text-sm text-zinc-500">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading repositories…
+                  {t('git:state.loading_repositories', { defaultValue: 'Loading repositories…' })}
                 </div>
               ) : filteredRepos.length === 0 ? (
                 <div className="p-4 text-center text-sm text-zinc-500">
-                  {repos.length === 0 ? 'No repositories found.' : 'No matches.'}
+                  {repos.length === 0 ? t('git:empty.no_repositories', { defaultValue: 'No repositories found.' }) : t('common:select.no_matches')}
                 </div>
               ) : (
                 <ul className="divide-y divide-zinc-100">
@@ -239,7 +241,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
                           {repo.full_name}
                         </span>
                         <span className="shrink-0 text-xs text-zinc-500">
-                          {repo.private ? 'Private' : 'Public'}
+                          {repo.private ? t('git:repo.private', { defaultValue: 'Private' }) : t('git:repo.public', { defaultValue: 'Public' })}
                           {repo.language ? ` · ${repo.language}` : ''}
                         </span>
                       </button>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { useToast } from '../components/Toast';
 
@@ -7,6 +8,7 @@ import { apiFetch } from '../lib/api';
 export function usePlatformSecrets() {
   
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [hints, setHints] = useState({});
   const [draft, setDraft] = useState({});
   const [loading, setLoading] = useState(true);
@@ -29,7 +31,7 @@ export function usePlatformSecrets() {
     load();
   }, [load]);
 
-  const saveSecrets = async (payload, { successMessage = 'Platform settings saved.' } = {}) => {
+  const saveSecrets = async (payload, { successMessage = t('settings:toast.platform_settings_saved', { defaultValue: 'Platform settings saved.' }) } = {}) => {
     setSaving(true);
     try {
       const res = await apiFetch('/api/v1/admin/agent-secrets', {
@@ -40,7 +42,7 @@ export function usePlatformSecrets() {
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to save.');
+      if (!res.ok) throw new Error(data.error || t('settings:toast.save_failed'));
       if (data.secrets) setHints(data.secrets);
       else await load();
       showToast('success', successMessage);

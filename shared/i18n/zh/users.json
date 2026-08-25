@@ -1,0 +1,69 @@
+{
+  "title": "用户",
+  "add_user": "添加用户",
+  "status": {
+    "active": "活跃",
+    "pending": "待审批",
+    "suspended": "已封禁"
+  },
+  "tier": {
+    "basic": "基础版",
+    "standard": "标准版",
+    "pro": "专业版",
+    "enterprise": "企业版"
+  },
+  "dialog": {
+    "create_user": "创建用户",
+    "edit_user": "编辑 {{username}}"
+  },
+  "empty": {
+    "no_users": "暂无用户。",
+    "no_match": "没有匹配的用户。"
+  },
+  "field": {
+    "username": "用户名",
+    "user": "用户",
+    "password": "密码",
+    "role": "角色",
+    "status": "状态",
+    "usage": "用量",
+    "tier": "等级",
+    "tier_hint": "资源等级 — 控制 LLM 请求速率",
+    "last_login": "最后登录",
+    "quota": "配额",
+    "agent_auth": "Agent 授权",
+    "reset_password": "重置密码",
+    "reset_password_optional": "重置密码（可选）",
+    "leave_blank": "留空则保持当前密码",
+    "projects": "工作区",
+    "sessions": "会话",
+    "previews": "预览",
+    "max_projects": "最大工作区数",
+    "max_sessions": "最大会话数",
+    "max_previews": "最大预览数",
+    "resource_tier": "资源等级"
+  },
+  "role": {
+    "admin": "管理员",
+    "user": "用户"
+  },
+  "action": {
+    "save": "保存",
+    "cancel": "取消",
+    "actions_for": "{{username}} 的操作"
+  },
+  "error": {
+    "password_too_short": "密码至少需要 8 位字符。",
+    "cannot_demote_last_admin": "无法降级最后一个活跃的管理员。"
+  },
+  "toast": {
+    "user_created": "用户已创建。",
+    "user_activated": "用户已激活。",
+    "user_suspended": "用户已封禁。",
+    "user_updated": "用户已更新。",
+    "user_deleted": "用户已删除。",
+    "password_reset": "密码已重置。",
+    "quota_updated": "配额已更新。",
+    "agents_granted": "Agent 授权已更新。"
+  }
+}

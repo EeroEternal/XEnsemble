@@ -68,6 +68,7 @@ import {
   hoverTextPrimary,
 } from '../lib/consoleTheme.js';
 import { buttonClass } from '../lib/buttonStyles';
+import { useTranslation } from 'react-i18next';
 
 const DEFAULT_AGENT_ID = 'kimi-code';
 
@@ -172,6 +173,7 @@ export default React.forwardRef(function Sessions({
   const [configError, setConfigError] = useState(null);
   const { showToast } = useToast();
   const { themeId, preset } = useTerminalTheme();
+  const { t } = useTranslation();
   // eslint-disable-next-line no-unused-vars
   const [_deletingSessionId, setDeletingSessionId] = useState(null);
   const [restartingSession, setRestartingSession] = useState(false);
@@ -307,13 +309,13 @@ export default React.forwardRef(function Sessions({
       });
       const data = await res.json();
       if (!res.ok) {
-        if (res.status === 401 || data.error === 'Unauthorized') {
-          throw new Error('Session expired, please log in again.');
+        if (res.status === 401 || data.code === 'unauthorized') {
+          throw new Error(t('auth:error.session_expired'));
         }
-        if (data.error === 'quota_exceeded') {
+        if (data.code === 'quota_exceeded') {
           throw new Error(formatQuotaExceeded(data.dimension || 'max_projects', data.current, data.limit));
         }
-        throw new Error(data.error || 'Failed to create workspace');
+        throw new Error(data.error || t('sessions:error.create_workspace_failed'));
       }
       return { id: data.id, name: data.name || name };
     } catch (err) {
@@ -327,7 +329,7 @@ export default React.forwardRef(function Sessions({
   const handleStartSession = async (projectId, projectName, { closeLaunchModal = true } = {}) => {
     if (!selectedAgentId || !selectedAgent) return false;
     if (!projectId) {
-      setLaunchModalError('Could not create workspace for this session.');
+      setLaunchModalError(t('sessions:error.no_workspace'));
       return false;
     }
     setIsLoading(true);
@@ -336,7 +338,7 @@ export default React.forwardRef(function Sessions({
     try {
       const ready = await ensureAgentSecrets(selectedAgent);
       if (!ready) {
-        setLaunchModalError('Configure required API keys before launching.');
+        setLaunchModalError(t('sessions:error.configure_keys'));
         return false;
       }
 
@@ -365,16 +367,16 @@ export default React.forwardRef(function Sessions({
       });
       const data = await response.json();
       if (!response.ok) {
-        const msg = data.detail || data.error || data.message || 'Failed to start session';
-        if (response.status === 401 || msg === 'Unauthorized') {
-          setLaunchModalError('Session expired, please log in again.');
+        const msg = data.detail || data.error || data.message || t('sessions:error.start_failed');
+        if (response.status === 401 || data.code === 'unauthorized') {
+          setLaunchModalError(t('auth:error.session_expired'));
           return false;
         }
-        if (data.error === 'agent_not_granted') {
-          setLaunchModalError('You do not have permission to use this agent.');
+        if (data.code === 'agent_not_granted') {
+          setLaunchModalError(t('sessions:error.not_granted'));
           return false;
         }
-        if (data.error === 'quota_exceeded') {
+        if (data.code === 'quota_exceeded') {
           setLaunchModalError(formatQuotaExceeded(data.dimension, data.current, data.limit));
           fetchWorkspaces();
           return false;
@@ -516,7 +518,7 @@ export default React.forwardRef(function Sessions({
           return;
         }
         if (!launchWorkspaceId) {
-          setLaunchModalError('Select a workspace first.');
+          setLaunchModalError(t('sessions:error.select_workspace', { defaultValue: 'Select a workspace first.' }));
           return;
         }
         const ws = projects.find((p) => p.id === launchWorkspaceId);
@@ -570,13 +572,13 @@ export default React.forwardRef(function Sessions({
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to save keys');
+      if (!res.ok) throw new Error(data.error || t('sessions:error.save_keys_failed'));
       setSavedConfigKeys((prev) => {
         const next = { ...prev };
         Object.keys(payload).forEach((k) => { next[k] = true; });
         return next;
       });
-      showToast('success', 'Configuration saved.');
+      showToast('success', t('sessions:toast.config_saved'));
       setShowLaunchConfigModal(false);
       setLaunchModalError(null);
     } catch (err) {
@@ -595,7 +597,7 @@ export default React.forwardRef(function Sessions({
       const res = await apiFetch(`/api/v1/workspace/files?${qs}`);
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to load workspace files');
+        throw new Error(data.error || t('sessions:error.load_files_failed'));
       }
     } catch (err) {
       if (notifyError) showToast('error', err.message);
@@ -612,7 +614,7 @@ export default React.forwardRef(function Sessions({
       );
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to read file');
+        throw new Error(data.error || t('sessions:error.read_file_failed'));
       }
       setViewingFile(file);
       setFileContent(data.content || '');
@@ -706,7 +708,7 @@ export default React.forwardRef(function Sessions({
     if (!activeSession) return;
     const agentId = activeSession.agentId || sessions.find((s) => s.id === activeSession.sessionId)?.agentId;
     if (!agentId || !activeSession.projectId) {
-      showToast('error', 'Cannot start: missing agent or workspace.');
+      showToast('error', t('sessions:error.missing_agent_or_workspace', { defaultValue: 'Cannot start: missing agent or workspace.' }));
       return;
     }
     const agent = agents.find((a) => a.id === agentId);
@@ -717,7 +719,7 @@ export default React.forwardRef(function Sessions({
     try {
       const ready = await ensureAgentSecrets(agent);
       if (!ready) {
-        showToast('error', 'Configure required API keys before starting.');
+        showToast('error', t('sessions:error.configure_keys'));
         return;
       }
 
@@ -725,7 +727,7 @@ export default React.forwardRef(function Sessions({
         if (sessionAlive) {
           const stopRes = await apiFetch(`/api/v1/sessions/${encodeURIComponent(oldSessionId)}/stop`, { method: 'POST' });
           const stopData = await stopRes.json();
-          if (!stopRes.ok) throw new Error(stopData.error || 'Failed to pause session');
+          if (!stopRes.ok) throw new Error(stopData.error || t('sessions:error.pause_failed', { defaultValue: 'Failed to pause session' }));
           handleSessionIdle(oldSessionId);
         }
         const response = await apiFetch(`/api/v1/sessions/${encodeURIComponent(oldSessionId)}/resume`, {
@@ -733,18 +735,18 @@ export default React.forwardRef(function Sessions({
           body: JSON.stringify({ terminal_theme_id: themeId }),
         });
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || data.detail || 'Failed to resume session');
+        if (!response.ok) throw new Error(data.error || data.detail || t('sessions:error.resume_failed'));
         setSessions((prev) => prev.map((s) => (
           s.id === oldSessionId ? { ...s, alive: true, status: 'running', memoryStatus: 'running' } : s
         )));
         setReconnectVersion((v) => v + 1);
         fetchWorkspaces();
-        showToast('success', sessionAlive ? 'Session restarted.' : 'Session resumed.');
+        showToast('success', sessionAlive ? t('sessions:toast.session_restarted') : t('sessions:toast.session_resumed', { defaultValue: 'Session resumed.' }));
         return;
       }
 
       const deleteRes = await apiFetch(`/api/v1/sessions/${encodeURIComponent(oldSessionId)}`, { method: 'DELETE' });
-      if (!deleteRes.ok) throw new Error('Failed to release previous session');
+      if (!deleteRes.ok) throw new Error(t('sessions:error.release_previous_session', { defaultValue: 'Failed to release previous session' }));
       archiveSession(oldSessionId);
 
       const response = await apiFetch('/api/v1/session/start', {
@@ -757,7 +759,7 @@ export default React.forwardRef(function Sessions({
         }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Failed to start session');
+      if (!response.ok) throw new Error(data.error || t('sessions:error.start_failed'));
 
       replaceRecentSessionId(oldSessionId, data.session_id, {
         agentId, projectId: activeSession.projectId, projectName: activeSession.projectName, createdAt: Date.now(),
@@ -778,7 +780,7 @@ export default React.forwardRef(function Sessions({
         return [...withoutOld, { id: data.session_id, projectId: activeSession.projectId, agentId, status: 'running', alive: true, projectName: activeSession.projectName, createdAt: now }];
       });
       fetchWorkspaces();
-      showToast('success', 'Session started.');
+      showToast('success', t('sessions:toast.session_started', { defaultValue: 'Session started.' }));
     } catch (err) {
       showToast('error', err.message);
     } finally {
@@ -792,11 +794,11 @@ export default React.forwardRef(function Sessions({
     try {
       const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(activeSession.sessionId)}/stop`, { method: 'POST' });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to pause session');
+      if (!res.ok) throw new Error(data.error || t('sessions:error.pause_failed', { defaultValue: 'Failed to pause session' }));
       rememberRecentSession({ id: activeSession.sessionId, agentId: activeSession.agentId, projectId: activeSession.projectId, projectName: activeSession.projectName, createdAt: Date.now() });
       handleSessionIdle(activeSession.sessionId);
       fetchWorkspaces();
-      showToast('success', 'Session paused.');
+      showToast('success', t('sessions:toast.session_paused', { defaultValue: 'Session paused.' }));
     } catch (err) {
       showToast('error', err.message);
     } finally {
@@ -808,7 +810,7 @@ export default React.forwardRef(function Sessions({
     setDeletingSessionId(sessionId);
     try {
       const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete session');
+      if (!res.ok) throw new Error(t('sessions:error.delete_session_failed', { defaultValue: 'Failed to delete session' }));
       archiveSession(sessionId);
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       if (activeSession?.sessionId === sessionId) setActiveSession(null);
@@ -826,7 +828,7 @@ export default React.forwardRef(function Sessions({
       sessionId: session.id,
       isLive: session.alive === true,
       agentLabel: getAgentLabel(session.agentId),
-      workspaceName: ws?.name || 'Unassigned',
+      workspaceName: ws?.name || t('sessions:label.unassigned'),
     });
   };
 
@@ -843,7 +845,7 @@ export default React.forwardRef(function Sessions({
         const res = await apiFetch(`/api/v1/projects/${encodeURIComponent(workspaceId)}`, { method: 'DELETE' });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || 'Failed to delete workspace');
+          throw new Error(data.error || t('sessions:error.delete_workspace_failed'));
         }
         if (activeSession?.projectId === workspaceId) setActiveSession(null);
       }
@@ -854,7 +856,7 @@ export default React.forwardRef(function Sessions({
       }
       setDeleteConfirmWorkspace(null);
       fetchWorkspaces();
-      showToast('success', workspaceId === '_orphan' ? 'Unassigned sessions cleared.' : 'Workspace deleted.');
+      showToast('success', workspaceId === '_orphan' ? t('sessions:toast.unassigned_cleared', { defaultValue: 'Unassigned sessions cleared.' }) : t('sessions:toast.workspace_deleted'));
     } catch (err) {
       showToast('error', err.message);
       fetchWorkspaces();
@@ -1025,7 +1027,7 @@ export default React.forwardRef(function Sessions({
             <ByokConfigForm
               agentId={activeSession.agentId}
               loading={false}
-              onSave={() => { setShowSessionConfigModal(false); setSessionConfigError(null); showToast('success', 'Configuration saved.'); }}
+              onSave={() => { setShowSessionConfigModal(false); setSessionConfigError(null); showToast('success', t('sessions:toast.config_saved')); }}
             />
           </div>
           <div className={consoleStructuredDialogFooterClass}>
@@ -1221,7 +1223,7 @@ export default React.forwardRef(function Sessions({
                         <Settings2 className="w-3.5 h-3.5 text-[#9AA0A6]" />
                         <h4 className="text-xs font-medium text-[#5F6368]">Configure {selectedAgent.name}</h4>
                       </div>
-                      <ByokConfigForm agentId={selectedAgentId} loading={false} onSave={() => { setShowLaunchConfigModal(false); showToast('success', 'Configuration saved.'); }} />
+                      <ByokConfigForm agentId={selectedAgentId} loading={false} onSave={() => { setShowLaunchConfigModal(false); showToast('success', t('sessions:toast.config_saved')); }} />
                     </div>
                   )}
 

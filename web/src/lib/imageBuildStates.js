@@ -1,14 +1,24 @@
+import i18next from 'i18next';
 import { CheckCircle2, Clock, Loader2, XCircle } from 'lucide-react';
 
 export const BUILD_STATES = {
-  queued: { label: 'Queued', icon: Clock, tone: 'warning' },
-  building: { label: 'Building…', icon: Loader2, tone: 'info', spinning: true },
-  ready: { label: 'Ready', icon: CheckCircle2, tone: 'success' },
-  failed: { label: 'Failed', icon: XCircle, tone: 'danger' },
+  queued: { icon: Clock, tone: 'warning' },
+  building: { icon: Loader2, tone: 'info', spinning: true },
+  ready: { icon: CheckCircle2, tone: 'success' },
+  failed: { icon: XCircle, tone: 'danger' },
+};
+
+const STATE_LABELS = {
+  queued: () => i18next.t('images:status.queued'),
+  building: () => i18next.t('images:status.building'),
+  ready: () => i18next.t('images:status.ready', { defaultValue: 'Ready' }),
+  failed: () => i18next.t('images:status.failed'),
 };
 
 export function getBuildState(state) {
-  return BUILD_STATES[state] || { label: state || '\u2014', icon: null, tone: 'neutral' };
+  const entry = BUILD_STATES[state];
+  if (!entry) return { label: state || '\u2014', icon: null, tone: 'neutral' };
+  return { ...entry, label: STATE_LABELS[state] ? STATE_LABELS[state]() : state };
 }
 
 export function formatDuration(ms) {

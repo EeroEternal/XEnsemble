@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useToast } from '../components/Toast';
 import { getApiBase } from '../lib/api';
 import * as gitApi from '../lib/gitApi';
@@ -27,6 +28,7 @@ function openOAuthPopup(url) {
 
 export function useGitProvider(providerName, { onChange } = {}) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [connection, setConnection] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -81,13 +83,13 @@ export function useGitProvider(providerName, { onChange } = {}) {
       } catch (_) { /* keep window origin */ }
       const popup = openOAuthPopup(authUrl);
       if (!popup) openExternal(authUrl);
-      showToast('loading', `Waiting for ${providerName} authorization…`);
+      showToast('loading', t('git:toast.waiting_authorization', { provider: providerName, defaultValue: 'Waiting for {{provider}} authorization…' }));
       clearPoll();
 
       const reportSuccess = (conn) => {
         const username = conn.remote_username || conn.remoteUsername
           || conn.github_username || conn.githubUsername || providerName;
-        showToast('success', `Connected to ${providerName} as ${username}`);
+        showToast('success', t('git:toast.connected_as', { provider: providerName, username, defaultValue: 'Connected to {{provider}} as {{username}}' }));
       };
 
       const onMessage = async (event) => {
@@ -100,7 +102,7 @@ export function useGitProvider(providerName, { onChange } = {}) {
           const conn = await fetchConnection({ silent: true });
           if (conn) reportSuccess(conn);
         } else {
-          showToast('error', data.message || `${providerName} authorization failed. Please try again.`);
+          showToast('error', data.message || t('git:toast.authorization_failed', { provider: providerName, defaultValue: '{{provider}} authorization failed. Please try again.' }));
         }
       };
       messageHandlerRef.current = onMessage;
@@ -117,10 +119,10 @@ export function useGitProvider(providerName, { onChange } = {}) {
           reportSuccess(conn);
         } else if (attemptsAfterClose >= CLOSED_POPUP_GRACE_ATTEMPTS) {
           clearPoll();
-          showToast('error', `${providerName} authorization window was closed before completing. Please try again.`);
+          showToast('error', t('git:toast.authorization_window_closed', { provider: providerName, defaultValue: '{{provider}} authorization window was closed before completing. Please try again.' }));
         } else if (attempts >= MAX_POLL_ATTEMPTS) {
           clearPoll();
-          showToast('error', `${providerName} authorization timed out. Please try again.`);
+          showToast('error', t('git:toast.authorization_timed_out', { provider: providerName, defaultValue: '{{provider}} authorization timed out. Please try again.' }));
         }
       }, POLL_INTERVAL_MS);
       return true;
@@ -149,7 +151,7 @@ export function useGitProvider(providerName, { onChange } = {}) {
       }
       const username = conn.remote_username || conn.remoteUsername
         || conn.github_username || conn.githubUsername || providerName;
-      showToast('success', `Connected to ${providerName} as ${username}`);
+      showToast('success', t('git:toast.connected_as', { provider: providerName, username, defaultValue: 'Connected to {{provider}} as {{username}}' }));
       return true;
     } catch (err) {
       setError(err.message);
@@ -167,7 +169,7 @@ export function useGitProvider(providerName, { onChange } = {}) {
       await gitApi.disconnectProvider(providerName);
       setConnection(null);
       onChange?.(null);
-      showToast('success', `Disconnected from ${providerName}.`);
+      showToast('success', t('git:toast.disconnected', { provider: providerName }));
     } catch (err) {
       showToast('error', err.message);
     } finally {

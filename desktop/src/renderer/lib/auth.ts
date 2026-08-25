@@ -70,6 +70,10 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
     headers['Content-Type'] = 'application/json';
   }
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  const locale = localStorage.getItem('xe_locale') || 'en';
+  if (!headers['Accept-Language']) {
+    headers['Accept-Language'] = locale;
+  }
 
   const url = `${getApiBase()}${path}`;
   const res = await fetch(url, { ...options, headers });

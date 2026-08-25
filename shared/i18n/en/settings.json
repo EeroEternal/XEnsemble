@@ -1,0 +1,47 @@
+{
+  "title": "Settings",
+  "close": "Close settings",
+  "tabs": {
+    "general": "General",
+    "terminal": "Terminal",
+    "agent": "Agent",
+    "github": "GitHub",
+    "git_providers": "Git Providers",
+    "quota": "Quota",
+    "gateway": "Gateway",
+    "language": "Language"
+  },
+  "language": {
+    "label": "Language",
+    "en": "English",
+    "zh": "中文"
+  },
+  "secret": {
+    "unchanged_if_blank": "Unchanged if blank",
+    "enter_label": "Enter {{label}}"
+  },
+  "quota": {
+    "title": "My Quota",
+    "projects": "Workspaces",
+    "sessions": "Sessions",
+    "previews": "Previews"
+  },
+  "toast": {
+    "saved": "Saved.",
+    "save_failed": "Failed to save.",
+    "config_saved": "Configuration saved.",
+    "save_keys_failed": "Failed to save keys",
+    "save_config_failed": "Failed to save configuration"
+  },
+  "agent": {
+    "title": "Agent Settings",
+    "byok_config": "BYOK Configuration",
+    "gateway_config": "Gateway Configuration"
+  },
+  "terminal": {
+    "title": "Terminal Settings",
+    "theme": "Theme",
+    "font_size": "Font size",
+    "font_family": "Font family"
+  }
+}

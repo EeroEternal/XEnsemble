@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { ConsoleDialogShell } from './ConsoleDialog';
 import { buttonClass } from '../lib/buttonStyles';
 import { consoleButtonFocusClass, textPrimary, textSecondary } from '../lib/consoleTokens';
+import { useTranslation } from 'react-i18next';
 
 let openConfirmFn = null;
 
@@ -13,22 +14,23 @@ export function confirm(options) {
 }
 
 export default function ConfirmDialog() {
+  const { t } = useTranslation();
   const [state, setState] = useState(null);
 
   const open = useCallback((options) => {
     const opts = typeof options === 'string' ? { message: options } : options;
     return new Promise((resolve) => {
       setState({
-        title: opts.title || 'Confirm',
+        title: opts.title || t('common:dialog.confirm_title'),
         message: opts.message || '',
-        confirmLabel: opts.confirmLabel || 'Confirm',
-        cancelLabel: opts.cancelLabel || 'Cancel',
+        confirmLabel: opts.confirmLabel || t('common:action.confirm'),
+        cancelLabel: opts.cancelLabel || t('common:action.cancel'),
         variant: opts.variant || 'primary',
         container: opts.container || null,
         resolve,
       });
     });
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     openConfirmFn = open;

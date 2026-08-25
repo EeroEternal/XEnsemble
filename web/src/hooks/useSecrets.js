@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { useToast } from '../components/Toast';
 import { apiFetch } from '../lib/api';
@@ -6,6 +7,7 @@ import { apiFetch } from '../lib/api';
 export function useSecrets() {
   
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [secrets, setSecrets] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -27,7 +29,7 @@ export function useSecrets() {
     load();
   }, [load]);
 
-  const saveSecrets = async (payload, { successMessage = 'Saved successfully.' } = {}) => {
+  const saveSecrets = async (payload, { successMessage = t('settings:toast.saved_successfully', { defaultValue: 'Saved successfully.' }) } = {}) => {
     setSaving(true);
     try {
       const res = await apiFetch('/api/v1/secrets', {
@@ -44,7 +46,7 @@ export function useSecrets() {
         showToast('success', successMessage);
         return true;
       }
-      showToast('error', 'Failed to save.');
+      showToast('error', t('settings:toast.save_failed'));
       return false;
     } catch (err) {
       showToast('error', err.message);

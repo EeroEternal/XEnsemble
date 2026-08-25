@@ -18,15 +18,16 @@ import AgentRegisterDialog from '../components/admin/AgentRegisterDialog';
 import AgentEditDialog from '../components/admin/AgentEditDialog';
 import AgentConfigDialog from '../components/admin/AgentConfigDialog';
 import AgentDetailsDialog from '../components/admin/AgentDetailsDialog';
+import { useTranslation } from 'react-i18next';
 
 const ACTION_PROGRESS_LABEL = {
-  install: 'Installing',
-  uninstall: 'Removing',
-  update: 'Updating',
+  install: 'agents:action.installing_progress',
+  uninstall: 'agents:action.removing_progress',
+  update: 'agents:action.updating_progress',
 };
 
 const ACTION_LOADING_HINT = {
-  install: 'This may take several minutes.',
+  install: 'agents:action.loading_hint',
 };
 
 function statusBadge(installed) {
@@ -40,27 +41,28 @@ function formatLifecycleTime(ts) {
   return new Date(ts).toLocaleString();
 }
 
-function getAuthSummary(agent) {
+function getAuthSummary(agent, t) {
   const isGateway = agent.llm_auth_mode === 'gateway';
   if (isGateway) {
     return {
-      mode: 'Gateway',
-      hint: agent.keys_ready ? 'Ready' : 'Needs model',
+      mode: t('agents:auth.gateway', { defaultValue: 'Gateway' }),
+      hint: agent.keys_ready ? t('agents:status.ready') : t('agents:status.needs_model'),
       hintClass: agent.keys_ready ? 'text-emerald-600' : 'text-amber-600',
     };
   }
   return {
     mode: 'BYOK',
-    hint: 'User keys',
+    hint: t('agents:auth.user_keys', { defaultValue: 'User keys' }),
     hintClass: 'text-zinc-500',
   };
 }
 
 function LifecycleInfoDot({ lifecycle }) {
+  const { t } = useTranslation();
   if (!lifecycle) return null;
   const label = lifecycle.ok
-    ? `${lifecycle.action} OK`
-    : `${lifecycle.action} failed`;
+    ? t('agents:lifecycle.ok', { action: lifecycle.action, defaultValue: '{{action}} OK' })
+    : t('agents:lifecycle.failed', { action: lifecycle.action, defaultValue: '{{action}} failed' });
   const when = formatLifecycleTime(lifecycle.finished_at);
 
   return (
@@ -103,6 +105,7 @@ function AgentActionsMenu({
   onUninstall,
   onConfigure,
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [dropUp, setDropUp] = useState(false);
   const rootRef = useRef(null);
@@ -158,7 +161,7 @@ function AgentActionsMenu({
         onClick={() => handleToggle()}
         aria-expanded={open}
         aria-haspopup="menu"
-        aria-label={`Actions for ${agent.name}`}
+        aria-label={t('agents:action.actions_for', { name: agent.name })}
         className={`${consoleIconButtonClass} ${open ? 'bg-zinc-100 text-zinc-900' : ''}`}
       >
         <MoreHorizontal className="w-4 h-4" />
@@ -170,15 +173,15 @@ function AgentActionsMenu({
         >
           <button type="button" role="menuitem" onClick={run(onViewDetails)} className={itemClass()}>
             <Info className="w-4 h-4 shrink-0" />
-            View details
+            {t('agents:action.view_details')}
           </button>
           <button type="button" role="menuitem" onClick={run(onEdit)} className={itemClass()} disabled={busy}>
             <Pencil className="w-4 h-4 shrink-0" />
-            Edit executable
+            {t('agents:action.edit_executable')}
           </button>
           <button type="button" role="menuitem" onClick={run(onConfigure)} className={itemClass()} disabled={busy}>
             <KeyRound className="w-4 h-4 shrink-0" />
-            Configure
+            {t('agents:action.configure')}
           </button>
           <div className="my-1 border-t border-zinc-100" role="separator" />
           {!agent.installed ? (
@@ -190,7 +193,7 @@ function AgentActionsMenu({
               disabled={installLoading}
             >
               <Download className="w-4 h-4 shrink-0" />
-              {installLoading ? 'Installing...' : 'Install on server'}
+              {installLoading ? t('agents:action.installing', { defaultValue: 'Installing...' }) : t('agents:action.install_on_server', { defaultValue: 'Install on server' })}
             </button>
           ) : (
             <>
@@ -202,7 +205,7 @@ function AgentActionsMenu({
                 disabled={updateLoading}
               >
                 <RefreshCw className={`w-4 h-4 shrink-0 ${updateLoading ? 'animate-spin' : ''}`} />
-                {updateLoading ? 'Updating...' : 'Check and update'}
+                {updateLoading ? t('agents:action.updating', { defaultValue: 'Updating...' }) : t('agents:action.check_and_update', { defaultValue: 'Check and update' })}
               </button>
               <button
                 type="button"
@@ -212,7 +215,7 @@ function AgentActionsMenu({
                 disabled={uninstallLoading}
               >
                 <Trash2 className="w-4 h-4 shrink-0" />
-                {uninstallLoading ? 'Removing...' : 'Uninstall'}
+                {uninstallLoading ? t('agents:action.removing', { defaultValue: 'Removing...' }) : t('agents:action.uninstall')}
               </button>
             </>
           )}
@@ -230,6 +233,7 @@ function patchAgentLifecycle(agents, agentId, lastLifecycle) {
 }
 
 export default function AgentsAdmin() {
+  const { t } = useTranslation();
   const { showToast } = useToast();
   const [agents, setAgents] = useState(() => loadAdminAgentsCache());
   const [gatewayProviders, setGatewayProviders] = useState([]);
@@ -278,10 +282,14 @@ export default function AgentsAdmin() {
   }, [fetchGatewayProviders]);
 
   const runAgentAction = async (agentId, action, { agentName, method = 'POST', successMsg, onSuccess } = {}) => {
-    const label = ACTION_PROGRESS_LABEL[action] || 'Processing';
+    const label = ACTION_PROGRESS_LABEL[action]
+      ? t(ACTION_PROGRESS_LABEL[action], { defaultValue: action.charAt(0).toUpperCase() + action.slice(1) + '…' })
+      : t('agents:action.processing', { defaultValue: 'Processing' });
     const name = agentName || agentId;
-    const hint = ACTION_LOADING_HINT[action];
-    showToast('loading', hint ? `${label} ${name}... ${hint}` : `${label} ${name}...`);
+    const hint = ACTION_LOADING_HINT[action]
+      ? t(ACTION_LOADING_HINT[action], { defaultValue: 'This may take several minutes.' })
+      : null;
+    showToast('loading', hint ? t('agents:toast.action_progress_hint', { label, name, hint, defaultValue: '{{label}} {{name}}... {{hint}}' }) : t('agents:toast.action_progress', { label, name, defaultValue: '{{label}} {{name}}...' }));
     setActionLoading(`${agentId}:${action}`);
     try {
       const res = await apiFetch(`/api/v1/admin/agents/${agentId}/${action}`, {
@@ -302,7 +310,7 @@ export default function AgentsAdmin() {
       fetchAgents({ silent: true });
       return data;
     } catch (err) {
-      showToast('error', err.message || 'Action failed.');
+      showToast('error', err.message || t('agents:toast.action_failed', { defaultValue: 'Action failed.' }));
       return null;
     } finally {
       setActionLoading(null);
@@ -313,17 +321,21 @@ export default function AgentsAdmin() {
     agentName: agent.name,
     onSuccess: (data) => showToast(
       'success',
-      data.already_installed ? `${agent.name} is already installed.` : `${agent.name} installed.`,
+      data.already_installed
+        ? t('agents:toast.already_installed', { name: agent.name, defaultValue: '{{name}} is already installed.' })
+        : t('agents:toast.installed', { name: agent.name, defaultValue: '{{name}} installed.' }),
     ),
   });
 
   const handleUninstall = async (agent) => {
-    if (!window.confirm(`Uninstall ${agent.name} from this server?`)) return;
+    if (!window.confirm(t('agents:confirm.uninstall', { name: agent.name, defaultValue: 'Uninstall {{name}} from this server?' }))) return;
     await runAgentAction(agent.id, 'uninstall', {
       agentName: agent.name,
       onSuccess: (data) => showToast(
         'success',
-        data.already_removed ? `${agent.name} is already removed.` : `${agent.name} uninstalled.`,
+        data.already_removed
+          ? t('agents:toast.already_removed', { name: agent.name, defaultValue: '{{name}} is already removed.' })
+          : t('agents:toast.uninstalled', { name: agent.name, defaultValue: '{{name}} uninstalled.' }),
       ),
     });
   };
@@ -335,17 +347,17 @@ export default function AgentsAdmin() {
       const check = await checkRes.json();
       if (!checkRes.ok) throw new Error(check.error);
       if (!check.installed) {
-        showToast('error', `${agent.name} is not installed.`);
+        showToast('error', t('agents:toast.not_installed', { name: agent.name, defaultValue: '{{name}} is not installed.' }));
         return;
       }
 
       const shouldUpdate = check.update_available || !check.latest_version;
       if (!shouldUpdate) {
-        showToast('success', `${agent.name} is up to date (${check.local_version}).`);
+        showToast('success', t('agents:toast.up_to_date', { name: agent.name, version: check.local_version, defaultValue: '{{name}} is up to date ({{version}}).' }));
         return;
       }
 
-      showToast('loading', `Updating ${agent.name}...`);
+      showToast('loading', t('agents:toast.updating', { name: agent.name, defaultValue: 'Updating {{name}}...' }));
       const updateRes = await apiFetch(`/api/v1/admin/agents/${agent.id}/update`, {
         method: 'POST',
         body: '{}',
@@ -362,13 +374,15 @@ export default function AgentsAdmin() {
 
       const newVersion = updated.local_version || check.latest_version;
       if (check.update_available && check.local_version && newVersion) {
-        showToast('success', `${agent.name} updated (${check.local_version} -> ${newVersion}).`);
+        showToast('success', t('agents:toast.updated_with_version', { name: agent.name, oldVersion: check.local_version, newVersion, defaultValue: '{{name}} updated ({{oldVersion}} -> {{newVersion}}).' }));
       } else {
-        showToast('success', newVersion ? `${agent.name} updated to ${newVersion}.` : `${agent.name} updated.`);
+        showToast('success', newVersion
+          ? t('agents:toast.updated_to', { name: agent.name, version: newVersion, defaultValue: '{{name}} updated to {{version}}.' })
+          : t('agents:toast.updated', { name: agent.name, defaultValue: '{{name}} updated.' }));
       }
       fetchAgents({ silent: true });
     } catch (err) {
-      showToast('error', err.message || 'Update failed.');
+      showToast('error', err.message || t('agents:toast.update_failed', { defaultValue: 'Update failed.' }));
     } finally {
       setActionLoading(null);
     }
@@ -377,16 +391,16 @@ export default function AgentsAdmin() {
   return (
     <div className={consoleAdminPageClass}>
       <PageHeader
-        title="Agents"
+        title={t('agents:title')}
         description={
           refreshing
-            ? 'Refreshing agent status...'
-            : 'Install agents on the server, configure platform API keys, and manage the registry.'
+            ? t('agents:refreshing', { defaultValue: 'Refreshing agent status...' })
+            : t('agents:description', { defaultValue: 'Install agents on the server, configure platform API keys, and manage the registry.' })
         }
         actions={(
           <Button type="button" onClick={() => setRegisterOpen(true)} size="md" className="shrink-0">
             <Plus className="w-4 h-4" />
-            Add Agent
+            {t('agents:add_agent')}
           </Button>
         )}
       />
@@ -420,25 +434,25 @@ export default function AgentsAdmin() {
           <table className="w-full text-left text-sm">
             <thead className="border-b border-zinc-200 bg-white">
               <tr>
-                <th className={consoleTableHeadCellClass}>Name</th>
-                <th className={consoleTableHeadCellClass}>Status</th>
-                <th className={consoleTableHeadCellClass}>Version</th>
-                <th className={consoleTableHeadCellClass}>Executable</th>
-                <th className={consoleTableHeadCellClass}>Auth</th>
-                <th className={`${consoleTableHeadCellClass} w-12 text-right`}>Actions</th>
+                <th className={consoleTableHeadCellClass}>{t('agents:field.name')}</th>
+                <th className={consoleTableHeadCellClass}>{t('common:table.status', { defaultValue: 'Status' })}</th>
+                <th className={consoleTableHeadCellClass}>{t('agents:field.version')}</th>
+                <th className={consoleTableHeadCellClass}>{t('agents:field.executable')}</th>
+                <th className={consoleTableHeadCellClass}>{t('agents:field.auth')}</th>
+                <th className={`${consoleTableHeadCellClass} w-12 text-right`}>{t('agents:field.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {loading && agents.length === 0 ? (
                 <tr>
                   <td colSpan={6} className={`${consoleTableBodyCellClass} text-zinc-500`}>
-                    Loading...
+                    {t('common:state.loading')}
                   </td>
                 </tr>
               ) : agents.length === 0 ? (
                 <tr>
                   <td colSpan={6} className={`${consoleTableBodyCellClass} text-zinc-500`}>
-                    No agents registered yet.
+                    {t('agents:empty.none_registered')}
                   </td>
                 </tr>
               ) : agents.map((agent) => {

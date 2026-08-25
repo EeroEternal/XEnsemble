@@ -13,6 +13,7 @@ import {
   isTerminalAuthFailure,
   refreshTokenForTerminalFailure,
 } from '../../../../shared/terminalReconnect.mjs';
+import { useTranslation } from 'react-i18next';
 
 const FALLBACK_XTERM_THEME = {
   background: '#09090b',
@@ -111,6 +112,7 @@ function AgentConsole({
   sessionWakeable = false,
 }) {
   const { preset } = useTerminalTheme();
+  const { t } = useTranslation();
   const xtermTheme = preset?.xterm || FALLBACK_XTERM_THEME;
 
   const hostRef = useRef(null);
@@ -347,7 +349,7 @@ function AgentConsole({
     resizeObserver.observe(host);
 
     if (!sessionId || (!shouldConnect && !shouldReplayIdle)) {
-      terminal.write('\r\n\x1b[33m[System] Session is not running.\x1b[0m\r\n');
+      terminal.write(`\r\n\x1b[33m${t('sessions:terminal.system_prefix')} ${t('sessions:terminal.not_running')}\x1b[0m\r\n`);
       setEnded(true);
     } else if (shouldReplayIdle) {
       (async () => {
@@ -357,7 +359,7 @@ function AgentConsole({
           const data = await response.json();
           if (!response.ok) throw new Error(data.error || 'Failed to load session history');
           if (data.head != null && data.head > 0) setCachedSeq(sessionId, data.head);
-          const systemMsg = '\r\n\x1b[33m[System] Session paused. Click Start to resume.\x1b[0m\r\n';
+          const systemMsg = `\r\n\x1b[33m${t('sessions:terminal.system_prefix')} ${t('sessions:terminal.paused')}\x1b[0m\r\n`;
           // Use terminal.write callback to hide overlay only AFTER xterm.js
           // has fully processed the transcript data. xterm.js processes write
           // data asynchronously in setTimeout(0) chunks; without the callback,
@@ -382,7 +384,7 @@ function AgentConsole({
           }
         } catch (error) {
           if (!disposed) {
-            terminal.write(`\r\n\x1b[31m[System] ${error?.message || 'Failed to load session history'}\x1b[0m\r\n`);
+            terminal.write(`\r\n\x1b[31m${t('sessions:terminal.system_prefix')} ${error?.message || t('sessions:terminal.load_history_failed')}\x1b[0m\r\n`);
             hideOverlay();
             setEnded(true);
           }
@@ -396,11 +398,11 @@ function AgentConsole({
         if (disposed || serverEnded) return;
         const next = reconnectState.nextReconnect();
         if (next.exhausted) {
-          terminal.write(`\r\n\x1b[31m[System] Terminal could not be restored${reason ? ` (${reason})` : ''}. Click Restart to retry.\x1b[0m\r\n`);
+          terminal.write(`\r\n\x1b[31m${t('sessions:terminal.system_prefix')} ${t('sessions:terminal.restore_failed', { reason: reason ? ` (${reason})` : '' })}\x1b[0m\r\n`);
           setEnded(true);
           return;
         }
-        terminal.write(`\r\n\x1b[33m[System] Reconnecting terminal… (${next.attempt}/${MAX_RECONNECTS})\x1b[0m\r\n`);
+        terminal.write(`\r\n\x1b[33m${t('sessions:terminal.system_prefix')} ${t('sessions:terminal.reconnecting', { attempt: next.attempt, max: MAX_RECONNECTS })}\x1b[0m\r\n`);
         setConnected(false);
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null;
@@ -889,7 +891,7 @@ function AgentConsole({
       >
         <div className="flex items-center gap-2 text-sm text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Loading history…
+          {t('common:state.loading', { defaultValue: 'Loading…' })}
         </div>
       </div>
       <div ref={hostRef} className="min-h-0 w-full flex-1" />

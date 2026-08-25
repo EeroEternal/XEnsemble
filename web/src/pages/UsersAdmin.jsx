@@ -23,15 +23,7 @@ import {
 
 import { apiFetch } from '../lib/api';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
-
-function statusBadge(status) {
-  const map = {
-    active: { tone: 'success', icon: CheckCircle, label: 'Active' },
-    pending: { tone: 'warning', icon: Clock, label: 'Pending' },
-    suspended: { tone: 'danger', icon: Pause, label: 'Suspended' },
-  };
-  return map[status] || { tone: 'neutral', icon: null, label: status || 'Unknown' };
-}
+import { useTranslation } from 'react-i18next';
 
 const emptyForm = {
   username: '',
@@ -45,8 +37,18 @@ const emptyForm = {
 };
 
 export default function UsersAdmin() {
-  
+  const { t } = useTranslation();
   const { showToast } = useToast();
+
+  function statusBadge(status) {
+    const map = {
+      active: { tone: 'success', icon: CheckCircle, label: t('users:status.active') },
+      pending: { tone: 'warning', icon: Clock, label: t('users:status.pending') },
+      suspended: { tone: 'danger', icon: Pause, label: t('users:status.suspended') },
+    };
+    return map[status] || { tone: 'neutral', icon: null, label: status || t('users:status.unknown', { defaultValue: 'Unknown' }) };
+  }
+
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -115,7 +117,7 @@ export default function UsersAdmin() {
     try {
       if (dialogMode === 'create') {
         if (!form.password || form.password.length < 8) {
-          showToast('error', 'Password must be at least 8 characters.');
+          showToast('error', t('users:error.password_too_short'));
           return;
         }
         const res = await apiFetch('/api/v1/admin/users', {
@@ -136,7 +138,7 @@ export default function UsersAdmin() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
-        showToast('success', 'User created.');
+        showToast('success', t('users:toast.user_created'));
       } else if (editingUser) {
         const patchRes = await apiFetch(`/api/v1/admin/users/${editingUser.id}`, {
           method: 'PATCH',
@@ -164,7 +166,7 @@ export default function UsersAdmin() {
 
         if (resetPassword.trim()) {
           if (resetPassword.length < 8) {
-            showToast('error', 'New password must be at least 8 characters.');
+            showToast('error', t('users:error.password_too_short'));
             return;
           }
           const pwRes = await apiFetch(`/api/v1/admin/users/${editingUser.id}/reset-password`, {
@@ -176,7 +178,7 @@ export default function UsersAdmin() {
           if (!pwRes.ok) throw new Error(pwData.error);
         }
 
-        showToast('success', 'User updated.');
+        showToast('success', t('users:toast.user_updated'));
       }
       closeDialog();
       fetchUsers();
@@ -195,7 +197,7 @@ export default function UsersAdmin() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      showToast('success', next === 'active' ? 'User activated.' : 'User suspended.');
+      showToast('success', next === 'active' ? t('users:toast.user_activated') : t('users:toast.user_suspended'));
       fetchUsers();
     } catch (err) {
       showToast('error', err.message);
@@ -211,7 +213,7 @@ export default function UsersAdmin() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      showToast('success', 'User approved.');
+      showToast('success', t('users:toast.user_approved', { defaultValue: 'User approved.' }));
       fetchUsers();
     } catch (err) {
       showToast('error', err.message);
@@ -226,17 +228,17 @@ export default function UsersAdmin() {
 
   return (
     <div className={consoleAdminPageClass}>
-      <PageHeader title="Users" />
+      <PageHeader title={t('users:title')} />
 
       <div className="flex items-center justify-between gap-3">
-        <span className="text-xs text-zinc-500 shrink-0">{users.length} users</span>
+        <span className="text-xs text-zinc-500 shrink-0">{t('users:count', { count: users.length, defaultValue: '{{count}} users' })}</span>
         <div className="flex items-center gap-2">
           <div className="relative w-64 shrink-0">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
             <Input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search users…"
+              placeholder={t('users:search_placeholder', { defaultValue: 'Search users…' })}
               className="w-full pl-8"
             />
           </div>
@@ -245,13 +247,13 @@ export default function UsersAdmin() {
             onClick={() => fetchUsers()}
             disabled={refreshing}
             className={consoleIconButtonClass}
-            title="Refresh"
+            title={t('common:action.refresh')}
           >
             {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           </button>
           <Button type="button" onClick={openCreate} size="md" className="shrink-0">
             <Plus className="w-4 h-4" />
-            Add User
+            {t('users:add_user')}
           </Button>
         </div>
       </div>
@@ -269,23 +271,23 @@ export default function UsersAdmin() {
             </colgroup>
             <thead>
               <tr className={consoleTableHeadRowClass}>
-                <th className={consoleTableHeadCellClass}>User</th>
-                <th className={consoleTableHeadCellClass}>Status</th>
-                <th className={consoleTableHeadCellClass}>Usage</th>
-                <th className={consoleTableHeadCellClass} title="Resource tier — controls LLM request rate">Tier</th>
-                <th className={consoleTableHeadCellClass}>Last login</th>
-                <th className={consoleTableHeadCellClass}>Actions</th>
+                <th className={consoleTableHeadCellClass}>{t('users:field.user')}</th>
+                <th className={consoleTableHeadCellClass}>{t('users:field.status')}</th>
+                <th className={consoleTableHeadCellClass}>{t('users:field.usage')}</th>
+                <th className={consoleTableHeadCellClass} title={t('users:field.tier_hint')}>{t('users:field.tier')}</th>
+                <th className={consoleTableHeadCellClass}>{t('users:field.last_login')}</th>
+                <th className={consoleTableHeadCellClass}>{t('common:table.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className={`${consoleTableBodyCellClass} text-zinc-400`}>Loading…</td>
+                  <td colSpan={6} className={`${consoleTableBodyCellClass} text-zinc-400`}>{t('common:state.loading')}</td>
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
                   <td colSpan={6} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>
-                    {users.length === 0 ? 'No users yet.' : 'No users match your search.'}
+                    {users.length === 0 ? t('users:empty.no_users', { defaultValue: 'No users yet.' }) : t('users:empty.no_match', { defaultValue: 'No users match your search.' })}
                   </td>
                 </tr>
               ) : filteredUsers.map((user) => (
@@ -299,9 +301,9 @@ export default function UsersAdmin() {
                   </td>
                   <td className={consoleTableBodyCellClass}>
                     <div className="flex flex-col gap-0.5 text-xs text-zinc-600">
-                      <span>Workspaces {user.projects_count}/{user.quotas?.max_projects == null ? 'Unlimited' : user.quotas.max_projects}</span>
-                      <span>Sessions {user.active_sessions}/{user.quotas?.max_sessions == null ? 'Unlimited' : user.quotas.max_sessions}</span>
-                      <span>Previews {user.active_previews}/{user.quotas?.max_previews == null ? 'Unlimited' : user.quotas.max_previews}</span>
+                      <span>{t('users:field.projects')} {user.projects_count}/{user.quotas?.max_projects == null ? t('common:state.unlimited') : user.quotas.max_projects}</span>
+                      <span>{t('users:field.sessions')} {user.active_sessions}/{user.quotas?.max_sessions == null ? t('common:state.unlimited') : user.quotas.max_sessions}</span>
+                      <span>{t('users:field.previews')} {user.active_previews}/{user.quotas?.max_previews == null ? t('common:state.unlimited') : user.quotas.max_previews}</span>
                     </div>
                   </td>
                   <td className={consoleTableBodyCellClass}>
@@ -314,18 +316,18 @@ export default function UsersAdmin() {
                   </td>
                   <td className={consoleTableBodyCellClass}>
                     <RowActionsMenu
-                      label={`Actions for ${user.username}`}
+                      label={t('users:action.actions_for', { username: user.username })}
                       items={[
-                        { icon: Pencil, label: 'Edit', onClick: () => openEdit(user) },
+                        { icon: Pencil, label: t('common:action.edit'), onClick: () => openEdit(user) },
                         user.status === 'pending' && {
                           icon: CheckCircle,
-                          label: 'Approve',
+                          label: t('common:action.approve'),
                           onClick: () => approveUser(user),
                         },
                         user.status !== 'pending' && (
                           user.status === 'active'
-                            ? { icon: Pause, label: 'Suspend', danger: true, onClick: () => toggleStatus(user) }
-                            : { icon: Play, label: 'Activate', onClick: () => toggleStatus(user) }
+                            ? { icon: Pause, label: t('users:action.suspend', { defaultValue: 'Suspend' }), danger: true, onClick: () => toggleStatus(user) }
+                            : { icon: Play, label: t('common:action.activate'), onClick: () => toggleStatus(user) }
                         ),
                       ].filter(Boolean)}
                     />
@@ -343,12 +345,12 @@ export default function UsersAdmin() {
           panelClassName={`${consoleDialogMdClass} max-h-[calc(100vh-2rem)] overflow-y-auto p-6`}
         >
               <h2 className="font-bold text-lg text-zinc-900 mb-4">
-                {dialogMode === 'create' ? 'Create user' : `Edit ${editingUser?.username}`}
+                {dialogMode === 'create' ? t('users:dialog.create_user') : t('users:dialog.edit_user', { username: editingUser?.username })}
               </h2>
               <form onSubmit={handleSave} className="space-y-4">
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
-                    <label className={`block mb-1 ${consoleSectionLabelClass}`}>Username</label>
+                    <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('users:field.username')}</label>
                     <Input
                       required
                       disabled={dialogMode === 'edit'}
@@ -359,7 +361,7 @@ export default function UsersAdmin() {
                   </div>
                   {dialogMode === 'create' && (
                     <div>
-                      <label className={`block mb-1 ${consoleSectionLabelClass}`}>Password</label>
+                      <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('users:field.password')}</label>
                       <Input
                         required
                         type="password"
@@ -370,25 +372,25 @@ export default function UsersAdmin() {
                     </div>
                   )}
                   <div>
-                    <label className={`block mb-1 ${consoleSectionLabelClass}`}>Role</label>
+                    <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('users:field.role')}</label>
                     <SelectMenu
                       value={form.role}
                       onChange={(v) => setForm({ ...form, role: v })}
                       options={[
-                        { value: 'user', label: 'User' },
-                        { value: 'admin', label: 'Admin' },
+                        { value: 'user', label: t('users:role.user') },
+                        { value: 'admin', label: t('users:role.admin') },
                       ]}
                     />
                   </div>
                   <div>
-                    <label className={`block mb-1 ${consoleSectionLabelClass}`}>Status</label>
+                    <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('users:field.status')}</label>
                     <SelectMenu
                       value={form.status}
                       onChange={(v) => setForm({ ...form, status: v })}
                       options={[
-                        { value: 'active', label: 'Active' },
-                        { value: 'pending', label: 'Pending' },
-                        { value: 'suspended', label: 'Suspended' },
+                        { value: 'active', label: t('users:status.active') },
+                        { value: 'pending', label: t('users:status.pending') },
+                        { value: 'suspended', label: t('users:status.suspended') },
                       ]}
                     />
                   </div>
@@ -396,10 +398,10 @@ export default function UsersAdmin() {
 
                 {form.role !== 'admin' && (
                 <div className={`${consoleCardClass} p-4 space-y-3`}>
-                  <h3 className={consoleSectionLabelClass}>Quotas</h3>
+                  <h3 className={consoleSectionLabelClass}>{t('users:field.quota', { defaultValue: 'Quotas' })}</h3>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs text-zinc-500">Workspaces</label>
+                      <label className="text-xs text-zinc-500">{t('users:field.max_projects', { defaultValue: 'Workspaces' })}</label>
                       <Input
                         type="number"
                         min={0}
@@ -409,7 +411,7 @@ export default function UsersAdmin() {
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-zinc-500">Sessions</label>
+                      <label className="text-xs text-zinc-500">{t('users:field.max_sessions', { defaultValue: 'Sessions' })}</label>
                       <Input
                         type="number"
                         min={0}
@@ -419,7 +421,7 @@ export default function UsersAdmin() {
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-zinc-500">Previews</label>
+                      <label className="text-xs text-zinc-500">{t('users:field.max_previews', { defaultValue: 'Previews' })}</label>
                       <Input
                         type="number"
                         min={0}
@@ -429,14 +431,14 @@ export default function UsersAdmin() {
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-zinc-500" title="Controls LLM request rate">Tier</label>
+                      <label className="text-xs text-zinc-500" title={t('users:field.tier_hint', { defaultValue: 'Controls LLM request rate' })}>{t('users:field.resource_tier', { defaultValue: 'Tier' })}</label>
                       <SelectMenu
                         value={form.resource_tier}
                         onChange={(v) => setForm({ ...form, resource_tier: v })}
                         options={[
-                          { value: 'basic', label: 'Basic' },
-                          { value: 'pro', label: 'Pro' },
-                          { value: 'enterprise', label: 'Enterprise' },
+                          { value: 'basic', label: t('users:tier.basic', { defaultValue: 'Basic' }) },
+                          { value: 'pro', label: t('users:tier.pro', { defaultValue: 'Pro' }) },
+                          { value: 'enterprise', label: t('users:tier.enterprise', { defaultValue: 'Enterprise' }) },
                         ]}
                       />
                     </div>
@@ -448,11 +450,11 @@ export default function UsersAdmin() {
                   <div>
                     <label className={`flex items-center gap-1 mb-1 ${consoleSectionLabelClass}`}>
                       <KeyRound className="w-3 h-3" />
-                      Reset password (optional)
+                      {t('users:field.reset_password_optional')}
                     </label>
                     <Input
                       type="password"
-                      placeholder="Leave blank to keep current"
+                      placeholder={t('users:field.leave_blank')}
                       value={resetPassword}
                       onChange={(e) => setResetPassword(e.target.value)}
                       className="h-9 py-1.5"
@@ -462,10 +464,10 @@ export default function UsersAdmin() {
 
                 <div className="flex justify-end gap-2 pt-2">
                   <Button type="button" variant="secondary" size="md" onClick={closeDialog}>
-                    Cancel
+                    {t('common:action.cancel')}
                   </Button>
                   <Button type="submit" size="md">
-                    Save
+                    {t('users:action.save')}
                   </Button>
                 </div>
               </form>

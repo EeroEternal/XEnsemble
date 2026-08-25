@@ -6,6 +6,7 @@ const { db } = require('../db/index');
 const schema = require('../db/schema');
 const { eq } = require('drizzle-orm');
 const { sendPublicError } = require('../http/publicError');
+const { t } = require('../i18n');
 
 function registerUserRoutes(fastify) {
     fastify.get('/api/v1/terminal-themes', { preValidation: [fastify.authenticate] }, async () => {
@@ -24,17 +25,17 @@ function registerUserRoutes(fastify) {
         try {
             return await userPreferences.updatePreferences(request.user.id, request.body || {});
         } catch (err) {
-            return sendPublicError(reply, err, 'Failed to update preferences', 400);
+            return sendPublicError(reply, err, 'Failed to update preferences', 400, request.locale || 'en');
         }
     });
 
     fastify.get('/api/v1/session/spawn-preview', { preValidation: [fastify.authenticate] }, async (request, reply) => {
         const agentId = request.query?.agent_id;
         if (!agentId) {
-            return reply.code(400).send({ error: 'agent_id query parameter is required' });
+            return reply.code(400).send({ error: t('errors:agent_id_required', { defaultValue: 'agent_id query parameter is required' }, request.locale || 'en'), code: 'agent_id_required' });
         }
         const rows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId));
-        if (rows.length === 0) return reply.code(404).send({ error: 'Agent not found' });
+        if (rows.length === 0) return reply.code(404).send({ error: t('errors:agent_not_found', {}, request.locale || 'en'), code: 'agent_not_found' });
         const row = rows[0];
         try {
             return await previewSpawnEnv({
@@ -44,7 +45,7 @@ function registerUserRoutes(fastify) {
                 terminalThemeId: request.query?.terminal_theme_id,
             });
         } catch (err) {
-            return sendPublicError(reply, err, 'Failed to preview spawn env', 500);
+            return sendPublicError(reply, err, 'Failed to preview spawn env', 500, request.locale || 'en');
         }
     });
 }

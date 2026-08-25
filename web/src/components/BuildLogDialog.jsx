@@ -16,6 +16,7 @@ import {
 import { formatDuration, getBuildState } from '../lib/imageBuildStates';
 import { cn } from '../lib/utils';
 import { apiFetch } from '../lib/api';
+import { useTranslation } from 'react-i18next';
 
 function formatTime(ts) {
   if (!ts) return '\u2014';
@@ -30,6 +31,7 @@ function stateBadge(state) {
 }
 
 export default function BuildLogDialog({ image, onClose }) {
+  const { t } = useTranslation();
   const [logs, setLogs] = useState('');
   const [truncated, setTruncated] = useState(false);
   const [available, setAvailable] = useState(false);
@@ -40,13 +42,13 @@ export default function BuildLogDialog({ image, onClose }) {
     try {
       const res = await apiFetch(`/api/v1/custom-images/${image.id}/log`);
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Failed to load build log');
+      if (!res.ok) throw new Error(data.error || t('images:error.load_build_log_failed'));
       setLogs(data.logs || '');
       setTruncated(Boolean(data.truncated));
       setAvailable(Boolean(data.available));
       setError(null);
     } catch (err) {
-      setError(err.message || 'Failed to load build log');
+      setError(err.message || t('images:error.load_build_log_failed'));
     } finally {
       setLoading(false);
     }
@@ -88,32 +90,32 @@ export default function BuildLogDialog({ image, onClose }) {
 
           <div className="grid grid-cols-3 gap-4">
             <div className="min-w-0">
-              <p className={consoleSectionLabelClass}>Started</p>
+              <p className={consoleSectionLabelClass}>{t('images:field.started', { defaultValue: 'Started' })}</p>
               <p className="mt-0.5 truncate text-sm text-zinc-700">{formatTime(build?.started_at)}</p>
             </div>
             <div className="min-w-0">
-              <p className={consoleSectionLabelClass}>Finished</p>
+              <p className={consoleSectionLabelClass}>{t('images:field.finished', { defaultValue: 'Finished' })}</p>
               <p className="mt-0.5 truncate text-sm text-zinc-700">{formatTime(build?.finished_at)}</p>
             </div>
             <div className="min-w-0">
-              <p className={consoleSectionLabelClass}>Duration</p>
+              <p className={consoleSectionLabelClass}>{t('images:field.duration', { defaultValue: 'Duration' })}</p>
               <p className="mt-0.5 truncate text-sm text-zinc-700">{formatDuration(durationMs)}</p>
             </div>
           </div>
 
           <div>
-            <p className={consoleSectionLabelClass}>Build log</p>
+            <p className={consoleSectionLabelClass}>{t('images:build_log')}</p>
             <div className="mt-1.5 max-h-[45vh] overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 console-scroll-hidden">
               {loading ? (
                 <p className="flex items-center gap-2 text-xs text-zinc-400">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading log…
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('images:loading_log', { defaultValue: 'Loading log…' })}
                 </p>
               ) : error ? (
                 <p className="text-xs text-red-400">{error}</p>
               ) : !available ? (
-                <p className="text-xs text-zinc-400">Build has not started yet.</p>
+                <p className="text-xs text-zinc-400">{t('images:build_not_started', { defaultValue: 'Build has not started yet.' })}</p>
               ) : !logs ? (
-                <p className="text-xs text-zinc-400">No log output yet.</p>
+                <p className="text-xs text-zinc-400">{t('images:no_log_output', { defaultValue: 'No log output yet.' })}</p>
               ) : (
                 <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-zinc-200">
                   {logs}
@@ -121,14 +123,14 @@ export default function BuildLogDialog({ image, onClose }) {
               )}
             </div>
             {truncated && (
-              <p className="mt-1 text-xs text-zinc-400">Log truncated — showing the latest portion.</p>
+              <p className="mt-1 text-xs text-zinc-400">{t('images:log_truncated', { defaultValue: 'Log truncated — showing the latest portion.' })}</p>
             )}
           </div>
         </ConsoleStructuredDialogBody>
 
         <ConsoleStructuredDialogFooter>
           <Button type="button" variant="secondary" size="sm" onClick={onClose}>
-            Close
+            {t('common:action.close')}
           </Button>
         </ConsoleStructuredDialogFooter>
       </div>

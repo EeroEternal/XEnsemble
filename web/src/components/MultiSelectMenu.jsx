@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Check, ChevronDown } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { consoleMenuDropdownZClass, consoleSectionLabelClass, consoleToolbarInputClass, consoleDropdownPanelClass } from '../lib/consoleTokens';
+import { useTranslation } from 'react-i18next';
 
 function formatSummary(options, value, placeholder) {
   if (!value.length) return placeholder;
@@ -44,13 +45,16 @@ export default function MultiSelectMenu({
   value = [],
   onChange,
   options = [],
-  placeholder = 'Select…',
+  placeholder,
   disabled = false,
   className = '',
   label,
   showSelectAll = false,
-  selectAllLabel = 'Select all',
+  selectAllLabel,
 }) {
+  const { t } = useTranslation();
+  const effectivePlaceholder = placeholder || t('common:select.placeholder');
+  const effectiveSelectAllLabel = selectAllLabel || t('common:select.select_all');
   const [open, setOpen] = useState(false);
   const [menuRect, setMenuRect] = useState(null);
   const rootRef = useRef(null);
@@ -62,7 +66,7 @@ export default function MultiSelectMenu({
   const selectAllActive = showSelectAll && allSelected;
   const hasSelectAll = showSelectAll && options.length > 0;
   const dropdownDisabled = disabled || options.length === 0 || selectAllActive;
-  const summary = selectAllActive ? placeholder : formatSummary(options, value, placeholder);
+  const summary = selectAllActive ? effectivePlaceholder : formatSummary(options, value, effectivePlaceholder);
 
   const updateMenuRect = () => {
     const el = triggerRef.current;
@@ -174,7 +178,7 @@ export default function MultiSelectMenu({
           {hasSelectAll && (
             <SelectAllControl
               checked={allSelected}
-              label={selectAllLabel}
+              label={effectiveSelectAllLabel}
               onToggle={toggleSelectAll}
               disabled={disabled}
             />

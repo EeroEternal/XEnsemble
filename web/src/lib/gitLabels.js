@@ -1,3 +1,5 @@
+import i18next from 'i18next';
+
 const PROVIDER_LABELS = {
   github: 'GitHub',
   gitlab: 'GitLab',
@@ -43,7 +45,13 @@ export function isOAuthNotConfiguredError(message) {
 export function formatGitOAuthError(message, provider) {
   const label = getProviderLabel(provider) || provider || 'Git';
   if (isOAuthNotConfiguredError(message)) {
-    return `${label} OAuth is not configured. Ask an administrator to set up OAuth credentials in Settings → Git.`;
+    return i18next.t('git:error.oauth_not_configured', {
+      label,
+      defaultValue: '{{label}} OAuth is not configured. Ask an administrator to set up OAuth credentials in Settings → Git.',
+    });
   }
-  return message || `${label} connection failed.`;
+  return message || i18next.t('git:error.connection_failed', {
+    label,
+    defaultValue: '{{label}} connection failed.',
+  });
 }

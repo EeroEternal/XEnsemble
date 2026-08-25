@@ -9,6 +9,7 @@ const schema = require('../db/schema');
 const { projectDir } = require('../workspace');
 const policy = require('../auth/PolicyService');
 const { scaffoldXEnsemble } = require('../repositories/RepositoryEnvironmentService');
+const { t } = require('../i18n');
 
 function escapeHtml(str) {
     return String(str)
@@ -131,7 +132,7 @@ function registerGitHubRoutes(fastify) {
     }, async (request, reply) => {
         const connection = await connectionService.getConnection(request.user.id);
         if (!connection) {
-            return reply.code(404).send({ error: 'GitHub not connected' });
+            return reply.code(404).send({ error: t('errors:github_not_connected', { defaultValue: 'GitHub not connected' }, request.locale || 'en'), code: 'github_not_connected' });
         }
         return connection;
     });
@@ -185,7 +186,7 @@ function registerGitHubRoutes(fastify) {
             return { ok: true };
         } catch (err) {
             request.log.error(err);
-            return reply.code(500).send({ error: 'Failed to disconnect GitHub' });
+            return reply.code(500).send({ error: t('errors:disconnect_failed', { defaultValue: 'Failed to disconnect GitHub' }, request.locale || 'en'), code: 'disconnect_failed' });
         }
     });
 
@@ -204,7 +205,7 @@ function registerGitHubRoutes(fastify) {
         } catch (err) {
             request.log.error(err);
             if (err.message === 'github_not_connected') {
-                return reply.code(400).send({ error: 'GitHub account not connected' });
+                return reply.code(400).send({ error: t('errors:github_account_not_connected', { defaultValue: 'GitHub account not connected' }, request.locale || 'en'), code: 'github_account_not_connected' });
             }
             const isAuthError = err.code === 'token_expired' || err.status === 401;
             if (isAuthError) {
@@ -226,7 +227,7 @@ function registerGitHubRoutes(fastify) {
         } catch (err) {
             request.log.error(err);
             if (err.message === 'github_not_connected') {
-                return reply.code(400).send({ error: 'GitHub account not connected' });
+                return reply.code(400).send({ error: t('errors:github_account_not_connected', { defaultValue: 'GitHub account not connected' }, request.locale || 'en'), code: 'github_account_not_connected' });
             }
             const isAuthError = err.code === 'token_expired' || err.status === 401;
             if (isAuthError) {
@@ -261,7 +262,7 @@ function registerGitHubRoutes(fastify) {
 
         const projectName = String(name || repo).trim();
         if (!projectName) {
-            return reply.code(400).send({ error: 'name is required' });
+            return reply.code(400).send({ error: t('errors:name_required', { defaultValue: 'name is required' }, request.locale || 'en'), code: 'name_required' });
         }
 
         let token;
@@ -270,14 +271,14 @@ function registerGitHubRoutes(fastify) {
         try {
             connection = await connectionService.getConnection(request.user.id);
             if (!connection) {
-                return reply.code(400).send({ error: 'GitHub account not connected' });
+                return reply.code(400).send({ error: t('errors:github_account_not_connected', { defaultValue: 'GitHub account not connected' }, request.locale || 'en'), code: 'github_account_not_connected' });
             }
             token = await connectionService.getDecryptedToken(request.user.id);
             ghRepo = await gitHubService.getRepo(token, owner, repo);
         } catch (err) {
             request.log.error(err);
             if (err.message === 'github_not_connected') {
-                return reply.code(400).send({ error: 'GitHub account not connected' });
+                return reply.code(400).send({ error: t('errors:github_account_not_connected', { defaultValue: 'GitHub account not connected' }, request.locale || 'en'), code: 'github_account_not_connected' });
             }
             const isAuthError = err.code === 'token_expired' || err.status === 401;
             if (isAuthError) {
@@ -317,7 +318,7 @@ function registerGitHubRoutes(fastify) {
             await db.insert(schema.projects).values(projectRow);
         } catch (err) {
             request.log.error(err);
-            return reply.code(500).send({ error: 'Failed to create project record' });
+            return reply.code(500).send({ error: t('errors:create_project_record_failed', { defaultValue: 'Failed to create project record' }, request.locale || 'en'), code: 'create_project_record_failed' });
         }
 
         const { ensureProjectRuntime } = require('../runtime/RuntimeService');

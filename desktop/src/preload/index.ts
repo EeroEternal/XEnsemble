@@ -12,5 +12,6 @@ contextBridge.exposeInMainWorld('xensembleDesktopAPI', {
   selectFile: () => ipcRenderer.invoke(IPC_CHANNELS.SELECT_FILE),
   saveFile: (file: { name: string; content: string }) => ipcRenderer.invoke(IPC_CHANNELS.SAVE_FILE, file),
   openExternal: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.OPEN_EXTERNAL, url),
-  getAppVersion: () => ipcRenderer.sendSync(IPC_CHANNELS.GET_APP_VERSION)
+  getAppVersion: () => ipcRenderer.sendSync(IPC_CHANNELS.GET_APP_VERSION),
+  setLocale: (locale: string) => ipcRenderer.invoke(IPC_CHANNELS.SET_LOCALE, locale)
 });

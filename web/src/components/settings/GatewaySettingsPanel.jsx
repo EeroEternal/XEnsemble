@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, Settings2, Play, Square, RotateCw, Loader2, Pencil, Trash2, Activity, List, CheckCircle, XCircle, Clock, Search } from 'lucide-react';
 import Button from '../Button';
 import Input, { FormLabel, Textarea } from '../Input';
@@ -290,7 +291,7 @@ function ProviderFormFields({
 }
 
 export default function GatewaySettingsPanel() {
-  
+  const { t } = useTranslation();
   const { showToast } = useToast();
 
   const [status, setStatus] = useState(null);
@@ -418,7 +419,7 @@ export default function GatewaySettingsPanel() {
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error?.message || data.message || data.error || 'Provider verification failed.');
+        throw new Error(data.error?.message || data.message || data.error || t('gateway:error.verify_failed'));
       }
       const result = data.data || {};
       const next = {
@@ -521,7 +522,7 @@ export default function GatewaySettingsPanel() {
         const res = await apiFetch(`/api/v1/admin/gateway/providers/${encodeURIComponent(name)}/api-key`);
         const data = await res.json();
         if (!res.ok) {
-          throw new Error(data.error || 'Failed to load API Key.');
+          throw new Error(data.error || t('gateway:error.load_key_failed'));
         }
         const apiKey = data.data?.api_key || '';
         setProviderDialog((prev) => (prev ? {
@@ -583,7 +584,7 @@ export default function GatewaySettingsPanel() {
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Provider verification failed.');
+        throw new Error(data.error || t('gateway:error.verify_failed'));
       }
       const result = data.data || {};
       const testedAt = Date.now();
@@ -639,7 +640,7 @@ export default function GatewaySettingsPanel() {
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to fetch models.');
+        throw new Error(data.error || t('gateway:error.fetch_models_failed'));
       }
       const models = data.data?.models || [];
       const patch = { models: models.join('\n') };
@@ -647,7 +648,7 @@ export default function GatewaySettingsPanel() {
         patch.default_model = models[0];
       }
       updateProviderForm(patch);
-      showToast('success', `Fetched ${models.length} model${models.length === 1 ? '' : 's'}.`);
+      showToast('success', t('gateway:toast.models_fetched', { count: models.length }));
     } catch (err) {
       showToast('error', `${err.message} You can enter models manually.`);
     } finally {
@@ -754,7 +755,7 @@ export default function GatewaySettingsPanel() {
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to save gateway process settings.');
+        throw new Error(data.error || t('gateway:error.save_settings_failed'));
       }
       setStatus(data);
       if (data.bind_addr) {

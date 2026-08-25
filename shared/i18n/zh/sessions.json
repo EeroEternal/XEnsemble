@@ -1,0 +1,68 @@
+{
+  "title": "会话",
+  "new_session": "新建会话",
+  "search": "搜索",
+  "launch": {
+    "title": "新建会话",
+    "repository": "仓库",
+    "agent": "Agent",
+    "select_agent": "选择 Agent",
+    "search_agents": "搜索 Agent…",
+    "cancel": "取消",
+    "starting": "启动中…",
+    "start_agent": "启动 Agent",
+    "create_workspace": "创建工作区",
+    "custom": "自定义"
+  },
+  "empty": {
+    "no_sessions": "此工作区暂无会话。",
+    "select_workspace": "选择一个工作区以查看其会话。",
+    "no_matching": "无匹配会话"
+  },
+  "action": {
+    "stop_and_remove": "停止并移除",
+    "remove": "移除"
+  },
+  "label": {
+    "unassigned": "未分配"
+  },
+  "error": {
+    "no_workspace": "无法为此会话创建工作区。",
+    "configure_keys": "启动前请先配置所需的 API 密钥。",
+    "create_workspace_failed": "创建工作区失败",
+    "start_failed": "启动会话失败",
+    "resume_failed": "恢复会话失败",
+    "delete_workspace_failed": "删除工作区失败",
+    "save_keys_failed": "保存密钥失败",
+    "load_files_failed": "加载工作区文件失败",
+    "read_file_failed": "读取文件失败",
+    "not_granted": "你没有使用此 Agent 的权限。"
+  },
+  "toast": {
+    "file_deleted": "文件已删除。",
+    "session_restarted": "会话已重启。",
+    "path_copied": "路径已复制。",
+    "config_saved": "配置已保存。",
+    "session_deleted": "会话已删除。",
+    "workspace_deleted": "工作区已删除。"
+  },
+  "terminal": {
+    "not_running": "会话未运行。",
+    "paused": "会话已暂停。点击启动以恢复。",
+    "reconnecting": "正在重连终端… ({{attempt}}/{{max}})",
+    "restore_failed": "终端无法恢复{{reason}}。点击重启以重试。",
+    "load_history_failed": "加载会话历史失败",
+    "select_workspace": "选择一个工作区以打开终端。",
+    "reconnecting_shell": "正在重连工作区终端… ({{attempt}}/{{max}})",
+    "restore_shell_failed": "终端无法恢复{{reason}}。切换标签页以重试。",
+    "system_prefix": "[系统]"
+  },
+  "guide": {
+    "title": "告诉 Agent 你想构建什么",
+    "prompt_1": "用 Express 构建 REST API",
+    "prompt_2": "创建带图表的 React 仪表盘",
+    "prompt_3": "用 Python 编写 CLI 工具"
+  },
+  "count_one": "{{count}} 个会话",
+  "count_other": "{{count}} 个会话"
+}

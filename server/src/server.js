@@ -42,6 +42,7 @@ const {
 const { addSseClient, broadcastSse } = require('./session/sseManager');
 const { getProjectForUser, invalidateProjectCache } = require('./projects/getProjectForUser');
 const { registerAuthHooks } = require('./auth/hooks');
+const { detectLocale } = require('./i18n/localeDetector');
 const policy = require('./auth/PolicyService');
 const { registerAuthRoutes } = require('./routes/auth');
 const { registerAdminRoutes } = require('./routes/admin');
@@ -171,6 +172,12 @@ fastify.register(require('@fastify/websocket'), {
 });
 
 registerAuthHooks(fastify);
+
+// Inject request.locale for i18n error messages
+fastify.addHook('onRequest', async (request) => {
+  request.locale = detectLocale(request);
+});
+
 registerAuthRoutes(fastify);
 registerAdminRoutes(fastify);
 registerUserRoutes(fastify);
@@ -243,7 +250,7 @@ fastify.post('/api/v1/secrets', { preValidation: [fastify.authenticate] }, async
         return { success: true, secrets: mergedSecrets };
     } catch (e) {
         request.log.error(e);
-        return reply.code(500).send({ error: 'Failed to save secrets' });
+        return reply.code(500).send({ error: t('errors:save_secrets_failed', { defaultValue: 'Failed to save secrets' }, request.locale || 'en'), code: 'save_secrets_failed' });
     }
 });
 
@@ -272,7 +279,7 @@ fastify.put('/api/v1/agents/:agentId/byok-config', { preValidation: [fastify.aut
 
     const entry = BYOK_FIELDS[agentId];
     const fields = entry?.fields;
-    if (!fields) return reply.code(404).send({ error: 'No BYOK fields for this agent' });
+    if (!fields) return reply.code(404).send({ error: t('errors:no_byok_fields', { defaultValue: 'No BYOK fields for this agent' }, request.locale || 'en'), code: 'no_byok_fields' });
 
     const missing = fields
         .filter((f) => f.required && !String(values[f.key] ?? '').trim())
@@ -298,7 +305,7 @@ fastify.put('/api/v1/agents/:agentId/byok-config', { preValidation: [fastify.aut
         return { success: true };
     } catch (e) {
         request.log.error(e);
-        return reply.code(500).send({ error: 'Failed to save BYOK config' });
+        return reply.code(500).send({ error: t('errors:save_byok_failed', { defaultValue: 'Failed to save BYOK config' }, request.locale || 'en'), code: 'save_byok_failed' });
     }
 });
 
@@ -317,7 +324,7 @@ fastify.delete('/api/v1/agents/:agentId/byok-config', { preValidation: [fastify.
         return { success: true };
     } catch (e) {
         request.log.error(e);
-        return reply.code(500).send({ error: 'Failed to delete BYOK config' });
+        return reply.code(500).send({ error: t('errors:delete_byok_failed', { defaultValue: 'Failed to delete BYOK config' }, request.locale || 'en'), code: 'delete_byok_failed' });
     }
 });
 
@@ -382,14 +389,14 @@ fastify.post('/api/v1/agents', { preValidation: [fastify.authenticate, fastify.r
         });
         return { success: true };
     } catch (e) {
-        return reply.code(400).send({ error: 'Failed to insert agent or ID already exists' });
+        return reply.code(400).send({ error: t('errors:agent_insert_failed', { defaultValue: 'Failed to insert agent or ID already exists' }, request.locale || 'en'), code: 'agent_insert_failed' });
     }
 });
 
 fastify.put('/api/v1/agents/:id', { preValidation: [fastify.authenticate, fastify.requireAdmin] }, async (request, reply) => {
     const { name, cmd, args, env_required } = request.body || {};
     const rows = await db.select().from(schema.agents).where(eq(schema.agents.id, request.params.id));
-    if (rows.length === 0) return reply.code(404).send({ error: 'Agent not found' });
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:agent_not_found', {}, request.locale || 'en'), code: 'agent_not_found' });
     await db.update(schema.agents).set({
         ...(name !== undefined && { name }),
         ...(cmd !== undefined && { cmd }),
@@ -401,7 +408,7 @@ fastify.put('/api/v1/agents/:id', { preValidation: [fastify.authenticate, fastif
 
 fastify.delete('/api/v1/agents/:id', { preValidation: [fastify.authenticate, fastify.requireAdmin] }, async (request, reply) => {
     const rows = await db.select().from(schema.agents).where(eq(schema.agents.id, request.params.id));
-    if (rows.length === 0) return reply.code(404).send({ error: 'Agent not found' });
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:agent_not_found', {}, request.locale || 'en'), code: 'agent_not_found' });
     await db.delete(schema.userAgentGrants).where(eq(schema.userAgentGrants.agentId, request.params.id));
     await db.delete(schema.agents).where(eq(schema.agents.id, request.params.id));
     return { ok: true };
@@ -438,8 +445,8 @@ fastify.post('/api/v1/projects', { preValidation: [fastify.authenticate] }, asyn
     if (!quotaCheck.ok) return policy.quotaErrorReply(reply, quotaCheck);
 
     const name = String(request.body?.name || '').trim();
-    if (!name) return reply.code(400).send({ error: 'Project name is required' });
-    if (name.length > 120) return reply.code(400).send({ error: 'Project name is too long' });
+    if (!name) return reply.code(400).send({ error: t('errors:project_name_required', { defaultValue: 'Project name is required' }, request.locale || 'en'), code: 'project_name_required' });
+    if (name.length > 120) return reply.code(400).send({ error: t('errors:project_name_too_long', { defaultValue: 'Project name is too long' }, request.locale || 'en'), code: 'project_name_too_long' });
 
     const projectId = `proj_${crypto.randomBytes(8).toString('hex')}`;
     const createdAt = Date.now();
@@ -468,7 +475,7 @@ fastify.post('/api/v1/projects', { preValidation: [fastify.authenticate] }, asyn
     } catch (err) {
         request.log.error(err);
         await db.delete(schema.projects).where(eq(schema.projects.id, projectId)).catch(() => {});
-        return reply.code(500).send({ error: 'Failed to create project directory' });
+        return reply.code(500).send({ error: t('errors:create_project_dir_failed', { defaultValue: 'Failed to create project directory' }, request.locale || 'en'), code: 'create_project_dir_failed' });
     }
 
     // Initialize built-in Git repo (Layer 1) for the new project
@@ -492,24 +499,24 @@ fastify.post('/api/v1/projects', { preValidation: [fastify.authenticate] }, asyn
 // Repository environment — 外部 Git provider 绑定与工程环境元数据
 fastify.delete('/api/v1/projects/:projectId', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     try {
         await deleteProjectForUser(request.user.id, project, { log: request.log });
         return { ok: true };
     } catch (err) {
         request.log.error(err);
-        return reply.code(500).send({ error: 'Failed to delete project' });
+        return reply.code(500).send({ error: t('errors:delete_project_failed', { defaultValue: 'Failed to delete project' }, request.locale || 'en'), code: 'delete_project_failed' });
     }
 });
 
 fastify.patch('/api/v1/projects/:projectId', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const name = String(request.body?.name || '').trim();
-    if (!name) return reply.code(400).send({ error: 'Project name is required' });
-    if (name.length > 120) return reply.code(400).send({ error: 'Project name is too long' });
+    if (!name) return reply.code(400).send({ error: t('errors:project_name_required', { defaultValue: 'Project name is required' }, request.locale || 'en'), code: 'project_name_required' });
+    if (name.length > 120) return reply.code(400).send({ error: t('errors:project_name_too_long', { defaultValue: 'Project name is too long' }, request.locale || 'en'), code: 'project_name_too_long' });
 
     await db.update(schema.projects)
         .set({ name })
@@ -522,50 +529,50 @@ fastify.patch('/api/v1/projects/:projectId', { preValidation: [fastify.authentic
 
 fastify.get('/api/v1/projects/:projectId/repository', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
     return repositoryEnvironment.formatRepository(project);
 });
 
 fastify.put('/api/v1/projects/:projectId/repository', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
     return repositoryEnvironment.updateRepository(project, request.body || {});
 });
 
 fastify.get('/api/v1/projects/:projectId/dev-profile', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
     return { profile: await repositoryEnvironment.getDevProfile(project) };
 });
 
 fastify.put('/api/v1/projects/:projectId/dev-profile', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
     return repositoryEnvironment.upsertDevProfile(project, request.body || {});
 });
 
 fastify.get('/api/v1/projects/:projectId/repo-snapshots', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
     return repositoryEnvironment.listSnapshots(project.id);
 });
 
 fastify.post('/api/v1/projects/:projectId/repo-snapshots', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
     const snapshot = await repositoryEnvironment.createSnapshot(project, request.body || {});
     return reply.code(201).send(snapshot);
 });
 
 fastify.get('/api/v1/projects/:projectId/checkpoints', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
     return repositoryEnvironment.listCheckpoints(project.id);
 });
 
 fastify.post('/api/v1/projects/:projectId/checkpoints', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const sessionId = request.body?.session_id || request.body?.sessionId;
     if (sessionId) {
@@ -575,7 +582,7 @@ fastify.post('/api/v1/projects/:projectId/checkpoints', { preValidation: [fastif
                 eq(schema.sessions.userId, request.user.id),
                 eq(schema.sessions.projectId, project.id),
             ));
-        if (rows.length === 0) return reply.code(404).send({ error: 'Session not found for this project' });
+        if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
     }
 
     // Use LocalGitService for git-mode projects to execute real git commit
@@ -593,7 +600,7 @@ fastify.post('/api/v1/projects/:projectId/checkpoints', { preValidation: [fastif
             checkpoint = await localGit.commitCheckpoint(project, meta);
         } catch (err) {
             request.log.error(err);
-            return reply.code(500).send({ error: 'Failed to create git checkpoint' });
+            return reply.code(500).send({ error: t('errors:create_checkpoint_failed', { defaultValue: 'Failed to create git checkpoint' }, request.locale || 'en'), code: 'create_checkpoint_failed' });
         }
     } else {
         checkpoint = await repositoryEnvironment.createCheckpoint(project, request.body || {}, request.user.id);
@@ -631,7 +638,7 @@ fastify.post('/api/v1/projects/:projectId/checkpoints/:checkpointId/restore', {
     preValidation: [fastify.authenticate],
 }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const ckId = request.params.checkpointId;
     const ckRows = await db.select().from(schema.workspaceCheckpoints)
@@ -691,7 +698,7 @@ fastify.get('/api/v1/projects/:projectId/repository/log', {
     preValidation: [fastify.authenticate, fastify.requireActive],
 }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const _localGitSid = request.query?.session_id || request.body?.session_id;
     const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
@@ -701,7 +708,7 @@ fastify.get('/api/v1/projects/:projectId/repository/log', {
         return { commits: log };
     } catch (err) {
         request.log.error(err);
-        return reply.code(500).send({ error: 'Failed to get repository log' });
+        return reply.code(500).send({ error: t('errors:get_repo_log_failed', { defaultValue: 'Failed to get repository log' }, request.locale || 'en'), code: 'get_repo_log_failed' });
     }
 });
 
@@ -710,14 +717,14 @@ fastify.get('/api/v1/projects/:projectId/checkpoints/:checkpointId/diff', {
     preValidation: [fastify.authenticate],
 }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const rows = await db.select().from(schema.workspaceCheckpoints)
         .where(and(
             eq(schema.workspaceCheckpoints.id, request.params.checkpointId),
             eq(schema.workspaceCheckpoints.projectId, project.id),
         ));
-    if (rows.length === 0) return reply.code(404).send({ error: 'Checkpoint not found' });
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:checkpoint_not_found', { defaultValue: 'Checkpoint not found' }, request.locale || 'en'), code: 'checkpoint_not_found' });
 
     const checkpoint = rows[0];
     if (!checkpoint.gitSha) return reply.code(409).send({ error: 'Checkpoint has no git_sha' });
@@ -741,10 +748,10 @@ fastify.get('/api/v1/projects/:projectId/repository/blame', {
     preValidation: [fastify.authenticate, fastify.requireActive],
 }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const { path: filePath, ref, start_line, end_line } = request.query || {};
-    if (!filePath) return reply.code(400).send({ error: 'path query parameter is required' });
+    if (!filePath) return reply.code(400).send({ error: t('errors:path_required', { defaultValue: 'path query parameter is required' }, request.locale || 'en'), code: 'path_required' });
 
     const _localGitSid = request.query?.session_id || request.body?.session_id;
     const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
@@ -766,7 +773,7 @@ fastify.get('/api/v1/projects/:projectId/repository/log/detailed', {
     preValidation: [fastify.authenticate, fastify.requireActive],
 }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const _localGitSid = request.query?.session_id || request.body?.session_id;
     const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
@@ -786,7 +793,7 @@ fastify.get('/api/v1/projects/:projectId/repository/commit/:sha/files', {
     preValidation: [fastify.authenticate, fastify.requireActive],
 }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const _localGitSid = request.query?.session_id || request.body?.session_id;
     const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
@@ -804,7 +811,7 @@ fastify.get('/api/v1/projects/:projectId/repository/files', {
     preValidation: [fastify.authenticate, fastify.requireActive],
 }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const _localGitSid = request.query?.session_id || request.body?.session_id;
     const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
@@ -821,7 +828,7 @@ fastify.get('/api/v1/projects/:projectId/repository/log/graph', {
     preValidation: [fastify.authenticate, fastify.requireActive],
 }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const _localGitSid = request.query?.session_id || request.body?.session_id;
     const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
@@ -840,7 +847,7 @@ fastify.get('/api/v1/projects/:projectId/repository/conflict-check', {
     preValidation: [fastify.authenticate, fastify.requireActive],
 }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const targetBranch = request.query?.target || project.repoDefaultBranch || 'main';
     const _localGitSid = request.query?.session_id || request.body?.session_id;
@@ -859,7 +866,7 @@ fastify.get('/api/v1/projects/:projectId/repository/conflicts', {
     preValidation: [fastify.authenticate, fastify.requireActive],
 }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const _localGitSid = request.query?.session_id || request.body?.session_id;
     const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
@@ -877,10 +884,10 @@ fastify.post('/api/v1/projects/:projectId/repository/conflicts/resolve', {
     preValidation: [fastify.authenticate, fastify.requireActive],
 }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const { path: filePath, strategy } = request.body || {};
-    if (!filePath) return reply.code(400).send({ error: 'path is required' });
+    if (!filePath) return reply.code(400).send({ error: t('errors:path_required', { defaultValue: 'path is required' }, request.locale || 'en'), code: 'path_required' });
     if (!strategy || !['ours', 'theirs', 'manual'].includes(strategy)) {
         return reply.code(400).send({ error: 'strategy must be ours, theirs, or manual' });
     }
@@ -901,10 +908,10 @@ fastify.get('/api/v1/projects/:projectId/repository/file', {
     preValidation: [fastify.authenticate, fastify.requireActive],
 }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const { path: filePath, ref } = request.query || {};
-    if (!filePath) return reply.code(400).send({ error: 'path query parameter is required' });
+    if (!filePath) return reply.code(400).send({ error: t('errors:path_required', { defaultValue: 'path query parameter is required' }, request.locale || 'en'), code: 'path_required' });
 
     const _localGitSid = request.query?.session_id || request.body?.session_id;
     const localGit = new LocalGitService({ runtimeId: _localGitSid ? await resolveRuntimeIdFromSession(request.user.id, _localGitSid) : null });
@@ -955,7 +962,7 @@ fastify.post('/api/v1/sessions/:sessionId/stop', { preValidation: [fastify.authe
     const { sessionId } = request.params;
     const rows = await db.select().from(schema.sessions)
         .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
-    if (rows.length === 0) return reply.code(404).send({ error: 'Session not found' });
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
 
     const session = rows[0];
     if (session.status === 'idle') {
@@ -1004,7 +1011,7 @@ fastify.get('/api/v1/sessions/:sessionId/transcript', { preValidation: [fastify.
 
     const rows = await db.select().from(schema.sessions)
         .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
-    if (rows.length === 0) return reply.code(404).send({ error: 'Session not found' });
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
 
     const session = rows[0];
     if (session.status !== 'idle' && session.status !== 'exited') {
@@ -1050,7 +1057,7 @@ fastify.delete('/api/v1/sessions/:sessionId', { preValidation: [fastify.authenti
     const { sessionId } = request.params;
     const rows = await db.select().from(schema.sessions)
         .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
-    if (rows.length === 0) return reply.code(404).send({ error: 'Session not found' });
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
 
     const session = rows[0];
 
@@ -1119,7 +1126,7 @@ fastify.get('/api/v1/sessions/:sessionId/config', { preValidation: [fastify.auth
     const { sessionId } = request.params;
     const rows = await db.select().from(schema.sessions)
         .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
-    if (rows.length === 0) return reply.code(404).send({ error: 'Session not found' });
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
 
     const { getSessionConfig, getAgentConfigSchema } = require('./session/sessionConfig');
     const config = await getSessionConfig(db, schema, sessionId);
@@ -1139,7 +1146,7 @@ fastify.put('/api/v1/sessions/:sessionId/config', { preValidation: [fastify.auth
 
     const rows = await db.select().from(schema.sessions)
         .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
-    if (rows.length === 0) return reply.code(404).send({ error: 'Session not found' });
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
 
     const session = rows[0];
     const { saveSessionConfig, validateConfigFiles, writeConfigFilesToVM, getSessionConfig } = require('./session/sessionConfig');
@@ -1209,7 +1216,7 @@ fastify.post('/api/v1/sessions/:sessionId/resume', { preValidation: [fastify.aut
 
     const rows = await db.select().from(schema.sessions)
         .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
-    if (rows.length === 0) return reply.code(404).send({ error: 'Session not found' });
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
 
     const session = rows[0];
     if (sessionManager.isAlive(sessionId)) {
@@ -1280,7 +1287,7 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
     }
 
     const project = await getProjectForUser(request.user.id, project_id);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     if (!isShellOnly) {
         const agentAccess = await policy.checkAgentAccess(request.user.id, agent_id, request.user.role);
@@ -1359,7 +1366,7 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
     // --- regular agent session: async provisioning ---
 
     const dbAgents = await db.select().from(schema.agents).where(eq(schema.agents.id, agent_id));
-    if (dbAgents.length === 0) return reply.code(404).send({ error: 'Agent not found' });
+    if (dbAgents.length === 0) return reply.code(404).send({ error: t('errors:agent_not_found', {}, request.locale || 'en'), code: 'agent_not_found' });
     const agentMeta = {
         ...dbAgents[0],
         args: JSON.parse(dbAgents[0].args),
@@ -2121,7 +2128,7 @@ fastify.get('/api/v1/runtimes', { preValidation: [fastify.authenticate] }, async
     if (!projectId) return reply.code(400).send({ error: 'project_id is required' });
 
     const project = await getProjectForUser(request.user.id, projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const rows = await db.select().from(schema.runtimes)
         .where(eq(schema.runtimes.projectId, projectId));
@@ -2134,7 +2141,7 @@ fastify.get('/api/v1/deployments', { preValidation: [fastify.authenticate] }, as
     if (!projectId) return reply.code(400).send({ error: 'project_id is required' });
 
     const project = await getProjectForUser(request.user.id, projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     return deploymentService.listForProject(request.user.id, projectId);
 });
@@ -2147,7 +2154,7 @@ fastify.get('/api/v1/deployments/:deploymentId', { preValidation: [fastify.authe
 
 fastify.post('/api/v1/projects/:projectId/preview', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const project = await getProjectForUser(request.user.id, request.params.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const previewQuota = await policy.checkQuota(request.user.id, 'previews', request.user.role);
     if (!previewQuota.ok) return policy.quotaErrorReply(reply, previewQuota);
@@ -2173,7 +2180,7 @@ fastify.post('/api/v1/deployments', { preValidation: [fastify.authenticate] }, a
     if (!projectId) return reply.code(400).send({ error: 'project_id is required' });
 
     const project = await getProjectForUser(request.user.id, projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const previewQuota = await policy.checkQuota(request.user.id, 'previews', request.user.role);
     if (!previewQuota.ok) return policy.quotaErrorReply(reply, previewQuota);
@@ -2187,7 +2194,7 @@ fastify.post('/api/v1/deployments/:deploymentId/start', { preValidation: [fastif
     if (!row) return reply.code(404).send({ error: 'Deployment not found' });
 
     const project = await getProjectForUser(request.user.id, row.projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     try {
         return await deploymentService.startPreview(request.user.id, project, row);
@@ -2232,7 +2239,7 @@ fastify.get('/api/v1/workspace/files', { preValidation: [fastify.authenticate, f
     if (!projectId) return reply.code(400).send({ error: 'project_id is required' });
 
     const project = await getProjectForUser(request.user.id, projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     try {
         const relativePath = request.query.path || '';
@@ -2281,7 +2288,7 @@ fastify.get('/api/v1/workspace/file', { preValidation: [fastify.authenticate, fa
     if (!filePath) return reply.code(400).send({ error: 'Missing path' });
 
     const project = await getProjectForUser(request.user.id, projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     try {
         const _sessionId = request.query?.session_id || request.body?.session_id;
@@ -2324,7 +2331,7 @@ fastify.put('/api/v1/workspace/file', { preValidation: [fastify.authenticate, fa
     if (!filePath) return reply.code(400).send({ error: 'Missing path' });
 
     const project = await getProjectForUser(request.user.id, projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const { content } = request.body || {};
     if (content === undefined || content === null) return reply.code(400).send({ error: 'content is required' });
@@ -2373,7 +2380,7 @@ fastify.delete('/api/v1/workspace/file', { preValidation: [fastify.authenticate,
     if (!filePath) return reply.code(400).send({ error: 'Missing path' });
 
     const project = await getProjectForUser(request.user.id, projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     try {
         const _sessionId = request.query?.session_id || request.body?.session_id;
@@ -2396,10 +2403,10 @@ fastify.post('/api/v1/workspace/dir', { preValidation: [fastify.authenticate, fa
     if (!projectId) return reply.code(400).send({ error: 'project_id is required' });
 
     const project = await getProjectForUser(request.user.id, projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const { path: dirPath } = request.body || {};
-    if (!dirPath) return reply.code(400).send({ error: 'path is required' });
+    if (!dirPath) return reply.code(400).send({ error: t('errors:path_required', { defaultValue: 'path is required' }, request.locale || 'en'), code: 'path_required' });
 
     try {
         const _sessionId = request.query?.session_id || request.body?.session_id;
@@ -2424,7 +2431,7 @@ fastify.delete('/api/v1/workspace/dir', { preValidation: [fastify.authenticate, 
     if (!dirPath) return reply.code(400).send({ error: 'Missing path' });
 
     const project = await getProjectForUser(request.user.id, projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     try {
         const _sessionId = request.query?.session_id || request.body?.session_id;
@@ -2447,7 +2454,7 @@ fastify.post('/api/v1/workspace/move', { preValidation: [fastify.authenticate, f
     if (!projectId) return reply.code(400).send({ error: 'project_id is required' });
 
     const project = await getProjectForUser(request.user.id, projectId);
-    if (!project) return reply.code(404).send({ error: 'Project not found' });
+    if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
     const { from, to } = request.body || {};
     if (!from || !to) return reply.code(400).send({ error: 'from and to are required' });

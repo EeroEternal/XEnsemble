@@ -1,0 +1,68 @@
+{
+  "title": "Sessions",
+  "new_session": "New Session",
+  "search": "Search",
+  "launch": {
+    "title": "New Session",
+    "repository": "Repository",
+    "agent": "Agent",
+    "select_agent": "Select agent",
+    "search_agents": "Search agents…",
+    "cancel": "Cancel",
+    "starting": "Starting…",
+    "start_agent": "Start agent",
+    "create_workspace": "Create workspace",
+    "custom": "Custom"
+  },
+  "empty": {
+    "no_sessions": "No sessions in this workspace yet.",
+    "select_workspace": "Select a workspace to view its sessions.",
+    "no_matching": "No matching sessions"
+  },
+  "action": {
+    "stop_and_remove": "Stop and remove",
+    "remove": "Remove"
+  },
+  "label": {
+    "unassigned": "Unassigned"
+  },
+  "error": {
+    "no_workspace": "Could not create workspace for this session.",
+    "configure_keys": "Configure required API keys before launching.",
+    "create_workspace_failed": "Failed to create workspace",
+    "start_failed": "Failed to start session",
+    "resume_failed": "Failed to resume session",
+    "delete_workspace_failed": "Failed to delete workspace",
+    "save_keys_failed": "Failed to save keys",
+    "load_files_failed": "Failed to load workspace files",
+    "read_file_failed": "Failed to read file",
+    "not_granted": "You do not have permission to use this agent."
+  },
+  "toast": {
+    "file_deleted": "File deleted.",
+    "session_restarted": "Session restarted.",
+    "path_copied": "Path copied.",
+    "config_saved": "Configuration saved.",
+    "session_deleted": "Session deleted.",
+    "workspace_deleted": "Workspace deleted."
+  },
+  "terminal": {
+    "not_running": "Session is not running.",
+    "paused": "Session paused. Click Start to resume.",
+    "reconnecting": "Reconnecting terminal… ({{attempt}}/{{max}})",
+    "restore_failed": "Terminal could not be restored{{reason}}. Click Restart to retry.",
+    "load_history_failed": "Failed to load session history",
+    "select_workspace": "Select a workspace to open a shell.",
+    "reconnecting_shell": "Reconnecting workspace shell… ({{attempt}}/{{max}})",
+    "restore_shell_failed": "Terminal could not be restored{{reason}}. Switch tabs to retry.",
+    "system_prefix": "[System]"
+  },
+  "guide": {
+    "title": "Tell the agent what to build",
+    "prompt_1": "Build a REST API with Express",
+    "prompt_2": "Create a React dashboard with charts",
+    "prompt_3": "Write a CLI tool in Python"
+  },
+  "count_one": "{{count}} session",
+  "count_other": "{{count}} sessions"
+}
