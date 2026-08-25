@@ -42,9 +42,9 @@ async function generateCommitMessage(project, gitOperationService) {
     return result;
 }
 
-async function generatePRDescription(project, gitOperationService, { sourceBranch, targetBranch } = {}) {
+async function generatePRDescription(project, gitOperationService, { sourceBranch, targetBranch, locale } = {}) {
     const base = targetBranch || 'main';
-    const result = await generateAIDescription(project, gitOperationService, 'pr', { base });
+    const result = await generateAIDescription(project, gitOperationService, 'pr', { base, locale });
     return result;
 }
 
@@ -63,15 +63,19 @@ async function generateAIDescription(project, gitOperationService, type, opts = 
             if (changed) diff = changed;
         } catch { /* ignore */ }
     }
-    if (!diff) return { title: '', body: '' };
+    if (!diff) return type === 'pr' ? { title: '', body: '' } : { message: '' };
 
     const apiKey = process.env.LLM_ANALYZE_API_KEY || process.env.DEEPSEEK_API_KEY;
     const apiUrl = process.env.LLM_ANALYZE_API_URL || process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
     const model = process.env.LLM_VERIFY_MODEL || process.env.LLM_ANALYZE_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
-    if (!apiKey) return { title: '', body: '', error: 'AI not configured' };
+    if (!apiKey) return type === 'pr' ? { title: '', body: '', error: 'AI not configured' } : { message: '', error: 'AI not configured' };
 
     const truncated = diff.slice(0, 8000);
-    const prompts = {
+    const locale = opts.locale || 'en';
+    const prompts = locale === 'zh' ? {
+        commit: '你是一个 commit message 生成器。根据 git diff，输出简洁的 conventional commit 消息（如 "feat: 添加登录表单"）。只输出消息本身，不要引号、markdown 或解释。',
+        pr: '你是一个 pull request 生成器。根据 git diff，输出一个包含 "title" 和 "body" 字段的 JSON 对象。title 是简洁的 conventional commit 风格摘要。body 是关于改了什么以及为什么的简短描述，用 markdown 列表格式。只输出有效 JSON，不要 markdown 代码块或解释。',
+    } : {
         commit: 'You are a commit message generator. Given a git diff, output a concise conventional commit message (e.g. "feat: add login form"). Respond with the message only, no quotes, no markdown, no explanation.',
         pr: 'You are a pull request generator. Given a git diff, output a JSON object with "title" and "body" fields. The title should be a concise conventional commit style summary. The body should be a brief description of what changed and why, in markdown bullet points. Respond with valid JSON only, no markdown code blocks, no explanation.',
     };
@@ -239,6 +243,7 @@ function registerProjectGitRoutes(fastify) {
             const result = await generatePRDescription(project, gitOperationService, {
                 sourceBranch: request.body?.source_branch,
                 targetBranch: request.body?.target_branch,
+                locale: request.locale,
             });
             return result;
         } catch (err) {

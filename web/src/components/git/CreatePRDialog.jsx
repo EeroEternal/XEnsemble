@@ -173,10 +173,12 @@ export default function CreatePRDialog({
         <div>
           <div className="flex items-center justify-between">
             <FormLabel htmlFor="pr-title">Title</FormLabel>
-            {aiLoading && (
+            {(diffLoading || aiLoading) && (
               <span className="flex items-center gap-1 text-[10px] text-zinc-400">
                 <Loader2 className="h-3 w-3 animate-spin" />
-                AI generating…
+                {diffLoading
+                  ? t('git:pr.loading_diff', { defaultValue: 'Loading diff…' })
+                  : t('git:pr.ai_generating', { defaultValue: 'AI generating…' })}
               </span>
             )}
           </div>
@@ -184,7 +186,9 @@ export default function CreatePRDialog({
             id="pr-title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="feat: describe the change"
+            placeholder={aiLoading
+              ? t('git:pr.ai_filling', { defaultValue: 'AI is generating…' })
+              : 'feat: describe the change'}
             className="mt-1.5"
             autoFocus
           />
@@ -196,7 +200,9 @@ export default function CreatePRDialog({
             id="pr-body"
             value={body}
             onChange={(e) => setBody(e.target.value)}
-            placeholder="What changed and why"
+            placeholder={aiLoading
+              ? t('git:pr.ai_filling', { defaultValue: 'AI is generating…' })
+              : t('git:pr.body_placeholder', { defaultValue: 'What changed and why' })}
             className="mt-1.5 min-h-[6rem]"
           />
         </div>
