@@ -37,6 +37,23 @@
   "connected": "已连接",
   "not_connected": "未连接",
   "select_repository": "选择仓库",
+  "new_pull_request": "新建 Pull Request",
+  "create_pull_request": "创建 Pull Request",
+  "create_pull_request_btn": "创建 Pull Request",
+  "merge_pull_request": "合并 Pull Request",
+  "close_pull_request": "关闭 Pull Request",
+  "merge": "合并",
+  "close": "关闭",
+  "approve": "批准",
+  "reopen": "重新打开",
+  "approve_hint": "批准此 Pull Request",
+  "merge_hint": "合并 Pull Request",
+  "close_hint": "关闭 Pull Request",
+  "reopen_hint": "重新打开 Pull Request",
+  "back_to_list": "返回列表",
+  "select_pr_hint": "从列表中选择一个 Pull Request 以查看审查",
+  "merge_confirm": "合并此 Pull Request？此操作无法撤销。",
+  "close_confirm": "关闭此 Pull Request 而不合并？",
   "status": {
     "modified": "已修改",
     "added": "已添加",
@@ -46,7 +63,10 @@
   },
   "empty": {
     "no_changes": "无更改",
-    "no_commits": "暂无提交"
+    "no_commits": "暂无提交",
+    "no_prs": "暂无 Pull Request。",
+    "no_prs_hint_create": "创建你的第一个 Pull Request 吧。",
+    "no_prs_hint_wait": "Pull Request 创建后将显示在这里。"
   },
   "error": {
     "clone_failed": "克隆失败。",
@@ -65,7 +85,11 @@
     "mr_created": "合并请求已创建。",
     "conflict_resolved": "冲突已解决。",
     "connected": "已连接到 {{provider}}。",
-    "disconnected": "已断开与 {{provider}} 的连接。"
+    "disconnected": "已断开与 {{provider}} 的连接。",
+    "pr_reopened": "Pull request 已重新打开。",
+    "pr_merged": "Pull request 已合并。",
+    "pr_closed": "Pull request 已关闭。",
+    "pr_approved": "Pull request 已批准。"
   },
   "count_one": "{{count}} 个会话",
   "count_other": "{{count}} 个会话",

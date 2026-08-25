@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ExternalLink, Loader2 } from 'lucide-react';
 import {
   ConsoleDialogShell,
@@ -22,6 +23,7 @@ export default function CreatePRDialog({
   onCreated,
 }) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [branches, setBranches] = useState([]);
   const [branchesError, setBranchesError] = useState(null);
   const [targetBranch, setTargetBranch] = useState(defaultTargetBranch || 'main');
@@ -93,7 +95,7 @@ export default function CreatePRDialog({
         source_branch: sourceBranch,
         target_branch: targetBranch,
       });
-      showToast('success', 'Pull request created.');
+      showToast('success', t('git:toast.pr_created'));
       if (pr?.remoteMrUrl || pr?.remote_mr_url || pr?.github_pr_url || pr?.githubPrUrl) {
         githubApi.openExternal(pr.remoteMrUrl || pr.remote_mr_url || pr.github_pr_url || pr.githubPrUrl);
       }
@@ -117,7 +119,7 @@ export default function CreatePRDialog({
   return (
     <ConsoleDialogShell onClose={onClose} panelClassName={`${consoleDialogMdClass} max-h-[calc(100vh-2rem)]`}>
       <ConsoleStructuredDialogHeader
-        title="Create Pull Request"
+        title={t('git:create_pull_request')}
         subtitle={`From ${sourceBranch || 'current branch'}`}
       />
       <ConsoleStructuredDialogBody>
@@ -224,7 +226,7 @@ export default function CreatePRDialog({
             </>
           ) : (
             <>
-              Create pull request
+              {t('git:create_pull_request_btn')}
               <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
             </>
           )}

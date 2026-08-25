@@ -52,5 +52,27 @@
     "add_env_var": "添加环境变量",
     "remove": "移除",
     "loading": "加载中…"
+  },
+  "register_dialog": {
+    "title": "注册新 Agent",
+    "identity": "身份",
+    "execution": "执行",
+    "id": "ID",
+    "display_name": "显示名称",
+    "command": "命令",
+    "arguments_json": "参数 (JSON)",
+    "required_env_json": "必需环境变量 (JSON)",
+    "saving": "保存中…",
+    "save": "保存",
+    "cancel": "取消",
+    "registered_toast": "Agent 已注册。"
+  },
+  "config_dialog": {
+    "title": "配置 - {{name}}",
+    "gateway_desc": "通过共享网关路由此 Agent。没有自己 API 密钥的用户将使用网关密钥。",
+    "saved_toast": "Agent 配置已保存。",
+    "saving": "保存中…",
+    "save": "保存",
+    "cancel": "取消"
   }
 }

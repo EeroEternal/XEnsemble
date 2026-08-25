@@ -37,6 +37,23 @@
   "connected": "Connected",
   "not_connected": "Not connected",
   "select_repository": "Select repository",
+  "new_pull_request": "New Pull Request",
+  "create_pull_request": "Create Pull Request",
+  "create_pull_request_btn": "Create pull request",
+  "merge_pull_request": "Merge Pull Request",
+  "close_pull_request": "Close Pull Request",
+  "merge": "Merge",
+  "close": "Close",
+  "approve": "Approve",
+  "reopen": "Reopen",
+  "approve_hint": "Approve this pull request",
+  "merge_hint": "Merge pull request",
+  "close_hint": "Close pull request",
+  "reopen_hint": "Reopen pull request",
+  "back_to_list": "Back to list",
+  "select_pr_hint": "Select a pull request from the list to view review",
+  "merge_confirm": "Merge this pull request? This action cannot be undone.",
+  "close_confirm": "Close this pull request without merging?",
   "status": {
     "modified": "Modified",
     "added": "Added",
@@ -46,7 +63,10 @@
   },
   "empty": {
     "no_changes": "No changes",
-    "no_commits": "No commits yet"
+    "no_commits": "No commits yet",
+    "no_prs": "No pull requests yet.",
+    "no_prs_hint_create": "Create your first pull request to get started.",
+    "no_prs_hint_wait": "Pull requests will appear here once created."
   },
   "error": {
     "clone_failed": "Clone failed.",
@@ -65,7 +85,11 @@
     "mr_created": "Merge request created.",
     "conflict_resolved": "Conflict resolved.",
     "connected": "Connected to {{provider}}.",
-    "disconnected": "Disconnected from {{provider}}."
+    "disconnected": "Disconnected from {{provider}}.",
+    "pr_reopened": "Pull request reopened.",
+    "pr_merged": "Pull request merged.",
+    "pr_closed": "Pull request closed.",
+    "pr_approved": "Pull request approved."
   },
   "count_one": "{{count}} session",
   "count_other": "{{count}} sessions",

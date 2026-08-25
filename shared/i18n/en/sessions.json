@@ -29,7 +29,8 @@
     "restarting_session": "Restarting session",
     "starting_session": "Starting session",
     "hide_side_panel": "Hide side panel",
-    "show_side_panel": "Show side panel"
+    "show_side_panel": "Show side panel",
+    "back_to_workspaces": "Back to workspaces"
   },
   "label": {
     "unassigned": "Unassigned",
@@ -64,6 +65,10 @@
     "session_deleted": "Session deleted.",
     "workspace_deleted": "Workspace deleted."
   },
+  "dialog": {
+    "agent_configuration": "Agent Configuration",
+    "workspace_files_deleted": "All workspace files on the server will be deleted. This frees your workspace quota."
+  },
   "terminal": {
     "not_running": "Session is not running.",
     "paused": "Session paused. Click Start to resume.",
@@ -80,6 +85,10 @@
     "prompt_1": "Build a REST API with Express",
     "prompt_2": "Create a React dashboard with charts",
     "prompt_3": "Write a CLI tool in Python"
+  },
+  "creation": {
+    "import_repository": "Import repository",
+    "start_session": "Start session"
   },
   "count_one": "{{count}} session",
   "count_other": "{{count}} sessions"

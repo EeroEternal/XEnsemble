@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import Button from '../Button';
 import Input, { FormLabel } from '../Input';
@@ -25,6 +26,7 @@ function parseJsonSafe(value) {
 }
 
 export default function AgentRegisterDialog({ open, onClose, onRegistered }) {
+  const { t } = useTranslation();
   const { showToast } = useToast();
   const [newAgent, setNewAgent] = useState(EMPTY_AGENT);
   const [saving, setSaving] = useState(false);
@@ -51,7 +53,7 @@ export default function AgentRegisterDialog({ open, onClose, onRegistered }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      showToast('success', 'Agent registered.');
+      showToast('success', t('agents:register_dialog.registered_toast'));
       setNewAgent(EMPTY_AGENT);
       onClose();
       onRegistered?.();
@@ -66,16 +68,16 @@ export default function AgentRegisterDialog({ open, onClose, onRegistered }) {
 
   return (
     <ConsoleDialogShell onClose={onClose} panelClassName={consoleDialogMdClass}>
-      <ConsoleStructuredDialogHeader title="Register new agent" />
+      <ConsoleStructuredDialogHeader title={t('agents:register_dialog.title')} />
       <ConsoleStructuredDialogBody>
         <form id="agent-register-form" onSubmit={handleSubmit} className="space-y-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">
-              Identity
+              {t('agents:register_dialog.identity')}
             </p>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <FormLabel htmlFor="agent-id" className="mb-1.5">ID</FormLabel>
+                <FormLabel htmlFor="agent-id" className="mb-1.5">{t('agents:register_dialog.id')}</FormLabel>
                 <Input
                   id="agent-id"
                   required
@@ -86,7 +88,7 @@ export default function AgentRegisterDialog({ open, onClose, onRegistered }) {
                 />
               </div>
               <div>
-                <FormLabel htmlFor="agent-name" className="mb-1.5">Display name</FormLabel>
+                <FormLabel htmlFor="agent-name" className="mb-1.5">{t('agents:register_dialog.display_name')}</FormLabel>
                 <Input
                   id="agent-name"
                   required
@@ -100,11 +102,11 @@ export default function AgentRegisterDialog({ open, onClose, onRegistered }) {
 
           <div className="border-t border-zinc-100 pt-4">
             <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">
-              Execution
+              {t('agents:register_dialog.execution')}
             </p>
             <div className="space-y-3">
               <div>
-                <FormLabel htmlFor="agent-cmd" className="mb-1.5">Command</FormLabel>
+                <FormLabel htmlFor="agent-cmd" className="mb-1.5">{t('agents:register_dialog.command')}</FormLabel>
                 <Input
                   id="agent-cmd"
                   required
@@ -115,7 +117,7 @@ export default function AgentRegisterDialog({ open, onClose, onRegistered }) {
                 />
               </div>
               <div>
-                <FormLabel htmlFor="agent-args" className="mb-1.5">Arguments (JSON)</FormLabel>
+                <FormLabel htmlFor="agent-args" className="mb-1.5">{t('agents:register_dialog.arguments_json')}</FormLabel>
                 <Input
                   id="agent-args"
                   required
@@ -129,7 +131,7 @@ export default function AgentRegisterDialog({ open, onClose, onRegistered }) {
                 )}
               </div>
               <div>
-                <FormLabel htmlFor="agent-env" className="mb-1.5">Required env (JSON)</FormLabel>
+                <FormLabel htmlFor="agent-env" className="mb-1.5">{t('agents:register_dialog.required_env_json')}</FormLabel>
                 <Input
                   id="agent-env"
                   required
@@ -151,7 +153,7 @@ export default function AgentRegisterDialog({ open, onClose, onRegistered }) {
       </ConsoleStructuredDialogBody>
       <ConsoleStructuredDialogFooter>
         <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={saving}>
-          Cancel
+          {t('agents:register_dialog.cancel')}
         </Button>
         <Button
           type="submit"
@@ -162,10 +164,10 @@ export default function AgentRegisterDialog({ open, onClose, onRegistered }) {
           {saving ? (
             <>
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Saving…
+              {t('agents:register_dialog.saving')}
             </>
           ) : (
-            'Save'
+            t('agents:register_dialog.save')
           )}
         </Button>
       </ConsoleStructuredDialogFooter>

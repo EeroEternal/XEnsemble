@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import Button from '../Button';
 import Input from '../Input';
 import SelectMenu from '../SelectMenu';
@@ -26,6 +27,7 @@ function normalizeModels(model) {
 }
 
 export default function AgentConfigDialog({ agent, gatewayProviders, onClose, onSaved }) {
+  const { t } = useTranslation();
   const { showToast } = useToast();
   const [authDraft, setAuthDraft] = useState({ provider: '', model: [] });
   const [savingKeys, setSavingKeys] = useState(false);
@@ -118,7 +120,7 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
       if (data.warning) {
         showToast('warning', data.warning, { durationMs: 12000 });
       } else {
-        showToast('success', 'Agent configuration saved.');
+        showToast('success', t('agents:config_dialog.saved_toast'));
       }
       const diskGb = vmResources.disk_size_gb.trim();
       const cpus = vmResources.cpus.trim();
@@ -173,10 +175,10 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
       panelClassName={`${consoleDialogAdminFormPanelClass} p-6`}
     >
       <h2 className="font-bold text-lg text-zinc-900 mb-1">
-        Configure - {agent.name}
+        {t('agents:config_dialog.title', { name: agent.name })}
       </h2>
       <p className="text-sm text-zinc-500 mb-4">
-        Route this agent through the shared gateway and select the model(s) users can use.
+        {t('agents:config_dialog.gateway_desc')}
       </p>
       <form onSubmit={handleSave} className="space-y-4">
         {/* Section: Gateway config */}
@@ -260,10 +262,10 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
 
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="secondary" size="md" onClick={onClose}>
-            Cancel
+            {t('agents:config_dialog.cancel')}
           </Button>
           <Button type="submit" size="md" disabled={savingKeys || !canSave}>
-            {savingKeys ? 'Saving...' : 'Save'}
+            {savingKeys ? t('agents:config_dialog.saving') : t('agents:config_dialog.save')}
           </Button>
         </div>
       </form>

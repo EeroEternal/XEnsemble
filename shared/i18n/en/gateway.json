@@ -10,6 +10,8 @@
   "verify": "Verify",
   "control_plane_url": "Control plane public URL",
   "external_unigateway_url": "External UniGateway URL",
+  "agent_proxy_desc": "Agents connect via control plane LLM proxy at",
+  "agent_proxy_base_url_desc": "Agents reach the LLM proxy at this base URL (optional; defaults to localhost).",
   "error": {
     "verify_failed": "Provider verification failed.",
     "load_key_failed": "Failed to load API Key.",

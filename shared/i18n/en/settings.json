@@ -23,8 +23,25 @@
   "quota": {
     "title": "My Quota",
     "projects": "Workspaces",
-    "sessions": "Sessions",
-    "previews": "Previews"
+    "sessions": "Concurrent sessions",
+    "previews": "Concurrent previews",
+    "unlimited": "Unlimited",
+    "resource_tier": "Resource tier",
+    "loading": "Loading quota information…"
+  },
+  "general": {
+    "title": "General",
+    "registration": "Registration",
+    "registration_mode": "Registration mode",
+    "mode_open": "Open",
+    "mode_approval": "Approval required",
+    "mode_admin": "Admin only",
+    "mode_invite": "Invite only",
+    "default_quota": "Default user quota",
+    "tier": "Tier",
+    "session_ttl": "Session TTL (hours)",
+    "saving": "Saving…",
+    "save": "Save"
   },
   "toast": {
     "saved": "Saved.",

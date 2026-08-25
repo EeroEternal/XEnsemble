@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { consoleSectionLabelClass, consoleCardClass } from '../../lib/consoleTokens';
 
 import { apiFetch } from '../../lib/api';
 
 export default function QuotaSettingsPanel() {
-  
+  const { t } = useTranslation();
   const [me, setMe] = useState(null);
 
   useEffect(() => {
@@ -15,7 +16,7 @@ export default function QuotaSettingsPanel() {
   }, []);
 
   if (!me?.quotas) {
-    return <p className="text-sm text-zinc-400">Loading quota information…</p>;
+    return <p className="text-sm text-zinc-400">{t('settings:quota.loading')}</p>;
   }
 
   const q = me.quotas;
@@ -23,9 +24,9 @@ export default function QuotaSettingsPanel() {
   const isAdmin = me.role === 'admin';
 
   const rows = [
-    { label: 'Workspaces', used: u.projects ?? 0, max: q.max_projects },
-    { label: 'Concurrent sessions', used: u.sessions ?? 0, max: q.max_sessions },
-    { label: 'Concurrent previews', used: u.previews ?? 0, max: q.max_previews },
+    { label: t('settings:quota.projects'), used: u.projects ?? 0, max: q.max_projects },
+    { label: t('settings:quota.sessions'), used: u.sessions ?? 0, max: q.max_sessions },
+    { label: t('settings:quota.previews'), used: u.previews ?? 0, max: q.max_previews },
   ];
 
   return (
@@ -36,7 +37,7 @@ export default function QuotaSettingsPanel() {
             <div className={`${consoleSectionLabelClass} mb-2`}>{label}</div>
             <div className="flex items-baseline gap-1 mb-3">
               <span className="text-2xl font-bold text-zinc-900">{used}</span>
-              <span className="text-sm text-zinc-400">/ {isAdmin ? 'Unlimited' : max}</span>
+              <span className="text-sm text-zinc-400">/ {isAdmin ? t('settings:quota.unlimited') : max}</span>
             </div>
             {!isAdmin && (
               <div className="h-1.5 rounded-full bg-zinc-100 overflow-hidden">
@@ -51,7 +52,7 @@ export default function QuotaSettingsPanel() {
       </div>
 
       <div className={`${consoleCardClass} p-4 flex justify-between items-center`}>
-        <span className={consoleSectionLabelClass}>Resource tier</span>
+        <span className={consoleSectionLabelClass}>{t('settings:quota.resource_tier')}</span>
         <span className="text-sm font-medium text-zinc-900 capitalize">{q.resource_tier || 'basic'}</span>
       </div>
     </div>

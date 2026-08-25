@@ -848,6 +848,10 @@ export default function GatewaySettingsPanel() {
                   {processConfig.host}:{processConfig.port}
                 </span>
               </p>
+              <p className="text-xs text-zinc-500 mt-1">
+                {t('gateway:agent_proxy_desc')}{' '}
+                <span className="font-mono">{agentBaseUrl}</span>
+              </p>
               {status?.gateway_upstream_url && (
                 <p className="text-xs text-zinc-500 mt-1">
                   Upstream UniGateway:{' '}
@@ -1096,7 +1100,7 @@ export default function GatewaySettingsPanel() {
                   placeholder="https://app.example.com"
                   className="h-9 min-h-9 py-1.5 font-mono"
                 />
-                <p className="text-xs text-zinc-500">Agents reach the LLM proxy at this base URL (optional; defaults to localhost).</p>
+                <p className="text-xs text-zinc-500">{t('gateway:agent_proxy_base_url_desc')}</p>
               </div>
               <div className="space-y-2">
                 <FormLabel htmlFor="gateway-upstream-url">External UniGateway URL</FormLabel>

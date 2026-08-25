@@ -1,4 +1,5 @@
 import { useState, useEffect, useContext } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AuthContext } from '../../App';
 import Button from '../Button';
 import Input from '../Input';
@@ -9,6 +10,7 @@ import { consoleSectionLabelClass, consoleCardClass } from '../../lib/consoleTok
 import { apiFetch } from '../../lib/api';
 
 export default function GeneralSettingsPanel() {
+  const { t } = useTranslation();
   const { user } = useContext(AuthContext);
   const { showToast } = useToast();
   const [settings, setSettings] = useState(null);
@@ -48,7 +50,7 @@ export default function GeneralSettingsPanel() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setSettings(data);
-      showToast('success', 'Settings saved.');
+      showToast('success', t('settings:toast.saved'));
     } catch (err) {
       showToast('error', err.message);
     } finally {
@@ -58,32 +60,34 @@ export default function GeneralSettingsPanel() {
 
   if (isAdmin) {
     if (!settings) {
-      return <p className="text-sm text-zinc-500">Loading…</p>;
+      return <p className="text-sm text-zinc-500">{t('common:state.loading')}</p>;
     }
 
     return (
       <form onSubmit={handleSave} className="h-full flex flex-col">
         <div className="flex-1 min-h-0 overflow-y-auto console-scroll-hidden">
           <div className={`${consoleCardClass} p-6`}>
-            <div className="mb-3"><h3 className={consoleSectionLabelClass}>Registration</h3></div>
+            <div className="mb-3"><h3 className={consoleSectionLabelClass}>{t('settings:general.registration')}</h3></div>
             <div className="mb-6">
-              <label className="block mb-1 text-xs text-zinc-500">Registration mode</label>
+              <label className="block mb-1 text-xs text-zinc-500">{t('settings:general.registration_mode')}</label>
               <SelectMenu
                 value={settings.registration_mode}
                 onChange={(v) => setSettings({ ...settings, registration_mode: v })}
                 options={[
-                  { value: 'open', label: 'Open' },
-                  { value: 'approval', label: 'Approval required' },
-                  { value: 'admin_only', label: 'Admin only' },
-                  { value: 'invite_only', label: 'Invite only' },
+                  { value: 'open', label: t('settings:general.mode_open') },
+                  { value: 'approval', label: t('settings:general.mode_approval') },
+                  { value: 'admin_only', label: t('settings:general.mode_admin') },
+                  { value: 'invite_only', label: t('settings:general.mode_invite') },
                 ]}
               />
             </div>
 
-            <div className="mb-3 mt-6"><h3 className={consoleSectionLabelClass}>Default user quota</h3></div>
+            <div className="border-t border-zinc-100 my-4" />
+
+            <div className="mb-3"><h3 className={consoleSectionLabelClass}>{t('settings:general.default_quota')}</h3></div>
             <div className="grid grid-cols-2 gap-3 mb-6">
               <div>
-                <label className="text-xs text-zinc-500">Workspaces</label>
+                <label className="text-xs text-zinc-500">{t('settings:quota.projects')}</label>
                 <Input
                   type="number"
                   min={0}
@@ -96,7 +100,7 @@ export default function GeneralSettingsPanel() {
                 />
               </div>
               <div>
-                <label className="text-xs text-zinc-500">Sessions</label>
+                <label className="text-xs text-zinc-500">{t('settings:quota.sessions')}</label>
                 <Input
                   type="number"
                   min={0}
@@ -109,7 +113,7 @@ export default function GeneralSettingsPanel() {
                 />
               </div>
               <div>
-                <label className="text-xs text-zinc-500">Previews</label>
+                <label className="text-xs text-zinc-500">{t('settings:quota.previews')}</label>
                 <Input
                   type="number"
                   min={0}
@@ -122,7 +126,7 @@ export default function GeneralSettingsPanel() {
                 />
               </div>
               <div>
-                <label className="text-xs text-zinc-500">Tier</label>
+                <label className="text-xs text-zinc-500">{t('settings:general.tier')}</label>
                 <SelectMenu
                   value={quota.resource_tier ?? 'basic'}
                   onChange={(v) => setSettings({
@@ -130,17 +134,19 @@ export default function GeneralSettingsPanel() {
                     default_user_quota: { ...quota, resource_tier: v },
                   })}
                   options={[
-                    { value: 'basic', label: 'Basic' },
-                    { value: 'pro', label: 'Pro' },
-                    { value: 'enterprise', label: 'Enterprise' },
+                    { value: 'basic', label: t('users:tier.basic') },
+                    { value: 'pro', label: t('users:tier.pro') },
+                    { value: 'enterprise', label: t('users:tier.enterprise') },
                   ]}
                 />
               </div>
             </div>
 
-            <div className="mb-3 mt-6"><h3 className={consoleSectionLabelClass}>Session</h3></div>
+            <div className="border-t border-zinc-100 my-4" />
+
+            <div className="mb-3"><h3 className={consoleSectionLabelClass}>{t('sessions:title')}</h3></div>
             <div>
-              <label className="block mb-1 text-xs text-zinc-500">Session TTL (hours)</label>
+              <label className="block mb-1 text-xs text-zinc-500">{t('settings:general.session_ttl')}</label>
               <Input
                 type="number"
                 min={1}
@@ -152,7 +158,7 @@ export default function GeneralSettingsPanel() {
 
             <div className="pt-6 flex justify-start">
               <Button type="submit" size="md" disabled={saving}>
-                {saving ? 'Saving…' : 'Save'}
+                {saving ? t('settings:general.saving') : t('settings:general.save')}
               </Button>
             </div>
           </div>

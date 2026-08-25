@@ -52,5 +52,27 @@
     "add_env_var": "Add env var",
     "remove": "Remove",
     "loading": "Loading…"
+  },
+  "register_dialog": {
+    "title": "Register new agent",
+    "identity": "Identity",
+    "execution": "Execution",
+    "id": "ID",
+    "display_name": "Display name",
+    "command": "Command",
+    "arguments_json": "Arguments (JSON)",
+    "required_env_json": "Required env (JSON)",
+    "saving": "Saving…",
+    "save": "Save",
+    "cancel": "Cancel",
+    "registered_toast": "Agent registered."
+  },
+  "config_dialog": {
+    "title": "Configure - {{name}}",
+    "gateway_desc": "Route this agent through the shared gateway. Users without their own API keys will use the gateway keys.",
+    "saved_toast": "Agent configuration saved.",
+    "saving": "Saving…",
+    "save": "Save",
+    "cancel": "Cancel"
   }
 }

@@ -35,10 +35,10 @@
     "reset_password": "重置密码",
     "reset_password_optional": "重置密码（可选）",
     "leave_blank": "留空则保持当前密码",
-    "projects": "工作区",
+    "projects": "工作空间",
     "sessions": "会话",
     "previews": "预览",
-    "max_projects": "最大工作区数",
+    "max_projects": "最大工作空间数",
     "max_sessions": "最大会话数",
     "max_previews": "最大预览数",
     "resource_tier": "资源等级"
@@ -50,6 +50,7 @@
   "action": {
     "save": "保存",
     "cancel": "取消",
+    "suspend": "封禁",
     "actions_for": "{{username}} 的操作"
   },
   "error": {

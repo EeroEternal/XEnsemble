@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight, ExternalLink, GitPullRequest, Loader2, Search } from 'lucide-react';
 import { openExternal } from '../../lib/githubApi';
 import * as gitApi from '../../lib/gitApi';
@@ -51,6 +52,7 @@ function formatRelative(ts) {
 
 export default function MergeRequestListPanel({ projectId, provider, onSelectMR, refreshTrigger, onCreatePR }) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [mergeRequests, setMergeRequests] = useState([]);
   const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState('open');
@@ -59,7 +61,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
   // 当前用户在该仓库的写权限（merge/approve/close/reopen），来自列表接口
   const [permissions, setPermissions] = useState(null);
 
-  const label = provider === 'gitlab' ? 'Merge Requests' : 'Pull Requests';
+  const label = provider === 'gitlab' ? t('git:merge_requests') : t('git:pull_requests');
 
   const fetchMRs = useCallback(async (silent = false) => {
     if (!projectId) return;
@@ -185,7 +187,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
               className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-zinc-700 rounded-md border border-zinc-200 hover:bg-zinc-100 ${consoleButtonFocusClass}`}
             >
               <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
-              New Pull Request
+              {t('git:new_pull_request')}
             </button>
           )}
         </div>
@@ -208,7 +210,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
               </p>
               <p className="mt-0.5 text-xs text-zinc-400">
                 {mergeRequests.length === 0
-                  ? (onCreatePR ? 'Create your first pull request to get started.' : 'Pull requests will appear here once created.')
+                  ? (onCreatePR ? t('git:empty.no_prs_hint_create') : t('git:empty.no_prs_hint_wait'))
                   : 'Try a different filter or search term.'}
               </p>
             </div>
@@ -219,7 +221,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
                 className={buttonClass('primary', 'sm')}
               >
                 <GitPullRequest className="h-3.5 w-3.5 mr-1.5 inline" />
-                New Pull Request
+                {t('git:new_pull_request')}
               </button>
             )}
           </div>

@@ -1,4 +1,5 @@
 import { Loader2, Check, GitBranch, Rocket, AlertCircle, ArrowLeft } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
 import {
   textPlaceholder,
@@ -11,11 +12,12 @@ import {
 import { buttonClass } from '../lib/buttonStyles';
 
 const STEPS = [
-  { id: 'import', label: 'Import repository', icon: GitBranch },
-  { id: 'session', label: 'Start session', icon: Rocket },
+  { id: 'import', labelKey: 'sessions:creation.import_repository', icon: GitBranch },
+  { id: 'session', labelKey: 'sessions:creation.start_session', icon: Rocket },
 ];
 
 export default function CreationProgress({ currentStep, error, onDismiss }) {
+  const { t } = useTranslation();
   const hasError = Boolean(error);
   const stepStatus = (stepId) => {
     const idx = STEPS.findIndex((s) => s.id === stepId);
@@ -67,7 +69,7 @@ export default function CreationProgress({ currentStep, error, onDismiss }) {
                       status === 'pending' && textPlaceholder,
                     )}
                   >
-                    {step.label}
+                    {t(step.labelKey)}
                   </span>
                 </div>
               </div>
@@ -96,7 +98,7 @@ export default function CreationProgress({ currentStep, error, onDismiss }) {
             className={`${buttonClass('secondary', 'sm')} ${consoleButtonFocusClass}`}
           >
             <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
-            Back
+            {t('sessions:action.back_to_workspaces')}
           </button>
         </div>
       )}

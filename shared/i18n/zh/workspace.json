@@ -1,5 +1,5 @@
 {
-  "title": "工作区",
+  "title": "工作空间",
   "files": "文件",
   "tabs": {
     "editor": "编辑器",
@@ -71,7 +71,7 @@
     "confirm_delete": "确定删除 \"{{name}}\"？此操作无法撤销。"
   },
   "error": {
-    "load_files_failed": "加载工作区文件失败",
+    "load_files_failed": "加载工作空间文件失败",
     "read_file_failed": "读取文件失败"
   }
 }

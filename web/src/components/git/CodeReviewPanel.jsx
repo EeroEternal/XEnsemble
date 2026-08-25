@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Check, CheckCircle2, ChevronDown, ChevronRight, CircleDot, GitPullRequest, GitMerge, Loader2, MessageSquare, Send, X, XCircle, RotateCcw, Trash2, Pencil, CornerDownRight } from 'lucide-react';
 import * as gitApi from '../../lib/gitApi';
 import { apiFetch } from '../../lib/api';
@@ -333,6 +334,7 @@ function ThreadGroup({ thread, mrFiles, renderDiffLines, onReply, onEdit, onDele
 
 export default function CodeReviewPanel({ projectId, mergeRequestId, mergeRequest, onBack, onChanged }) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const panelRootRef = useWorkspacePanelPanel();
   const [reviews, setReviews] = useState([]);
   const [comments, setComments] = useState([]);
@@ -493,7 +495,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
     setActionLoading('reopen');
     try {
       await gitApi.reopenMergeRequest(projectId, mergeRequestId);
-      showToast('success', 'Pull request reopened.');
+      showToast('success', t('git:toast.pr_reopened'));
       refreshMR();
     } catch (err) {
       if (err.code === 'REAUTH_REQUIRED') {
@@ -508,11 +510,11 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
   };
 
   const handleMerge = async () => {
-    if (!await confirm({ title: 'Merge Pull Request', message: 'Merge this pull request? This action cannot be undone.', confirmLabel: 'Merge', variant: 'primary', container: panelRootRef?.current })) return;
+    if (!await confirm({ title: t('git:merge_pull_request'), message: t('git:merge_confirm'), confirmLabel: t('git:merge'), variant: 'primary', container: panelRootRef?.current })) return;
     setActionLoading('merge');
     try {
       await gitApi.mergeMergeRequest(projectId, mergeRequestId);
-      showToast('success', 'Pull request merged.');
+      showToast('success', t('git:toast.pr_merged'));
       refreshMR();
     } catch (err) {
       if (err.code === 'REAUTH_REQUIRED') {
@@ -527,11 +529,11 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
   };
 
   const handleClose = async () => {
-    if (!await confirm({ title: 'Close Pull Request', message: 'Close this pull request without merging?', confirmLabel: 'Close', variant: 'secondary', container: panelRootRef?.current })) return;
+    if (!await confirm({ title: t('git:close_pull_request'), message: t('git:close_confirm'), confirmLabel: t('git:close'), variant: 'secondary', container: panelRootRef?.current })) return;
     setActionLoading('close');
     try {
       await gitApi.closeMergeRequest(projectId, mergeRequestId);
-      showToast('success', 'Pull request closed.');
+      showToast('success', t('git:toast.pr_closed'));
       refreshMR();
     } catch (err) {
       if (err.code === 'REAUTH_REQUIRED') {
@@ -549,7 +551,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
     setActionLoading('approve');
     try {
       await gitApi.approveMergeRequest(projectId, mergeRequestId);
-      showToast('success', 'Pull request approved.');
+      showToast('success', t('git:toast.pr_approved'));
       refreshMR();
     } catch (err) {
       if (err.code === 'REAUTH_REQUIRED') {
@@ -673,7 +675,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
             <button
               type="button"
               onClick={onBack}
-              title="Back to list"
+              title={t('git:back_to_list')}
               className={`p-1 rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
             >
               <ArrowLeft className="h-3.5 w-3.5" />
@@ -704,7 +706,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
                   type="button"
                   onClick={handleApprove}
                   disabled={actionLoading !== null}
-                  title="Approve this pull request"
+                  title={t('git:approve_hint')}
                   className={`flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
                 >
                   {actionLoading === 'approve' ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
@@ -716,7 +718,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
                   type="button"
                   onClick={handleMerge}
                   disabled={actionLoading !== null}
-                  title="Merge pull request"
+                  title={t('git:merge_hint')}
                   className={`flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
                 >
                   {actionLoading === 'merge' ? <Loader2 className="w-3 h-3 animate-spin" /> : <GitMerge className="h-3.5 w-3.5" />}
@@ -728,7 +730,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
                   type="button"
                   onClick={handleClose}
                   disabled={actionLoading !== null}
-                  title="Close pull request"
+                  title={t('git:close_hint')}
                   className={`flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-zinc-500 bg-zinc-100 hover:bg-zinc-200 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
                 >
                   {actionLoading === 'close' ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
@@ -748,7 +750,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
                   type="button"
                   onClick={handleReopen}
                   disabled={actionLoading !== null}
-                  title="Reopen pull request"
+                  title={t('git:reopen_hint')}
                   className={`flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-black bg-blue-50 hover:bg-blue-100 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
                 >
                   {actionLoading === 'reopen' ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
@@ -777,7 +779,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
       {!mergeRequestId ? (
         <div className="flex flex-col items-center justify-center py-8 gap-2 text-zinc-400">
           <GitPullRequest className="h-6 w-6" />
-          <p className="text-[10px]">Select a pull request from the list to view review</p>
+          <p className="text-[10px]">{t('git:select_pr_hint')}</p>
         </div>
       ) : (
         <>

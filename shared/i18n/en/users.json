@@ -50,6 +50,7 @@
   "action": {
     "save": "Save",
     "cancel": "Cancel",
+    "suspend": "Suspend",
     "actions_for": "Actions for {{username}}"
   },
   "error": {

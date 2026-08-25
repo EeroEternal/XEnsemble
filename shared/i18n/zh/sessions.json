@@ -11,12 +11,12 @@
     "cancel": "取消",
     "starting": "启动中…",
     "start_agent": "启动 Agent",
-    "create_workspace": "创建工作区",
+    "create_workspace": "创建工作空间",
     "custom": "自定义"
   },
   "empty": {
-    "no_sessions": "此工作区暂无会话。",
-    "select_workspace": "选择一个工作区以查看其会话。",
+    "no_sessions": "此工作空间暂无会话。",
+    "select_workspace": "选择一个工作空间以查看其会话。",
     "no_matching": "无匹配会话"
   },
   "action": {
@@ -29,15 +29,16 @@
     "restarting_session": "正在重启会话",
     "starting_session": "正在启动会话",
     "hide_side_panel": "隐藏侧边栏",
-    "show_side_panel": "显示侧边栏"
+    "show_side_panel": "显示侧边栏",
+    "back_to_workspaces": "返回工作空间"
   },
   "label": {
     "unassigned": "未分配",
-    "select_workspace": "选择工作区",
-    "new_workspace": "新建工作区",
-    "delete_workspace": "删除工作区",
-    "no_workspaces": "暂无工作区",
-    "no_matching_workspaces": "无匹配工作区"
+    "select_workspace": "选择工作空间",
+    "new_workspace": "新建工作空间",
+    "delete_workspace": "删除工作空间",
+    "no_workspaces": "暂无工作空间",
+    "no_matching_workspaces": "无匹配工作空间"
   },
   "state": {
     "preparing_environment": "正在准备你的环境…",
@@ -45,14 +46,14 @@
     "session_failed": "会话启动失败"
   },
   "error": {
-    "no_workspace": "无法为此会话创建工作区。",
+    "no_workspace": "无法为此会话创建工作空间。",
     "configure_keys": "启动前请先配置所需的 API 密钥。",
-    "create_workspace_failed": "创建工作区失败",
+    "create_workspace_failed": "创建工作空间失败",
     "start_failed": "启动会话失败",
     "resume_failed": "恢复会话失败",
-    "delete_workspace_failed": "删除工作区失败",
+    "delete_workspace_failed": "删除工作空间失败",
     "save_keys_failed": "保存密钥失败",
-    "load_files_failed": "加载工作区文件失败",
+    "load_files_failed": "加载工作空间文件失败",
     "read_file_failed": "读取文件失败",
     "not_granted": "你没有使用此 Agent 的权限。"
   },
@@ -62,7 +63,11 @@
     "path_copied": "路径已复制。",
     "config_saved": "配置已保存。",
     "session_deleted": "会话已删除。",
-    "workspace_deleted": "工作区已删除。"
+    "workspace_deleted": "工作空间已删除。"
+  },
+  "dialog": {
+    "agent_configuration": "Agent 配置",
+    "workspace_files_deleted": "服务器上的所有工作空间文件将被删除。这将释放你的工作空间配额。"
   },
   "terminal": {
     "not_running": "会话未运行。",
@@ -70,8 +75,8 @@
     "reconnecting": "正在重连终端… ({{attempt}}/{{max}})",
     "restore_failed": "终端无法恢复{{reason}}。点击重启以重试。",
     "load_history_failed": "加载会话历史失败",
-    "select_workspace": "选择一个工作区以打开终端。",
-    "reconnecting_shell": "正在重连工作区终端… ({{attempt}}/{{max}})",
+    "select_workspace": "选择一个工作空间以打开终端。",
+    "reconnecting_shell": "正在重连工作空间终端… ({{attempt}}/{{max}})",
     "restore_shell_failed": "终端无法恢复{{reason}}。切换标签页以重试。",
     "system_prefix": "[系统]"
   },
@@ -80,6 +85,10 @@
     "prompt_1": "用 Express 构建 REST API",
     "prompt_2": "创建带图表的 React 仪表盘",
     "prompt_3": "用 Python 编写 CLI 工具"
+  },
+  "creation": {
+    "import_repository": "导入仓库",
+    "start_session": "启动会话"
   },
   "count_one": "{{count}} 个会话",
   "count_other": "{{count}} 个会话"
