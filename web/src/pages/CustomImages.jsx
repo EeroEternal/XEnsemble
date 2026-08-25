@@ -633,17 +633,17 @@ export function CustomImagesContent() {
                       {names.length === 0 ? (
                         <span className="text-zinc-400">\u2014</span>
                       ) : names.length <= max ? (
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex flex-nowrap gap-1 overflow-hidden" title={names.join(', ')}>
                           {names.map((n, i) => (
-                            <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">{n}</span>
+                            <span key={i} className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">{n}</span>
                           ))}
                         </div>
                       ) : (
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex flex-nowrap gap-1 overflow-hidden" title={names.join(', ')}>
                           {names.slice(0, max).map((n, i) => (
-                            <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">{n}</span>
+                            <span key={i} className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">{n}</span>
                           ))}
-                          <span className="text-xs text-zinc-400" title={names.slice(max).join(', ')}>
+                          <span className="shrink-0 text-xs text-zinc-400" title={names.slice(max).join(', ')}>
                             +{names.length - max} more
                           </span>
                         </div>
