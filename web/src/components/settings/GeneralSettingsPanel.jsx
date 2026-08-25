@@ -80,9 +80,7 @@ export default function GeneralSettingsPanel() {
               />
             </div>
 
-            <div className="border-t border-zinc-100 my-4" />
-
-            <div className="mb-3"><h3 className={consoleSectionLabelClass}>Default user quota</h3></div>
+            <div className="mb-3 mt-6"><h3 className={consoleSectionLabelClass}>Default user quota</h3></div>
             <div className="grid grid-cols-2 gap-3 mb-6">
               <div>
                 <label className="text-xs text-zinc-500">Workspaces</label>
@@ -140,9 +138,7 @@ export default function GeneralSettingsPanel() {
               </div>
             </div>
 
-            <div className="border-t border-zinc-100 my-4" />
-
-            <div className="mb-3"><h3 className={consoleSectionLabelClass}>Session</h3></div>
+            <div className="mb-3 mt-6"><h3 className={consoleSectionLabelClass}>Session</h3></div>
             <div>
               <label className="block mb-1 text-xs text-zinc-500">Session TTL (hours)</label>
               <Input

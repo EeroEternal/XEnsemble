@@ -3,7 +3,7 @@ import { AuthContext } from '../../App';
 import Button from '../Button';
 import Input, { FormLabel } from '../Input';
 import { useToast } from '../Toast';
-import { consoleSectionLabelClass } from '../../lib/consoleTokens';
+import { consoleSectionLabelClass, consoleCardClass } from '../../lib/consoleTokens';
 import { apiFetch } from '../../lib/api';
 import GitConnectButton from '../git/GitConnectButton';
 import GitOAuthAlert from '../git/GitOAuthAlert';
@@ -148,7 +148,7 @@ export default function GitProvidersSettingsPanel() {
       </section>
       <div className="border-t border-zinc-200" />
       {/* OAuth Application Configuration */}
-      <section className="space-y-4">
+      <section className={`${consoleCardClass} p-6 space-y-4`}>
         <h3 className={consoleSectionLabelClass}>OAuth Apps</h3>
         {error ? (
           <div className="space-y-4">

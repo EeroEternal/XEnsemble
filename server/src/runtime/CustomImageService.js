@@ -222,16 +222,6 @@ async function createImage({ ownerUserId, name, selection }) {
     );
   }
 
-  const count = await db.select({ count: sql`count(*)::int` })
-    .from(schema.customImages)
-    .where(eq(schema.customImages.ownerUserId, ownerUserId));
-  if (Number(count[0]?.count || 0) >= MAX_PER_USER) {
-    throw new RuntimeError(
-      `maximum ${MAX_PER_USER} custom images per user`,
-      429,
-    );
-  }
-
   const now = Date.now();
   const imageId = `cimg_${crypto.randomBytes(8).toString('hex')}`;
   const buildId = `cbld_${crypto.randomBytes(8).toString('hex')}`;
@@ -321,7 +311,7 @@ async function listImages(ownerUserId) {
     ))
     .orderBy(desc(schema.customImages.createdAt));
 
-  if (images.length === 0) return { images: [], count: 0, max: MAX_PER_USER };
+  if (images.length === 0) return { images: [], count: 0, max: null };
 
   const imageIds = images.map((img) => img.id);
   const allBuilds = await db.select().from(schema.customImageBuilds)
@@ -338,7 +328,7 @@ async function listImages(ownerUserId) {
   const result = images.map((image) =>
     formatImageRow(image, latestBuildMap.get(image.id) || null),
   );
-  return { images: result, count: result.length, max: MAX_PER_USER };
+  return { images: result, count: result.length, max: null };
 }
 
 async function getImage(ownerUserId, imageId) {
