@@ -3,7 +3,11 @@
   "changes": "Changes",
   "staged": "Staged",
   "unstaged": "Unstaged",
-  "commit": "Commit",
+  "commit": {
+    "commit": "Commit",
+    "commit_message": "Commit message",
+    "ai_generating": "AI is generating…"
+  },
   "commit_message": "Commit message",
   "push": "Push",
   "pull": "Pull",
@@ -42,7 +46,6 @@
   "create_pull_request_btn": "Create pull request",
   "merge_pull_request": "Merge Pull Request",
   "close_pull_request": "Close Pull Request",
-  "merge": "Merge",
   "close": "Close",
   "approve": "Approve",
   "reopen": "Reopen",
@@ -95,5 +98,10 @@
   "count_one": "{{count}} session",
   "count_other": "{{count}} sessions",
   "model_one": "{{count}} model",
-  "model_other": "{{count}} models"
+  "model_other": "{{count}} models",
+  "pr": {
+    "ai_filling": "AI is generating…",
+    "body_placeholder": "What changed and why"
+  },
+  "commit_ai_generating": "AI is generating…"
 }

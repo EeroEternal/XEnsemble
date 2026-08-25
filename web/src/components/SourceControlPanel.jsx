@@ -739,7 +739,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           <div className="px-5 pb-5 flex flex-col gap-3">
             <textarea
               ref={commitMsgRef}
-              placeholder={generatingMsg ? 'AI 正在总结你的变更…' : t('workspace:dialog.commit_placeholder')}
+              placeholder={generatingMsg ? t('git:commit_ai_generating', { defaultValue: 'AI is generating…' }) : t('workspace:dialog.commit_placeholder')}
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
               onKeyDown={(e) => {

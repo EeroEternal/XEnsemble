@@ -99,11 +99,21 @@ async function generateAIDescription(project, gitOperationService, type, opts = 
     if (type === 'pr') {
         let parsed;
         try {
-            const cleaned = content.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '');
+            const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
             parsed = JSON.parse(cleaned);
         } catch {
-            const firstLine = content.split('\n')[0].replace(/^["'`]|["'`]$/g, '').trim();
-            parsed = { title: firstLine, body: content };
+            parsed = { title: '', body: '' };
+            const titleMatch = content.match(/"title"\s*:\s*"([^"]*)"/);
+            const bodyMatch = content.match(/"body"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+            if (titleMatch) parsed.title = titleMatch[1];
+            if (bodyMatch) parsed.body = bodyMatch[1].replace(/\\n/g, '\n');
+            if (!parsed.title) {
+                const firstLine = content.split('\n')[0]
+                    .replace(/^```(?:json)?\s*/i, '')
+                    .replace(/^["'`]|["'`]$/g, '')
+                    .trim();
+                parsed = { title: firstLine, body: content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim() };
+            }
         }
         return {
             title: String(parsed.title || '').replace(/^["'`]|["'`]$/g, '').trim(),

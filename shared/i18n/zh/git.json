@@ -42,7 +42,6 @@
   "create_pull_request_btn": "创建 Pull Request",
   "merge_pull_request": "合并 Pull Request",
   "close_pull_request": "关闭 Pull Request",
-  "merge": "合并",
   "close": "关闭",
   "approve": "批准",
   "reopen": "重新打开",
@@ -95,5 +94,10 @@
   "count_one": "{{count}} 个会话",
   "count_other": "{{count}} 个会话",
   "model_one": "{{count}} 个模型",
-  "model_other": "{{count}} 个模型"
+  "model_other": "{{count}} 个模型",
+  "pr": {
+    "ai_filling": "AI 正在生成…",
+    "body_placeholder": "描述改动内容和原因"
+  },
+  "commit_ai_generating": "AI 正在生成…"
 }
