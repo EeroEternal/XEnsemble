@@ -10,7 +10,7 @@ export default function SettingsModal({ onClose }) {
       panelClassName={`${consoleDialogPanelClass} w-[800px] max-w-[calc(100vw-2rem)] h-[600px] max-h-[calc(100vh-2rem)]`}
       panelProps={{ 'aria-labelledby': 'settings-modal-title' }}
     >
-      <div className="flex items-center justify-between px-5 pt-3 pb-1 shrink-0">
+      <div className="flex items-center justify-between px-6 pt-3 pb-1 shrink-0">
         <h2 id="settings-modal-title" className="font-bold text-lg text-zinc-900">
           Settings
         </h2>
@@ -23,7 +23,7 @@ export default function SettingsModal({ onClose }) {
           <X className="w-4 h-4" />
         </button>
       </div>
-      <div className="flex-1 min-h-0 px-5 py-3 overflow-hidden">
+      <div className="flex-1 min-h-0 px-6 py-3 overflow-hidden">
         <SettingsShell />
       </div>
     </ConsoleDialogShell>

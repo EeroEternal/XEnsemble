@@ -124,7 +124,7 @@ export default function GitProvidersSettingsPanel() {
   return (
     <div className="space-y-8">
       {/* Git Account Configuration */}
-      <section className="space-y-4">
+      <section className={`${consoleCardClass} p-6 space-y-4`}>
         <h3 className={consoleSectionLabelClass}>Git Account</h3>
 
         <div className="space-y-4">
@@ -162,7 +162,6 @@ export default function GitProvidersSettingsPanel() {
           disabled={providerOAuthConfigured[activeProvider] === false}
         />
       </section>
-      <div className="border-t border-zinc-200" />
       {/* OAuth Application Configuration */}
       <section className={`${consoleCardClass} p-6 space-y-4`}>
         <h3 className={consoleSectionLabelClass}>OAuth Apps</h3>
