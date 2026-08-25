@@ -353,7 +353,7 @@ export function CustomImagesContent() {
                         className="w-full pl-8"
                       />
                     </div>
-                    <div className="mt-1.5 border border-zinc-200 rounded-lg flex-1 min-h-0 overflow-y-auto console-scroll-hidden">
+                    <div className="mt-1.5 border border-zinc-200 rounded-lg flex-1 min-h-0 overflow-y-auto scrollbar-hover">
                       {!filteredComponents.length ? (
                         <p className="px-3 py-4 text-xs text-zinc-400">
                           {catalog?.components?.length ? 'No components match your search.' : 'No components available.'}
@@ -458,7 +458,7 @@ export function CustomImagesContent() {
                   {/* Selected summary */}
                   <div className="min-w-0 flex flex-col min-h-0 overflow-hidden">
                     <div className={consoleSectionLabelClass}>Selected ({selectedComponentIds.length})</div>
-                    <div className="mt-1.5 border border-zinc-200 rounded-lg flex-1 min-h-0 overflow-y-auto console-scroll-hidden">
+                    <div className="mt-1.5 border border-zinc-200 rounded-lg flex-1 min-h-0 overflow-y-auto scrollbar-hover">
                       {selectedComponentIds.length === 0 ? (
                         <p className="px-3 py-4 text-xs text-zinc-400">
                           No components selected yet. Pick from the list to add.
