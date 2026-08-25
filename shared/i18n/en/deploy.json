@@ -10,7 +10,13 @@
     "restart": "Restart",
     "delete": "Delete",
     "copy_url": "Copy URL",
-    "open_in_browser": "Open in browser"
+    "open_in_browser": "Open in browser",
+    "deploy": "Deploy",
+    "deploy_preview": "Deploy preview",
+    "stop_deployment": "Stop deployment",
+    "open_preview_window": "Open preview window",
+    "restart_preview": "Restart preview",
+    "stop_preview": "Stop preview"
   },
   "field": {
     "public_url": "Public URL",

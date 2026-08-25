@@ -104,10 +104,10 @@ function AuthenticatedLayout({
               type="button"
               onClick={() => navigate('/sessions')}
               className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 ${consoleButtonFocusClass}`}
-              title={t('common:action.back')}
+              title={t('sessions:action.back_to_workspaces')}
             >
               <ArrowLeft className="w-3.5 h-3.5" strokeWidth={1.75} />
-              {t('common:action.back')}
+              {t('sessions:action.back_to_workspaces')}
             </button>
           </div>
         ) : (

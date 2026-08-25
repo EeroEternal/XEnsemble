@@ -307,7 +307,7 @@ export default function UsersAdmin() {
                     </div>
                   </td>
                   <td className={consoleTableBodyCellClass}>
-                    <span className="text-xs text-zinc-500">{user.quotas?.resource_tier ?? 'basic'}</span>
+                    <span className="text-xs text-zinc-500 capitalize">{user.quotas?.resource_tier ?? 'basic'}</span>
                   </td>
                   <td className={consoleTableBodyCellClass}>
                     <span className="text-xs text-zinc-500" title={user.last_login_at ? new Date(user.last_login_at).toLocaleString() : undefined}>

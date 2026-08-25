@@ -10,7 +10,13 @@
     "restart": "重启",
     "delete": "删除",
     "copy_url": "复制 URL",
-    "open_in_browser": "在浏览器中打开"
+    "open_in_browser": "在浏览器中打开",
+    "deploy": "部署",
+    "deploy_preview": "部署预览",
+    "stop_deployment": "停止部署",
+    "open_preview_window": "打开预览窗口",
+    "restart_preview": "重启预览",
+    "stop_preview": "停止预览"
   },
   "field": {
     "public_url": "公网 URL",
