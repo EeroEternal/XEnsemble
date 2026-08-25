@@ -44,10 +44,11 @@ i18next.init({
  * @returns {string}
  */
 function t(key, params, locale) {
-  if (locale && locale !== i18next.language) {
-    return i18next.getFixedT(locale).t(key, params);
-  }
-  return i18next.t(key, params);
+    if (locale && locale !== i18next.language) {
+        const fixedT = i18next.getFixedT(locale);
+        return typeof fixedT === 'function' ? fixedT(key, params) : fixedT.t(key, params);
+    }
+    return i18next.t(key, params);
 }
 
 module.exports = { i18next, t };
