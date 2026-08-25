@@ -70,6 +70,7 @@ function ReviewItem({ review }) {
 }
 
 function CommentActionButtons({ comment, isOwnComment, onReply, onEdit, onDelete, disabled }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
       {onReply && (
@@ -77,7 +78,7 @@ function CommentActionButtons({ comment, isOwnComment, onReply, onEdit, onDelete
           type="button"
           onClick={() => onReply(comment)}
           disabled={disabled}
-          title="Reply"
+          title={t('git:reply', { defaultValue: 'Reply' })}
           className={`p-1 rounded text-zinc-400 hover:text-zinc-500 hover:bg-zinc-100 disabled:opacity-40 ${consoleButtonFocusClass}`}
         >
           <CornerDownRight className="h-3 w-3" />
@@ -89,7 +90,7 @@ function CommentActionButtons({ comment, isOwnComment, onReply, onEdit, onDelete
             type="button"
             onClick={() => onEdit(comment)}
             disabled={disabled}
-            title="Edit"
+            title={t('common:action.edit')}
             className={`p-1 rounded text-zinc-400 hover:text-zinc-500 hover:bg-zinc-100 disabled:opacity-40 ${consoleButtonFocusClass}`}
           >
             <Pencil className="h-3 w-3" />
@@ -98,7 +99,7 @@ function CommentActionButtons({ comment, isOwnComment, onReply, onEdit, onDelete
             type="button"
             onClick={() => onDelete(comment)}
             disabled={disabled}
-            title="Delete"
+            title={t('common:action.delete')}
             className={consoleIconButtonDangerClass}
           >
             <Trash2 className="h-3 w-3" />
@@ -226,6 +227,7 @@ function CommentItem({ comment, mrFiles, renderDiffLines, isOwnComment, onReply,
 }
 
 function ThreadGroup({ thread, mrFiles, renderDiffLines, onReply, onEdit, onDelete, actionLoading, replyingTo, replyText, setReplyText, onSendReply, onCancelReply, remoteUsername }) {
+  const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
   const firstComment = thread.comments[0];
   const path = firstComment?.path || '';
@@ -296,7 +298,7 @@ function ThreadGroup({ thread, mrFiles, renderDiffLines, onReply, onEdit, onDele
               <textarea
                 value={replyText}
                 onChange={(e) => setReplyText(e.target.value)}
-                placeholder="Reply…"
+                placeholder={t('git:reply_placeholder', { defaultValue: 'Reply…' })}
                 rows={1}
                 autoFocus
                 onKeyDown={(e) => {
@@ -948,7 +950,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
                             <textarea
                               value={replyText}
                               onChange={(e) => setReplyText(e.target.value)}
-                              placeholder="Reply…"
+                              placeholder={t('git:reply_placeholder', { defaultValue: 'Reply…' })}
                               rows={1}
                               autoFocus
                               onKeyDown={(e) => {
@@ -1024,7 +1026,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
           <textarea
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
-            placeholder="Leave a comment…"
+            placeholder={t('git:comment_placeholder', { defaultValue: 'Leave a comment…' })}
             rows={1}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -1038,7 +1040,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
             type="button"
             onClick={handleSendComment}
             disabled={!commentText.trim() || commentSending}
-            title="Comment (Ctrl+Enter)"
+            title={t('git:comment_shortcut', { defaultValue: 'Comment (Ctrl+Enter)' })}
             className={`shrink-0 flex items-center gap-1 px-2.5 h-7 text-[11px] font-medium rounded-md text-white bg-black hover:bg-zinc-800 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
           >
             {commentSending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}

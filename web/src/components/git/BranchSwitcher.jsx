@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import { GitBranch, Loader2, Check, Plus } from 'lucide-react';
 import * as githubApi from '../../lib/githubApi';
 import {
@@ -17,6 +18,7 @@ import {
 export const GIT_REPO_PROVIDERS = new Set(['github', 'gitlab', 'gitea', 'local_git']);
 
 export default function BranchSwitcher({ projectId, project, git }) {
+  const { t } = useTranslation();
   const branch = git?.branch;
   const operation = git?.operation;
   const switchBranch = git?.switchBranch;
@@ -79,8 +81,8 @@ export default function BranchSwitcher({ projectId, project, git }) {
   useEffect(() => {
     if (menuOpen) {
       setNewName('');
-      const t = setTimeout(() => newInputRef.current?.focus(), 50);
-      return () => clearTimeout(t);
+      const focusTimer = setTimeout(() => newInputRef.current?.focus(), 50);
+      return () => clearTimeout(focusTimer);
     }
   }, [menuOpen]);
 
@@ -95,7 +97,7 @@ export default function BranchSwitcher({ projectId, project, git }) {
           type="button"
           onClick={openMenu}
           disabled={operation === 'switch'}
-          title="Switch branch"
+          title={t('git:switch_branch', { defaultValue: 'Switch branch' })}
           className={`flex items-center gap-1 max-w-[14rem] truncate rounded-md px-2 py-1 text-[13px] font-medium ${transitionBase} ${consoleButtonFocusClass} ${
             menuOpen ? `${bgSecondary} ${textPrimary}` : `text-zinc-700 ${hoverBgTertiary}`
           } disabled:opacity-50`}
@@ -158,14 +160,14 @@ export default function BranchSwitcher({ projectId, project, git }) {
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
-                placeholder="New branch…"
+                placeholder={t('git:new_branch_placeholder', { defaultValue: 'New branch…' })}
                 className={`flex-1 min-w-0 ${consoleInputClass} text-xs font-mono`}
               />
               <button
                 type="button"
                 onClick={handleCreate}
                 disabled={!newName.trim() || operation === 'switch'}
-                title="Create branch"
+                title={t('git:create_branch', { defaultValue: 'Create branch' })}
                 className={`shrink-0 p-1 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-default ${consoleButtonFocusClass}`}
               >
                 {operation === 'switch' ? (

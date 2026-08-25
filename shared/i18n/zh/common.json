@@ -38,7 +38,8 @@
     "disconnect": "断开连接",
     "authorize": "授权",
     "approve": "批准",
-    "reject": "拒绝"
+    "reject": "拒绝",
+    "logout": "退出登录"
   },
   "state": {
     "loading": "加载中…",
@@ -89,7 +90,7 @@
     "search_placeholder": "搜索…",
     "no_matches": "无匹配项",
     "recently_used": "最近使用",
-    "all_agents": "全部 Agent",
+    "all_agents": "全部智能体",
     "select_all": "全选",
     "close": "关闭"
   }

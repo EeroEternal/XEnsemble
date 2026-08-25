@@ -38,7 +38,8 @@
     "disconnect": "Disconnect",
     "authorize": "Authorize",
     "approve": "Approve",
-    "reject": "Reject"
+    "reject": "Reject",
+    "logout": "Log out"
   },
   "state": {
     "loading": "Loading…",

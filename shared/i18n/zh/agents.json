@@ -1,13 +1,13 @@
 {
-  "title": "Agent",
-  "count_one": "{{count}} 个 Agent",
-  "count_other": "{{count}} 个 Agent",
-  "search_placeholder": "搜索 Agent…",
+  "title": "智能体",
+  "count_one": "{{count}} 个智能体",
+  "count_other": "{{count}} 个智能体",
+  "search_placeholder": "搜索智能体…",
   "refresh": "刷新",
-  "add_agent": "添加 Agent",
+  "add_agent": "添加智能体",
   "empty": {
-    "none_registered": "暂无已注册的 Agent。",
-    "no_match": "没有匹配的 Agent。"
+    "none_registered": "暂无已注册的智能体。",
+    "no_match": "没有匹配的智能体。"
   },
   "status": {
     "ready": "就绪",
@@ -45,8 +45,8 @@
     "env_required": "必需的环境变量"
   },
   "config": {
-    "agent_variables": "Agent 变量",
-    "agent_variables_desc": "在启动时传递给 Agent 进程的环境变量和密钥。",
+    "agent_variables": "智能体变量",
+    "agent_variables_desc": "在启动时传递给智能体进程的环境变量和密钥。",
     "configuration_files": "配置文件",
     "load_example": "加载示例",
     "add_env_var": "添加环境变量",
@@ -54,7 +54,7 @@
     "loading": "加载中…"
   },
   "register_dialog": {
-    "title": "注册新 Agent",
+    "title": "注册新智能体",
     "identity": "身份",
     "execution": "执行",
     "id": "ID",
@@ -65,12 +65,12 @@
     "saving": "保存中…",
     "save": "保存",
     "cancel": "取消",
-    "registered_toast": "Agent 已注册。"
+    "registered_toast": "智能体已注册。"
   },
   "config_dialog": {
     "title": "配置 - {{name}}",
-    "gateway_desc": "通过共享网关路由此 Agent。没有自己 API 密钥的用户将使用网关密钥。",
-    "saved_toast": "Agent 配置已保存。",
+    "gateway_desc": "通过共享网关路由此智能体。没有自己 API 密钥的用户将使用网关密钥。",
+    "saved_toast": "智能体配置已保存。",
     "saving": "保存中…",
     "save": "保存",
     "cancel": "取消"

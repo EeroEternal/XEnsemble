@@ -555,7 +555,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 type="button"
                 onClick={handlePull}
                 disabled={pulling || gitChanges?.operation === 'pull'}
-                title="Pull latest changes"
+                title={t('workspace:action.pull_latest')}
                 className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`}
               >
                 {pulling || gitChanges?.operation === 'pull' ? (

@@ -1,5 +1,8 @@
 {
   "source_control": "版本控制",
+  "switch_branch": "切换分支",
+  "new_branch_placeholder": "新分支…",
+  "create_branch": "创建分支",
   "changes": "更改",
   "staged": "已暂存",
   "unstaged": "未暂存",
@@ -51,6 +54,10 @@
   "reopen_hint": "重新打开 Pull Request",
   "back_to_list": "返回列表",
   "select_pr_hint": "从列表中选择一个 Pull Request 以查看审查",
+  "reply": "回复",
+  "reply_placeholder": "回复…",
+  "comment_placeholder": "发表评论…",
+  "comment_shortcut": "评论 (Ctrl+Enter)",
   "merge_confirm": "合并此 Pull Request？此操作无法撤销。",
   "close_confirm": "关闭此 Pull Request 而不合并？",
   "status": {

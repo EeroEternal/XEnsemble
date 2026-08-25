@@ -31,7 +31,7 @@
     "tier_hint": "资源等级 — 控制 LLM 请求速率",
     "last_login": "最后登录",
     "quota": "配额",
-    "agent_auth": "Agent 授权",
+    "agent_auth": "智能体授权",
     "reset_password": "重置密码",
     "reset_password_optional": "重置密码（可选）",
     "leave_blank": "留空则保持当前密码",
@@ -65,6 +65,6 @@
     "user_deleted": "用户已删除。",
     "password_reset": "密码已重置。",
     "quota_updated": "配额已更新。",
-    "agents_granted": "Agent 授权已更新。"
+    "agents_granted": "智能体授权已更新。"
   }
 }

@@ -1,5 +1,8 @@
 {
   "source_control": "Source Control",
+  "switch_branch": "Switch branch",
+  "new_branch_placeholder": "New branch…",
+  "create_branch": "Create branch",
   "changes": "Changes",
   "staged": "Staged",
   "unstaged": "Unstaged",
@@ -55,6 +58,10 @@
   "reopen_hint": "Reopen pull request",
   "back_to_list": "Back to list",
   "select_pr_hint": "Select a pull request from the list to view review",
+  "reply": "Reply",
+  "reply_placeholder": "Reply…",
+  "comment_placeholder": "Leave a comment…",
+  "comment_shortcut": "Comment (Ctrl+Enter)",
   "merge_confirm": "Merge this pull request? This action cannot be undone.",
   "close_confirm": "Close this pull request without merging?",
   "status": {
