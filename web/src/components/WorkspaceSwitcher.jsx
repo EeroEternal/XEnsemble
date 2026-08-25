@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import {
   ChevronsUpDown,
@@ -42,6 +43,7 @@ export default function WorkspaceSwitcher({
   onCreate,
   onDelete,
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [menuRect, setMenuRect] = useState(null);
@@ -50,7 +52,7 @@ export default function WorkspaceSwitcher({
   const searchInputRef = useRef(null);
 
   const currentProject = projects.find((p) => p.id === activeWorkspaceId) || null;
-  const currentName = currentProject?.name || 'Select workspace';
+  const currentName = currentProject?.name || t('sessions:label.select_workspace');
 
   const updateMenuRect = useCallback(() => {
     const el = rootRef.current;
@@ -118,7 +120,7 @@ export default function WorkspaceSwitcher({
     ? (isGitLinkedProject(currentProject)
       ? [getProviderLabel(currentProject.repoProvider), getWorkspaceRepoLabel(currentProject), currentProject.currentBranch ? `branch: ${currentProject.currentBranch}` : null].filter(Boolean).join(' · ')
       : currentProject.name)
-    : 'Select workspace';
+    : t('sessions:label.select_workspace');
 
   const menu = open && menuRect ? (
     <div
@@ -140,7 +142,7 @@ export default function WorkspaceSwitcher({
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search"
+            placeholder={t('sessions:search')}
             className="min-w-0 flex-1 bg-transparent text-xs text-zinc-700 placeholder:text-zinc-400 outline-none"
           />
         </label>
@@ -148,7 +150,7 @@ export default function WorkspaceSwitcher({
       <div className="flex-1 min-h-0 overflow-y-auto px-1 pb-1">
         {filtered.length === 0 ? (
           <p className={`px-2.5 py-2 text-xs ${textPlaceholder}`}>
-            {projects.length === 0 ? 'No workspaces yet' : 'No matching workspaces'}
+            {projects.length === 0 ? t('sessions:label.no_workspaces') : t('sessions:label.no_matching_workspaces')}
           </p>
         ) : (
           filtered.map((p) => {
@@ -190,8 +192,8 @@ export default function WorkspaceSwitcher({
                 </button>
                 <button
                   type="button"
-                  title="Delete workspace"
-                  aria-label="Delete workspace"
+                  title={t('sessions:label.delete_workspace')}
+                  aria-label={t('sessions:label.delete_workspace')}
                   onClick={(e) => {
                     e.stopPropagation();
                     const ws = {
@@ -218,7 +220,7 @@ export default function WorkspaceSwitcher({
           className={`flex w-full items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium text-zinc-700 ${hoverBgTertiary} ${transitionBase} ${consoleButtonFocusClass}`}
         >
           <Plus className="w-3.5 h-3.5" strokeWidth={1.75} />
-          New workspace
+          {t('sessions:label.new_workspace')}
         </button>
       </div>
     </div>

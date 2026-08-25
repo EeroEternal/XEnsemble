@@ -5,7 +5,11 @@
     "editor": "编辑器",
     "preview": "预览",
     "deploy": "部署",
-    "source_control": "版本控制"
+    "source_control": "版本控制",
+    "changes": "更改",
+    "pull_requests": "Pull Requests",
+    "terminal": "终端",
+    "browser": "浏览器"
   },
   "empty": {
     "no_files": "暂无文件"
@@ -24,11 +28,47 @@
     "download": "下载",
     "rename": "重命名",
     "delete": "删除",
-    "refresh": "刷新"
+    "refresh": "刷新",
+    "copy_path": "复制路径",
+    "create": "创建",
+    "creating": "创建中…",
+    "renaming": "重命名中…",
+    "cancel": "取消",
+    "discard_changes": "放弃更改",
+    "discard_all": "全部放弃",
+    "collapse_diff": "折叠差异",
+    "expand_diff": "展开差异",
+    "collapse_all": "全部折叠",
+    "expand_all": "全部展开",
+    "collapse_sidebar": "折叠侧边栏",
+    "more_git_actions": "更多 Git 操作",
+    "stage_and_commit": "暂存并提交",
+    "committing": "提交中…",
+    "stage_all_and_commit": "暂存所有更改并提交",
+    "pull_latest": "拉取最新更改",
+    "create_pr": "创建 PR",
+    "create_pr_hint": "将推送并创建 Pull Request",
+    "set": "设置",
+    "edit": "编辑"
   },
   "label": {
     "unsaved_changes": "未保存的更改",
-    "saved": "已保存。"
+    "saved": "已保存。",
+    "unpushed": "未推送",
+    "binary_file": "二进制文件，无法显示文本差异",
+    "content_truncated": "内容过大，已截断",
+    "no_author": "未设置作者信息"
+  },
+  "dialog": {
+    "stage_commit_title": "暂存并提交更改",
+    "commit_placeholder": "描述你做了哪些更改",
+    "set_author_title": "设置 Git 作者信息",
+    "name": "姓名",
+    "email": "邮箱",
+    "confirm": "确认",
+    "delete_folder": "删除文件夹",
+    "delete_file": "删除文件",
+    "confirm_delete": "确定删除 \"{{name}}\"？此操作无法撤销。"
   },
   "error": {
     "load_files_failed": "加载工作区文件失败",

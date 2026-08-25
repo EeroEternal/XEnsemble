@@ -21,10 +21,28 @@
   },
   "action": {
     "stop_and_remove": "Stop and remove",
-    "remove": "Remove"
+    "remove": "Remove",
+    "restart_session": "Restart session",
+    "start_session": "Start session",
+    "restarting": "Restarting…",
+    "starting": "Starting…",
+    "restarting_session": "Restarting session",
+    "starting_session": "Starting session",
+    "hide_side_panel": "Hide side panel",
+    "show_side_panel": "Show side panel"
   },
   "label": {
-    "unassigned": "Unassigned"
+    "unassigned": "Unassigned",
+    "select_workspace": "Select workspace",
+    "new_workspace": "New workspace",
+    "delete_workspace": "Delete workspace",
+    "no_workspaces": "No workspaces yet",
+    "no_matching_workspaces": "No matching workspaces"
+  },
+  "state": {
+    "preparing_environment": "Preparing your environment…",
+    "preparing_environment_desc": "Pulling image and starting virtual machine. This usually takes less than a minute.",
+    "session_failed": "Session failed to start"
   },
   "error": {
     "no_workspace": "Could not create workspace for this session.",

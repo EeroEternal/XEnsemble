@@ -36,6 +36,14 @@
   "review": "审查",
   "connected": "已连接",
   "not_connected": "未连接",
+  "select_repository": "选择仓库",
+  "status": {
+    "modified": "已修改",
+    "added": "已添加",
+    "deleted": "已删除",
+    "untracked": "未跟踪",
+    "renamed": "已重命名"
+  },
   "empty": {
     "no_changes": "无更改",
     "no_commits": "暂无提交"

@@ -5,7 +5,11 @@
     "editor": "Editor",
     "preview": "Preview",
     "deploy": "Deploy",
-    "source_control": "Source Control"
+    "source_control": "Source Control",
+    "changes": "Changes",
+    "pull_requests": "Pull Requests",
+    "terminal": "Terminal",
+    "browser": "Browser"
   },
   "empty": {
     "no_files": "No files"
@@ -24,11 +28,47 @@
     "download": "Download",
     "rename": "Rename",
     "delete": "Delete",
-    "refresh": "Refresh"
+    "refresh": "Refresh",
+    "copy_path": "Copy Path",
+    "create": "Create",
+    "creating": "Creating…",
+    "renaming": "Renaming…",
+    "cancel": "Cancel",
+    "discard_changes": "Discard changes",
+    "discard_all": "Discard All",
+    "collapse_diff": "Collapse diff",
+    "expand_diff": "Expand diff",
+    "collapse_all": "Collapse all",
+    "expand_all": "Expand all",
+    "collapse_sidebar": "Collapse sidebar",
+    "more_git_actions": "More git actions",
+    "stage_and_commit": "Stage & commit",
+    "committing": "Committing…",
+    "stage_all_and_commit": "Stage all changes and commit",
+    "pull_latest": "Pull latest changes",
+    "create_pr": "Create PR",
+    "create_pr_hint": "Will push and create pull request",
+    "set": "Set",
+    "edit": "Edit"
   },
   "label": {
     "unsaved_changes": "Unsaved changes",
-    "saved": "Saved."
+    "saved": "Saved.",
+    "unpushed": "unpushed",
+    "binary_file": "Binary file, cannot display text diff",
+    "content_truncated": "Content too large, truncated",
+    "no_author": "No author identity set"
+  },
+  "dialog": {
+    "stage_commit_title": "Stage & commit changes",
+    "commit_placeholder": "Describe what changed",
+    "set_author_title": "Set Git author info",
+    "name": "Name",
+    "email": "Email",
+    "confirm": "Confirm",
+    "delete_folder": "Delete Folder",
+    "delete_file": "Delete File",
+    "confirm_delete": "Delete \"{{name}}\"? This cannot be undone."
   },
   "error": {
     "load_files_failed": "Failed to load workspace files",

@@ -21,10 +21,28 @@
   },
   "action": {
     "stop_and_remove": "停止并移除",
-    "remove": "移除"
+    "remove": "移除",
+    "restart_session": "重启会话",
+    "start_session": "启动会话",
+    "restarting": "重启中…",
+    "starting": "启动中…",
+    "restarting_session": "正在重启会话",
+    "starting_session": "正在启动会话",
+    "hide_side_panel": "隐藏侧边栏",
+    "show_side_panel": "显示侧边栏"
   },
   "label": {
-    "unassigned": "未分配"
+    "unassigned": "未分配",
+    "select_workspace": "选择工作区",
+    "new_workspace": "新建工作区",
+    "delete_workspace": "删除工作区",
+    "no_workspaces": "暂无工作区",
+    "no_matching_workspaces": "无匹配工作区"
+  },
+  "state": {
+    "preparing_environment": "正在准备你的环境…",
+    "preparing_environment_desc": "正在拉取镜像并启动虚拟机。通常不到一分钟。",
+    "session_failed": "会话启动失败"
   },
   "error": {
     "no_workspace": "无法为此会话创建工作区。",

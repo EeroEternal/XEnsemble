@@ -8,7 +8,6 @@ import {
   Globe,
   GitBranch,
   Gauge,
-  Languages,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
@@ -21,7 +20,6 @@ const ALL_TABS = [
   { id: 'general', labelKey: 'settings:tabs.general', icon: Settings2, route: '/settings', adminOnly: true },
   { id: 'git', labelKey: 'settings:tabs.git_providers', icon: GitBranch, route: '/settings', adminOnly: false },
   { id: 'quota', labelKey: 'settings:tabs.quota', icon: Gauge, route: '/settings', adminOnly: false },
-  { id: 'language', labelKey: 'settings:tabs.language', icon: Languages, route: '/settings', adminOnly: false },
   { id: 'images', labelKey: 'images:agent_images', icon: Container, route: '/custom-images', adminOnly: true },
   { id: 'agents', labelKey: 'agents:title', icon: Bot, route: '/admin/agents', adminOnly: true },
   { id: 'users', labelKey: 'users:title', icon: Users, route: '/admin/users', adminOnly: true },
@@ -42,7 +40,7 @@ export default function SettingsTabSidebar({ activeTab, onSectionChange, user, o
           const Icon = tab.icon;
           const isActive = tab.id === activeTab;
           const handleClick = () => {
-            if (tab.id === 'general' || tab.id === 'git' || tab.id === 'quota' || tab.id === 'language') {
+            if (tab.id === 'general' || tab.id === 'git' || tab.id === 'quota') {
               onSectionChange?.(tab.id);
             } else if (tab.route) {
               navigate(tab.route);

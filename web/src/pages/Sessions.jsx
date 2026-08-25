@@ -38,6 +38,7 @@ import {
   PanelRightOpen,
 } from 'lucide-react';
 import ByokConfigForm from '../components/ByokConfigForm';
+import LanguageToggle from '../components/LanguageToggle';
 import { formatQuotaExceeded } from '../lib/quotaLabels';
 import {
   archiveSession,
@@ -1255,6 +1256,7 @@ export default React.forwardRef(function Sessions({
                 )}
               </div>
               <div className="flex items-center gap-0.5 shrink-0">
+                <LanguageToggle />
                 {activeSession && (
                   <>
                     <div className="mx-0.5 h-5 w-px bg-zinc-200" />

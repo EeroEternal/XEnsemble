@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, FileText, Plus } from 'lucide-react';
 import {
   consoleInputClass,
@@ -27,6 +28,7 @@ export default function AgentConfigEditor({
   onEnvVarsChange,
   loading = false,
 }) {
+  const { t } = useTranslation();
   const [showConfigFiles, setShowConfigFiles] = useState(true);
 
   const handleConfigFileContent = (path, content) => {
@@ -54,7 +56,7 @@ export default function AgentConfigEditor({
   if (loading) {
     return (
       <p className={`text-sm ${textPlaceholder} flex items-center gap-2`}>
-        <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+        <Loader2 className="w-4 h-4 animate-spin" /> {t('agents:config.loading')}
       </p>
     );
   }
@@ -71,7 +73,7 @@ export default function AgentConfigEditor({
             className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${textPlaceholder} hover:${textPrimary} ${transitionBase} mb-2`}
           >
             <FileText className="w-3.5 h-3.5" />
-            Configuration Files
+            {t('agents:config.configuration_files')}
           </button>
           {showConfigFiles && (
             <div className="space-y-3">
@@ -92,7 +94,7 @@ export default function AgentConfigEditor({
                           onClick={() => handleLoadExample(fileDecl)}
                           className={`text-xs font-medium ${textPlaceholder} hover:${textPrimary} ${transitionBase}`}
                         >
-                          Load Example
+                          {t('agents:config.load_example')}
                         </button>
                       )}
                     </div>
@@ -114,10 +116,10 @@ export default function AgentConfigEditor({
 
       <div>
         <label className={`block text-xs font-semibold uppercase tracking-wider ${textPlaceholder} mb-1`}>
-          Agent variables
+          {t('agents:config.agent_variables')}
         </label>
         <p className={`text-xs ${textPlaceholder} mb-2`}>
-          Environment variables and secrets passed to the agent process at startup.
+          {t('agents:config.agent_variables_desc')}
         </p>
         <div className="space-y-2">
           {envVars.map((pair, idx) => (
@@ -141,7 +143,7 @@ export default function AgentConfigEditor({
                 type="button"
                 onClick={() => handleRemoveEnv(idx)}
                 className={`flex-shrink-0 mt-1.5 ${textPlaceholder} hover:text-red-600 ${transitionBase}`}
-                title="Remove"
+                title={t('agents:config.remove')}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="18" y1="6" x2="6" y2="18" />
@@ -155,7 +157,7 @@ export default function AgentConfigEditor({
             onClick={() => onEnvVarsChange([...envVars, { key: '', value: '' }])}
             className={`flex items-center gap-1 text-sm ${textPlaceholder} hover:${textPrimary} ${transitionBase}`}
           >
-            <Plus className="w-3.5 h-3.5" /> Add env var
+            <Plus className="w-3.5 h-3.5" /> {t('agents:config.add_env_var')}
           </button>
         </div>
       </div>

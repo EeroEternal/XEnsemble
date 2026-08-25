@@ -7,7 +7,6 @@ import GeneralSettingsPanel from './GeneralSettingsPanel';
 import GitHubSettingsPanel from './GitHubSettingsPanel';
 import GitProvidersSettingsPanel from './GitProvidersSettingsPanel';
 import QuotaSettingsPanel from './QuotaSettingsPanel';
-import LanguageSettingsPanel from './LanguageSettingsPanel';
 
 const SECTION_TITLES = {
   general: 'General',
@@ -15,7 +14,6 @@ const SECTION_TITLES = {
   'git-providers': 'Git',
   github: 'Git',
   quota: 'Quota',
-  language: 'Language',
 };
 
 export default function SettingsShell({ section = 'general' }) {
@@ -30,7 +28,6 @@ export default function SettingsShell({ section = 'general' }) {
   else if (section === 'git-providers' && isAdmin) panel = <GitProvidersSettingsPanel />;
   else if (section === 'github' && !isAdmin) panel = <GitHubSettingsPanel />;
   else if (section === 'quota') panel = <QuotaSettingsPanel />;
-  else if (section === 'language') panel = <LanguageSettingsPanel />;
 
   return (
     <div className={consoleAdminPageClass}>

@@ -43,5 +43,14 @@
     "cmd": "命令",
     "args": "参数",
     "env_required": "必需的环境变量"
+  },
+  "config": {
+    "agent_variables": "Agent 变量",
+    "agent_variables_desc": "在启动时传递给 Agent 进程的环境变量和密钥。",
+    "configuration_files": "配置文件",
+    "load_example": "加载示例",
+    "add_env_var": "添加环境变量",
+    "remove": "移除",
+    "loading": "加载中…"
   }
 }

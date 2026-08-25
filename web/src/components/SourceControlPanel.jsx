@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import {
   GitCommit, GitPullRequest, RefreshCw, PanelLeftClose,
@@ -38,15 +39,28 @@ const GIT_STATUS_COLORS = {
   'R ': 'text-black',
 };
 
-const GIT_STATUS_DESC = {
-  'M ': 'Modified', ' M': 'Modified', 'MM': 'Modified',
-  'A ': 'Added', 'AM': 'Added',
-  'D ': 'Deleted',
-  '??': 'Untracked',
-  'R ': 'Renamed',
-};
+function getGitStatusDesc(status, t) {
+  switch (status) {
+    case 'M ':
+    case ' M':
+    case 'MM':
+      return t('git:status.modified');
+    case 'A ':
+    case 'AM':
+      return t('git:status.added');
+    case 'D ':
+      return t('git:status.deleted');
+    case '??':
+      return t('git:status.untracked');
+    case 'R ':
+      return t('git:status.renamed');
+    default:
+      return '';
+  }
+}
 
 export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile, onCollapse, provider, sessionLive }) {
+  const { t } = useTranslation();
   const { showToast } = useToast();
   const [commitMessage, setCommitMessage] = useState('');
   const [committing, setCommitting] = useState(false);
@@ -161,9 +175,9 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       paths: allPaths,
       title: 'Discard All Changes',
       message: `Discard all ${allPaths.length} change(s)? This cannot be undone.`,
-      confirmLabel: 'Discard All',
+      confirmLabel: t('workspace:action.discard_all'),
     });
-  }, [gitStagedFiles, gitUnstagedFiles]);
+  }, [gitStagedFiles, gitUnstagedFiles, t]);
 
   const cancelDiscard = useCallback(() => setDiscardConfirm(null), []);
 
@@ -401,7 +415,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   const renderFileRow = (f, depth) => {
     const label = GIT_STATUS_LABELS[f.status] || f.status;
     const colorCls = GIT_STATUS_COLORS[f.status] || 'text-zinc-400';
-    const desc = GIT_STATUS_DESC[f.status] || '';
+    const desc = getGitStatusDesc(f.status, t);
     const isExpanded = expandedFiles.has(f.path);
     const diffEntry = fileDiffs[f.path];
     const diffText = typeof diffEntry === 'string' ? diffEntry : diffEntry?.diff;
@@ -414,7 +428,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           <button
             onClick={() => toggleFileExpand(f.path)}
             className="shrink-0 p-0.5 text-zinc-400 hover:text-zinc-600"
-            title={isExpanded ? 'Collapse diff' : 'Expand diff'}
+            title={isExpanded ? t('workspace:action.collapse_diff') : t('workspace:action.expand_diff')}
           >
             {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           </button>
@@ -430,7 +444,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           </button>
           <button
             onClick={() => requestDiscardFile(f.path)}
-            title="Discard changes"
+            title={t('workspace:action.discard_changes')}
             className={`shrink-0 p-1 rounded text-zinc-400 hover:text-red-600 hover:bg-zinc-200 opacity-0 group-hover:opacity-100 focus:opacity-100 ${consoleButtonFocusClass}`}
           >
             <RotateCcw className="h-3 w-3" />
@@ -445,7 +459,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             ) : diffEntry != null ? (
               diffBinary ? (
                 <div className="px-3 py-3 text-[11px] text-zinc-500" data-testid="inline-diff-binary">
-                  Binary file, cannot display text diff
+                  {t('workspace:label.binary_file')}
                 </div>
               ) : (
                 <div className="text-[11px] leading-relaxed overflow-x-auto font-mono select-text"
@@ -453,7 +467,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                   <DiffText diff={diffText} />
                   {diffTruncated && (
                     <div className="px-2 py-1 text-amber-700 bg-amber-50 border-t border-amber-200" data-testid="inline-diff-truncated">
-                      Content too large, truncated
+                      {t('workspace:label.content_truncated')}
                     </div>
                   )}
                 </div>
@@ -500,7 +514,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           {(gitChanges?.ahead > 0) && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-[11px] font-medium text-amber-700" title={`${gitChanges.ahead} committed but not pushed`}>
               <Upload className="h-3 w-3" />
-              {gitChanges.ahead} unpushed
+              {gitChanges.ahead} {t('workspace:label.unpushed')}
             </span>
           )}
         </div>
@@ -511,7 +525,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 type="button"
                 onClick={() => setShowCommitDialog(true)}
                 disabled={committing || gitChanges?.operation === 'commit'}
-                title="Stage all changes and commit"
+                title={t('workspace:action.stage_all_and_commit')}
                 className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`}
               >
                 {committing || gitChanges?.operation === 'commit' ? (
@@ -519,7 +533,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 ) : (
                   <GitCommit className="h-3.5 w-3.5" />
                 )}
-                Commit
+                {t('git:commit')}
               </button>
             ) : gitChanges?.ahead > 0 ? (
               <button
@@ -534,7 +548,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 ) : (
                   <Upload className="h-3.5 w-3.5" />
                 )}
-                Push
+                {t('git:push')}{gitChanges?.ahead > 1 ? ` (${gitChanges.ahead})` : ''}
               </button>
             ) : (
               <button
@@ -549,15 +563,15 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 ) : (
                   <Download className="h-3.5 w-3.5" />
                 )}
-                Pull
+                {t('git:pull')}
               </button>
             )}
             <button
               ref={actionMenuBtnRef}
               type="button"
               onClick={() => setActionMenuOpen((v) => !v)}
-              title="More git actions"
-              aria-label="More git actions"
+              title={t('workspace:action.more_git_actions')}
+              aria-label={t('workspace:action.more_git_actions')}
               aria-haspopup="menu"
               aria-expanded={actionMenuOpen}
               className={`flex items-center px-1.5 text-zinc-500 hover:bg-zinc-100 border-l border-zinc-200 ${consoleButtonFocusClass} ${actionMenuOpen ? 'bg-zinc-100 text-zinc-900' : ''}`}
@@ -567,7 +581,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           </div>
           {gitHasChanges && (
             <button
-              title={allExpanded ? 'Collapse all' : 'Expand all'}
+              title={allExpanded ? t('workspace:action.collapse_all') : t('workspace:action.expand_all')}
               onClick={toggleExpandAll}
               className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
             >
@@ -575,7 +589,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             </button>
           )}
           <button
-            title="Refresh"
+            title={t('workspace:action.refresh')}
             onClick={() => gitChanges?.fetchStatus()}
             className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
           >
@@ -583,7 +597,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           </button>
           {onCollapse && (
             <button
-              title="Collapse sidebar"
+              title={t('workspace:action.collapse_sidebar')}
               onClick={onCollapse}
               className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
             >
@@ -650,7 +664,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             ) : (
               <Download className="h-3.5 w-3.5" />
             )}
-            Pull{gitChanges?.behind > 0 ? ` (${gitChanges.behind})` : ''}
+            {t('git:pull')}{gitChanges?.behind > 0 ? ` (${gitChanges.behind})` : ''}
           </button>
           {!isLocalGit && (
             <button
@@ -665,7 +679,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               ) : (
                 <Upload className="h-3.5 w-3.5" />
               )}
-              Push
+              {t('git:push')}{gitChanges?.ahead > 0 ? ` (${gitChanges.ahead})` : ''}
             </button>
           )}
           <button
@@ -676,7 +690,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
           >
             <GitCommit className="h-3.5 w-3.5" />
-            Commit
+            {t('git:commit')}
           </button>
           {!isLocalGit && (
             <button
@@ -684,11 +698,11 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               role="menuitem"
               disabled={!branch}
               onClick={handleOpenCreatePR}
-              title="Will push and create pull request"
+              title={t('workspace:action.create_pr_hint')}
               className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
             >
               <GitPullRequest className="h-3.5 w-3.5" />
-              Create PR
+              {t('git:create_pr')}
             </button>
           )}
           {gitHasChanges && (
@@ -700,7 +714,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-red-600 hover:bg-red-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
             >
               {discarding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-              Discard All
+              {t('workspace:action.discard_all')}
             </button>
           )}
         </div>,
@@ -713,19 +727,19 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
         sourceBranch={branch}
         defaultTargetBranch="main"
         onClose={() => setCreatePROpen(false)}
-        onCreated={() => { setCreatePROpen(false); gitChanges?.fetchStatus?.({ silent: true }); showToast('success', 'Pull request created.'); }}
+        onCreated={() => { setCreatePROpen(false); gitChanges?.fetchStatus?.({ silent: true }); showToast('success', t('git:toast.pr_created')); }}
       />
 
       {/* Commit dialog */}
       {showCommitDialog && (
         <ConsoleDialogShell onClose={() => setShowCommitDialog(false)} panelClassName={consoleDialogSmClass}>
           <div className="px-5 pt-5 pb-2 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-zinc-900">Stage & commit changes</h3>
+            <h3 className="text-sm font-semibold text-zinc-900">{t('workspace:dialog.stage_commit_title')}</h3>
           </div>
           <div className="px-5 pb-5 flex flex-col gap-3">
             <textarea
               ref={commitMsgRef}
-              placeholder={generatingMsg ? 'AI 正在总结你的变更…' : 'Describe what changed'}
+              placeholder={generatingMsg ? 'AI 正在总结你的变更…' : t('workspace:dialog.commit_placeholder')}
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
               onKeyDown={(e) => {
@@ -742,14 +756,14 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               <span className="text-xs text-zinc-500 truncate">
                 {authorName && authorEmail
                   ? `${authorName} <${authorEmail}>`
-                  : 'No author identity set'}
+                  : t('workspace:label.no_author')}
               </span>
               <button
                 type="button"
                 onClick={() => setShowAuthorDialog(true)}
                 className={`text-xs text-black hover:text-zinc-800 shrink-0 ${consoleButtonFocusClass}`}
               >
-                {authorName ? 'Edit' : 'Set'}
+                {authorName ? t('workspace:action.edit') : t('workspace:action.set')}
               </button>
             </div>
           </div>
@@ -759,7 +773,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               onClick={() => setShowCommitDialog(false)}
               className={buttonClass('secondary', 'sm')}
             >
-              Cancel
+              {t('workspace:action.cancel')}
             </button>
             <button
               type="button"
@@ -767,7 +781,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               disabled={!commitMessage.trim() || committing}
               className={buttonClass('primary', 'sm')}
             >
-              {committing ? 'Committing…' : 'Stage & commit'}
+              {committing ? t('workspace:action.committing') : t('workspace:action.stage_and_commit')}
             </button>
           </div>
         </ConsoleDialogShell>
@@ -777,20 +791,20 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       {showAuthorDialog && (
         <ConsoleDialogShell onClose={() => setShowAuthorDialog(false)} panelClassName={consoleDialogSmClass}>
           <div className="px-5 pt-5 pb-2">
-            <h3 className="text-sm font-semibold text-zinc-900">Set Git author info</h3>
+            <h3 className="text-sm font-semibold text-zinc-900">{t('workspace:dialog.set_author_title')}</h3>
           </div>
           <div className="px-5 pb-5 flex flex-col gap-3">
             <input
               ref={authorNameRef}
               type="text"
-              placeholder="Name"
+              placeholder={t('workspace:dialog.name')}
               value={authorName}
               onChange={(e) => setAuthorName(e.target.value)}
               className={`w-full ${consoleInputClass} text-xs`}
             />
             <input
               type="email"
-              placeholder="Email"
+              placeholder={t('workspace:dialog.email')}
               value={authorEmail}
               onChange={(e) => setAuthorEmail(e.target.value)}
               className={`w-full ${consoleInputClass} text-xs`}
@@ -801,14 +815,14 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               onClick={() => setShowAuthorDialog(false)}
               className={buttonClass('secondary', 'sm')}
             >
-              Cancel
+              {t('workspace:action.cancel')}
             </button>
             <button
               onClick={handleAuthorConfirm}
               disabled={!authorName.trim() || !authorEmail.trim()}
               className={buttonClass('primary', 'sm')}
             >
-              Confirm
+              {t('workspace:dialog.confirm')}
             </button>
           </div>
         </ConsoleDialogShell>
@@ -839,7 +853,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 disabled={discarding}
                 className={`${buttonClass('secondary', 'sm')} ${consoleButtonFocusClass}`}
               >
-                Cancel
+                {t('workspace:action.cancel')}
               </button>
               <button
                 type="button"

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, Search, Loader2, Check, GitBranch, Plus } from 'lucide-react';
 import { useGitProvider } from '../../hooks/useGitProvider';
 import { useToast } from '../Toast';
@@ -21,6 +22,7 @@ export default function ProjectSourceSelect({
   onImported,
   disabled,
 }) {
+  const { t } = useTranslation();
   const { showToast } = useToast();
   const gh = useGitProvider('github');
   const gl = useGitProvider('gitlab');
@@ -125,7 +127,7 @@ export default function ProjectSourceSelect({
     await providers[provider].connect();
   };
 
-  const triggerLabel = importedProject ? importedProject.name : 'Select repository';
+  const triggerLabel = importedProject ? importedProject.name : t('git:select_repository');
 
   return (
     <div className="relative" ref={rootRef}>

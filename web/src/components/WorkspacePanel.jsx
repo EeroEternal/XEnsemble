@@ -32,20 +32,20 @@ function DiffViewerFallback() {
   );
 }
 
-const PINNED_TABS = [
-  { key: 'files', label: 'Files', icon: Files },
-  { key: 'changes', label: 'Changes', icon: GitBranch },
+const PINNED_TAB_DEFS = [
+  { key: 'files', labelKey: 'workspace:files', icon: Files },
+  { key: 'changes', labelKey: 'workspace:tabs.changes', icon: GitBranch },
 ];
 
-const ADDABLE_TABS = [
-  { key: 'pullrequests', label: 'Pull Requests', icon: GitPullRequest },
-  { key: 'terminal', label: 'Terminal', icon: Terminal },
-  { key: 'preview', label: 'Preview', icon: Monitor },
-  { key: 'browser', label: 'Browser', icon: Globe },
-  { key: 'deploy', label: 'Deploy', icon: Rocket },
+const ADDABLE_TAB_DEFS = [
+  { key: 'pullrequests', labelKey: 'git:pull_requests', icon: GitPullRequest },
+  { key: 'terminal', labelKey: 'workspace:tabs.terminal', icon: Terminal },
+  { key: 'preview', labelKey: 'workspace:tabs.preview', icon: Monitor },
+  { key: 'browser', labelKey: 'workspace:tabs.browser', icon: Globe },
+  { key: 'deploy', labelKey: 'workspace:tabs.deploy', icon: Rocket },
 ];
 
-const ADDABLE_KEYS = new Set(ADDABLE_TABS.map((t) => t.key));
+const ADDABLE_KEYS = new Set(ADDABLE_TAB_DEFS.map((t) => t.key));
 
 function migrateTabKey(key) {
   if (key === 'git') return 'changes';
@@ -285,9 +285,9 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
     setContextMenu(null);
     const label = node.name || node.path;
     const ok = await confirm({
-      title: node.type === 'directory' ? 'Delete Folder' : 'Delete File',
-      message: `Delete "${label}"? This cannot be undone.`,
-      confirmLabel: 'Delete',
+      title: node.type === 'directory' ? t('workspace:dialog.delete_folder', { defaultValue: 'Delete Folder' }) : t('workspace:dialog.delete_file', { defaultValue: 'Delete File' }),
+      message: t('workspace:dialog.confirm_delete', { name: label }),
+      confirmLabel: t('workspace:action.delete'),
       variant: 'danger',
       container: panelRootRef.current,
     });
@@ -429,29 +429,32 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   const isExternalGit = provider && provider !== 'none' && provider !== 'local_git';
 
   const visibleTabs = useMemo(() => {
-    const pinned = PINNED_TABS.map((t) => (
-      t.key === 'changes' ? { ...t, badge: changeCount } : t
-    ));
+    const pinned = PINNED_TAB_DEFS.map((tab) => ({
+      ...tab,
+      label: t(tab.labelKey),
+      badge: tab.key === 'changes' ? changeCount : undefined,
+    }));
     const extras = extraTabs
-      .map((key) => ADDABLE_TABS.find((t) => t.key === key))
-      .filter((t) => {
-        if (!t) return false;
-        if (t.key === 'pullrequests') return isExternalGit;
+      .map((key) => ADDABLE_TAB_DEFS.find((tab) => tab.key === key))
+      .filter((tab) => {
+        if (!tab) return false;
+        if (tab.key === 'pullrequests') return isExternalGit;
         return true;
-      });
+      })
+      .map((tab) => ({ ...tab, label: t(tab.labelKey) }));
     return [
       ...pinned,
       ...extras,
     ];
-  }, [extraTabs, changeCount, isExternalGit]);
+  }, [extraTabs, changeCount, isExternalGit, t]);
 
-  const addableRemaining = ADDABLE_TABS.filter((t) => {
-    if (extraTabs.includes(t.key)) return false;
+  const addableRemaining = ADDABLE_TAB_DEFS.filter((tab) => {
+    if (extraTabs.includes(tab.key)) return false;
     // deploy 通过页面右上角的 Deploy 按钮打开，不放进"添加新窗口"菜单
-    if (t.key === 'deploy') return false;
-    if (t.key === 'pullrequests') return isExternalGit;
+    if (tab.key === 'deploy') return false;
+    if (tab.key === 'pullrequests') return isExternalGit;
     return true;
-  });
+  }).map((tab) => ({ ...tab, label: t(tab.labelKey) }));
 
   return (
     <div ref={panelRootRef} className="relative flex h-full min-h-0 flex-col" data-testid="workspace-panel">
@@ -500,7 +503,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
           <button
             ref={addBtnRef}
             type="button"
-            title="Add panel"
+            title={t('workspace:action.add_panel', { defaultValue: 'Add panel' })}
             onClick={() => setAddMenuOpen((v) => !v)}
             className={`ml-0.5 p-1.5 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
           >
@@ -511,16 +514,16 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
 
       {mainTab === 'files' && (
         <div className="flex items-center justify-end gap-0.5 px-1 py-0.5 border-b border-zinc-200 shrink-0 bg-white">
-          <button title="New file" onClick={() => { setNewName(''); setShowNewFile(true); }}
+          <button title={t('workspace:action.new_file')} onClick={() => { setNewName(''); setShowNewFile(true); }}
             className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}>
             <Plus className="h-3.5 w-3.5" />
           </button>
-          <button title="New folder" onClick={() => { setNewName(''); setShowNewFolder(true); }}
+          <button title={t('workspace:action.new_folder')} onClick={() => { setNewName(''); setShowNewFolder(true); }}
             className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}>
             <FolderPlus className="h-3.5 w-3.5" />
           </button>
           <button
-            title={sidebarOpen ? 'Collapse file tree' : 'Expand file tree'}
+            title={sidebarOpen ? t('workspace:action.collapse_all') : t('workspace:action.expand_all')}
             onClick={() => setSidebarOpen((open) => !open)}
             className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}>
             {sidebarOpen ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelLeft className="h-3.5 w-3.5" />}
@@ -531,8 +534,8 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
               <button
                 type="button"
                 onClick={() => onCloseTab?.(activeTab.path)}
-                title="Close file"
-                aria-label="Close file"
+                title={t('workspace:action.close')}
+                aria-label={t('workspace:action.close')}
                 className={`p-1 rounded text-zinc-400 hover:text-red-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}>
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -623,7 +626,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
               ) : (
                 <div className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-400">
                   <FileText className="h-12 w-12" />
-                  <p className="text-sm">Select a file from the tree to open</p>
+                  <p className="text-sm">{t('workspace:empty.no_files')}</p>
                 </div>
               )}
             </div>
@@ -681,7 +684,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
             {shellContent || (
               <div className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-400 h-full">
                 <Terminal className="h-12 w-12" />
-                <p className="text-sm">Terminal</p>
+                <p className="text-sm">{t('workspace:tabs.terminal')}</p>
                 <p className="text-[11px]">Run commands like <code className="font-mono">npm test</code> or <code className="font-mono">npm run dev</code></p>
               </div>
             )}
@@ -710,7 +713,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
       {showNewFile && (
         <ConsoleDialogShell onClose={() => { setShowNewFile(false); setNewHereBasePath(null); }}>
           <div className="p-4 w-80">
-            <h3 className="font-bold text-lg text-zinc-900 mb-1">New File</h3>
+            <h3 className="font-bold text-lg text-zinc-900 mb-1">{t('workspace:action.new_file')}</h3>
             {newHereBasePath && newHereBasePath !== '.' && (
               <p className="text-xs text-zinc-400 mb-2 font-mono">{newHereBasePath}/</p>
             )}
@@ -719,9 +722,9 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
               onKeyDown={(e) => { if (e.key === 'Enter') handleCreateFile(); }}
               className={consoleInputClass} />
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => { setShowNewFile(false); setNewHereBasePath(null); }} className={buttonClass('secondary', 'sm')}>Cancel</button>
+              <button onClick={() => { setShowNewFile(false); setNewHereBasePath(null); }} className={buttonClass('secondary', 'sm')}>{t('workspace:action.cancel')}</button>
               <button onClick={handleCreateFile} disabled={creating || !newName.trim()} className={buttonClass('primary', 'sm')}>
-                {creating ? 'Creating…' : 'Create'}
+                {creating ? t('workspace:action.creating') : t('workspace:action.create')}
               </button>
             </div>
           </div>
@@ -731,7 +734,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
       {showNewFolder && (
         <ConsoleDialogShell onClose={() => { setShowNewFolder(false); setNewHereBasePath(null); }}>
           <div className="p-4 w-80">
-            <h3 className="font-bold text-lg text-zinc-900 mb-1">New Folder</h3>
+            <h3 className="font-bold text-lg text-zinc-900 mb-1">{t('workspace:action.new_folder')}</h3>
             {newHereBasePath && newHereBasePath !== '.' && (
               <p className="text-xs text-zinc-400 mb-2 font-mono">{newHereBasePath}/</p>
             )}
@@ -740,9 +743,9 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
               onKeyDown={(e) => { if (e.key === 'Enter') handleCreateDir(); }}
               className={consoleInputClass} />
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => { setShowNewFolder(false); setNewHereBasePath(null); }} className={buttonClass('secondary', 'sm')}>Cancel</button>
+              <button onClick={() => { setShowNewFolder(false); setNewHereBasePath(null); }} className={buttonClass('secondary', 'sm')}>{t('workspace:action.cancel')}</button>
               <button onClick={handleCreateDir} disabled={creating || !newName.trim()} className={buttonClass('primary', 'sm')}>
-                {creating ? 'Creating…' : 'Create'}
+                {creating ? t('workspace:action.creating') : t('workspace:action.create')}
               </button>
             </div>
           </div>
@@ -759,14 +762,14 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
           const isDir = node.type === 'directory';
           const menuItems = [];
           if (isDir) {
-            menuItems.push({ icon: FilePlus, label: 'New File', onClick: () => handleNewHere(node, 'file') });
-            menuItems.push({ icon: FolderPlus, label: 'New Folder', onClick: () => handleNewHere(node, 'folder') });
+            menuItems.push({ icon: FilePlus, label: t('workspace:action.new_file'), onClick: () => handleNewHere(node, 'file') });
+            menuItems.push({ icon: FolderPlus, label: t('workspace:action.new_folder'), onClick: () => handleNewHere(node, 'folder') });
             menuItems.push({ divider: true });
           }
-          menuItems.push({ icon: Pencil, label: 'Rename', onClick: () => handleStartRename(node) });
-          menuItems.push({ icon: ClipboardCopy, label: 'Copy Path', onClick: () => handleCopyPath(node) });
+          menuItems.push({ icon: Pencil, label: t('workspace:action.rename'), onClick: () => handleStartRename(node) });
+          menuItems.push({ icon: ClipboardCopy, label: t('workspace:action.copy_path'), onClick: () => handleCopyPath(node) });
           menuItems.push({ divider: true });
-          menuItems.push({ icon: Trash2, label: 'Delete', onClick: () => handleDeleteNode(node), danger: true });
+          menuItems.push({ icon: Trash2, label: t('workspace:action.delete'), onClick: () => handleDeleteNode(node), danger: true });
           return (
             <div
               id="workspace-context-menu"
@@ -803,15 +806,15 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
       {renaming && (
         <ConsoleDialogShell onClose={() => setRenaming(null)} container={panelRootRef.current}>
           <div className="p-4 w-80 bg-white border border-zinc-200 shadow-sm rounded-lg">
-            <h3 className="font-bold text-lg text-zinc-900 mb-3">Rename</h3>
+            <h3 className="font-bold text-lg text-zinc-900 mb-3">{t('workspace:action.rename')}</h3>
             <input ref={renameInputRef} type="text" placeholder="new name"
               value={renaming.newName} onChange={(e) => setRenaming((prev) => prev ? { ...prev, newName: e.target.value } : prev)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmRename(); }}
               className={consoleInputClass} />
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setRenaming(null)} className={buttonClass('secondary', 'sm')}>Cancel</button>
+              <button onClick={() => setRenaming(null)} className={buttonClass('secondary', 'sm')}>{t('workspace:action.cancel')}</button>
               <button onClick={handleConfirmRename} disabled={renamingLoading || !renaming.newName.trim()} className={buttonClass('primary', 'sm')}>
-                {renamingLoading ? 'Renaming…' : 'Rename'}
+                {renamingLoading ? t('workspace:action.renaming') : t('workspace:action.rename')}
               </button>
             </div>
           </div>

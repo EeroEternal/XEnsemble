@@ -43,5 +43,14 @@
     "cmd": "Command",
     "args": "Arguments",
     "env_required": "Required environment variables"
+  },
+  "config": {
+    "agent_variables": "Agent variables",
+    "agent_variables_desc": "Environment variables and secrets passed to the agent process at startup.",
+    "configuration_files": "Configuration Files",
+    "load_example": "Load Example",
+    "add_env_var": "Add env var",
+    "remove": "Remove",
+    "loading": "Loading…"
   }
 }

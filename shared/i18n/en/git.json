@@ -36,6 +36,14 @@
   "review": "Review",
   "connected": "Connected",
   "not_connected": "Not connected",
+  "select_repository": "Select repository",
+  "status": {
+    "modified": "Modified",
+    "added": "Added",
+    "deleted": "Deleted",
+    "untracked": "Untracked",
+    "renamed": "Renamed"
+  },
   "empty": {
     "no_changes": "No changes",
     "no_commits": "No commits yet"
