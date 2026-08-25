@@ -1064,44 +1064,6 @@ export default function GatewaySettingsPanel() {
           <ConsoleStructuredDialogHeader title="Gateway" />
           <ConsoleStructuredDialogBody>
             <form id="gateway-process-form" onSubmit={handleSaveProcess} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <FormLabel htmlFor="gateway-host">Listen host</FormLabel>
-                  <Input
-                    id="gateway-host"
-                    value={processDraft.host}
-                    onChange={(e) => setProcessDraft((prev) => ({ ...prev, host: e.target.value }))}
-                    placeholder="127.0.0.1"
-                    className="h-9 min-h-9 py-1.5 font-mono"
-                    disabled={envBindLocked}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <FormLabel htmlFor="gateway-port">Port</FormLabel>
-                  <Input
-                    id="gateway-port"
-                    type="number"
-                    min={1}
-                    max={65535}
-                    value={processDraft.port}
-                    onChange={(e) => setProcessDraft((prev) => ({ ...prev, port: e.target.value }))}
-                    placeholder="8741"
-                    className="h-9 min-h-9 py-1.5 font-mono"
-                    disabled={envBindLocked}
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <FormLabel htmlFor="gateway-public-url">Control plane public URL</FormLabel>
-                <Input
-                  id="gateway-public-url"
-                  value={processDraft.public_url || ''}
-                  onChange={(e) => setProcessDraft((prev) => ({ ...prev, public_url: e.target.value }))}
-                  placeholder="https://app.example.com"
-                  className="h-9 min-h-9 py-1.5 font-mono"
-                />
-                <p className="text-xs text-zinc-500">{t('gateway:agent_proxy_base_url_desc')}</p>
-              </div>
               <div className="space-y-2">
                 <FormLabel htmlFor="gateway-upstream-url">External UniGateway URL</FormLabel>
                 <Input
@@ -1122,11 +1084,6 @@ export default function GatewaySettingsPanel() {
                 />
                 Start automatically when the server boots
               </label>
-              {envBindLocked && (
-                <p className="text-xs text-amber-700">
-                  Bind address is locked by UNIGATEWAY_BIND_ADDR in the server environment.
-                </p>
-              )}
             </form>
           </ConsoleStructuredDialogBody>
           <ConsoleStructuredDialogFooter>
