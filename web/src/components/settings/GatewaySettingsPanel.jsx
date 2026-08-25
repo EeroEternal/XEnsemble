@@ -212,7 +212,7 @@ function ProviderFormFields({
     <div className={`${consoleCardClass} bg-zinc-50/70 p-4 space-y-4`}>
       {!isEdit && (
         <div className="space-y-2">
-          <FormLabel htmlFor="provider-name">Name</FormLabel>
+          <FormLabel htmlFor="provider-name">Name<span className="text-red-500 ml-0.5">*</span></FormLabel>
           <Input
             id="provider-name"
             value={form.name}
@@ -223,7 +223,7 @@ function ProviderFormFields({
         </div>
       )}
       <div className="space-y-2">
-        <FormLabel htmlFor="provider-base-url">Base URL</FormLabel>
+        <FormLabel htmlFor="provider-base-url">Base URL<span className="text-red-500 ml-0.5">*</span></FormLabel>
         <Input
           id="provider-base-url"
           value={form.base_url}
@@ -233,7 +233,7 @@ function ProviderFormFields({
         />
       </div>
       <div className="space-y-2">
-        <FormLabel htmlFor="provider-api-key">API Key</FormLabel>
+        <FormLabel htmlFor="provider-api-key">API Key<span className="text-red-500 ml-0.5">*</span></FormLabel>
         <MaskedApiKeyInput
           value={form.api_key}
           maskedPreview={apiKeyMasked}
