@@ -64,5 +64,8 @@
   "verified_at": "Verified at",
   "not_verified": "Not verified",
   "available": "Available",
-  "unavailable": "Unavailable"
+  "unavailable": "Unavailable",
+  "one_model_per_line": "One model ID per line.",
+  "update": "Update",
+  "add": "Add"
 }

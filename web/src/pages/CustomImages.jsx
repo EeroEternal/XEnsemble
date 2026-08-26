@@ -331,7 +331,7 @@ export function CustomImagesContent() {
             <ConsoleStructuredDialogBody>
               <div className="flex flex-col gap-4">
                 <div>
-                  <div className={consoleSectionLabelClass}>Image Name<span className="text-red-500 ml-0.5">*</span></div>
+                  <div className={consoleSectionLabelClass}>{t('images:image_name')}<span className="text-red-500 ml-0.5">*</span></div>
                   <Input
                     ref={nameRef}
                     value={imageName}
@@ -345,7 +345,7 @@ export function CustomImagesContent() {
                 <div className="grid grid-cols-[2fr_3fr] gap-4 h-72">
                   {/* Component library */}
                   <div className="min-w-0 flex flex-col min-h-0 overflow-hidden">
-                    <div className={consoleSectionLabelClass}>Components<span className="text-red-500 ml-0.5">*</span></div>
+                    <div className={consoleSectionLabelClass}>{t('images:table.components')}<span className="text-red-500 ml-0.5">*</span></div>
                     <div className="relative mt-1.5 shrink-0">
                       <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
                       <Input
@@ -459,7 +459,7 @@ export function CustomImagesContent() {
 
                   {/* Selected summary */}
                   <div className="min-w-0 flex flex-col min-h-0 overflow-hidden">
-                    <div className={consoleSectionLabelClass}>Selected ({selectedComponentIds.length})</div>
+                    <div className={consoleSectionLabelClass}>{t('images:selected')} ({selectedComponentIds.length})</div>
                     <div className="mt-1.5 border border-zinc-200 rounded-lg flex-1 min-h-0 overflow-y-auto scrollbar-hover">
                       {selectedComponentIds.length === 0 ? (
                         <p className="px-3 py-4 text-xs text-zinc-400">

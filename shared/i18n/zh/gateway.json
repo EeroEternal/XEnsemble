@@ -64,5 +64,8 @@
   "verified_at": "验证于",
   "not_verified": "未验证",
   "available": "可用",
-  "unavailable": "不可用"
+  "unavailable": "不可用",
+  "one_model_per_line": "每行一个模型 ID。",
+  "update": "更新",
+  "add": "添加"
 }

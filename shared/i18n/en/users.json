@@ -66,5 +66,6 @@
     "password_reset": "Password reset.",
     "quota_updated": "Quota updated.",
     "agents_granted": "Agent authorization updated."
-  }
+  },
+  "search_placeholder": "Search users…"
 }

@@ -227,7 +227,7 @@ function ProviderFormFields({
         </div>
       )}
       <div className="space-y-2">
-        <FormLabel htmlFor="provider-base-url">Base URL<span className="text-red-500 ml-0.5">*</span></FormLabel>
+        <FormLabel htmlFor="provider-base-url">{t('gateway:base_url')}<span className="text-red-500 ml-0.5">*</span></FormLabel>
         <Input
           id="provider-base-url"
           value={form.base_url}
@@ -261,7 +261,7 @@ function ProviderFormFields({
       </div>
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <FormLabel htmlFor="provider-models" className="mb-0">Models</FormLabel>
+          <FormLabel htmlFor="provider-models" className="mb-0">{t('gateway:models')}</FormLabel>
           <div className="flex shrink-0 items-center gap-0.5">
             <TestConnectionButton
               health={connectionHealth}
@@ -288,7 +288,7 @@ function ProviderFormFields({
           placeholder={'deepseek-chat\ndeepseek-reasoner'}
           className="font-mono min-h-[5rem]"
         />
-        <p className="text-xs text-zinc-500">One model ID per line.</p>
+        <p className="text-xs text-zinc-500">{t('gateway:one_model_per_line')}</p>
       </div>
     </div>
   );
@@ -1100,10 +1100,10 @@ export default function GatewaySettingsPanel() {
                 setProcessDraft(null);
               }}
             >
-              Cancel
+              {t('common:action.cancel')}
             </Button>
             <Button type="submit" form="gateway-process-form" disabled={processSaving} size="sm">
-              {processSaving ? 'Saving…' : 'Save'}
+              {processSaving ? t('common:action.saving') : t('common:action.save')}
             </Button>
           </ConsoleStructuredDialogFooter>
         </ConsoleDialogShell>
@@ -1146,10 +1146,10 @@ export default function GatewaySettingsPanel() {
           </ConsoleStructuredDialogBody>
           <ConsoleStructuredDialogFooter>
             <Button type="button" variant="secondary" size="sm" onClick={() => setProviderDialog(null)}>
-              Cancel
+              {t('common:action.cancel')}
             </Button>
             <Button type="submit" form="gateway-provider-form" disabled={saving} size="sm">
-              {saving ? 'Saving…' : providerDialog.mode === 'edit' ? 'Update' : 'Add'}
+              {saving ? t('common:action.saving') : providerDialog.mode === 'edit' ? t('gateway:update') : t('gateway:add')}
             </Button>
           </ConsoleStructuredDialogFooter>
         </ConsoleDialogShell>

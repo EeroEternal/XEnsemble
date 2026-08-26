@@ -39,7 +39,8 @@
     "authorize": "Authorize",
     "approve": "Approve",
     "reject": "Reject",
-    "logout": "Log out"
+    "logout": "Log out",
+    "saving": "Saving…"
   },
   "state": {
     "loading": "Loading…",
