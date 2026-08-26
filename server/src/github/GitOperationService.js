@@ -65,8 +65,13 @@ class GitOperationService {
                 return await this._execGitOnce(project, args, options);
             } catch (err) {
                 const msg = err.message || '';
-                const isIndexLock = msg.includes('index.lock') && msg.includes('File exists');
-                if (!isIndexLock || attempt >= maxRetries) throw err;
+                // Retry on transient index lock conflicts:
+                //  - "index.lock...File exists" — concurrent git processes
+                //  - "unable to write new_index file" — lock was stale/removed
+                //    mid-write (e.g. after VM agent crash leaves stale lock)
+                const isTransient = (msg.includes('index.lock') && msg.includes('File exists'))
+                    || msg.includes('unable to write new_index file');
+                if (!isTransient || attempt >= maxRetries) throw err;
                 await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
             }
         }
@@ -307,6 +312,10 @@ class GitOperationService {
     }
 
     async getStatusLight(project) {
+        return withProjectGitLock(project?.id, async () => this._getStatusLight(project));
+    }
+
+    async _getStatusLight(project) {
         const statusOut = await this._execGit(project, ['--no-optional-locks', 'status', '--porcelain=v1', '-uall']).catch(() => ({ stdout: '' }));
         let lines = statusOut.stdout.split('\n').filter(Boolean);
         lines = await this._expandDirEntries(project, lines);
@@ -350,6 +359,10 @@ class GitOperationService {
     }
 
     async getStatus(project) {
+        return withProjectGitLock(project?.id, async () => this._getStatus(project));
+    }
+
+    async _getStatus(project) {
         const [branchOut, shaOut, statusOut] = await Promise.all([
             this._execGit(project, ['rev-parse', '--abbrev-ref', 'HEAD']).catch((err) => {
                 console.warn('[GitOperationService] getStatus rev-parse branch failed:', err.message);

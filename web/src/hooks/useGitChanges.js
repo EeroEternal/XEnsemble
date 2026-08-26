@@ -104,7 +104,9 @@ export function useGitChanges(projectId, fullPollEnabledRef, sessionId, ready) {
       };
     });
     await githubApi.stageFiles(projectId, files);
-    fetchStatus({ silent: true });
+    // Don't fetchStatus here — the caller (handleCommit) immediately commits
+    // afterwards; fetching status now would compete for the git lock and
+    // delay the commit. fetchStatus will run after commit completes.
   }, [projectId, fetchStatus, status]);
 
   const unstage = useCallback(async (files) => {

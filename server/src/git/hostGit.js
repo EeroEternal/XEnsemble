@@ -3,8 +3,6 @@
  * (local disk, or BoxLite virtiofs mount).
  */
 const { spawn } = require('child_process');
-const fs = require('fs');
-const path = require('path');
 const { resolveRuntimeProvider } = require('../config/runtimeProvider');
 
 /** Providers whose workspace lives on (or is virtiofs-mounted from) the host. */
@@ -27,10 +25,6 @@ function hostGit(cwd, args, options = {}) {
         let gitArgs = ['-c', 'safe.directory=*'];
         if (options.gitDir && options.workTree) {
             gitArgs.push('--git-dir', options.gitDir, '--work-tree', options.workTree);
-            const lockFile = path.join(options.gitDir, 'index.lock');
-            try {
-                if (fs.existsSync(lockFile)) fs.unlinkSync(lockFile);
-            } catch { /* best-effort */ }
         }
         gitArgs.push(...args);
         const child = spawn('git', gitArgs, {
