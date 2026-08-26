@@ -159,26 +159,46 @@ async function syncPlatformRouterSecrets(platformSecrets) {
 
 function killForeignListenerOnPort(bindAddr, log = console) {
     const port = bindAddr.includes(':') ? bindAddr.slice(bindAddr.lastIndexOf(':') + 1) : bindAddr;
+    const killPids = (pids) => {
+        if (!pids) return false;
+        let killed = false;
+        for (const pid of pids) {
+            if (!Number.isFinite(pid) || pid === process.pid) continue;
+            if (child?.pid === pid) continue;
+            try {
+                process.kill(pid, 'SIGTERM');
+                killed = true;
+                log.info?.(`[unigateway] stopped foreign listener pid=${pid} on port ${port}`);
+            } catch {
+                /* ignore */
+            }
+        }
+        return killed;
+    };
+    const tryFuser = (cb) => {
+        execFile('fuser', [`${port}/tcp`], (err, stdout) => {
+            const raw = (stdout || '').trim();
+            cb(raw ? raw.split(/\s+/).map(Number).filter((n) => Number.isFinite(n)) : null);
+        });
+    };
+    const trySs = (cb) => {
+        execFile('ss', ['-tlnp', `sport = :${port}`], (err, stdout) => {
+            if (err || !stdout) return cb(null);
+            const pids = new Set();
+            for (const m of stdout.matchAll(/pid=(\d+)/g)) pids.add(Number(m[1]));
+            cb(pids.size ? [...pids] : null);
+        });
+    };
     return new Promise((resolve) => {
         execFile('lsof', ['-ti', `:${port}`, '-sTCP:LISTEN'], (err, stdout) => {
-            if (err || !stdout.trim()) {
-                resolve(false);
-                return;
+            if (!err && stdout.trim()) {
+                resolve(killPids(stdout.trim().split('\n').map(Number)));
+            } else {
+                tryFuser((pids) => {
+                    if (pids) resolve(killPids(pids));
+                    else trySs((pids2) => resolve(killPids(pids2)));
+                });
             }
-            let killed = false;
-            for (const pidText of stdout.trim().split('\n')) {
-                const pid = Number(pidText);
-                if (!Number.isFinite(pid) || pid === process.pid) continue;
-                if (child?.pid === pid) continue;
-                try {
-                    process.kill(pid, 'SIGTERM');
-                    killed = true;
-                    log.info?.(`[unigateway] stopped foreign listener pid=${pid} on port ${port}`);
-                } catch {
-                    /* ignore */
-                }
-            }
-            resolve(killed);
         });
     });
 }
