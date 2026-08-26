@@ -37,6 +37,12 @@ function providerKey(provider, field) {
   return `${provider.toUpperCase()}_${field}`;
 }
 
+/** Mask a Client ID for display: show first 4 and last 4 chars. */
+function maskClientId(value) {
+  if (!value || value.length <= 8) return value ? '••••' : '';
+  return `${value.slice(0, 4)}…${value.slice(-4)}`;
+}
+
 export default function GitProvidersSettingsPanel() {
   const { t } = useTranslation();
   const { user } = useContext(AuthContext);

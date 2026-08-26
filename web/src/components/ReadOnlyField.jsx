@@ -1,8 +1,10 @@
 /**
  * Read-only label:value row for settings display mode.
  *
- * Height matches the edit-mode Input row (h-8 = 32px) so toggling
- * between view/edit does not cause layout shift (DESIGN.md §页面稳定性).
+ * Renders a horizontal label/value pair. When `value` is empty/null,
+ * `emptyText` is shown (defaults to "—"). Height matches the edit-mode
+ * Input row (h-8 = 32px) so toggling between view/edit does not cause
+ * layout shift (DESIGN.md §页面稳定性).
  */
 export default function ReadOnlyField({
   label,
