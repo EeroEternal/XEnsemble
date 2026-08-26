@@ -14,6 +14,8 @@ const MAX_FRAMES = Number(process.env.TRANSCRIPT_MAX_FRAMES) || 50000;
 const TAIL_BYTES = Number(process.env.TRANSCRIPT_TAIL_BYTES) || 1048576;
 const ALT_SCREEN_TAIL_BYTES = Number(process.env.TRANSCRIPT_ALT_SCREEN_TAIL_BYTES) || 20971520;
 const TAIL_READ_THRESHOLD = Number(process.env.TRANSCRIPT_TAIL_READ_THRESHOLD) || 67108864; // 64MB
+const MAX_FILE_SIZE = Number(process.env.TRANSCRIPT_MAX_FILE_SIZE) || 134217728; // 128MB
+const ROTATE_TAIL_BYTES = Number(process.env.TRANSCRIPT_ROTATE_TAIL_BYTES) || 33554432; // 32MB — keep last 32MB when rotating
 const TUI_ENTER_RE = /\x1b\[\?(?:1049|47|1047)h|\x1b\[\?2026h/;
 
 function safeRef(ref) {
@@ -428,6 +430,48 @@ class TranscriptStore {
             );
             state._pendingBytes = lines.length;
             this._scheduleFlush(state);
+            return;
+        }
+        this._maybeRotateFile(state);
+    }
+
+    /**
+     * When the file exceeds MAX_FILE_SIZE, rewrite it keeping only the
+     * last ROTATE_TAIL_BYTES. Frames are re-sequenced starting from 1 so
+     * seq numbers stay monotonic and never collide across resume cycles.
+     * The in-memory `state.frames` array is rebuilt from the same tail.
+     */
+    _maybeRotateFile(state) {
+        if (!state.file) return;
+        let stat;
+        try { stat = fs.statSync(state.file); } catch (_) { return; }
+        if (stat.size < MAX_FILE_SIZE) return;
+
+        const tailFrames = this._readTailLines(state.file, ROTATE_TAIL_BYTES);
+        if (tailFrames.length === 0) return;
+
+        // Re-sequence from 1
+        const resequenced = [];
+        for (let i = 0; i < tailFrames.length; i++) {
+            const old = tailFrames[i];
+            const frame = { ...old, seq: i + 1 };
+            resequenced.push(frame);
+        }
+        const lines = resequenced.map((f) => `${JSON.stringify(f)}\n`).join('');
+
+        try {
+            const tmp = `${state.file}.rotate`;
+            fs.writeFileSync(tmp, lines);
+            fs.renameSync(tmp, state.file);
+        } catch (_) { return; }
+
+        // Rebuild in-memory state
+        state.frames = resequenced;
+        state.headSeq = resequenced.length;
+        state.nextSeq = resequenced.length + 1;
+        state.bytes = resequenced.reduce((sum, f) => sum + (Number(f.bytes) || bytesFor(f.kind, f.data)), 0);
+        if (state.frames.length > MAX_FRAMES) {
+            state.frames.splice(0, state.frames.length - MAX_FRAMES);
         }
     }
 
