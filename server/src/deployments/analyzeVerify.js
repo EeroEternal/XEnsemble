@@ -7,8 +7,8 @@
 
 const { getRuntime } = require('../runtime/registry');
 
-const API_KEY = process.env.LLM_ANALYZE_API_KEY || process.env.DEEPSEEK_API_KEY;
-const API_URL = process.env.LLM_ANALYZE_API_URL || process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
+const API_KEY = process.env.LLM_ANALYZE_API_KEY;
+const API_URL = process.env.LLM_ANALYZE_API_URL || 'https://api.deepseek.com/chat/completions';
 const MODEL = process.env.LLM_VERIFY_MODEL || process.env.LLM_ANALYZE_MODEL || 'deepseek-chat';
 const LLM_TIMEOUT_MS = 240000;
 const MAX_AGENT_ROUNDS = Number(process.env.OPENCODE_VERIFY_MAX_ROUNDS) || 60;

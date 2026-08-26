@@ -2,9 +2,9 @@ const { getRuntime } = require('../runtime/registry');
 const { RuntimeError } = require('../runtime/interfaces');
 const { analyzeProjectWithOpencode } = require('./analyzeOpencode');
 
-const API_KEY = process.env.LLM_ANALYZE_API_KEY || process.env.DEEPSEEK_API_KEY;
-const API_URL = process.env.LLM_ANALYZE_API_URL || process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
-const MODEL = process.env.LLM_ANALYZE_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+const API_KEY = process.env.LLM_ANALYZE_API_KEY;
+const API_URL = process.env.LLM_ANALYZE_API_URL || 'https://api.deepseek.com/chat/completions';
+const MODEL = process.env.LLM_ANALYZE_MODEL || 'deepseek-chat';
 const LLM_TIMEOUT_MS = 180000;
 
 const KEY_FILES = [

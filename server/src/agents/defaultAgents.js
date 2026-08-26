@@ -311,7 +311,7 @@ const DEFAULT_AGENTS = [
                             {
                                 id: 'gpt-4o',
                                 baseUrl: 'https://api.openai.com/v1',
-                                envKey: 'DEEPSEEK_API_KEY',
+                                envKey: 'OPENAI_API_KEY',
                             },
                         ],
                     },
@@ -324,7 +324,7 @@ const DEFAULT_AGENTS = [
                         },
                     },
                     env: {
-                        DEEPSEEK_API_KEY: 'sk-xxxx',
+                        OPENAI_API_KEY: 'sk-xxxx',
                     },
                 }, null, 2),
             }],

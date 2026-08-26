@@ -2,12 +2,16 @@ const { eq } = require('drizzle-orm');
 const { db } = require('../db');
 const schema = require('../db/schema');
 
-const API_KEY = process.env.DEEPSEEK_API_KEY;
-const API_URL = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
-const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
-
 const MAX_HISTORY_CHARS = 4000;
 const MAX_TITLE_LENGTH = 40;
+
+function getLlmConfig() {
+    return {
+        apiKey: process.env.LLM_ANALYZE_API_KEY,
+        apiUrl: process.env.LLM_ANALYZE_API_URL || 'https://api.deepseek.com/chat/completions',
+        model: process.env.LLM_ANALYZE_MODEL || 'deepseek-chat',
+    };
+}
 
 const STARTUP_KEYWORDS = /\b(welcome|config|setup|initializ|loading|checking|ready|starting|booting|installing|verifying|preparing|configur)\b/i;
 
@@ -38,7 +42,8 @@ function sanitizeTitle(raw) {
 }
 
 async function fetchSummary(history, agentName) {
-    if (!API_KEY) return null;
+    const { apiKey, apiUrl, model } = getLlmConfig();
+    if (!apiKey) return null;
 
     const prompt = [
         'You are a concise session title generator.',
@@ -48,7 +53,7 @@ async function fetchSummary(history, agentName) {
     ].join(' ');
 
     const body = {
-        model: MODEL,
+        model,
         messages: [
             { role: 'system', content: prompt },
             { role: 'user', content: history },
@@ -57,18 +62,18 @@ async function fetchSummary(history, agentName) {
         temperature: 0.6,
     };
 
-    const res = await fetch(API_URL, {
+    const res = await fetch(apiUrl, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${API_KEY}`,
+            Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify(body),
     });
 
     if (!res.ok) {
         const text = await res.text().catch(() => '');
-        throw new Error(`DeepSeek title API error ${res.status}: ${text}`);
+        throw new Error(`Title LLM API error ${res.status}: ${text}`);
     }
 
     const data = await res.json();

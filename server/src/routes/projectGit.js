@@ -65,9 +65,9 @@ async function generateAIDescription(project, gitOperationService, type, opts = 
     }
     if (!diff) return type === 'pr' ? { title: '', body: '' } : { message: '' };
 
-    const apiKey = process.env.LLM_ANALYZE_API_KEY || process.env.DEEPSEEK_API_KEY;
-    const apiUrl = process.env.LLM_ANALYZE_API_URL || process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
-    const model = process.env.LLM_VERIFY_MODEL || process.env.LLM_ANALYZE_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+    const apiKey = process.env.LLM_ANALYZE_API_KEY;
+    const apiUrl = process.env.LLM_ANALYZE_API_URL || 'https://api.deepseek.com/chat/completions';
+    const model = process.env.LLM_VERIFY_MODEL || process.env.LLM_ANALYZE_MODEL || 'deepseek-chat';
     if (!apiKey) return type === 'pr' ? { title: '', body: '', error: 'AI not configured' } : { message: '', error: 'AI not configured' };
 
     const truncated = diff.slice(0, 8000);
