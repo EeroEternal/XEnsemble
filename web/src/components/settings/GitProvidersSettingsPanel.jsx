@@ -11,7 +11,7 @@ import {
 } from '../ConsoleDialog';
 import { useToast } from '../Toast';
 import { useEditMode } from '../../hooks/useEditMode';
-import { consoleSectionLabelClass, consoleCardClass } from '../../lib/consoleTokens';
+import { consoleSectionLabelClass, consoleCardClass, consoleStructuredDialogPanelClass } from '../../lib/consoleTokens';
 import { apiFetch } from '../../lib/api';
 import GitConnectButton from '../git/GitConnectButton';
 import GitOAuthAlert from '../git/GitOAuthAlert';
@@ -157,32 +157,33 @@ export default function GitProvidersSettingsPanel() {
           const git = gitMap[p.id];
           const isConfigured = isAdmin && settings ? Boolean(settings[providerKey(p.id, 'CLIENT_ID')]) : false;
           const oauthReady = providerOAuthConfigured[p.id] !== false;
+          const showConfigured = isAdmin ? isConfigured : oauthReady;
 
           return (
             <section key={p.id} className={`${consoleCardClass} p-6 flex flex-col gap-4`}>
               <div className="flex items-center gap-2 shrink-0">
                 <h3 className={consoleSectionLabelClass}>{p.label}</h3>
-                {isConfigured && (
+                {showConfigured && (
                   <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-600" />
                 )}
               </div>
 
-              {isAdmin && (
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs">
-                    {isConfigured ? (
-                      <span className="text-emerald-600">● Configured</span>
-                    ) : (
-                      <span className="text-amber-600">⚠️ Not configured</span>
-                    )}
-                  </span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs">
+                  {showConfigured ? (
+                    <span className="text-emerald-600">● Configured</span>
+                  ) : (
+                    <span className="text-amber-600">⚠️ Not configured</span>
+                  )}
+                </span>
+                {isAdmin && (
                   <Button variant="secondary" size="sm" onClick={() => openConfig(p)}>
                     {t('git:providers.configure_oauth', { defaultValue: 'Configure OAuth' })}
                   </Button>
-                </div>
-              )}
+                )}
+              </div>
 
-              {isAdmin && <div className="border-t border-zinc-100" />}
+              <div className="border-t border-zinc-100" />
 
               <div className="mt-auto flex flex-col gap-2">
                 <GitConnectButton
@@ -213,7 +214,7 @@ export default function GitProvidersSettingsPanel() {
       </div>
 
       {configProvider && configEdit && (
-        <ConsoleDialogShell fitContent onClose={closeConfig}>
+        <ConsoleDialogShell fitContent onClose={closeConfig} panelClassName={consoleStructuredDialogPanelClass}>
           <ConsoleStructuredDialogHeader
             title={t('git:providers.configure_dialog_title', { defaultValue: `Configure ${configProvider.label} OAuth` })}
           />
