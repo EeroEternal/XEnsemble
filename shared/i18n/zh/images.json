@@ -43,5 +43,28 @@
     "rebuild_image_failed": "重新构建镜像失败",
     "delete_image_failed": "删除镜像失败",
     "load_build_log_failed": "加载构建日志失败"
-  }
+  },
+  "table": {
+    "name": "名称",
+    "status": "状态",
+    "components": "组件",
+    "build_time": "构建时间",
+    "created": "创建时间",
+    "actions": "操作"
+  },
+  "search_images": "搜索镜像…",
+  "image_name": "镜像名称",
+  "selected": "已选择",
+  "select_components_hint": "选择组件和版本以构建镜像",
+  "count_images": "{{count}} 个镜像",
+  "no_custom_images_hint": "暂无自定义镜像。点击“新建镜像”创建。",
+  "no_match": "没有匹配的镜像。",
+  "refresh": "刷新",
+  "view_logs": "查看日志",
+  "rebuild": "重建",
+  "delete": "删除",
+  "actions_for": "操作",
+  "rebuilding": "重建中…",
+  "deleting": "删除中…",
+  "delete_confirm": "确定删除 \"{{name}}\" 吗？此操作不可撤销。"
 }

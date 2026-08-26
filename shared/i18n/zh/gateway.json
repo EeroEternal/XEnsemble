@@ -33,5 +33,31 @@
     "provider_saved": "提供商已保存。",
     "provider_deleted": "提供商已删除。",
     "settings_saved": "网关设置已保存。"
-  }
+  },
+  "table": {
+    "name": "名称",
+    "endpoint": "端点",
+    "status": "状态",
+    "actions": "操作"
+  },
+  "test_connection": "测试连接",
+  "edit": "编辑",
+  "remove": "删除",
+  "fetch_models": "获取模型",
+  "fetching_models": "获取模型中",
+  "default_model": "默认模型",
+  "name": "名称",
+  "refresh": "刷新",
+  "actions_for": "操作",
+  "verifying": "验证中…",
+  "starting": "启动中…",
+  "stopping": "停止中…",
+  "restarting": "重启中…",
+  "removing": "删除中…",
+  "configure_gateway": "配置网关",
+  "start_gateway": "启动网关",
+  "stop_gateway": "停止网关",
+  "restart_gateway": "重启网关",
+  "listen_host": "监听地址",
+  "port": "端口"
 }

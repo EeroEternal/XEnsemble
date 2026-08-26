@@ -314,7 +314,7 @@ export function CustomImagesContent() {
           </button>
           <Button onClick={openCreate} disabled={!enabled} size="md">
             <Plus className="w-4 h-4" />
-            New Image
+            {t('images:new_image')}
           </Button>
         </div>
       </div>
@@ -504,8 +504,8 @@ export function CustomImagesContent() {
                                 }}
                                 disabled={creating}
                                 className="p-1 shrink-0 rounded text-zinc-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
-                                title={`Remove ${comp.name}`}
-                                aria-label={`Remove ${comp.name}`}
+                                title={t('images:remove_component', { name: comp.name })}
+                                aria-label={t('images:remove_component', { name: comp.name })}
                               >
                                 <X className="h-3.5 w-3.5" />
                               </button>
@@ -551,7 +551,7 @@ export function CustomImagesContent() {
           <div className={cn(consoleStructuredDialogPanelClass, 'min-w-[360px] max-w-md')}>
             <ConsoleStructuredDialogHeader
               title={t('images:delete_image', { defaultValue: 'Delete Custom Image' })}
-              subtitle={`Are you sure you want to delete "${confirmDelete.name}"? This cannot be undone.`}
+              subtitle={t('images:delete_confirm', { name: confirmDelete.name })}
             />
             <ConsoleStructuredDialogFooter>
               <div className="flex items-center gap-2 w-full justify-end">
@@ -589,12 +589,12 @@ export function CustomImagesContent() {
           </colgroup>
           <thead>
             <tr className={consoleTableHeadRowClass}>
-              <th className={consoleTableHeadCellClass}>Name</th>
-              <th className={consoleTableHeadCellClass}>Status</th>
-              <th className={consoleTableHeadCellClass}>Components</th>
-              <th className={consoleTableHeadCellClass}>Build time</th>
-              <th className={consoleTableHeadCellClass}>Created</th>
-              <th className={consoleTableHeadCellClass}>Actions</th>
+              <th className={consoleTableHeadCellClass}>{t('images:table.name')}</th>
+              <th className={consoleTableHeadCellClass}>{t('images:table.status')}</th>
+              <th className={consoleTableHeadCellClass}>{t('images:table.components')}</th>
+              <th className={consoleTableHeadCellClass}>{t('images:table.build_time')}</th>
+              <th className={consoleTableHeadCellClass}>{t('images:table.created')}</th>
+              <th className={consoleTableHeadCellClass}>{t('images:table.actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -659,24 +659,24 @@ export function CustomImagesContent() {
                     </td>
                     <td className={consoleTableBodyCellClass}>
                       <RowActionsMenu
-                        label={`Actions for ${img.name}`}
+                        label={`${t('images:actions_for')} ${img.name}`}
                         items={[
-                          { icon: ScrollText, label: 'View logs', onClick: () => setLogImage(img) },
+                          { icon: ScrollText, label: t('images:view_logs'), onClick: () => setLogImage(img) },
                           img.status === 'failed' && {
                             icon: RotateCw,
-                            label: 'Rebuild',
+                            label: t('images:rebuild'),
                             onClick: () => handleRebuild(img),
                             busy: rebuildingId === img.id,
-                            busyLabel: 'Rebuilding…',
+                            busyLabel: t('images:rebuilding'),
                           },
                           { separator: true },
                           {
                             icon: Trash2,
-                            label: 'Delete',
+                            label: t('images:delete'),
                             danger: true,
                             onClick: () => setConfirmDelete(img),
                             busy: deletingId === img.id,
-                            busyLabel: 'Deleting…',
+                            busyLabel: t('images:deleting'),
                           },
                         ].filter(Boolean)}
                       />

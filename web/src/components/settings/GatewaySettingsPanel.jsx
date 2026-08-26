@@ -212,7 +212,7 @@ function ProviderFormFields({
     <div className={`${consoleCardClass} bg-zinc-50/70 p-4 space-y-4`}>
       {!isEdit && (
         <div className="space-y-2">
-          <FormLabel htmlFor="provider-name">Name<span className="text-red-500 ml-0.5">*</span></FormLabel>
+          <FormLabel htmlFor="provider-name">{t('gateway:name')}<span className="text-red-500 ml-0.5">*</span></FormLabel>
           <Input
             id="provider-name"
             value={form.name}
@@ -242,11 +242,11 @@ function ProviderFormFields({
           onToggleReveal={onToggleApiKeyReveal}
           onChange={onApiKeyChange}
           placeholder="sk-…"
-          aria-label="API Key"
+          aria-label={t('gateway:api_key')}
         />
       </div>
       <div className="space-y-2">
-        <FormLabel htmlFor="provider-default-model">Default model</FormLabel>
+        <FormLabel htmlFor="provider-default-model">{t('gateway:default_model')}</FormLabel>
         <Input
           id="provider-default-model"
           value={form.default_model}
@@ -868,7 +868,7 @@ export default function GatewaySettingsPanel() {
                 onClick={openProcessDialog}
                 className={consoleIconButtonClass}
                 title={t('gateway:configure', { defaultValue: 'Configure gateway' })}
-                aria-label="Configure gateway"
+                aria-label={t('gateway:configure', { defaultValue: 'Configure gateway' })}
               >
                 <Settings2 className="w-4 h-4" />
               </button>
@@ -877,8 +877,8 @@ export default function GatewaySettingsPanel() {
                 disabled={status?.running || processAction === 'start'}
                 onClick={() => runProcessAction('start')}
                 className={consoleIconButtonClass}
-                title={processAction === 'start' ? 'Starting…' : 'Start gateway'}
-                aria-label={processAction === 'start' ? 'Starting gateway' : 'Start gateway'}
+                title={processAction === 'start' ? t('gateway:starting') : t('gateway:start_gateway')}
+                aria-label={processAction === 'start' ? t('gateway:starting') : t('gateway:start_gateway')}
               >
                 {processAction === 'start' ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -891,8 +891,8 @@ export default function GatewaySettingsPanel() {
                 disabled={!status?.running || processAction === 'stop'}
                 onClick={() => runProcessAction('stop')}
                 className={consoleIconButtonClass}
-                title={processAction === 'stop' ? 'Stopping…' : 'Stop gateway'}
-                aria-label={processAction === 'stop' ? 'Stopping gateway' : 'Stop gateway'}
+                title={processAction === 'stop' ? t('gateway:stopping') : t('gateway:stop_gateway')}
+                aria-label={processAction === 'stop' ? t('gateway:stopping') : t('gateway:stop_gateway')}
               >
                 {processAction === 'stop' ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -905,8 +905,8 @@ export default function GatewaySettingsPanel() {
                 disabled={!status?.running || processAction === 'restart'}
                 onClick={() => runProcessAction('restart')}
                 className={consoleIconButtonClass}
-                title={processAction === 'restart' ? 'Restarting…' : 'Restart gateway'}
-                aria-label={processAction === 'restart' ? 'Restarting gateway' : 'Restart gateway'}
+                title={processAction === 'restart' ? t('gateway:restarting') : t('gateway:restart_gateway')}
+                aria-label={processAction === 'restart' ? t('gateway:restarting') : t('gateway:restart_gateway')}
               >
                 {processAction === 'restart' ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -944,7 +944,7 @@ export default function GatewaySettingsPanel() {
               </button>
               <Button type="button" size="md" onClick={openAddProviderDialog}>
                 <Plus className="w-4 h-4" />
-                Add Provider
+                {t('gateway:add_provider')}
               </Button>
             </div>
           </div>
@@ -964,11 +964,11 @@ export default function GatewaySettingsPanel() {
                 </colgroup>
                 <thead>
                   <tr className={consoleTableHeadRowClass}>
-                    <th className={consoleTableHeadCellClass}>Name</th>
-                    <th className={consoleTableHeadCellClass}>Endpoint</th>
-                    <th className={consoleTableHeadCellClass}>Models</th>
-                    <th className={consoleTableHeadCellClass}>Status</th>
-                    <th className={`${consoleTableHeadCellClass}`}>Actions</th>
+                    <th className={consoleTableHeadCellClass}>{t('gateway:table.name')}</th>
+                    <th className={consoleTableHeadCellClass}>{t('gateway:table.endpoint')}</th>
+                    <th className={consoleTableHeadCellClass}>{t('gateway:models')}</th>
+                    <th className={consoleTableHeadCellClass}>{t('gateway:table.status')}</th>
+                    <th className={`${consoleTableHeadCellClass}`}>{t('gateway:table.actions')}</th>
                   </tr>
                 </thead>
                 <tbody className={consoleTableBodyDivideClass}>
@@ -1019,24 +1019,24 @@ export default function GatewaySettingsPanel() {
                     </td>
                     <td className={consoleTableBodyCellClass}>
                       <RowActionsMenu
-                        label={`Actions for ${p.name}`}
+                        label={`${t('gateway:actions_for')} ${p.name}`}
                         items={[
                           {
                             icon: Activity,
-                            label: 'Test connection',
+                            label: t('gateway:test_connection'),
                             onClick: () => runProviderTest(p.name),
                             busy: testingProvider === p.name || providerHealth[p.name]?.status === 'testing',
-                            busyLabel: 'Verifying…',
+                            busyLabel: t('gateway:verifying'),
                           },
-                          { icon: Pencil, label: 'Edit', onClick: () => openEditProviderDialog(p) },
+                          { icon: Pencil, label: t('gateway:edit'), onClick: () => openEditProviderDialog(p) },
                           { separator: true },
                           {
                             icon: Trash2,
-                            label: 'Remove',
+                            label: t('gateway:remove'),
                             danger: true,
                             onClick: () => handleDelete(p.name),
                             busy: deleting === p.name,
-                            busyLabel: 'Removing…',
+                            busyLabel: t('gateway:removing'),
                           },
                         ]}
                       />
@@ -1065,7 +1065,7 @@ export default function GatewaySettingsPanel() {
           <ConsoleStructuredDialogBody>
             <form id="gateway-process-form" onSubmit={handleSaveProcess} className="space-y-4">
               <div className="space-y-2">
-                <FormLabel htmlFor="gateway-upstream-url">External UniGateway URL</FormLabel>
+                <FormLabel htmlFor="gateway-upstream-url">{t('gateway:external_unigateway_url')}</FormLabel>
                 <Input
                   id="gateway-upstream-url"
                   value={processDraft.upstream_url || ''}

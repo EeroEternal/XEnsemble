@@ -36,7 +36,7 @@
   "selected": "Selected",
   "select_components_hint": "Select components and versions to build your image",
   "count_images": "{{count}} images",
-  "no_custom_images_hint": "No custom images yet. Click \u201cNew Image\u201d to create one.",
+  "no_custom_images_hint": "No custom images yet. Click “New Image” to create one.",
   "no_match": "No images match your search.",
   "refresh": "Refresh",
   "view_logs": "View logs",
@@ -53,9 +53,7 @@
     "no_custom_images": "No custom images yet. Click \"New Image\" to create one."
   },
   "search_placeholder": "Search images…",
-  "new_image": "New Image",
   "new_image_subtitle": "Select components and versions to build your image",
-  "search_components": "Search components…",
   "delete_image": "Delete Custom Image",
   "error": {
     "load_catalog_failed": "Failed to load catalog",
@@ -64,5 +62,9 @@
     "rebuild_image_failed": "Failed to rebuild image",
     "delete_image_failed": "Failed to delete image",
     "load_build_log_failed": "Failed to load build log"
-  }
+  },
+  "actions_for": "Actions for",
+  "rebuilding": "Rebuilding…",
+  "deleting": "Deleting…",
+  "delete_confirm": "Are you sure you want to delete \"{{name}}\"? This cannot be undone."
 }
