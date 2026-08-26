@@ -50,11 +50,6 @@ export default function QuotaSettingsPanel() {
           </div>
         ))}
       </div>
-
-      <div className={`${consoleCardClass} p-4 flex justify-between items-center`}>
-        <span className={consoleSectionLabelClass}>{t('settings:quota.resource_tier')}</span>
-        <span className="text-sm font-medium text-zinc-900 capitalize">{q.resource_tier || 'basic'}</span>
-      </div>
     </div>
   );
 }
