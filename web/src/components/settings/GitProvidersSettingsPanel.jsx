@@ -199,16 +199,16 @@ export default function GitProvidersSettingsPanel() {
                   loading={git.loading}
                   onConnect={git.connect}
                   onDisconnect={git.disconnect}
-                  disabled={!oauthReady}
+                  disabled={!showConfigured}
                   disabledReason={t('git:providers.oauth_not_configured', { defaultValue: 'OAuth not configured' })}
                 />
-                {!oauthReady && !isAdmin && (
+                {!showConfigured && !isAdmin && (
                   <GitOAuthAlert
                     message={t('git:providers.not_configured', { defaultValue: `${p.label} OAuth is not configured. An admin must configure it before you can connect.` })}
                     provider={p.id}
                   />
                 )}
-                {git.error && oauthReady && (
+                {git.error && showConfigured && (
                   <GitOAuthAlert
                     message={git.error}
                     provider={p.id}
