@@ -63,10 +63,14 @@ export const pushBranch = (projectId, branch) =>
     body: JSON.stringify({ branch }),
   });
 
-export const pullLatest = (projectId) =>
-  request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/pull`, {
+export const pullLatest = (projectId, options = {}) => {
+  const body = {};
+  if (options.force) body.force = true;
+  return request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/pull`, {
     method: 'POST',
+    body: JSON.stringify(body),
   });
+};
 
 export const fetchRemote = (projectId) =>
   request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/fetch`, {

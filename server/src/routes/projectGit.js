@@ -428,8 +428,9 @@ function registerProjectGitRoutes(fastify) {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         const gitOperationService = await getGitService(request);
+        const force = request.body?.force === true;
         try {
-            await withProjectGitLock(project.id, async () => {
+            const result = await withProjectGitLock(project.id, async () => {
                 const { stdout: branch } = await gitOperationService._execGit(project, ['rev-parse', '--abbrev-ref', 'HEAD']);
                 const current = branch.trim();
                 let target = current;
@@ -450,11 +451,72 @@ function registerProjectGitRoutes(fastify) {
                         target = 'main';
                     }
                 }
-                await gitOperationService._execGit(project, ['pull', 'origin', target]);
-                gitOperationService._invalidateAheadBehind(project.id);
+
+                // Force pull: stash → pull → stash pop. Surface conflicts in working tree.
+                if (force) {
+                    // Detect local changes (tracked + untracked).
+                    const { stdout: statusOut } = await gitOperationService._execGit(project, ['status', '--porcelain']);
+                    const hasLocalChanges = statusOut.trim().length > 0;
+                    let stashed = false;
+                    if (hasLocalChanges) {
+                        await gitOperationService._execGit(project, ['stash', 'push', '-u', '-m', 'xe-force-pull']);
+                        stashed = true;
+                    }
+                    try {
+                        await gitOperationService._execGit(project, ['pull', 'origin', target]);
+                    } catch (pullErr) {
+                        // Pull itself hit a merge conflict (between branches). Abort the
+                        // in-progress merge, restore stashed changes, and surface the error.
+                        await gitOperationService._execGit(project, ['merge', '--abort']).catch(() => {});
+                        if (stashed) {
+                            await gitOperationService._execGit(project, ['stash', 'pop']).catch(() => {});
+                        }
+                        throw pullErr;
+                    }
+                    let conflicts = [];
+                    if (stashed) {
+                        try {
+                            await gitOperationService._execGit(project, ['stash', 'pop']);
+                            // stash pop may produce conflict markers in the working tree.
+                            const { stdout: conflictOut } = await gitOperationService._execGit(project, ['diff', '--name-only', '--diff-filter=U']);
+                            conflicts = conflictOut.trim().split('\n').filter(Boolean);
+                        } catch {
+                            // If stash pop itself conflicts, git exits non-zero but still leaves
+                            // conflict markers in the tree — they will surface in status.
+                            const { stdout: conflictOut } = await gitOperationService._execGit(project, ['diff', '--name-only', '--diff-filter=U']).catch(() => ({ stdout: '' }));
+                            conflicts = conflictOut.trim().split('\n').filter(Boolean);
+                        }
+                    }
+                    gitOperationService._invalidateAheadBehind(project.id);
+                    return { ok: true, conflicts };
+                }
+
+                try {
+                    await gitOperationService._execGit(project, ['pull', 'origin', target]);
+                    gitOperationService._invalidateAheadBehind(project.id);
+                    return { ok: true };
+                } catch (pullErr) {
+                    // Detect conflict-type failures so the frontend can prompt for force pull.
+                    const msg = (pullErr.message || '').toLowerCase();
+                    const isConflict = msg.includes('conflict')
+                        || msg.includes('would be overwritten')
+                        || msg.includes('local changes')
+                        || msg.includes('merge conflict');
+                    if (isConflict) {
+                        // Clean up any in-progress merge so the working tree is stashable.
+                        await gitOperationService._execGit(project, ['merge', '--abort']).catch(() => {});
+                        const err = new Error(t('git:pull_conflict_message', {}, request.locale || 'en'));
+                        err.code = 'pull_conflict';
+                        throw err;
+                    }
+                    throw pullErr;
+                }
             });
-            return { ok: true };
+            return result;
         } catch (err) {
+            if (err.code === 'pull_conflict') {
+                return reply.code(409).send({ error: err.message, code: 'pull_conflict' });
+            }
             request.log.error(err);
             return reply.code(500).send({ error: err.message });
         }

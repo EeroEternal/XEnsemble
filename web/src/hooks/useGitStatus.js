@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useToast } from '../components/Toast';
+import { confirm } from '../components/ConfirmDialog';
 import * as githubApi from '../lib/githubApi';
 
 const POLL_INTERVAL_MS = 15000;
@@ -160,13 +161,35 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
     if (!projectId) return;
     setOperation('pull');
     try {
-      const result = await githubApi.pullLatest(projectId);
-      showToast('success', t('git:toast.pulled_latest', { defaultValue: 'Pulled latest changes.' }));
-      fetchStatusFull({ silent: true });
-      return result;
-    } catch (err) {
-      showToast('error', err.message);
-      throw err;
+      try {
+        const result = await githubApi.pullLatest(projectId);
+        showToast('success', t('git:toast.pulled_latest', { defaultValue: 'Pulled latest changes.' }));
+        fetchStatusFull({ silent: true });
+        return result;
+      } catch (err) {
+        if (err.code !== 'pull_conflict') {
+          showToast('error', err.message);
+          throw err;
+        }
+        // Pull would conflict. Ask the user whether to force pull
+        // (stash → pull → stash pop); local changes are preserved and any
+        // conflicts surface in the Changes panel afterwards.
+        const confirmed = await confirm({
+          title: t('git:pull_conflict_title', { defaultValue: 'Pull Conflict' }),
+          message: t('git:pull_conflict_prompt', { defaultValue: 'There are conflicts between your local changes and the remote. Force pull will stash your local changes, pull the remote, then reapply them. This will not overwrite your local code — any conflicts will be shown in the Changes panel for you to resolve. Continue?' }),
+          confirmLabel: t('git:force_pull', { defaultValue: 'Force Pull' }),
+          variant: 'primary',
+        });
+        if (!confirmed) return null;
+        const forceResult = await githubApi.pullLatest(projectId, { force: true });
+        if (forceResult?.conflicts?.length) {
+          showToast('info', t('git:toast.pull_conflict_surfaced', { count: forceResult.conflicts.length, defaultValue: 'Pulled. {{count}} file(s) have conflicts — resolve them in Changes.' }));
+        } else {
+          showToast('success', t('git:toast.pulled_latest', { defaultValue: 'Pulled latest changes.' }));
+        }
+        fetchStatusFull({ silent: true });
+        return forceResult;
+      }
     } finally {
       setOperation(null);
     }
