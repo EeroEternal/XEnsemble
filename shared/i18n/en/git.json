@@ -153,6 +153,9 @@
     "ask_admin_to_configure": "Ask an administrator to configure Git provider OAuth settings.",
     "configured": "Configured",
     "not_configured": "Not configured",
+    "configure_oauth": "Configure OAuth",
+    "configure_dialog_title": "Configure {{label}} OAuth",
+    "oauth_not_configured_hint": "OAuth not configured",
     "loading_settings": "Loading…",
     "saved": "{{provider}} settings saved."
   },

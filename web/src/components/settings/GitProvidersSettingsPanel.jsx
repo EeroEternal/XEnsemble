@@ -184,14 +184,14 @@ export default function GitProvidersSettingsPanel() {
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs">
                   {showConfigured ? (
-                    <span className="text-emerald-600">● Configured</span>
+                    <span className="text-emerald-600">● {t('git:providers.configured')}</span>
                   ) : (
-                    <span className="text-amber-600">⚠️ Not configured</span>
+                    <span className="text-amber-600">⚠️ {t('git:providers.not_configured')}</span>
                   )}
                 </span>
                 {isAdmin && (
                   <Button variant="secondary" size="sm" onClick={() => openConfig(p)}>
-                    {t('git:providers.configure_oauth', { defaultValue: 'Configure OAuth' })}
+                    {t('git:providers.configure_oauth')}
                   </Button>
                 )}
               </div>
@@ -206,7 +206,7 @@ export default function GitProvidersSettingsPanel() {
                   onConnect={git.connect}
                   onDisconnect={git.disconnect}
                   disabled={!showConfigured}
-                  disabledReason={t('git:providers.oauth_not_configured', { defaultValue: 'OAuth not configured' })}
+                  disabledReason={t('git:providers.oauth_not_configured_hint')}
                 />
                 {!showConfigured && !isAdmin && (
                   <GitOAuthAlert
@@ -229,7 +229,7 @@ export default function GitProvidersSettingsPanel() {
       {configProvider && configEdit && (
         <ConsoleDialogShell fitContent onClose={closeConfig} panelClassName={consoleStructuredDialogPanelClass}>
           <ConsoleStructuredDialogHeader
-            title={t('git:providers.configure_dialog_title', { defaultValue: `Configure ${configProvider.label} OAuth` })}
+            title={t('git:providers.configure_dialog_title', { label: configProvider.label })}
           />
           <ConsoleStructuredDialogBody>
             <div className="space-y-4">

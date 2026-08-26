@@ -21,6 +21,27 @@
     "delete_image": "Delete image",
     "add_image": "Add Image"
   },
+  "table": {
+    "name": "Name",
+    "status": "Status",
+    "components": "Components",
+    "build_time": "Build time",
+    "created": "Created",
+    "actions": "Actions"
+  },
+  "search_images": "Search images…",
+  "search_components": "Search components…",
+  "new_image": "New Image",
+  "image_name": "Image Name",
+  "selected": "Selected",
+  "select_components_hint": "Select components and versions to build your image",
+  "count_images": "{{count}} images",
+  "no_custom_images_hint": "No custom images yet. Click \u201cNew Image\u201d to create one.",
+  "no_match": "No images match your search.",
+  "refresh": "Refresh",
+  "view_logs": "View logs",
+  "rebuild": "Rebuild",
+  "delete": "Delete",
   "field": {
     "components": "Components",
     "image_ref": "Image Ref",

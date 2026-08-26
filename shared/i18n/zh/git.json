@@ -153,6 +153,9 @@
     "ask_admin_to_configure": "请联系管理员配置 Git 提供商 OAuth 设置。",
     "configured": "已配置",
     "not_configured": "未配置",
+    "configure_oauth": "配置 OAuth",
+    "configure_dialog_title": "配置 {{label}} OAuth",
+    "oauth_not_configured_hint": "OAuth 未配置",
     "loading_settings": "加载中…",
     "saved": "{{provider}} 设置已保存。"
   },
