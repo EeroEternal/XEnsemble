@@ -1,15 +1,12 @@
-import { useCallback, useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Check, ChevronDown, ChevronRight, FileWarning, Loader2, RefreshCw, Pencil, GitMerge } from 'lucide-react';
+import { AlertTriangle, Check, ChevronRight, Loader2, RefreshCw, GitMerge } from 'lucide-react';
 import Button from '../Button';
-import SelectMenu from '../SelectMenu';
 import { useToast } from '../Toast';
 import * as gitApi from '../../lib/gitApi';
-import { DiffEditor, Editor } from '@monaco-editor/react';
-import '@/lib/monacoSetup';
+import MergeEditorDialog from './MergeEditorDialog';
 import {
   consoleIconButtonClass,
-  consoleButtonFocusClass,
   textPrimary,
   textSecondary,
   textPlaceholder,
@@ -17,49 +14,15 @@ import {
   bgCanvas,
 } from '../../lib/consoleTokens';
 
-const LANG_MAP = {
-  js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
-  json: 'json', css: 'css', html: 'html', md: 'markdown', py: 'python',
-  rb: 'ruby', go: 'go', rs: 'rust', java: 'java', c: 'c', cpp: 'cpp',
-  sh: 'shell', yml: 'yaml', yaml: 'yaml', toml: 'toml', sql: 'sql',
-  scss: 'scss', less: 'less', xml: 'xml', graphql: 'graphql',
-};
-
-function inferLanguage(path) {
-  if (!path) return 'plaintext';
-  const ext = path.split('.').pop().toLowerCase();
-  return LANG_MAP[ext] || 'plaintext';
-}
-
-const STRATEGY_OPTIONS = [
-  { value: 'ours', label: 'Keep ours' },
-  { value: 'theirs', label: 'Keep theirs' },
-  { value: 'manual', label: 'Manual merge' },
-];
-
-const STRATEGY_DESCRIPTIONS = {
-  ours: 'Accept the current branch version',
-  theirs: 'Accept the incoming branch version',
-  manual: 'Edit the final content manually',
-};
-
 export function ConflictFileItem({ file, projectId, onResolved }) {
-  const { t } = useTranslation();
   const { showToast } = useToast();
-  const [expanded, setExpanded] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
   const [oursContent, setOursContent] = useState(null);
   const [theirsContent, setTheirsContent] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [resolving, setResolving] = useState(false);
-  const [strategy, setStrategy] = useState('ours');
-  const [mergeMode, setMergeMode] = useState(false);
-  const [mergeContent, setMergeContent] = useState('');
-  const [saving, setSaving] = useState(false);
 
-  const language = useMemo(() => inferLanguage(file?.path), [file?.path]);
-
-  const loadContents = useCallback(async () => {
-    if (!expanded || !projectId || !file) return;
+  const openMerge = useCallback(async () => {
+    setMergeOpen(true);
     setLoading(true);
     try {
       const [oursRes, theirsRes] = await Promise.all([
@@ -73,186 +36,32 @@ export function ConflictFileItem({ file, projectId, onResolved }) {
     } finally {
       setLoading(false);
     }
-  }, [expanded, projectId, file, showToast]);
-
-  useEffect(() => {
-    if (expanded) loadContents();
-  }, [expanded, loadContents]);
-
-  const startManualMerge = useCallback(() => {
-    setStrategy('manual');
-    setMergeMode(true);
-    setMergeContent(oursContent || '');
-  }, [oursContent]);
-
-  const handleResolve = async () => {
-    if (strategy === 'manual' && mergeMode) {
-      setSaving(true);
-      try {
-        await gitApi.writeWorkspaceFile(projectId, file.path, mergeContent);
-        await gitApi.resolveConflict(projectId, file.path, 'manual');
-        showToast('success', t('git:toast.conflict_resolved'));
-        onResolved?.(file.path);
-      } catch (err) {
-        showToast('error', err.message);
-      } finally {
-        setSaving(false);
-      }
-      return;
-    }
-    setResolving(true);
-    try {
-      await gitApi.resolveConflict(projectId, file.path, strategy);
-      showToast('success', t('git:toast.conflict_resolved'));
-      onResolved?.(file.path);
-    } catch (err) {
-      showToast('error', err.message);
-    } finally {
-      setResolving(false);
-    }
-  };
+  }, [projectId, file, showToast]);
 
   return (
-    <div className={`border ${borderHairline} rounded-lg overflow-hidden`}>
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm ${bgCanvas} hover:bg-zinc-100 transition-colors`}
-      >
-        {expanded ? (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
-        )}
-        <FileWarning className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-        <span className="font-mono text-xs truncate">{file.path}</span>
-      </button>
-
-      {expanded && (
-        <div className="border-t border-zinc-200">
-          {loading ? (
-            <div className="flex items-center justify-center gap-2 p-4 text-xs text-zinc-500">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              {t('git:loading_file_contents', { defaultValue: 'Loading file contents…' })}
-            </div>
-          ) : mergeMode ? (
-            <>
-              <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-100 border-b border-zinc-200">
-                <div className="flex items-center gap-2">
-                  <Pencil className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                    {t('git:manual_merge_editor', { defaultValue: 'Manual merge — edit the final content' })}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => { setMergeMode(false); setStrategy('ours'); }}
-                  className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
-                  title={t('common:action.back', { defaultValue: 'Back to diff' })}
-                >
-                  <ChevronRight className="h-3.5 w-3.5 rotate-180" />
-                </button>
-              </div>
-              <div className="h-64">
-                <Editor
-                  height="100%"
-                  language={language}
-                  value={mergeContent}
-                  theme="vs"
-                  onChange={(val) => setMergeContent(val ?? '')}
-                  options={{
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                    wordWrap: 'on',
-                    fontSize: 13,
-                    fontFamily: "'Noto Sans Mono', 'Fira Code', monospace",
-                    automaticLayout: true,
-                  }}
-                />
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-100 border-b border-zinc-200">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                  {t('git:conflict_diff', { defaultValue: 'Conflict diff — ours vs theirs' })}
-                </span>
-                <button
-                  type="button"
-                  onClick={startManualMerge}
-                  className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
-                  title={t('git:manual_merge_hint', { defaultValue: 'Edit the final merged content yourself' })}
-                >
-                  <GitMerge className="h-3 w-3" />
-                  {t('git:manual_merge', { defaultValue: 'Manual merge' })}
-                </button>
-              </div>
-              <div className="h-64">
-                <DiffEditor
-                  height="100%"
-                  language={language}
-                  original={oursContent || ''}
-                  modified={theirsContent || ''}
-                  theme="vs"
-                  options={{
-                    readOnly: true,
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                    wordWrap: 'on',
-                    fontSize: 13,
-                    fontFamily: "'Noto Sans Mono', 'Fira Code', monospace",
-                    automaticLayout: true,
-                    renderSideBySide: true,
-                  }}
-                />
-              </div>
-            </>
-          )}
-
-          <div className="flex items-center gap-3 px-3 py-2 border-t border-zinc-200 bg-zinc-50">
-            {!mergeMode && (
-              <>
-                <SelectMenu
-                  value={strategy}
-                  onChange={setStrategy}
-                  options={STRATEGY_OPTIONS}
-                  className="min-w-[130px]"
-                />
-                <span className={`text-[10px] ${textPlaceholder}`}>
-                  {STRATEGY_DESCRIPTIONS[strategy]}
-                </span>
-              </>
-            )}
-            {mergeMode && (
-              <span className={`text-[10px] ${textPlaceholder}`}>
-                {t('git:manual_merge_save_hint', { defaultValue: 'Save will write the file and mark conflict as resolved' })}
-              </span>
-            )}
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleResolve}
-              disabled={resolving || saving}
-              className="ml-auto"
-            >
-              {(resolving || saving) ? (
-                <>
-                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                  {t('common:action.resolving', { defaultValue: 'Resolving…' })}
-                </>
-              ) : (
-                <>
-                  <Check className="mr-1 h-3 w-3" />
-                  {mergeMode
-                    ? t('git:save_and_resolve', { defaultValue: 'Save & resolve' })
-                    : t('git:resolve', { defaultValue: 'Resolve' })}
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
+    <>
+      <div className={`border ${borderHairline} rounded-lg overflow-hidden`}>
+        <button
+          type="button"
+          onClick={openMerge}
+          className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm ${bgCanvas} hover:bg-zinc-100 transition-colors`}
+        >
+          <GitMerge className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <span className="font-mono text-xs truncate flex-1">{file.path}</span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+        </button>
+      </div>
+      <MergeEditorDialog
+        open={mergeOpen}
+        file={file}
+        projectId={projectId}
+        oursContent={oursContent}
+        theirsContent={theirsContent}
+        loading={loading}
+        onClose={() => setMergeOpen(false)}
+        onResolved={onResolved}
+      />
+    </>
   );
 }
 
