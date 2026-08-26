@@ -5,7 +5,7 @@
  * The legacy /api/v1/github/* routes continue to work unchanged; see
  * registerGitHubRoutes() in routes/github.js.
  */
-const { eq } = require('drizzle-orm');
+const { eq, and } = require('drizzle-orm');
 const crypto = require('crypto');
 
 const { db } = require('../db/index');
@@ -70,6 +70,19 @@ function newId(prefix) {
 }
 
 const { getProjectForUser } = require('../projects/getProjectForUser');
+
+/**
+ * Resolve runtimeId from session_id (so git ops target the session's worktree).
+ */
+async function resolveRuntimeId(userId, sessionId) {
+    if (!sessionId) return null;
+    const rows = await db.select().from(schema.sessions)
+        .where(and(
+            eq(schema.sessions.id, sessionId),
+            eq(schema.sessions.userId, userId),
+        ));
+    return rows[0]?.runtimeId || null;
+}
 
 function registerGitRoutes(fastify) {
     const connectionService = new GitConnectionService();
@@ -400,6 +413,14 @@ function registerGitRoutes(fastify) {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try {
+            // Resolve runtimeId from session_id so fetchAndRebase/push operate
+            // on the session's worktree, not the bare main repo.
+            const runtimeId = await resolveRuntimeId(
+                request.user.id,
+                request.body?.session_id || request.query?.session_id,
+            );
+            const gitOperationService = new GitOperationService({ runtimeId });
+            const mergeRequestService = new MergeRequestService({ gitOperationService });
             const record = await mergeRequestService.create(
                 project, request.body || {}, request.user.id);
             return reply.code(201).send(record);
@@ -414,6 +435,9 @@ function registerGitRoutes(fastify) {
                     error: 'Git token 已过期或无效，请重新认证',
                     code: 'REAUTH_REQUIRED',
                 });
+            }
+            if (err.code === 'rebase_conflict') {
+                return reply.code(409).send({ error: err.message, code: 'rebase_conflict' });
             }
             return reply.code(400).send({ error: err.message });
         }

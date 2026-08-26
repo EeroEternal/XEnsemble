@@ -119,7 +119,7 @@ export const generatePRDescription = (projectId, { sourceBranch, targetBranch } 
   });
 
 export const createPullRequest = (projectId, payload) =>
-  request(`/api/v1/projects/${encodeURIComponent(projectId)}/merge-requests`, {
+  request(withSessionId(`/api/v1/projects/${encodeURIComponent(projectId)}/merge-requests`), {
     method: 'POST',
     body: JSON.stringify(payload),
   });
