@@ -67,5 +67,8 @@
   "unavailable": "Unavailable",
   "one_model_per_line": "One model ID per line.",
   "update": "Update",
-  "add": "Add"
+  "add": "Add",
+  "upstream_url_hint": "Leave empty to use the embedded local UniGateway process.",
+  "auto_start_hint": "Start automatically when the server boots",
+  "providers_count": "{{count}} providers"
 }

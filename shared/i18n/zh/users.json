@@ -67,5 +67,6 @@
     "quota_updated": "配额已更新。",
     "agents_granted": "Agent 授权已更新。"
   },
-  "search_placeholder": "搜索用户…"
+  "search_placeholder": "搜索用户…",
+  "count": "{{count}} 个用户"
 }

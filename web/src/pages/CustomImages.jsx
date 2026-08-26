@@ -292,7 +292,7 @@ export function CustomImagesContent() {
       )}
 
       <div className="flex items-center justify-between gap-3">
-        <span className="text-xs text-zinc-500">{imageQuota.count} images</span>
+        <span className="text-xs text-zinc-500">{t('images:count_images', { count: imageQuota.count })}</span>
         <div className="flex items-center gap-2">
           <div className="relative w-64">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />

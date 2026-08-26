@@ -67,5 +67,6 @@
     "quota_updated": "Quota updated.",
     "agents_granted": "Agent authorization updated."
   },
-  "search_placeholder": "Search users…"
+  "search_placeholder": "Search users…",
+  "count": "{{count}} users"
 }

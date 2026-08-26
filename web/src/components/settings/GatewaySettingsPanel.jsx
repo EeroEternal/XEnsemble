@@ -925,7 +925,7 @@ export default function GatewaySettingsPanel() {
         <div>
           <div className="flex items-center justify-between gap-3 mb-5">
             <span className="text-xs text-zinc-500 shrink-0">
-              {providers.length} providers
+              {t('gateway:providers_count', { count: providers.length })}
             </span>
             <div className="flex items-center gap-2">
               <div className="relative w-64 shrink-0">
@@ -1077,7 +1077,7 @@ export default function GatewaySettingsPanel() {
                   placeholder="http://unigateway.internal:8741"
                   className="h-9 min-h-9 py-1.5 font-mono"
                 />
-                <p className="text-xs text-zinc-500">Leave empty to use the embedded local UniGateway process.</p>
+                <p className="text-xs text-zinc-500">{t('gateway:upstream_url_hint')}</p>
               </div>
               <label className="flex items-center gap-2 text-sm text-zinc-600">
                 <input
@@ -1086,7 +1086,7 @@ export default function GatewaySettingsPanel() {
                   onChange={(e) => setProcessDraft((prev) => ({ ...prev, auto_start: e.target.checked }))}
                   className="rounded border-zinc-300"
                 />
-                Start automatically when the server boots
+                {t('gateway:auto_start_hint')}
               </label>
             </form>
           </ConsoleStructuredDialogBody>

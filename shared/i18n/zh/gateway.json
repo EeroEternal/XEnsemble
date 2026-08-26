@@ -67,5 +67,8 @@
   "unavailable": "不可用",
   "one_model_per_line": "每行一个模型 ID。",
   "update": "更新",
-  "add": "添加"
+  "add": "添加",
+  "upstream_url_hint": "留空使用内置的本地 UniGateway 进程。",
+  "auto_start_hint": "服务器启动时自动启动",
+  "providers_count": "{{count}} 个提供商"
 }
