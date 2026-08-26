@@ -21,7 +21,9 @@ function formatTtl(expiresAt) {
   if (ms <= 0) return i18next.t('deploy:preview.expired');
   const h = Math.floor(ms / 3600000);
   const m = Math.floor((ms % 3600000) / 60000);
-  return h > 0 ? `${h} 小时 ${m} 分钟` : `${m} 分钟`;
+  return h > 0
+    ? i18next.t('deploy:preview.hours_minutes', { h, m })
+    : i18next.t('deploy:preview.minutes', { m });
 }
 
 /** Deployed app preview (start/stop + embed). */
@@ -145,7 +147,7 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo 
             {elapsedMs != null && (
               <div>
                 <span className="text-zinc-500">{t('deploy:preview.elapsed')}：</span>
-                <span className="text-zinc-800">{(elapsedMs / 1000).toFixed(1)} 秒</span>
+                <span className="text-zinc-800">{t('deploy:preview.seconds', { s: (elapsedMs / 1000).toFixed(1) })}</span>
               </div>
             )}
           </div>

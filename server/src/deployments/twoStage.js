@@ -47,11 +47,23 @@ async function buildConcurrencyOccupants(userId, getProjectForUser) {
     const items = [];
     const seen = new Set();
     const nameCache = new Map();
+    const sessionNameCache = new Map();
     const getProjectName = async (projectId) => {
         if (nameCache.has(projectId)) return nameCache.get(projectId);
         let name = projectId;
         try { const p = await getProjectForUser(userId, projectId); if (p?.name) name = p.name; } catch { /* ignore */ }
         nameCache.set(projectId, name);
+        return name;
+    };
+    const getSessionName = async (sessionId) => {
+        if (!sessionId) return '';
+        if (sessionNameCache.has(sessionId)) return sessionNameCache.get(sessionId);
+        let name = sessionId;
+        try {
+            const rows = await db.select({ title: schema.sessions.title }).from(schema.sessions).where(eq(schema.sessions.id, sessionId));
+            if (rows[0]?.title) name = rows[0].title;
+        } catch { /* ignore */ }
+        sessionNameCache.set(sessionId, name);
         return name;
     };
     try {
@@ -60,7 +72,7 @@ async function buildConcurrencyOccupants(userId, getProjectForUser) {
             const key = `deploy:${projectId}:${sessionId || ''}`;
             if (seen.has(key)) continue;
             seen.add(key);
-            items.push({ sessionId: sessionId || null, projectId, projectName: await getProjectName(projectId), kind: 'deploy', status: 'building' });
+            items.push({ sessionId: sessionId || null, projectId, projectName: await getProjectName(projectId), sessionName: await getSessionName(sessionId), kind: 'deploy', status: 'building' });
         }
         // 运行中 / building / pending 的 preview 与部署记录（与 previews 计数口径一致）
         const rows = await db.select({
@@ -76,7 +88,7 @@ async function buildConcurrencyOccupants(userId, getProjectForUser) {
             const key = `${r.kind}:${r.projectId}:${r.sessionId || ''}`;
             if (seen.has(key)) continue;
             seen.add(key);
-            items.push({ sessionId: r.sessionId || null, projectId: r.projectId, projectName: await getProjectName(r.projectId), kind: r.kind, status: 'running' });
+            items.push({ sessionId: r.sessionId || null, projectId: r.projectId, projectName: await getProjectName(r.projectId), sessionName: await getSessionName(r.sessionId), kind: r.kind, status: 'running' });
         }
     } catch (e) {
         console.error('[twoStage] buildConcurrencyOccupants error:', e?.message || e);
@@ -483,13 +495,25 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
                 .where(eq(schema.deployments.id, deployRef.id))
                 .catch((e) => console.error('[twoStage] persist deploy final:', e.message));
         }
-        // 部署完成跨 session 提示：前端全局 EventSource 监听，即使不在该 session 页也能看到
+        // 部署完成跨 session 提示：前端全局 EventSource 监听，即使不在该 session 页也能看到。
+        // 带上 workspace（project）名与 session 名，前端 toast 能显示"哪个 workspace 的哪个 session"。
         try {
+            let projectName = project.id;
+            try { const p = await getProjectForUser(userId, project.id); if (p?.name) projectName = p.name; } catch { /* ignore */ }
+            let sessionName = sessionId || '';
+            if (sessionId) {
+                try {
+                    const rows = await db.select({ title: schema.sessions.title }).from(schema.sessions).where(eq(schema.sessions.id, sessionId));
+                    if (rows[0]?.title) sessionName = rows[0].title;
+                } catch { /* ignore */ }
+            }
             broadcastSse({
                 type: 'deploy_finished',
                 sessionId: sessionId || null,
                 projectId: project.id,
                 userId,
+                projectName,
+                sessionName,
                 ok: !!result?.ok,
                 aborted: !!result?.aborted,
             });

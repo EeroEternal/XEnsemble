@@ -52,7 +52,10 @@
   "occupant": {
     "deploying": "deploying",
     "preview_running": "preview running",
-    "session": "(session {{id}})"
+    "session": "(session {{id}})",
+    "unnamed": "Unnamed session",
+    "workspace": "Workspace",
+    "session_label": "Session"
   },
   "preview": {
     "running": "Your app is running",
@@ -63,6 +66,9 @@
     "ttl": "Time remaining",
     "elapsed": "Deployment time",
     "expired": "Expired",
+    "hours_minutes": "{{h}}h {{m}}m",
+    "minutes": "{{m}}m",
+    "seconds": "{{s}}s",
     "empty": "Deploy a preview to view your app here",
     "details": "Deployment details",
     "show_details": "View deployment details",
@@ -96,6 +102,14 @@
   "toast": {
     "finished": "Deployment finished",
     "aborted": "Deployment aborted",
-    "failed": "Deployment failed"
+    "failed": "Deployment failed",
+    "finished_with": "Deployment finished for {{session}} in {{workspace}}",
+    "aborted_with": "Deployment aborted for {{session}} in {{workspace}}",
+    "failed_with": "Deployment failed for {{session}} in {{workspace}}",
+    "ws_label": "Workspace",
+    "sess_label": "Session",
+    "finished_text": "deployment finished",
+    "aborted_text": "deployment aborted",
+    "failed_text": "deployment failed"
   }
 }

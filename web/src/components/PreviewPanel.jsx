@@ -12,13 +12,17 @@ import { useTranslation } from 'react-i18next';
 
 function pickActiveDeployment(list) {
   if (!Array.isArray(list) || list.length === 0) return null;
-  // 部署中（building/pending）优先：右上角显示"部署中"转圈
-  const building = list.find((d) => d.status === 'building' || d.status === 'pending');
-  if (building) return building;
-  // 只有真正的 preview running 才代表"有预览"；不要把 kind='deploy' running（部署完成记录）
-  // 误当 preview，否则右上角会出现"stop preview"但实际没有预览可停
+  // 1) 优先真正可用的预览（preview running）——不被旧 building 残留顶掉
   const runningPreview = list.find((d) => d.kind === 'preview' && d.status === 'running');
-  return runningPreview || null;
+  if (runningPreview) return runningPreview;
+  // 2) 其次只认"较新的"进行中部署（building/pending，updated 10 分钟内）——
+  //    太旧的视为残留（部署进程异常退出后 finally 未执行、记录卡 building），
+  //    不选中，否则右上角会一直转圈/错位
+  const recent = Date.now() - 10 * 60 * 1000;
+  const active = list
+    .filter((d) => (d.status === 'building' || d.status === 'pending') && d.updated_at >= recent)
+    .sort((a, b) => b.updated_at - a.updated_at)[0];
+  return active || null;
 }
 
 const PREVIEW_WINDOW_NAME = 'xensemble-preview';

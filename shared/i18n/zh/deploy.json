@@ -52,7 +52,10 @@
   "occupant": {
     "deploying": "部署中",
     "preview_running": "预览运行中",
-    "session": "（会话 {{id}}）"
+    "session": "（会话 {{id}}）",
+    "unnamed": "未命名会话",
+    "workspace": "工作区",
+    "session_label": "会话"
   },
   "preview": {
     "running": "你的应用正在运行",
@@ -63,6 +66,9 @@
     "ttl": "剩余可用时间",
     "elapsed": "本次部署用时",
     "expired": "已过期",
+    "hours_minutes": "{{h}} 小时 {{m}} 分钟",
+    "minutes": "{{m}} 分钟",
+    "seconds": "{{s}} 秒",
     "empty": "部署预览后在此查看应用",
     "details": "部署详情",
     "show_details": "查看部署详情",
@@ -96,6 +102,14 @@
   "toast": {
     "finished": "部署完成",
     "aborted": "部署已中止",
-    "failed": "部署失败"
+    "failed": "部署失败",
+    "finished_with": "「{{workspace}}」的「{{session}}」部署完成",
+    "aborted_with": "「{{workspace}}」的「{{session}}」部署已中止",
+    "failed_with": "「{{workspace}}」的「{{session}}」部署失败",
+    "ws_label": "工作区",
+    "sess_label": "会话",
+    "finished_text": "部署完成",
+    "aborted_text": "部署已中止",
+    "failed_text": "部署失败"
   }
 }

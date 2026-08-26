@@ -145,7 +145,11 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                     setRecoveredId(active.id);
                 } else if (deployRows.length > 0) {
                     const last = deployRows[0];
-                    if (last.status === 'running') setRunState('success');
+                    if (last.status === 'running') {
+                        setRunState('success');
+                        // 恢复部署耗时（updated_at - created_at = 部署总时长），否则成功态里"本次部署用时"不显示
+                        setResult({ ok: true, deploymentId: last.id, elapsedMs: (last.updated_at - last.created_at) || 0 });
+                    }
                     else if (last.status === 'failed') { setRunState('failed'); setResult({ ok: false, error: last.stage_message || '上次部署失败', stage: last.stage }); }
                     else if (last.status === 'stopped') setRunState('aborted');
                 }
@@ -199,6 +203,7 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 if (runStateRef.current !== 'running') return; // 已被 SSE 结果接管
                 if (latest.status === 'running') {
                     setRunState('success');
+                    setResult({ ok: true, deploymentId: latest.id, elapsedMs: (latest.updated_at - latest.created_at) || 0 });
                     jumpTimerRef.current = setTimeout(() => onSuccess?.(latest), 800);
                 } else if (latest.status === 'failed') {
                     setRunState('failed');
@@ -281,8 +286,7 @@ function FailureView({ result }) {
                     <ul className="text-xs text-amber-900 space-y-0.5">
                         {result.occupants.map((o, i) => (
                             <li key={i}>
-                                · 「{o.projectName || o.projectId}」{o.kind === 'preview' ? t('deploy:occupant.preview_running') : t('deploy:occupant.deploying')}
-                                {o.sessionId ? t('deploy:occupant.session', { id: o.sessionId.slice(-8) }) : ''}
+                                · {t('deploy:occupant.workspace')}「{o.projectName || o.projectId}」- {t('deploy:occupant.session_label')}「{o.sessionName || t('deploy:occupant.unnamed')}」{o.kind === 'preview' ? t('deploy:occupant.preview_running') : t('deploy:occupant.deploying')}
                             </li>
                         ))}
                     </ul>

@@ -179,7 +179,21 @@ export default React.forwardRef(function Sessions({
     const onDeployFinished = (e) => {
       const d = e.detail;
       if (!d || typeof d.ok !== 'boolean') return;
-      showToast(d.ok ? 'success' : 'error', d.ok ? t('deploy:toast.finished') : (d.aborted ? t('deploy:toast.aborted') : t('deploy:toast.failed')));
+      const ws = d.projectName || d.projectId || '';
+      const ss = d.sessionName || d.sessionId || '';
+      // workspace + session 加粗放在最前，便于一眼看清是哪个工作区的哪个会话
+      const head = (
+        <b>
+          {t('deploy:toast.ws_label')}「{ws}」- {t('deploy:toast.sess_label')}「{ss}」
+        </b>
+      );
+      const tail = d.ok
+        ? t('deploy:toast.finished_text')
+        : d.aborted
+          ? t('deploy:toast.aborted_text')
+          : t('deploy:toast.failed_text');
+      // 部署完成提示 8s（默认成功 4s 太短），便于看清
+      showToast(d.ok ? 'success' : 'error', <>{head} {tail}</>, { durationMs: 8000 });
     };
     window.addEventListener('xensemble:deploy_finished', onDeployFinished);
     return () => window.removeEventListener('xensemble:deploy_finished', onDeployFinished);
