@@ -138,7 +138,6 @@
     "ai_filling": "AI is generating…",
     "body_placeholder": "What changed and why"
   },
-  "commit_ai_generating": "AI is generating…",
   "providers": {
     "title": "Git Providers",
     "git_account": "Git Account",
