@@ -1,17 +1,35 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, ChevronRight, FileWarning, Loader2, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
+import { AlertTriangle, Check, ChevronDown, ChevronRight, FileWarning, Loader2, RefreshCw, Pencil, GitMerge } from 'lucide-react';
 import Button from '../Button';
 import SelectMenu from '../SelectMenu';
 import { useToast } from '../Toast';
 import * as gitApi from '../../lib/gitApi';
+import { DiffEditor, Editor } from '@monaco-editor/react';
+import '@/lib/monacoSetup';
 import {
   consoleIconButtonClass,
+  consoleButtonFocusClass,
   textPrimary,
   textSecondary,
   textPlaceholder,
   borderHairline,
   bgCanvas,
 } from '../../lib/consoleTokens';
+
+const LANG_MAP = {
+  js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
+  json: 'json', css: 'css', html: 'html', md: 'markdown', py: 'python',
+  rb: 'ruby', go: 'go', rs: 'rust', java: 'java', c: 'c', cpp: 'cpp',
+  sh: 'shell', yml: 'yaml', yaml: 'yaml', toml: 'toml', sql: 'sql',
+  scss: 'scss', less: 'less', xml: 'xml', graphql: 'graphql',
+};
+
+function inferLanguage(path) {
+  if (!path) return 'plaintext';
+  const ext = path.split('.').pop().toLowerCase();
+  return LANG_MAP[ext] || 'plaintext';
+}
 
 const STRATEGY_OPTIONS = [
   { value: 'ours', label: 'Keep ours' },
@@ -22,10 +40,11 @@ const STRATEGY_OPTIONS = [
 const STRATEGY_DESCRIPTIONS = {
   ours: 'Accept the current branch version',
   theirs: 'Accept the incoming branch version',
-  manual: 'Mark as manually resolved',
+  manual: 'Edit the final content manually',
 };
 
 export function ConflictFileItem({ file, projectId, onResolved }) {
+  const { t } = useTranslation();
   const { showToast } = useToast();
   const [expanded, setExpanded] = useState(false);
   const [oursContent, setOursContent] = useState(null);
@@ -33,6 +52,11 @@ export function ConflictFileItem({ file, projectId, onResolved }) {
   const [loading, setLoading] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [strategy, setStrategy] = useState('ours');
+  const [mergeMode, setMergeMode] = useState(false);
+  const [mergeContent, setMergeContent] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const language = useMemo(() => inferLanguage(file?.path), [file?.path]);
 
   const loadContents = useCallback(async () => {
     if (!expanded || !projectId || !file) return;
@@ -55,11 +79,31 @@ export function ConflictFileItem({ file, projectId, onResolved }) {
     if (expanded) loadContents();
   }, [expanded, loadContents]);
 
+  const startManualMerge = useCallback(() => {
+    setStrategy('manual');
+    setMergeMode(true);
+    setMergeContent(oursContent || '');
+  }, [oursContent]);
+
   const handleResolve = async () => {
+    if (strategy === 'manual' && mergeMode) {
+      setSaving(true);
+      try {
+        await gitApi.writeWorkspaceFile(projectId, file.path, mergeContent);
+        await gitApi.resolveConflict(projectId, file.path, 'manual');
+        showToast('success', t('git:toast.conflict_resolved'));
+        onResolved?.(file.path);
+      } catch (err) {
+        showToast('error', err.message);
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     setResolving(true);
     try {
       await gitApi.resolveConflict(projectId, file.path, strategy);
-      showToast('success', `Resolved ${file.path} using "${strategy}" strategy.`);
+      showToast('success', t('git:toast.conflict_resolved'));
       onResolved?.(file.path);
     } catch (err) {
       showToast('error', err.message);
@@ -89,30 +133,85 @@ export function ConflictFileItem({ file, projectId, onResolved }) {
           {loading ? (
             <div className="flex items-center justify-center gap-2 p-4 text-xs text-zinc-500">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Loading file contents…
+              {t('git:loading_file_contents', { defaultValue: 'Loading file contents…' })}
             </div>
+          ) : mergeMode ? (
+            <>
+              <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-100 border-b border-zinc-200">
+                <div className="flex items-center gap-2">
+                  <Pencil className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                    {t('git:manual_merge_editor', { defaultValue: 'Manual merge — edit the final content' })}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setMergeMode(false); setStrategy('ours'); }}
+                  className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
+                  title={t('common:action.back', { defaultValue: 'Back to diff' })}
+                >
+                  <ChevronRight className="h-3.5 w-3.5 rotate-180" />
+                </button>
+              </div>
+              <div className="h-64">
+                <Editor
+                  height="100%"
+                  language={language}
+                  value={mergeContent}
+                  theme="vs"
+                  onChange={(val) => setMergeContent(val ?? '')}
+                  options={{
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    wordWrap: 'on',
+                    fontSize: 13,
+                    fontFamily: "'Noto Sans Mono', 'Fira Code', monospace",
+                    automaticLayout: true,
+                  }}
+                />
+              </div>
+            </>
           ) : (
             <>
-              <div className="grid grid-cols-2 divide-x divide-zinc-200 max-h-64 overflow-auto">
-                <div>
-                  <div className="sticky top-0 bg-zinc-100 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 border-b border-zinc-200">
-                    Ours (current branch)
-                  </div>
-                  <pre className="p-2 text-xs font-mono whitespace-pre-wrap text-zinc-900 overflow-auto">
-                    {oursContent || '(empty)'}
-                  </pre>
-                </div>
-                <div>
-                  <div className="sticky top-0 bg-zinc-100 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 border-b border-zinc-200">
-                    Theirs (incoming)
-                  </div>
-                  <pre className="p-2 text-xs font-mono whitespace-pre-wrap text-zinc-900 overflow-auto">
-                    {theirsContent || '(empty)'}
-                  </pre>
-                </div>
+              <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-100 border-b border-zinc-200">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                  {t('git:conflict_diff', { defaultValue: 'Conflict diff — ours vs theirs' })}
+                </span>
+                <button
+                  type="button"
+                  onClick={startManualMerge}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200 ${consoleButtonFocusClass}`}
+                  title={t('git:manual_merge_hint', { defaultValue: 'Edit the final merged content yourself' })}
+                >
+                  <GitMerge className="h-3 w-3" />
+                  {t('git:manual_merge', { defaultValue: 'Manual merge' })}
+                </button>
               </div>
+              <div className="h-64">
+                <DiffEditor
+                  height="100%"
+                  language={language}
+                  original={oursContent || ''}
+                  modified={theirsContent || ''}
+                  theme="vs"
+                  options={{
+                    readOnly: true,
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    wordWrap: 'on',
+                    fontSize: 13,
+                    fontFamily: "'Noto Sans Mono', 'Fira Code', monospace",
+                    automaticLayout: true,
+                    renderSideBySide: true,
+                  }}
+                />
+              </div>
+            </>
+          )}
 
-              <div className="flex items-center gap-3 px-3 py-2 border-t border-zinc-200 bg-zinc-50">
+          <div className="flex items-center gap-3 px-3 py-2 border-t border-zinc-200 bg-zinc-50">
+            {!mergeMode && (
+              <>
                 <SelectMenu
                   value={strategy}
                   onChange={setStrategy}
@@ -122,28 +221,35 @@ export function ConflictFileItem({ file, projectId, onResolved }) {
                 <span className={`text-[10px] ${textPlaceholder}`}>
                   {STRATEGY_DESCRIPTIONS[strategy]}
                 </span>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={handleResolve}
-                  disabled={resolving}
-                  className="ml-auto"
-                >
-                  {resolving ? (
-                    <>
-                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                      Resolving…
-                    </>
-                  ) : (
-                    <>
-                      <Check className="mr-1 h-3 w-3" />
-                      Resolve
-                    </>
-                  )}
-                </Button>
-              </div>
-            </>
-          )}
+              </>
+            )}
+            {mergeMode && (
+              <span className={`text-[10px] ${textPlaceholder}`}>
+                {t('git:manual_merge_save_hint', { defaultValue: 'Save will write the file and mark conflict as resolved' })}
+              </span>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleResolve}
+              disabled={resolving || saving}
+              className="ml-auto"
+            >
+              {(resolving || saving) ? (
+                <>
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  {t('common:action.resolving', { defaultValue: 'Resolving…' })}
+                </>
+              ) : (
+                <>
+                  <Check className="mr-1 h-3 w-3" />
+                  {mergeMode
+                    ? t('git:save_and_resolve', { defaultValue: 'Save & resolve' })
+                    : t('git:resolve', { defaultValue: 'Resolve' })}
+                </>
+              )}
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -151,6 +257,7 @@ export function ConflictFileItem({ file, projectId, onResolved }) {
 }
 
 export default function ConflictResolutionPanel({ projectId, targetBranch }) {
+  const { t } = useTranslation();
   const { showToast } = useToast();
   const [conflicts, setConflicts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -204,7 +311,7 @@ export default function ConflictResolutionPanel({ projectId, targetBranch }) {
       <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-2.5 shrink-0">
         <div className="flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 text-amber-500" />
-          <h3 className={`text-sm font-semibold ${textPrimary}`}>Conflict Resolution</h3>
+          <h3 className={`text-sm font-semibold ${textPrimary}`}>{t('git:conflict_resolution')}</h3>
           {conflicts.length > 0 && (
             <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
               {conflicts.length} file{conflicts.length > 1 ? 's' : ''}
@@ -223,10 +330,10 @@ export default function ConflictResolutionPanel({ projectId, targetBranch }) {
               {checking ? (
                 <>
                   <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                  Checking…
+                  {t('common:action.checking', { defaultValue: 'Checking…' })}
                 </>
               ) : (
-                'Check conflicts'
+                t('git:check_conflicts', { defaultValue: 'Check conflicts' })
               )}
             </Button>
           )}
@@ -234,7 +341,7 @@ export default function ConflictResolutionPanel({ projectId, targetBranch }) {
             type="button"
             onClick={fetchConflicts}
             disabled={loading}
-            title="Refresh"
+            title={t('common:action.refresh', { defaultValue: 'Refresh' })}
             className={consoleIconButtonClass}
           >
             {loading ? (
@@ -274,14 +381,14 @@ export default function ConflictResolutionPanel({ projectId, targetBranch }) {
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-8 text-sm text-zinc-500">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Loading conflicts…
+            {t('git:loading_conflicts', { defaultValue: 'Loading conflicts…' })}
           </div>
         ) : conflicts.length === 0 ? (
           <div className="text-center py-8">
             <Check className="mx-auto h-8 w-8 text-green-500 mb-2" />
-            <p className={`text-sm ${textSecondary}`}>No conflicts in the working tree.</p>
+            <p className={`text-sm ${textSecondary}`}>{t('git:no_conflicts', { defaultValue: 'No conflicts in the working tree.' })}</p>
             <p className={`text-xs mt-1 ${textPlaceholder}`}>
-              Use "Check conflicts" to dry-run merge against a target branch.
+              {t('git:no_conflicts_hint', { defaultValue: 'Use "Check conflicts" to dry-run merge against a target branch.' })}
             </p>
           </div>
         ) : (

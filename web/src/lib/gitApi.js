@@ -182,6 +182,15 @@ export const resolveConflict = (projectId, filePath, strategy) =>
     body: JSON.stringify({ path: filePath, strategy }),
   });
 
+export const writeWorkspaceFile = (projectId, filePath, content) => {
+  const qs = new URLSearchParams({ project_id: projectId, path: filePath });
+  return request(`/api/v1/workspace/file?${qs.toString()}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+};
+
 export const getFileAtRef = (projectId, filePath, ref = 'HEAD') => {
   const qs = new URLSearchParams({ path: filePath, ref });
   return request(`/api/v1/projects/${encodeURIComponent(projectId)}/repository/file?${qs}`);
