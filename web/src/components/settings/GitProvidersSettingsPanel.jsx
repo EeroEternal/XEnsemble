@@ -1,5 +1,6 @@
 import { useState, useEffect, useContext } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { AuthContext } from '../../App';
 import Button from '../Button';
 import Input from '../Input';
@@ -79,6 +80,20 @@ export default function GitProvidersSettingsPanel() {
   const editGitea = useEditMode({ onSave: (d) => handleSave('gitea', d) });
   const editMap = { github: editGithub, gitlab: editGitlab, gitea: editGitea };
 
+  const [collapsedByProvider, setCollapsedByProvider] = useState({});
+
+  useEffect(() => {
+    if (!isAdmin || !settings) return;
+    for (const p of PROVIDERS) {
+      const isConfigured = Boolean(settings[providerKey(p.id, 'CLIENT_ID')]);
+      const editMode = editMap[p.id];
+      if (!isConfigured && !editMode.isEditing && !editMode.draft) {
+        editMode.enterEdit(settings);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings, isAdmin]);
+
   useEffect(() => {
     gitApi.listProviders()
       .then((data) => {
@@ -142,11 +157,13 @@ export default function GitProvidersSettingsPanel() {
         const editMode = editMap[p.id];
         const isConfigured = isAdmin && settings ? Boolean(settings[providerKey(p.id, 'CLIENT_ID')]) : false;
         const oauthReady = providerOAuthConfigured[p.id] !== false;
+        const collapsed = collapsedByProvider[p.id] ?? isConfigured;
+        const toggleCollapsed = () => setCollapsedByProvider((prev) => ({ ...prev, [p.id]: !collapsed }));
 
         return (
-          <section key={p.id} className={`${consoleCardClass} p-6 space-y-4`}>
+          <section key={p.id} className={`${consoleCardClass} p-6 flex flex-col gap-4`}>
             {/* Card header */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               <h3 className={consoleSectionLabelClass}>{p.label}</h3>
               {isConfigured && (
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-600" />
@@ -156,71 +173,100 @@ export default function GitProvidersSettingsPanel() {
             {/* OAuth Configuration (admin only) */}
             {isAdmin && (
             <div>
-              <p className="text-xs text-zinc-500">{t('git:providers.oauth_config_desc', { defaultValue: 'OAuth application credentials for this provider.' })}</p>
+              {collapsed ? (
+                <button
+                  type="button"
+                  onClick={toggleCollapsed}
+                  className="w-full flex items-center justify-between py-1 text-left"
+                >
+                  <span className="text-xs text-zinc-500">
+                    OAuth Configuration
+                    <span className={isConfigured ? 'text-emerald-600' : 'text-amber-600'}>
+                      {isConfigured ? ' · Configured' : ' · Not configured'}
+                    </span>
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
+                </button>
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className={consoleSectionLabelClass}>OAuth Configuration</span>
+                    <button
+                      type="button"
+                      onClick={toggleCollapsed}
+                      className="text-zinc-400 hover:text-zinc-600"
+                      title={t('common:action.collapse', { defaultValue: 'Collapse' })}
+                      aria-label={t('common:action.collapse', { defaultValue: 'Collapse' })}
+                    >
+                      <ChevronUp className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
 
-              <div className="mt-3 space-y-4">
-                {editMode.isEditing ? (
-                  <>
-                    {p.fields.map((field) => {
-                      const key = providerKey(p.id, field);
-                      const isSecret = field === 'CLIENT_SECRET';
-                      const label = t(`git:providers.${field.toLowerCase()}`);
-                      const placeholder = isSecret
-                        ? t('git:providers.client_secret_placeholder')
-                        : t(`git:providers.${field.toLowerCase()}_placeholder`);
-                      const isMono = field === 'CALLBACK_URL' || field === 'API_BASE';
-                      return (
-                        <div key={key}>
-                          <label htmlFor={key} className="text-xs text-zinc-500 block mb-1">
-                            {label}
-                            {field !== 'CLIENT_SECRET' && <span className="text-red-500 ml-0.5">*</span>}
-                          </label>
-                          <Input
-                            id={key}
-                            type={isSecret ? 'password' : 'text'}
-                            value={editMode.draft[key] || ''}
-                            onChange={(e) => editMode.setDraft({ ...editMode.draft, [key]: e.target.value })}
-                            placeholder={placeholder}
-                            className={`w-full ${isMono ? 'font-mono' : ''}`}
-                            autoFocus={field === 'CLIENT_ID'}
-                          />
+                  <div className="space-y-4">
+                    {editMode.isEditing ? (
+                      <>
+                        {p.fields.map((field) => {
+                          const key = providerKey(p.id, field);
+                          const isSecret = field === 'CLIENT_SECRET';
+                          const label = t(`git:providers.${field.toLowerCase()}`);
+                          const placeholder = isSecret
+                            ? t('git:providers.client_secret_placeholder')
+                            : t(`git:providers.${field.toLowerCase()}_placeholder`);
+                          const isMono = field === 'CALLBACK_URL' || field === 'API_BASE';
+                          return (
+                            <div key={key}>
+                              <label htmlFor={key} className="text-xs text-zinc-500 block mb-1">
+                                {label}
+                                {field !== 'CLIENT_SECRET' && <span className="text-red-500 ml-0.5">*</span>}
+                              </label>
+                              <Input
+                                id={key}
+                                type={isSecret ? 'password' : 'text'}
+                                value={editMode.draft[key] || ''}
+                                onChange={(e) => editMode.setDraft({ ...editMode.draft, [key]: e.target.value })}
+                                placeholder={placeholder}
+                                className={`w-full ${isMono ? 'font-mono' : ''}`}
+                                autoFocus={field === 'CLIENT_ID'}
+                              />
+                            </div>
+                          );
+                        })}
+
+                        <div className="pt-2 flex justify-end gap-2">
+                          <Button variant="secondary" size="md" onClick={editMode.cancelEdit} disabled={editMode.saving}>
+                            {t('common:action.cancel')}
+                          </Button>
+                          <Button variant="primary" size="md" onClick={editMode.save} disabled={editMode.saving}>
+                            {editMode.saving ? t('settings:general.saving') : t('settings:general.save')}
+                          </Button>
                         </div>
-                      );
-                    })}
+                      </>
+                    ) : (
+                      <>
+                        {[
+                          { key: 'CLIENT_ID', label: t('git:providers.client_id'), value: maskClientId(settings[providerKey(p.id, 'CLIENT_ID')]), empty: t('git:providers.not_configured') },
+                          { key: 'CLIENT_SECRET', label: t('git:providers.client_secret'), value: settings[providerKey(p.id, 'CLIENT_SECRET')] || null, empty: t('git:providers.not_configured') },
+                          { key: 'CALLBACK_URL', label: t('git:providers.callback_url'), value: settings[providerKey(p.id, 'CALLBACK_URL')], empty: t('git:providers.not_configured') },
+                          { key: 'API_BASE', label: t('git:providers.api_base_url'), value: settings[providerKey(p.id, 'API_BASE')], empty: t('settings:general.default_value') },
+                        ].map((f) => (
+                          <div key={f.key}>
+                            <span className="text-xs text-zinc-500 block mb-1">{f.label}</span>
+                            <span className={`text-sm block leading-[38px] truncate font-mono ${f.value ? 'text-zinc-900' : 'text-zinc-400'}`}>
+                              {f.value || f.empty}
+                            </span>
+                          </div>
+                        ))}
 
-                    <div className="pt-2 flex justify-end gap-2">
-                      <Button variant="secondary" size="md" onClick={editMode.cancelEdit} disabled={editMode.saving}>
-                        {t('common:action.cancel')}
-                      </Button>
-                      <Button variant="primary" size="md" onClick={editMode.save} disabled={editMode.saving}>
-                        {editMode.saving ? t('settings:general.saving') : t('settings:general.save')}
-                      </Button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    {[
-                      { key: 'CLIENT_ID', label: t('git:providers.client_id'), value: maskClientId(settings[providerKey(p.id, 'CLIENT_ID')]), empty: t('git:providers.not_configured') },
-                      { key: 'CLIENT_SECRET', label: t('git:providers.client_secret'), value: settings[providerKey(p.id, 'CLIENT_SECRET')] || null, empty: t('git:providers.not_configured') },
-                      { key: 'CALLBACK_URL', label: t('git:providers.callback_url'), value: settings[providerKey(p.id, 'CALLBACK_URL')], empty: t('git:providers.not_configured') },
-                      { key: 'API_BASE', label: t('git:providers.api_base_url'), value: settings[providerKey(p.id, 'API_BASE')], empty: t('settings:general.default_value') },
-                    ].map((f) => (
-                      <div key={f.key}>
-                        <span className="text-xs text-zinc-500 block mb-1">{f.label}</span>
-                        <span className={`text-sm block leading-[38px] truncate font-mono ${f.value ? 'text-zinc-900' : 'text-zinc-400'}`}>
-                          {f.value || f.empty}
-                        </span>
-                      </div>
-                    ))}
-
-                    <div className="pt-2 flex justify-end">
-                      <Button variant="secondary" size="md" onClick={() => editMode.enterEdit()}>
-                        {t('common:action.edit')}
-                      </Button>
-                    </div>
-                  </>
-                )}
-              </div>
+                        <div className="pt-2 flex justify-end">
+                          <Button variant="secondary" size="md" onClick={() => editMode.enterEdit()}>
+                            {t('common:action.edit')}
+                          </Button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             )}
 
@@ -228,7 +274,16 @@ export default function GitProvidersSettingsPanel() {
             {isAdmin && <div className="border-t border-zinc-100" />}
 
             {/* Connect account (all users) */}
-            <div>
+            <div className="mt-auto flex flex-col gap-2">
+              <GitConnectButton
+                provider={p.id}
+                connection={git.connection}
+                loading={git.loading}
+                onConnect={git.connect}
+                onDisconnect={git.disconnect}
+                disabled={!oauthReady}
+                disabledReason={t('git:providers.oauth_not_configured', { defaultValue: 'OAuth not configured' })}
+              />
               {!oauthReady && (
                 <GitOAuthAlert
                   message={t('git:providers.not_configured', { defaultValue: `${p.label} OAuth is not configured. An admin must configure it before you can connect.` })}
@@ -241,15 +296,6 @@ export default function GitProvidersSettingsPanel() {
                   provider={p.id}
                 />
               )}
-              <GitConnectButton
-                provider={p.id}
-                connection={git.connection}
-                loading={git.loading}
-                onConnect={git.connect}
-                onDisconnect={git.disconnect}
-                disabled={!oauthReady}
-                disabledReason={t('git:providers.oauth_not_configured', { defaultValue: 'OAuth not configured' })}
-              />
             </div>
           </section>
         );
