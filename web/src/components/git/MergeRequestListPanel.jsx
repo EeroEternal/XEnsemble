@@ -26,27 +26,27 @@ const STATUS_META = {
   },
 };
 
-const FILTER_OPTIONS = [
-  { value: 'open', label: 'Open' },
-  { value: 'merged', label: 'Merged' },
-  { value: 'closed', label: 'Closed' },
-  { value: 'all', label: 'All' },
+const FILTER_KEYS = [
+  { value: 'open', labelKey: 'git:status_filter.open' },
+  { value: 'merged', labelKey: 'git:status_filter.merged' },
+  { value: 'closed', labelKey: 'git:status_filter.closed' },
+  { value: 'all', labelKey: 'git:status_filter.all' },
 ];
 
-function formatRelative(ts) {
+function formatRelative(ts, t) {
   if (!ts) return '-';
   const date = new Date(ts);
   if (isNaN(date.getTime())) return '-';
   const diffMs = Date.now() - date.getTime();
   if (diffMs < 0) return date.toLocaleDateString();
   const sec = Math.floor(diffMs / 1000);
-  if (sec < 60) return 'just now';
+  if (sec < 60) return t('common:time.just_now', { defaultValue: 'just now' });
   const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
+  if (min < 60) return t('common:time.minutes_ago', { count: min, defaultValue: `${min}m ago` });
   const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
+  if (hr < 24) return t('common:time.hours_ago', { count: hr, defaultValue: `${hr}h ago` });
   const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d ago`;
+  if (day < 7) return t('common:time.days_ago', { count: day, defaultValue: `${day}d ago` });
   return date.toLocaleDateString();
 }
 
@@ -148,7 +148,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 shrink-0 bg-white">
         <div className="flex items-center gap-1 shrink-0">
-          {FILTER_OPTIONS.map((opt) => {
+          {FILTER_KEYS.map((opt) => {
             const active = statusFilter === opt.value;
             return (
               <button
@@ -161,7 +161,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
                     : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'
                 }`}
               >
-                {opt.label}
+                {t(opt.labelKey)}
                 <span className={`ml-1 ${active ? 'text-white/60' : 'text-zinc-400'}`}>
                   {countByStatus[opt.value] ?? 0}
                 </span>
@@ -175,7 +175,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search…"
+            placeholder={t('common:action.search')}
             className={`w-full pl-8 pr-2 py-1 text-xs ${consoleInputClass}`}
           />
         </div>
@@ -197,7 +197,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
         {loading ? (
           <div className="flex flex-col items-center justify-center gap-2 py-16 text-zinc-400">
             <Loader2 className="h-5 w-5 animate-spin" />
-            <span className="text-xs">Loading {label.toLowerCase()}…</span>
+            <span className="text-xs">{t('common:state.loading')} {label.toLowerCase()}…</span>
           </div>
         ) : filteredMRs.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
@@ -206,12 +206,12 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
             </div>
             <div>
               <p className="text-sm font-medium text-zinc-700">
-                {mergeRequests.length === 0 ? `No ${label.toLowerCase()} yet` : 'No matching results'}
+                {mergeRequests.length === 0 ? t('git:empty.no_prs') : t('git:empty.no_match', { defaultValue: 'No matching results' })}
               </p>
               <p className="mt-0.5 text-xs text-zinc-400">
                 {mergeRequests.length === 0
                   ? (onCreatePR ? t('git:empty.no_prs_hint_create') : t('git:empty.no_prs_hint_wait'))
-                  : 'Try a different filter or search term.'}
+                  : t('git:empty.no_match_hint', { defaultValue: 'Try a different filter or search term.' })}
               </p>
             </div>
             {mergeRequests.length === 0 && onCreatePR && (
@@ -242,7 +242,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
                     type="button"
                     onClick={() => onSelectMR?.({ ...mr, permissions })}
                     className={`absolute inset-0 z-0 ${consoleButtonFocusClass}`}
-                    aria-label={`Open pull request${number != null ? ` #${number}` : ''}${mr.title ? `: ${mr.title}` : ''}`}
+                    aria-label={t('git:open_pr', { defaultValue: 'Open pull request', number: number != null ? ` #${number}` : '', title: mr.title ? `: ${mr.title}` : '' })}
                   />
                   <span className={`relative z-10 mt-1.5 h-2 w-2 shrink-0 rounded-full ${meta.dot}`} />
                   <div className="relative z-10 min-w-0 flex-1 pointer-events-none">
@@ -251,7 +251,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
                         <span className="font-mono text-xs text-zinc-400 shrink-0 mt-0.5">#{number}</span>
                       )}
                       <span className="break-words text-sm font-medium leading-snug text-zinc-900">
-                        {mr.title || 'Untitled'}
+                        {mr.title || t('git:untitled', { defaultValue: 'Untitled' })}
                       </span>
                     </div>
                     <div className="mt-1 flex items-start gap-1.5 min-w-0 text-[11px] text-zinc-500">
@@ -268,7 +268,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
                         <span className="text-zinc-300 shrink-0">·</span>
                       )}
                       <span className="shrink-0 text-zinc-400">
-                        {formatRelative(mr.created_at || mr.createdAt)}
+                        {formatRelative(mr.created_at || mr.createdAt, t)}
                       </span>
                     </div>
                   </div>
@@ -280,8 +280,8 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
                       <button
                         type="button"
                         onClick={() => openExternal(remoteUrl)}
-                        title={`Open on ${provider}`}
-                        aria-label={`Open on ${provider}`}
+                        title={t('git:open_on_provider', { provider, defaultValue: `Open on ${provider}` })}
+                        aria-label={t('git:open_on_provider', { provider, defaultValue: `Open on ${provider}` })}
                         className={`${consoleIconButtonClass} pointer-events-auto`}
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
@@ -305,8 +305,8 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
               type="button"
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={currentPage <= 1}
-              title="Previous page"
-              aria-label="Previous page"
+              title={t('common:pagination.previous', { defaultValue: 'Previous page' })}
+              aria-label={t('common:pagination.previous', { defaultValue: 'Previous page' })}
               className={consoleIconButtonClass}
             >
               <ChevronLeft className="h-3.5 w-3.5" />
@@ -318,8 +318,8 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
               type="button"
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={currentPage >= totalPages}
-              title="Next page"
-              aria-label="Next page"
+              title={t('common:pagination.next', { defaultValue: 'Next page' })}
+              aria-label={t('common:pagination.next', { defaultValue: 'Next page' })}
               className={consoleIconButtonClass}
             >
               <ChevronRight className="h-3.5 w-3.5" />

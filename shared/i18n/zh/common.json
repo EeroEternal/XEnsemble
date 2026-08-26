@@ -83,7 +83,9 @@
   },
   "pagination": {
     "more": "更多",
-    "show_fewer": "收起"
+    "show_fewer": "收起",
+    "previous": "上一页",
+    "next": "下一页"
   },
   "select": {
     "placeholder": "请选择…",
@@ -93,5 +95,14 @@
     "all_agents": "全部 Agent",
     "select_all": "全选",
     "close": "关闭"
+  },
+  "time": {
+    "just_now": "刚刚",
+    "minutes_ago": "{{count}}分钟前",
+    "hours_ago": "{{count}}小时前",
+    "days_ago": "{{count}}天前"
+  },
+  "placeholder": {
+    "default": "默认"
   }
 }

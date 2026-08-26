@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Eye, Loader2, RefreshCw, User, FolderOpen, Search } from 'lucide-react';
 import * as gitApi from '../../lib/gitApi';
 import { useToast } from '../Toast';
@@ -65,6 +66,7 @@ function BlameLine({ entry, prevSha, showGutter }) {
 }
 
 export default function GitBlamePanel({ projectId }) {
+  const { t } = useTranslation();
   const { showToast } = useToast();
   const [blameData, setBlameData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -140,7 +142,7 @@ export default function GitBlamePanel({ projectId }) {
           <button
             type="button"
             onClick={() => setShowFilePicker((v) => !v)}
-            title="Select file"
+            title={t('git:select_file', { defaultValue: 'Select file' })}
             className={consoleIconButtonClass}
           >
             <FolderOpen className="h-3.5 w-3.5" />
@@ -149,7 +151,7 @@ export default function GitBlamePanel({ projectId }) {
             type="button"
             onClick={fetchBlame}
             disabled={loading || !selectedFile}
-            title="Refresh"
+            title={t('common:action.refresh')}
             className={consoleIconButtonClass}
           >
             {loading ? (
@@ -168,7 +170,7 @@ export default function GitBlamePanel({ projectId }) {
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-zinc-400" />
               <input
                 type="text"
-                placeholder="Search files..."
+                placeholder={t('git:search_files', { defaultValue: 'Search files...' })}
                 value={fileSearch}
                 onChange={(e) => setFileSearch(e.target.value)}
                 autoFocus={showFilePicker}

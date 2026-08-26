@@ -8,7 +8,6 @@
   "unstaged": "Unstaged",
   "commit": "Commit",
   "commit_message": "Commit message",
-  "commit_ai_generating": "AI is generating…",
   "push": "Push",
   "pull": "Pull",
   "fetch": "Fetch",
@@ -16,7 +15,6 @@
   "merge": "Merge",
   "rebase": "Rebase",
   "conflict": "Conflict",
-  "resolve": "Resolve",
   "force_pull": "Force Pull",
   "pull_conflict_title": "Pull Conflict",
   "pull_conflict_message": "Pull conflicts with local changes.",
@@ -84,6 +82,12 @@
   "comment_shortcut": "Comment (Ctrl+Enter)",
   "merge_confirm": "Merge this pull request? This action cannot be undone.",
   "close_confirm": "Close this pull request without merging?",
+  "status_filter": {
+    "open": "Open",
+    "merged": "Merged",
+    "closed": "Closed",
+    "all": "All"
+  },
   "status": {
     "modified": "Modified",
     "added": "Added",
@@ -96,7 +100,9 @@
     "no_commits": "No commits yet",
     "no_prs": "No pull requests yet.",
     "no_prs_hint_create": "Create your first pull request to get started.",
-    "no_prs_hint_wait": "Pull requests will appear here once created."
+    "no_prs_hint_wait": "Pull requests will appear here once created.",
+    "no_match": "No matching results",
+    "no_match_hint": "Try a different filter or search term."
   },
   "error": {
     "clone_failed": "Clone failed.",
@@ -150,5 +156,19 @@
     "not_configured": "Not configured",
     "loading_settings": "Loading…",
     "saved": "{{provider}} settings saved."
-  }
+  },
+  "untitled": "Untitled",
+  "open_on_provider": "Open on {{provider}}",
+  "title": "Title",
+  "select_target_branch": "Select target branch",
+  "personal_access_token": "Personal Access Token",
+  "repository_url": "Repository URL",
+  "project_name": "Project name",
+  "base_branch": "Base branch",
+  "work_branch_name": "Work branch name",
+  "oauth_not_configured_title": "OAuth not configured",
+  "import_repository": "Import Repository",
+  "select_file": "Select file",
+  "search_files": "Search files...",
+  "search_repositories": "Search repositories…"
 }

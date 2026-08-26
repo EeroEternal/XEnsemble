@@ -29,8 +29,13 @@
   },
   "empty": {
     "no_images": "暂无镜像",
-    "no_custom_images": "暂无自定义镜像"
+    "no_custom_images": "暂无自定义镜像。点击「新建镜像」创建一个。"
   },
+  "search_placeholder": "搜索镜像…",
+  "new_image": "新建镜像",
+  "new_image_subtitle": "选择组件和版本来构建你的镜像",
+  "search_components": "搜索组件…",
+  "delete_image": "删除自定义镜像",
   "error": {
     "load_catalog_failed": "加载目录失败",
     "load_images_failed": "加载镜像失败",

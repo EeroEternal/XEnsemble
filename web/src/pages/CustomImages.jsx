@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronRight, Loader2, Plus, RefreshCw, RotateCw, ScrollText, Search, Trash2, X } from 'lucide-react';
 
 import Button from '../components/Button';
@@ -71,6 +72,7 @@ async function fetchImages() {
 }
 
 export function CustomImagesContent() {
+  const { t } = useTranslation();
   const { showToast } = useToast();
   const nameRef = useRef(null);
   const [loading, setLoading] = useState(true);
@@ -297,7 +299,7 @@ export function CustomImagesContent() {
             <Input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search images…"
+              placeholder={t('images:search_placeholder')}
               className="w-full pl-8"
             />
           </div>
@@ -306,7 +308,7 @@ export function CustomImagesContent() {
             onClick={loadAll}
             disabled={loading}
             className={consoleIconButtonClass}
-            title="Refresh"
+            title={t('common:action.refresh')}
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           </button>
@@ -323,8 +325,8 @@ export function CustomImagesContent() {
         <form onSubmit={handleCreate}>
           <div className={cn(consoleStructuredDialogPanelClass, 'w-[680px] max-w-[calc(100vw-2rem)] h-[560px]')}>
             <ConsoleStructuredDialogHeader
-              title="New Image"
-              subtitle="Select components and versions to build your image"
+              title={t('images:new_image', { defaultValue: 'New Image' })}
+              subtitle={t('images:new_image_subtitle', { defaultValue: 'Select components and versions to build your image' })}
             />
             <ConsoleStructuredDialogBody>
               <div className="flex flex-col gap-4">
@@ -349,7 +351,7 @@ export function CustomImagesContent() {
                       <Input
                         value={componentSearch}
                         onChange={(e) => setComponentSearch(e.target.value)}
-                        placeholder="Search components…"
+                        placeholder={t('images:search_components', { defaultValue: 'Search components…' })}
                         className="w-full pl-8"
                       />
                     </div>
@@ -548,7 +550,7 @@ export function CustomImagesContent() {
         <ConsoleDialogShell onClose={() => setConfirmDelete(null)} fitContent>
           <div className={cn(consoleStructuredDialogPanelClass, 'min-w-[360px] max-w-md')}>
             <ConsoleStructuredDialogHeader
-              title="Delete Custom Image"
+              title={t('images:delete_image', { defaultValue: 'Delete Custom Image' })}
               subtitle={`Are you sure you want to delete "${confirmDelete.name}"? This cannot be undone.`}
             />
             <ConsoleStructuredDialogFooter>
@@ -606,7 +608,7 @@ export function CustomImagesContent() {
               <tr>
                 <td colSpan={6} className={cn(consoleTableBodyCellClass, 'text-center text-zinc-400')}>
                   {images.length === 0
-                    ? <>No custom images yet. Click &ldquo;New Image&rdquo; to create one.</>
+                    ? t('images:empty.no_custom_images', { defaultValue: 'No custom images yet. Click "New Image" to create one.' })
                     : 'No images match your search.'}
                 </td>
               </tr>

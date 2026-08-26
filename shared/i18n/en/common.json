@@ -83,7 +83,9 @@
   },
   "pagination": {
     "more": "More",
-    "show_fewer": "Show fewer"
+    "show_fewer": "Show fewer",
+    "previous": "Previous page",
+    "next": "Next page"
   },
   "select": {
     "placeholder": "Select…",
@@ -93,5 +95,14 @@
     "all_agents": "All agents",
     "select_all": "Select all",
     "close": "Close"
+  },
+  "time": {
+    "just_now": "just now",
+    "minutes_ago": "{{count}}m ago",
+    "hours_ago": "{{count}}h ago",
+    "days_ago": "{{count}}d ago"
+  },
+  "placeholder": {
+    "default": "Default"
   }
 }

@@ -83,6 +83,12 @@
   "comment_shortcut": "评论 (Ctrl+Enter)",
   "merge_confirm": "合并此 Pull Request？此操作无法撤销。",
   "close_confirm": "关闭此 Pull Request 而不合并？",
+  "status_filter": {
+    "open": "开放",
+    "merged": "已合并",
+    "closed": "已关闭",
+    "all": "全部"
+  },
   "status": {
     "modified": "已修改",
     "added": "已添加",
@@ -149,5 +155,19 @@
     "not_configured": "未配置",
     "loading_settings": "加载中…",
     "saved": "{{provider}} 设置已保存。"
-  }
+  },
+  "untitled": "无标题",
+  "open_on_provider": "在 {{provider}} 上打开",
+  "title": "标题",
+  "select_target_branch": "选择目标分支",
+  "personal_access_token": "个人访问令牌",
+  "repository_url": "仓库 URL",
+  "project_name": "项目名称",
+  "base_branch": "基础分支",
+  "work_branch_name": "工作分支名称",
+  "oauth_not_configured_title": "OAuth 未配置",
+  "import_repository": "导入仓库",
+  "select_file": "选择文件",
+  "search_files": "搜索文件...",
+  "search_repositories": "搜索仓库…"
 }

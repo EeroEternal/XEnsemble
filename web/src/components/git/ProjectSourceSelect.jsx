@@ -138,7 +138,7 @@ export default function ProjectSourceSelect({
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search repositories…"
+            placeholder={t('git:search_repositories', { defaultValue: 'Search repositories…' })}
             autoFocus
             className="flex-1 bg-transparent text-sm text-zinc-700 placeholder:text-zinc-400 outline-none"
           />

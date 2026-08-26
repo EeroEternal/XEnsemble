@@ -184,14 +184,14 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
         {/* Section: Gateway config */}
         <SectionDivider>
           <div className="space-y-3">
-            <SectionLabel>Gateway</SectionLabel>
+            <SectionLabel>{t('gateway:title', { defaultValue: 'Gateway' })}</SectionLabel>
             <div>
               <label className={`block mb-1 ${consoleSectionLabelClass}`}>Provider</label>
               <SelectMenu
                 value={authDraft.provider}
                 onChange={(v) => setAuthDraft((d) => ({ ...d, provider: v, model: [] }))}
                 options={providerOptions}
-                placeholder="Any provider"
+                placeholder={t('agents:config.any_provider', { defaultValue: 'Any provider' })}
               />
             </div>
             <div>
@@ -231,7 +231,7 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
                   value={vmResources.disk_size_gb}
                   onChange={(ev) => setVmResources((d) => ({ ...d, disk_size_gb: ev.target.value }))}
                   className="h-9 py-1.5"
-                  placeholder="Default"
+                  placeholder={t('common:placeholder.default', { defaultValue: 'Default' })}
                 />
               </div>
               <div>
@@ -242,7 +242,7 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
                   value={vmResources.cpus}
                   onChange={(ev) => setVmResources((d) => ({ ...d, cpus: ev.target.value }))}
                   className="h-9 py-1.5"
-                  placeholder="Default"
+                  placeholder={t('common:placeholder.default', { defaultValue: 'Default' })}
                 />
               </div>
               <div>
@@ -253,7 +253,7 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
                   value={vmResources.memory_mib}
                   onChange={(ev) => setVmResources((d) => ({ ...d, memory_mib: ev.target.value }))}
                   className="h-9 py-1.5"
-                  placeholder="Default"
+                  placeholder={t('common:placeholder.default', { defaultValue: 'Default' })}
                 />
               </div>
             </div>

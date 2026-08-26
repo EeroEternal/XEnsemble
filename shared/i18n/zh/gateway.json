@@ -12,6 +12,9 @@
   "external_unigateway_url": "外部 UniGateway URL",
   "agent_proxy_desc": "Agent 通过控制面 LLM 代理连接至",
   "agent_proxy_base_url_desc": "Agent 通过此基础 URL 访问 LLM 代理（可选；默认为 localhost）。",
+  "configure": "配置网关",
+  "search_providers": "搜索提供商…",
+  "upstream_subtitle": "用于 UniGateway 路由的上游 LLM 账户。",
   "error": {
     "verify_failed": "提供商验证失败。",
     "load_key_failed": "加载 API Key 失败。",

@@ -147,7 +147,7 @@ export default function CreatePRDialog({
       <ConsoleStructuredDialogBody>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <FormLabel htmlFor="pr-source">Source branch</FormLabel>
+            <FormLabel htmlFor="pr-source">{t('git:source_branch')}</FormLabel>
             <Input
               id="pr-source"
               value={sourceBranch || ''}
@@ -156,7 +156,7 @@ export default function CreatePRDialog({
             />
           </div>
           <div>
-            <FormLabel htmlFor="pr-target">Target branch</FormLabel>
+            <FormLabel htmlFor="pr-target">{t('git:target_branch')}</FormLabel>
             {branchesError ? (
               <p className="mt-1.5 text-xs text-red-600">{branchesError}</p>
             ) : (
@@ -165,7 +165,7 @@ export default function CreatePRDialog({
                 value={targetBranch}
                 onChange={setTargetBranch}
                 options={branchOptions}
-                placeholder="Select target branch"
+                placeholder={t('git:select_target_branch', { defaultValue: 'Select target branch' })}
                 className="mt-1.5"
               />
             )}
@@ -174,7 +174,7 @@ export default function CreatePRDialog({
 
         <div>
           <div className="flex items-center justify-between">
-            <FormLabel htmlFor="pr-title">Title</FormLabel>
+            <FormLabel htmlFor="pr-title">{t('git:title', { defaultValue: 'Title' })}</FormLabel>
           </div>
           <Input
             id="pr-title"
@@ -189,7 +189,7 @@ export default function CreatePRDialog({
         </div>
 
         <div>
-          <FormLabel htmlFor="pr-body">Description</FormLabel>
+          <FormLabel htmlFor="pr-body">{t('git:description')}</FormLabel>
           <Textarea
             id="pr-body"
             value={body}

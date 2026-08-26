@@ -867,7 +867,7 @@ export default function GatewaySettingsPanel() {
                 type="button"
                 onClick={openProcessDialog}
                 className={consoleIconButtonClass}
-                title="Configure gateway"
+                title={t('gateway:configure', { defaultValue: 'Configure gateway' })}
                 aria-label="Configure gateway"
               >
                 <Settings2 className="w-4 h-4" />
@@ -929,7 +929,7 @@ export default function GatewaySettingsPanel() {
                 <Input
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search providers…"
+                  placeholder={t('gateway:search_providers', { defaultValue: 'Search providers…' })}
                   className="w-full pl-8"
                 />
               </div>
@@ -938,7 +938,7 @@ export default function GatewaySettingsPanel() {
                 onClick={refreshProviders}
                 disabled={refreshingProviders}
                 className={consoleIconButtonClass}
-                title="Refresh"
+                title={t('common:action.refresh')}
               >
                 {refreshingProviders ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               </button>
@@ -1061,7 +1061,7 @@ export default function GatewaySettingsPanel() {
           shellClassName={NESTED_DIALOG_SHELL}
           panelClassName={consoleStructuredDialogPanelClass}
         >
-          <ConsoleStructuredDialogHeader title="Gateway" />
+          <ConsoleStructuredDialogHeader title={t('gateway:title', { defaultValue: 'Gateway' })} />
           <ConsoleStructuredDialogBody>
             <form id="gateway-process-form" onSubmit={handleSaveProcess} className="space-y-4">
               <div className="space-y-2">
@@ -1114,7 +1114,7 @@ export default function GatewaySettingsPanel() {
         >
           <ConsoleStructuredDialogHeader
             title={providerDialog.mode === 'edit' ? providerDialog.form.name : 'Add provider'}
-            subtitle="Upstream LLM account for UniGateway routing."
+            subtitle={t('gateway:upstream_subtitle', { defaultValue: 'Upstream LLM account for UniGateway routing.' })}
           />
           <ConsoleStructuredDialogBody className="scrollbar-hover">
             <form id="gateway-provider-form" onSubmit={handleSaveProvider}>
