@@ -27,10 +27,10 @@ const PROVIDERS = [
 ];
 
 const FIELD_META = {
-  CLIENT_ID: { label: 'git:providers.client_id', placeholder: 'git:providers.client_id_placeholder', required: true },
-  CLIENT_SECRET: { label: 'git:providers.client_secret', placeholder: 'git:providers.client_secret_placeholder', required: false },
-  CALLBACK_URL: { label: 'git:providers.callback_url', placeholder: 'git:providers.callback_url_placeholder', required: true },
-  API_BASE: { label: 'git:providers.api_base_url', placeholder: 'git:providers.api_base_url_placeholder', required: false },
+  CLIENT_ID: { label: 'git:providers.client_id', placeholder: 'git:providers.client_id_placeholder' },
+  CLIENT_SECRET: { label: 'git:providers.client_secret', placeholder: 'git:providers.client_secret_placeholder' },
+  CALLBACK_URL: { label: 'git:providers.callback_url', placeholder: 'git:providers.callback_url_placeholder' },
+  API_BASE: { label: 'git:providers.api_base_url', placeholder: 'git:providers.api_base_url_placeholder' },
 };
 
 function providerKey(provider, field) {
@@ -236,7 +236,6 @@ export default function GitProvidersSettingsPanel() {
                   <div key={key}>
                     <label htmlFor={`dialog-${key}`} className="text-xs text-zinc-500 block mb-1">
                       {t(meta.label)}
-                      {meta.required && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
                     <Input
                       id={`dialog-${key}`}
