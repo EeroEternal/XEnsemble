@@ -122,7 +122,7 @@ export default function GeneralSettingsPanel() {
 
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 mb-6">
             {isEdit ? (
-              <div className="flex items-center justify-between gap-4 min-h-[38px] py-1">
+              <div className="flex items-center justify-between gap-4 min-h-[38px]">
                 <span className="text-xs text-zinc-500 shrink-0">{t('settings:quota.projects')}</span>
                 <Input
                   type="number"
@@ -132,7 +132,7 @@ export default function GeneralSettingsPanel() {
                     ...draft,
                     default_user_quota: { ...draftQuota, max_projects: e.target.value },
                   })}
-                  className="h-8 py-1 w-24"
+                  className="w-24"
                 />
               </div>
             ) : (
@@ -142,7 +142,7 @@ export default function GeneralSettingsPanel() {
               />
             )}
             {isEdit ? (
-              <div className="flex items-center justify-between gap-4 min-h-[38px] py-1">
+              <div className="flex items-center justify-between gap-4 min-h-[38px]">
                 <span className="text-xs text-zinc-500 shrink-0">{t('settings:quota.sessions')}</span>
                 <Input
                   type="number"
@@ -152,7 +152,7 @@ export default function GeneralSettingsPanel() {
                     ...draft,
                     default_user_quota: { ...draftQuota, max_sessions: e.target.value },
                   })}
-                  className="h-8 py-1 w-24"
+                  className="w-24"
                 />
               </div>
             ) : (
@@ -162,7 +162,7 @@ export default function GeneralSettingsPanel() {
               />
             )}
             {isEdit ? (
-              <div className="flex items-center justify-between gap-4 min-h-[38px] py-1">
+              <div className="flex items-center justify-between gap-4 min-h-[38px]">
                 <span className="text-xs text-zinc-500 shrink-0">{t('settings:quota.previews')}</span>
                 <Input
                   type="number"
@@ -172,7 +172,7 @@ export default function GeneralSettingsPanel() {
                     ...draft,
                     default_user_quota: { ...draftQuota, max_previews: e.target.value },
                   })}
-                  className="h-8 py-1 w-24"
+                  className="w-24"
                 />
               </div>
             ) : (
@@ -223,7 +223,7 @@ export default function GeneralSettingsPanel() {
                   min={1}
                   value={draft.session_ttl_hours ?? 24}
                   onChange={(e) => editMode.setDraft({ ...draft, session_ttl_hours: e.target.value })}
-                  className="h-8 py-1 w-32"
+                  className="w-32"
                 />
               </div>
             ) : (

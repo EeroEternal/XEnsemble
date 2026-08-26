@@ -224,7 +224,7 @@ export default function GitProvidersSettingsPanel() {
                         : t(`git:providers.${field.toLowerCase()}_placeholder`);
                       const isMono = field === 'CALLBACK_URL' || field === 'API_BASE';
                       return (
-                        <div key={key} className="flex items-center justify-between gap-4 min-h-[38px] py-1">
+                        <div key={key} className="flex items-center justify-between gap-4 min-h-[38px]">
                           <label htmlFor={key} className="text-xs text-zinc-500 shrink-0">
                             {label}
                             {field !== 'CLIENT_SECRET' && <span className="text-red-500 ml-0.5">*</span>}
@@ -235,7 +235,7 @@ export default function GitProvidersSettingsPanel() {
                             value={draft[key] || ''}
                             onChange={(e) => editMode.setDraft({ ...draft, [key]: e.target.value })}
                             placeholder={placeholder}
-                            className={`h-8 py-1 w-64 ${isMono ? 'font-mono' : ''}`}
+                            className={`w-64 ${isMono ? 'font-mono' : ''}`}
                             autoFocus={field === 'CLIENT_ID'}
                           />
                         </div>
