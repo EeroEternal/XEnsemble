@@ -167,10 +167,31 @@ async function stopSession({
             } catch (err) {
                 fastifyLog?.warn?.(err, '[sessions] failed to kill session handle during stop');
             }
-            const runtimeRef = live?.runtimeRef || live?.runtimeId || null;
-            if (runtimeRef) {
-                await waitForAgentExit(runtime, runtimeRef, live.agentId);
-            }
+        }
+
+        // Persist DB status to 'idle' BEFORE waitForAgentExit/hibernate.
+        // gracefulShutdown's 10s timeout may fire process.exit(1) while
+        // waitForAgentExit (15s) or hibernate (35s) is still running.
+        // If DB stays 'running', recoverRunningSessions will reattach to
+        // a dead execution and the exit event may be lost, leaving the
+        // session in a false-alive state (display works, input silently dropped).
+        // Updating DB first ensures the session is always recoverable as 'idle'.
+        const liveBefore = sessionManager.getSession(sessionId);
+        try {
+            await db.update(schema.sessions)
+                .set({
+                    status: 'idle',
+                    streamRef: liveBefore?.streamRef || session.streamRef || null,
+                    stateDirRef: liveBefore?.stateDirRef || session.stateDirRef || null,
+                })
+                .where(eq(schema.sessions.id, sessionId));
+        } catch (err) {
+            fastifyLog?.warn?.(err, '[sessions] failed to persist idle status');
+        }
+
+        const runtimeRef = live?.runtimeRef || live?.runtimeId || null;
+        if (runtimeRef) {
+            await waitForAgentExit(runtime, runtimeRef, live.agentId);
         }
         const rtRef = live?.runtimeRef || live?.runtimeId || live?.handle?.runtimeRef
             || session.runtimeRef || session.runtimeId || session.streamRef || null;
@@ -187,18 +208,6 @@ async function stopSession({
         await maybeAutoCheckpointProject();
     }
 
-    const liveAfter = sessionManager.getSession(sessionId);
-    try {
-        await db.update(schema.sessions)
-            .set({
-                status: 'idle',
-                streamRef: liveAfter?.streamRef || session.streamRef || null,
-                stateDirRef: liveAfter?.stateDirRef || session.stateDirRef || null,
-            })
-            .where(eq(schema.sessions.id, sessionId));
-    } catch (err) {
-        fastifyLog?.warn?.(err, '[sessions] failed to persist idle status');
-    }
     sessionManager.completeHibernate(sessionId);
 
     return { stopped: true, status: 'idle' };

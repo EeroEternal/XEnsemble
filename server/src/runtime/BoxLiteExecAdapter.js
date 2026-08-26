@@ -42,6 +42,8 @@ class BoxLiteStreamHandle extends StreamHandle {
         this._dataCbs = [];
         this._exitCbs = [];
         this._closed = false;
+        this._exited = false;
+        this._exitCode = null;
         this._decoders = {};
         this._trailingFffd = {}; // per-channel: true if last output ended with stripped FFFD
         this._lastRseq = 0;
@@ -141,8 +143,9 @@ class BoxLiteStreamHandle extends StreamHandle {
     }
 
     _fireExit(exitCode) {
-        if (this._closed) return;
-        this._closed = true;
+        if (this._exited) return;
+        this._exited = true;
+        this._exitCode = exitCode;
         this._stopHeartbeat();
         for (const cb of this._exitCbs) {
             try { cb({ exitCode }); } catch (_) {}
@@ -151,7 +154,6 @@ class BoxLiteStreamHandle extends StreamHandle {
 
     _tryReattach() {
         if (this._closed || !this._client) {
-            this._fireExit(-1);
             return;
         }
         this._reattaching = true;
@@ -212,6 +214,10 @@ class BoxLiteStreamHandle extends StreamHandle {
     }
 
     onExit(callback) {
+        if (this._exited) {
+            try { callback({ exitCode: this._exitCode }); } catch (_) {}
+            return { dispose: () => {} };
+        }
         this._exitCbs.push(callback);
         return { dispose: () => { this._exitCbs = this._exitCbs.filter((c) => c !== callback); } };
     }
