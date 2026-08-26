@@ -214,7 +214,7 @@ export default function GitProvidersSettingsPanel() {
               if (editMode.isEditing) {
                 const draft = editMode.draft;
                 return (
-                  <div className="space-y-1">
+                  <div className="space-y-4">
                     {provider.fields.map((field) => {
                       const key = providerKey(provider.id, field);
                       const isSecret = field === 'CLIENT_SECRET';
@@ -260,7 +260,7 @@ export default function GitProvidersSettingsPanel() {
               const apiBase = settings[providerKey(provider.id, 'API_BASE')];
 
               return (
-                <div className="space-y-1">
+                <div className="space-y-4">
                   <ReadOnlyField
                     label={t('git:providers.client_id')}
                     value={maskClientId(clientId)}

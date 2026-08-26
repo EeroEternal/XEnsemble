@@ -182,7 +182,7 @@ export default function GeneralSettingsPanel() {
               />
             )}
             {isEdit ? (
-              <div className="flex items-center justify-between gap-4 min-h-[38px] py-1">
+              <div className="flex items-center justify-between gap-4 min-h-[38px]">
                 <span className="text-xs text-zinc-500 shrink-0">{t('settings:general.tier')}</span>
                 <div className="w-32">
                   <SelectMenu
