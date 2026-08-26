@@ -788,14 +788,25 @@ class LocalGitService {
             throw err;
         }
 
-        try {
-            const result = await this._git(workspacePath, ['show', `${ref}:${normalized}`]);
-            return { path: normalized, ref, content: result.stdout };
-        } catch {
-            const err = new Error(`File not found at ref ${ref}: ${filePath}`);
-            err.statusCode = 404;
-            throw err;
+        // For conflict resolution, "theirs" is MERGE_HEAD during a merge, but
+        // REBASE_HEAD during a rebase. Try the requested ref first, then fall
+        // back so the conflict UI works in both scenarios.
+        const refsToTry = ref === 'MERGE_HEAD'
+            ? ['MERGE_HEAD', 'REBASE_HEAD']
+            : [ref];
+
+        for (const tryRef of refsToTry) {
+            try {
+                const result = await this._git(workspacePath, ['show', `${tryRef}:${normalized}`]);
+                return { path: normalized, ref: tryRef, content: result.stdout };
+            } catch {
+                // try next ref
+            }
         }
+
+        const err = new Error(`File not found at ref ${ref}: ${filePath}`);
+        err.statusCode = 404;
+        throw err;
     }
 }
 
