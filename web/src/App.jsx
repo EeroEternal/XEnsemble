@@ -94,9 +94,12 @@ function AuthenticatedLayout({
         className="shrink-0 h-12 border-b border-zinc-200 bg-white flex items-center px-4 gap-3 relative z-30"
       >
         <BrandMark className="h-7 w-7 shrink-0" iconClassName="h-3.5 w-3.5" />
-        <div className="flex flex-col shrink-0 leading-tight items-start">
+        <div className="flex flex-col shrink-0 leading-tight">
           <span className="text-sm font-bold text-zinc-900">AgentHarness</span>
-          <span className="text-[10px] text-zinc-400 font-medium -mt-0.5">Yuma Coding</span>
+          <span className="text-[10px] text-zinc-400 font-medium -mt-0.5 flex justify-between">
+            <span>Yuma</span>
+            <span>Engineering</span>
+          </span>
         </div>
         {isSettingsRoute ? (
           <div className="flex-1 min-w-0 flex items-center gap-3">

@@ -59,6 +59,20 @@ class GitOperationService {
     }
 
     async _execGit(project, args, options = {}) {
+        const maxRetries = 3;
+        for (let attempt = 0; ; attempt++) {
+            try {
+                return await this._execGitOnce(project, args, options);
+            } catch (err) {
+                const msg = err.message || '';
+                const isIndexLock = msg.includes('index.lock') && msg.includes('File exists');
+                if (!isIndexLock || attempt >= maxRetries) throw err;
+                await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+            }
+        }
+    }
+
+    async _execGitOnce(project, args, options = {}) {
         const needsToken = options.needsToken ?? REMOTE_GIT_COMMANDS.has(args[0]);
         const token = needsToken ? await this._resolveToken(project) : undefined;
         let hostPath = workspace.projectDir(project.userId, project.id);
@@ -293,7 +307,7 @@ class GitOperationService {
     }
 
     async getStatusLight(project) {
-        const statusOut = await this._execGit(project, ['status', '--porcelain=v1', '-uall']).catch(() => ({ stdout: '' }));
+        const statusOut = await this._execGit(project, ['--no-optional-locks', 'status', '--porcelain=v1', '-uall']).catch(() => ({ stdout: '' }));
         let lines = statusOut.stdout.split('\n').filter(Boolean);
         lines = await this._expandDirEntries(project, lines);
         const files = [];
@@ -345,7 +359,7 @@ class GitOperationService {
                 console.warn('[GitOperationService] getStatus rev-parse HEAD failed:', err.message);
                 return { stdout: '' };
             }),
-            this._execGit(project, ['status', '--porcelain=v1', '-uall']).catch((err) => {
+            this._execGit(project, ['--no-optional-locks', 'status', '--porcelain=v1', '-uall']).catch((err) => {
                 console.warn('[GitOperationService] getStatus status failed:', err.message);
                 return { stdout: '' };
             }),
