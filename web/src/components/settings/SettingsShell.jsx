@@ -24,7 +24,7 @@ export default function SettingsShell({ section = 'general' }) {
 
   let panel = null;
   if (section === 'general') panel = <GeneralSettingsPanel />;
-  else if (section === 'git') panel = isAdmin ? <GitProvidersSettingsPanel /> : <GitHubSettingsPanel />;
+  else if (section === 'git') panel = <GitProvidersSettingsPanel />;
   else if (section === 'git-providers' && isAdmin) panel = <GitProvidersSettingsPanel />;
   else if (section === 'github' && !isAdmin) panel = <GitHubSettingsPanel />;
   else if (section === 'quota') panel = <QuotaSettingsPanel />;

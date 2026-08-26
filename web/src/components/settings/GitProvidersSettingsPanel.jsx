@@ -26,6 +26,13 @@ const PROVIDERS = [
   { id: 'gitea', label: 'Gitea', fields: ['CLIENT_ID', 'CLIENT_SECRET', 'CALLBACK_URL', 'API_BASE'] },
 ];
 
+const FIELD_META = {
+  CLIENT_ID: { label: 'git:providers.client_id', placeholder: 'git:providers.client_id_placeholder', required: true },
+  CLIENT_SECRET: { label: 'git:providers.client_secret', placeholder: 'git:providers.client_secret_placeholder', required: false },
+  CALLBACK_URL: { label: 'git:providers.callback_url', placeholder: 'git:providers.callback_url_placeholder', required: true },
+  API_BASE: { label: 'git:providers.api_base_url', placeholder: 'git:providers.api_base_url_placeholder', required: false },
+};
+
 function providerKey(provider, field) {
   return `${provider.toUpperCase()}_${field}`;
 }
@@ -195,7 +202,7 @@ export default function GitProvidersSettingsPanel() {
                   disabled={!oauthReady}
                   disabledReason={t('git:providers.oauth_not_configured', { defaultValue: 'OAuth not configured' })}
                 />
-                {!oauthReady && (
+                {!oauthReady && !isAdmin && (
                   <GitOAuthAlert
                     message={t('git:providers.not_configured', { defaultValue: `${p.label} OAuth is not configured. An admin must configure it before you can connect.` })}
                     provider={p.id}
@@ -222,24 +229,21 @@ export default function GitProvidersSettingsPanel() {
             <div className="space-y-4">
               {configProvider.fields.map((field) => {
                 const key = providerKey(configProvider.id, field);
+                const meta = FIELD_META[field];
                 const isSecret = field === 'CLIENT_SECRET';
-                const label = t(`git:providers.${field.toLowerCase()}`);
-                const placeholder = isSecret
-                  ? t('git:providers.client_secret_placeholder')
-                  : t(`git:providers.${field.toLowerCase()}_placeholder`);
                 const isMono = field === 'CALLBACK_URL' || field === 'API_BASE';
                 return (
                   <div key={key}>
                     <label htmlFor={`dialog-${key}`} className="text-xs text-zinc-500 block mb-1">
-                      {label}
-                      {field !== 'CLIENT_SECRET' && <span className="text-red-500 ml-0.5">*</span>}
+                      {t(meta.label)}
+                      {meta.required && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
                     <Input
                       id={`dialog-${key}`}
                       type={isSecret ? 'password' : 'text'}
                       value={configEdit.draft[key] || ''}
                       onChange={(e) => configEdit.setDraft({ ...configEdit.draft, [key]: e.target.value })}
-                      placeholder={placeholder}
+                      placeholder={t(meta.placeholder)}
                       className={`w-full ${isMono ? 'font-mono' : ''}`}
                       autoFocus={field === 'CLIENT_ID'}
                     />
