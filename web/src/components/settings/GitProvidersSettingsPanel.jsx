@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { AuthContext } from '../../App';
 import Button from '../Button';
 import Input from '../Input';
-import ReadOnlyField from '../ReadOnlyField';
 import { useToast } from '../Toast';
 import { useEditMode } from '../../hooks/useEditMode';
 import { consoleSectionLabelClass, consoleCardClass } from '../../lib/consoleTokens';
@@ -137,7 +136,7 @@ export default function GitProvidersSettingsPanel() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="grid grid-cols-3 gap-4">
       {PROVIDERS.map((p) => {
         const git = gitMap[p.id];
         const editMode = editMap[p.id];
@@ -171,8 +170,8 @@ export default function GitProvidersSettingsPanel() {
                         : t(`git:providers.${field.toLowerCase()}_placeholder`);
                       const isMono = field === 'CALLBACK_URL' || field === 'API_BASE';
                       return (
-                        <div key={key} className="flex items-center justify-between gap-4 min-h-[38px]">
-                          <label htmlFor={key} className="text-xs text-zinc-500 shrink-0">
+                        <div key={key}>
+                          <label htmlFor={key} className="text-xs text-zinc-500 block mb-1">
                             {label}
                             {field !== 'CLIENT_SECRET' && <span className="text-red-500 ml-0.5">*</span>}
                           </label>
@@ -182,7 +181,7 @@ export default function GitProvidersSettingsPanel() {
                             value={editMode.draft[key] || ''}
                             onChange={(e) => editMode.setDraft({ ...editMode.draft, [key]: e.target.value })}
                             placeholder={placeholder}
-                            className={`w-64 ${isMono ? 'font-mono' : ''}`}
+                            className={`w-full ${isMono ? 'font-mono' : ''}`}
                             autoFocus={field === 'CLIENT_ID'}
                           />
                         </div>
@@ -200,30 +199,19 @@ export default function GitProvidersSettingsPanel() {
                   </>
                 ) : (
                   <>
-                    <ReadOnlyField
-                      label={t('git:providers.client_id')}
-                      value={maskClientId(settings[providerKey(p.id, 'CLIENT_ID')])}
-                      mono
-                      emptyText={t('git:providers.not_configured')}
-                    />
-                    <ReadOnlyField
-                      label={t('git:providers.client_secret')}
-                      value={settings[providerKey(p.id, 'CLIENT_SECRET')] || null}
-                      mono
-                      emptyText={t('git:providers.not_configured')}
-                    />
-                    <ReadOnlyField
-                      label={t('git:providers.callback_url')}
-                      value={settings[providerKey(p.id, 'CALLBACK_URL')]}
-                      mono
-                      emptyText={t('git:providers.not_configured')}
-                    />
-                    <ReadOnlyField
-                      label={t('git:providers.api_base_url')}
-                      value={settings[providerKey(p.id, 'API_BASE')]}
-                      mono
-                      emptyText={t('settings:general.default_value')}
-                    />
+                    {[
+                      { key: 'CLIENT_ID', label: t('git:providers.client_id'), value: maskClientId(settings[providerKey(p.id, 'CLIENT_ID')]), empty: t('git:providers.not_configured') },
+                      { key: 'CLIENT_SECRET', label: t('git:providers.client_secret'), value: settings[providerKey(p.id, 'CLIENT_SECRET')] || null, empty: t('git:providers.not_configured') },
+                      { key: 'CALLBACK_URL', label: t('git:providers.callback_url'), value: settings[providerKey(p.id, 'CALLBACK_URL')], empty: t('git:providers.not_configured') },
+                      { key: 'API_BASE', label: t('git:providers.api_base_url'), value: settings[providerKey(p.id, 'API_BASE')], empty: t('settings:general.default_value') },
+                    ].map((f) => (
+                      <div key={f.key}>
+                        <span className="text-xs text-zinc-500 block mb-1">{f.label}</span>
+                        <span className={`text-sm block leading-[38px] truncate font-mono ${f.value ? 'text-zinc-900' : 'text-zinc-400'}`}>
+                          {f.value || f.empty}
+                        </span>
+                      </div>
+                    ))}
 
                     <div className="pt-2 flex justify-end">
                       <Button variant="secondary" size="md" onClick={() => editMode.enterEdit()}>
