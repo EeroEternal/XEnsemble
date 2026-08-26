@@ -173,6 +173,36 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
         return () => clearInterval(id);
     }, [recoveredId, projectId, sessionId]);
 
+    // 部署中轮询兜底：SSE 断开/verify 卡死时也能感知部署终态（running/failed/stopped），
+    // 避免前端一直卡在 running（右上角 Stop deploy 停不下来）。SSE 正常时由 result 事件接管。
+    const runStateRef = useRef(runState);
+    runStateRef.current = runState;
+    useEffect(() => {
+        if (runState !== 'running') return undefined;
+        const id = setInterval(async () => {
+            try {
+                const res = await apiFetch(withSessionId(`/api/v1/deployments?project_id=${encodeURIComponent(projectId)}`));
+                const data = await res.json();
+                const list = Array.isArray(data) ? data : (data?.deployments || []);
+                const rows = list.filter((d) => d.kind === 'deploy' && (!sessionId || d.session_id === sessionId)).sort((a, b) => b.created_at - a.created_at);
+                if (!rows.length) return;
+                const latest = rows[0];
+                if (latest.status !== 'running' && latest.status !== 'failed' && latest.status !== 'stopped') return;
+                if (runStateRef.current !== 'running') return; // 已被 SSE 结果接管
+                if (latest.status === 'running') {
+                    setRunState('success');
+                    jumpTimerRef.current = setTimeout(() => onSuccess?.(latest), 800);
+                } else if (latest.status === 'failed') {
+                    setRunState('failed');
+                    setResult({ ok: false, error: latest.stage_message || '部署失败', stage: latest.stage });
+                } else if (latest.status === 'stopped') {
+                    setRunState('aborted');
+                }
+            } catch { /* ignore */ }
+        }, 5000);
+        return () => clearInterval(id);
+    }, [runState, projectId, sessionId, onSuccess]);
+
     useEffect(() => () => {
         if (jumpTimerRef.current) clearTimeout(jumpTimerRef.current);
     }, []);

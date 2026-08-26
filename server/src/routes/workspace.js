@@ -9,7 +9,7 @@ const { analyzeProjectDeploy } = require('../deployments/analyzeDeploy');
 const { createTunnel, stopByProjectId, stopTunnel } = require('../preview/tunnelServer');
 const { db } = require('../db');
 const schema = require('../db/schema');
-const { eq, and } = require('drizzle-orm');
+const { eq, and, inArray } = require('drizzle-orm');
 const crypto = require('crypto');
 const policy = require('../auth/PolicyService');
 const { sendPublicError, sanitizePublicError } = require('../http/publicError');
@@ -238,6 +238,15 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
             if (sessionId) conds.push(eq(schema.deployments.sessionId, sessionId));
             const rows = await db.select({ id: schema.deployments.id }).from(schema.deployments).where(and(...conds));
             for (const r of rows) { try { stopTunnel(r.id); } catch (_) { /* ignore */ } }
+        } catch (_) { /* ignore */ }
+        // 把该 session 的 running/building/pending 部署全部标 stopped：
+        // 即使部署进程已卡死/无 activeDeploy entry，前端轮询也能感知到 stopped，不再卡在 running
+        try {
+            const stopConds = [eq(schema.deployments.projectId, project.id), inArray(schema.deployments.status, ['running', 'building', 'pending'])];
+            if (sessionId) stopConds.push(eq(schema.deployments.sessionId, sessionId));
+            await db.update(schema.deployments)
+                .set({ status: 'stopped', updatedAt: Date.now(), stoppedBy: request.user.id })
+                .where(and(...stopConds));
         } catch (_) { /* ignore */ }
         return { ok: true };
     });

@@ -26,6 +26,20 @@ const schema = require('../db/schema');
 
 const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 const VERIFY_STATE_TTL_MS = 30 * 60 * 1000;
+// 单次部署（阶段 1 分析 + 阶段 2 验证）整体超时：verify agent 可能因 run_shell 启动服务未正确
+// 后台化（缺少 &/nohup）而挂起，必须有总超时自动中止，否则部署永不结束、前端一直显示 running。
+const DEPLOY_TOTAL_TIMEOUT_MS = Number(process.env.DEPLOY_TOTAL_TIMEOUT_MS) || 25 * 60 * 1000;
+
+// 给长耗时异步操作加总超时：超时返回 fallback（不阻塞调用方），挂起的 promise 由内部超时机制兜底。
+function withTimeout(promise, ms, fallback) {
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(fallback), ms);
+        promise.then(
+            (v) => { clearTimeout(timer); resolve(v); },
+            () => { clearTimeout(timer); resolve(fallback); },
+        );
+    });
+}
 
 // 修复 host workspace 目录属主。
 // 背景：server 以 root 运行，新建/拉取 git 项目时目录可能被写成 root:root，
@@ -526,17 +540,26 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
     if (isAborted(project.id, sessionId)) {
         return { ok: false, aborted: true, error: '部署已中止', elapsedMs: Date.now() - startedAt };
     }
-    const verify = await analyzeProjectVerify({
-        workspacePath: wsPath,
-        hostWorkspacePath: hostWs,
-        runtimeRef: ref,
-        plan,
-        projectType: detected,
-        resume: resumeState ? { messages: resumeState.messages, trail: resumeState.trail, roundsUsed: resumeState.roundsUsed } : undefined,
-        isAborted: () => isAborted(project.id, sessionId),
-    });
+    const verify = await withTimeout(
+        analyzeProjectVerify({
+            workspacePath: wsPath,
+            hostWorkspacePath: hostWs,
+            runtimeRef: ref,
+            plan,
+            projectType: detected,
+            resume: resumeState ? { messages: resumeState.messages, trail: resumeState.trail, roundsUsed: resumeState.roundsUsed } : undefined,
+            isAborted: () => isAborted(project.id, sessionId),
+        }),
+        DEPLOY_TOTAL_TIMEOUT_MS,
+        {
+            ok: false,
+            aborted: true,
+            error: `部署验证超时（超过 ${Math.round(DEPLOY_TOTAL_TIMEOUT_MS / 60000)} 分钟）已自动中止`,
+            warning: '部署验证卡住超时，已自动中止。常见原因是沙箱内启动服务的命令未后台化（缺少 & / nohup ... &），run_shell 一直等待。',
+        },
+    );
     if (verify.aborted) {
-        return { ok: false, aborted: true, error: '部署已中止', elapsedMs: Date.now() - startedAt };
+        return { ok: false, aborted: true, error: verify.error || '部署已中止', elapsedMs: Date.now() - startedAt };
     }
     report({
         stage: 'B',
