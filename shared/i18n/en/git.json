@@ -96,6 +96,7 @@
     "pushed": "Changes pushed.",
     "pulled": "Changes pulled.",
     "pr_created": "Pull request created.",
+    "rebase_conflict": "Rebase failed: conflicts with target branch. Please resolve locally and push again.",
     "mr_created": "Merge request created.",
     "conflict_resolved": "Conflict resolved.",
     "pull_conflict_surfaced": "Pulled. {{count}} file(s) have conflicts — resolve them in Changes.",

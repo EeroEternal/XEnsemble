@@ -592,6 +592,50 @@ class GitOperationService {
         });
     }
 
+    /**
+     * Fetch the target branch and rebase the current branch onto origin/<target>.
+     * Used before creating a PR to ensure the source branch is up-to-date and
+     * conflict-free. Throws with code 'rebase_conflict' if conflicts arise.
+     */
+    async fetchAndRebase(project, targetBranch) {
+        return this._mutate(project, async () => {
+            const safeTarget = assertGitBranch(targetBranch);
+
+            // Fetch latest refs from remote.
+            await this._execGit(project, ['fetch', 'origin', safeTarget], { timeoutMs: 60_000 });
+
+            // Check if origin/<target> exists.
+            const remoteRef = `origin/${safeTarget}`;
+            try {
+                await this._execGit(project, ['rev-parse', '--verify', '--quiet', remoteRef]);
+            } catch {
+                // Target branch doesn't exist on remote — nothing to rebase onto.
+                return { rebased: false, reason: 'target_not_found' };
+            }
+
+            // Attempt rebase.
+            try {
+                await this._execGit(project, ['rebase', remoteRef]);
+                this._invalidateAheadBehind(project.id);
+                return { rebased: true };
+            } catch (err) {
+                const msg = err.message || '';
+                if (msg.includes('conflict') || msg.includes('CONFLICT')) {
+                    // Abort the rebase to leave the working tree clean.
+                    await this._execGit(project, ['rebase', '--abort']).catch(() => {});
+                    const conflictErr = new Error(
+                        `Rebase onto origin/${safeTarget} failed due to conflicts. ` +
+                        `Please resolve conflicts locally and push again.`
+                    );
+                    conflictErr.code = 'rebase_conflict';
+                    conflictErr.targetBranch = safeTarget;
+                    throw conflictErr;
+                }
+                throw err;
+            }
+        });
+    }
+
     async getDiff(project, { base, head } = {}) {
         const args = ['diff'];
         if (base && head) {

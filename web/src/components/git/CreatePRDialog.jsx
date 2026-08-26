@@ -126,6 +126,8 @@ export default function CreatePRDialog({
         showToast('warning', err.message);
         onClose();
         window.dispatchEvent(new CustomEvent('xe:open-settings'));
+      } else if (err.code === 'rebase_conflict') {
+        showToast('error', t('git:toast.rebase_conflict', { defaultValue: 'Rebase failed: conflicts with target branch. Please resolve locally and push again.' }));
       } else {
         showToast('error', err.message);
       }

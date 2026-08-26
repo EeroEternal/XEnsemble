@@ -199,6 +199,19 @@ class MergeRequestService {
                 });
             }
 
+            // Before pushing, fetch the target branch and rebase the source
+            // branch onto it. This ensures the PR is up-to-date and reduces
+            // merge conflicts on the remote.
+            try {
+                await this.gitOperationService.fetchAndRebase(project, tgt);
+            } catch (err) {
+                if (err.code === 'rebase_conflict') {
+                    throw err;
+                }
+                // Non-conflict rebase failures (e.g. network) are non-fatal —
+                // proceed with push and let the remote reject if needed.
+            }
+
             await this.gitOperationService.pushBranch(project, src);
 
             let prInfo;

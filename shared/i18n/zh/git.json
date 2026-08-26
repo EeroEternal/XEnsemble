@@ -92,6 +92,7 @@
     "pushed": "更改已推送。",
     "pulled": "更改已拉取。",
     "pr_created": "Pull request 已创建。",
+    "rebase_conflict": "Rebase 失败：与目标分支存在冲突，请在本地解决冲突后重新推送。",
     "mr_created": "合并请求已创建。",
     "conflict_resolved": "冲突已解决。",
     "pull_conflict_surfaced": "已拉取。{{count}} 个文件存在冲突——请在「更改」中解决。",
