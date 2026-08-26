@@ -250,17 +250,21 @@ class TranscriptStore {
     /**
      * Return frames for initial-load replay.
      *
-     * TUI agents (opencode/cline/qwen) use alt screen (\x1b[?1049h) and render
-     * incrementally — no full-screen redraws. The replay must start from the
-     * alt screen enter so the client enters alt screen and replays every
-     * incremental update; otherwise only fragments render on a blank screen.
-     * Uses a generous byte cap (20MB) to prevent unbounded memory on extreme
-     * sessions while covering virtually all real-world TUI conversations.
+     * TUI agents (opencode/cline/qwen) use alt screen (\x1b[?1049h) or
+     * sync-term (\x1b[?2026h) for screen rendering. The replay must include
+     * a TUI enter so the client enters the correct buffer mode.
      *
-     * Some TUI agents (kimi-code) use sync-term (\x1b[?2026h) for atomic
-     * screen updates in the primary buffer without alt screen. Detecting
-     * sync-term enter triggers the same 20MB cap so their incremental
-     * redraws replay correctly.
+     * When the transcript spans multiple resume cycles (same storage_ref
+     * reused across resumes), there are multiple TUI enters. We find the
+     * LAST one — this ensures the replay ends at the latest terminal state
+     * rather than an ancient session cycle. For full-screen redraw agents
+     * (sync-term, e.g. qwen), each block is self-contained, so the last
+     * block is the current screen. For incremental agents (alt-screen),
+     * the last enter starts a fresh rendering session.
+     *
+     * Uses a generous byte cap (20MB) to prevent unbounded memory. When
+     * trimming is needed, we trim from the FRONT (keep newest) so the
+     * replay always ends at the latest terminal state.
      *
      * CLI agents (claude code) have neither — use byte-capped tail (1MB).
      *
@@ -274,11 +278,20 @@ class TranscriptStore {
             return { frames: [], omittedCount: 0 };
         }
 
-        for (let i = 0; i < state.frames.length; i++) {
+        // Find the LAST TUI enter (alt-screen or sync-term).
+        // Using the LAST instead of the FIRST ensures the replay includes
+        // the latest terminal state when the transcript is large.
+        let lastTuiEnterIdx = -1;
+        for (let i = state.frames.length - 1; i >= 0; i--) {
             const f = state.frames[i];
             if (f.kind === 'out' && typeof f.data === 'string' && TUI_ENTER_RE.test(f.data)) {
-                return this._readTailFromIndex(state, i, ALT_SCREEN_TAIL_BYTES);
+                lastTuiEnterIdx = i;
+                break;
             }
+        }
+
+        if (lastTuiEnterIdx >= 0) {
+            return this._readTailFromIndex(state, lastTuiEnterIdx, ALT_SCREEN_TAIL_BYTES);
         }
 
         return this._readTailFromIndex(state, 0, maxBytes);
@@ -294,14 +307,18 @@ class TranscriptStore {
         if (totalBytes <= maxBytes) {
             return { frames: tail, omittedCount };
         }
-        let kept = tail.length;
+        // Trim from the FRONT to keep the newest content (latest terminal
+        // state). Always keep the first frame (TUI enter) so the terminal
+        // enters the correct buffer mode.
+        let trimStart = 1;
         let keptBytes = totalBytes;
-        while (kept > 1 && keptBytes > maxBytes) {
-            const f = tail[kept - 1];
+        while (trimStart < tail.length - 1 && keptBytes > maxBytes) {
+            const f = tail[trimStart];
             if (f.kind === 'out' && typeof f.data === 'string') keptBytes -= f.data.length;
-            kept--;
+            trimStart++;
         }
-        return { frames: tail.slice(0, kept), omittedCount };
+        const trimmed = [tail[0]].concat(tail.slice(trimStart));
+        return { frames: trimmed, omittedCount: omittedCount + trimStart - 1 };
     }
 
     head(streamRef) {
