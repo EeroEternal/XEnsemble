@@ -13,6 +13,7 @@ const FLUSH_SIZE_BYTES = Number(process.env.TRANSCRIPT_FLUSH_SIZE_BYTES) || 6553
 const MAX_FRAMES = Number(process.env.TRANSCRIPT_MAX_FRAMES) || 50000;
 const TAIL_BYTES = Number(process.env.TRANSCRIPT_TAIL_BYTES) || 1048576;
 const ALT_SCREEN_TAIL_BYTES = Number(process.env.TRANSCRIPT_ALT_SCREEN_TAIL_BYTES) || 20971520;
+const TAIL_READ_THRESHOLD = Number(process.env.TRANSCRIPT_TAIL_READ_THRESHOLD) || 67108864; // 64MB
 const TUI_ENTER_RE = /\x1b\[\?(?:1049|47|1047)h|\x1b\[\?2026h/;
 
 function safeRef(ref) {
@@ -56,6 +57,40 @@ class TranscriptStore {
         }
     }
 
+    /**
+     * Read the last `maxBytes` of a file and parse NDJSON lines.
+     * Used when the full file exceeds TAIL_READ_THRESHOLD to avoid
+     * ERR_STRING_TOO_LONG on files > 512MB.
+     */
+    _readTailLines(file, maxBytes) {
+        const stat = fs.statSync(file);
+        const readSize = Math.min(stat.size, maxBytes);
+        const offset = stat.size - readSize;
+        const fd = fs.openSync(file, 'r');
+        try {
+            const buf = Buffer.alloc(readSize);
+            fs.readSync(fd, buf, 0, readSize, offset);
+            let text = buf.toString('utf8');
+            // First line may be incomplete (we started reading mid-line).
+            const firstNewline = text.indexOf('\n');
+            if (firstNewline >= 0 && offset > 0) {
+                text = text.slice(firstNewline + 1);
+            }
+            const frames = [];
+            for (const line of text.split('\n')) {
+                if (!line.trim()) continue;
+                try {
+                    const frame = JSON.parse(line);
+                    if (!frame || typeof frame.seq !== 'number' || !VALID_KINDS.has(frame.kind)) continue;
+                    frames.push(frame);
+                } catch (_) { /* ignore malformed lines */ }
+            }
+            return frames;
+        } finally {
+            fs.closeSync(fd);
+        }
+    }
+
     _state(streamRef) {
         if (!streamRef) return null;
         let state = this.states.get(streamRef);
@@ -68,17 +103,27 @@ class TranscriptStore {
 
         if (file && fs.existsSync(file)) {
             try {
-                const contents = fs.readFileSync(file, 'utf8');
-                for (const line of contents.split('\n')) {
-                    if (!line.trim()) continue;
-                    try {
-                        const frame = JSON.parse(line);
-                        if (!frame || typeof frame.seq !== 'number' || !VALID_KINDS.has(frame.kind)) continue;
+                const stat = fs.statSync(file);
+                if (stat.size > TAIL_READ_THRESHOLD) {
+                    const tailFrames = this._readTailLines(file, TAIL_READ_THRESHOLD);
+                    for (const frame of tailFrames) {
                         frames.push(frame);
                         headSeq = Math.max(headSeq, frame.seq);
                         bytes += Number(frame.bytes) || bytesFor(frame.kind, frame.data);
-                    } catch (_) {
-                        // ignore malformed legacy lines
+                    }
+                } else {
+                    const contents = fs.readFileSync(file, 'utf8');
+                    for (const line of contents.split('\n')) {
+                        if (!line.trim()) continue;
+                        try {
+                            const frame = JSON.parse(line);
+                            if (!frame || typeof frame.seq !== 'number' || !VALID_KINDS.has(frame.kind)) continue;
+                            frames.push(frame);
+                            headSeq = Math.max(headSeq, frame.seq);
+                            bytes += Number(frame.bytes) || bytesFor(frame.kind, frame.data);
+                        } catch (_) {
+                            // ignore malformed legacy lines
+                        }
                     }
                 }
                 if (frames.length > MAX_FRAMES) {
@@ -157,15 +202,21 @@ class TranscriptStore {
     _syncFromFile(state) {
         if (!state?.file || !fs.existsSync(state.file)) return;
         try {
-            const contents = fs.readFileSync(state.file, 'utf8');
-            const fileFrames = [];
-            for (const line of contents.split('\n')) {
-                if (!line.trim()) continue;
-                try {
-                    const frame = JSON.parse(line);
-                    if (!frame || typeof frame.seq !== 'number' || !VALID_KINDS.has(frame.kind)) continue;
-                    fileFrames.push(frame);
-                } catch (_) { /* ignore malformed lines */ }
+            let fileFrames;
+            const stat = fs.statSync(state.file);
+            if (stat.size > TAIL_READ_THRESHOLD) {
+                fileFrames = this._readTailLines(state.file, TAIL_READ_THRESHOLD);
+            } else {
+                const contents = fs.readFileSync(state.file, 'utf8');
+                fileFrames = [];
+                for (const line of contents.split('\n')) {
+                    if (!line.trim()) continue;
+                    try {
+                        const frame = JSON.parse(line);
+                        if (!frame || typeof frame.seq !== 'number' || !VALID_KINDS.has(frame.kind)) continue;
+                        fileFrames.push(frame);
+                    } catch (_) { /* ignore malformed lines */ }
+                }
             }
             const newFrames = fileFrames.filter((f) => f.seq > state.headSeq);
             if (newFrames.length === 0) return;
