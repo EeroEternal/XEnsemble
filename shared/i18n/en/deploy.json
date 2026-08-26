@@ -15,9 +15,11 @@
     "deploy": "Deploy",
     "deploy_preview": "Deploy preview",
     "stop_deployment": "Stop deployment",
+    "stop_deploy": "Stop deploy",
     "open_preview_window": "Open preview window",
     "restart_preview": "Restart preview",
-    "stop_preview": "Stop preview"
+    "allow_popups": "Allow pop-ups to open the preview window",
+    "popups_preview_running": "Preview is running. Allow pop-ups to open the preview window"
   },
   "field": {
     "public_url": "Public URL",
@@ -26,13 +28,60 @@
     "created": "Created",
     "expires": "Expires"
   },
+  "idle": {
+    "empty": "Not deployed yet",
+    "hint": "Click the Deploy button in the top-right to start one-click deployment"
+  },
+  "steps": {
+    "analyze": "Step 1: Analyze project",
+    "build": "Step 2: Deploy & verify"
+  },
+  "running": {
+    "opening_preview": "Opening preview…"
+  },
+  "aborted": "Deployment aborted",
+  "failed": {
+    "title": "Deployment failed",
+    "quota_title": "Concurrency limit reached",
+    "occupants_title": "Currently occupying deployment quota:",
+    "occupants_hint": "Go to the corresponding session to stop the preview or wait for deployment to finish",
+    "show_details": "View error details",
+    "hide_details": "Hide error details",
+    "fallback_title": "Issues found during direct execution:"
+  },
+  "occupant": {
+    "deploying": "deploying",
+    "preview_running": "preview running",
+    "session": "(session {{id}})"
+  },
+  "preview": {
+    "running": "Your app is running",
+    "not_running": "App is not running",
+    "url": "Access URL",
+    "copy_url": "Copy access URL",
+    "open_new_window": "Open in new window",
+    "ttl": "Time remaining",
+    "elapsed": "Deployment time",
+    "expired": "Expired",
+    "empty": "Deploy a preview to view your app here",
+    "details": "Deployment details",
+    "show_details": "View deployment details",
+    "hide_details": "Hide deployment details",
+    "copied": "Access URL copied",
+    "copy_failed": "Copy failed, please copy manually",
+    "deploying": "Deploying preview…",
+    "loading": "Loading…"
+  },
   "status": {
     "pending": "pending",
     "building": "building",
     "running": "running",
     "stopped": "stopped",
     "failed": "failed",
-    "expired": "expired"
+    "expired": "expired",
+    "deploying": "Deploying",
+    "finished": "Finished",
+    "aborted": "Aborted"
   },
   "error": {
     "start_failed": "Failed to start",
@@ -41,6 +90,12 @@
     "preview_token_failed": "Failed to issue preview token",
     "load_preview_failed": "Failed to load preview",
     "preview_deploy_failed": "Preview deploy failed",
-    "auto_deploy_failed": "Auto-deploy failed ({{status}})"
+    "auto_deploy_failed": "Auto-deploy failed ({{status}})",
+    "quota_exceeded": "Concurrency limit reached ({{current}}/{{limit}})"
+  },
+  "toast": {
+    "finished": "Deployment finished",
+    "aborted": "Deployment aborted",
+    "failed": "Deployment failed"
   }
 }

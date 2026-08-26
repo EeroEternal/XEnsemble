@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { Loader2, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Rocket } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { AlertCircle, ChevronDown, ChevronUp, Rocket, Search } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import WorkspacePreviewPane from './WorkspacePreviewPane';
+import CreationProgress from './CreationProgress';
 import { withSessionId } from '../lib/sessionContext';
 
 /**
@@ -15,6 +18,11 @@ import { withSessionId } from '../lib/sessionContext';
  * 失败 → 显示错误 + 「重新部署」按钮。
  */
 const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSuccess, onDeployStatus, abortRequested }, ref) {
+    const { t } = useTranslation();
+    const deploySteps = [
+        { id: 'analyze', label: t('deploy:steps.analyze'), icon: Search },
+        { id: 'build', label: t('deploy:steps.build'), icon: Rocket },
+    ];
     const [runState, setRunState] = useState('idle');
     const [result, setResult] = useState(null);
     // 当前部署阶段：null（初始）| 'A'（分析）| 'B'（部署/验证）| 'preview'（开预览）
@@ -209,54 +217,45 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
 
     return (
         <div className="flex h-full min-h-0 flex-col">
-            <div className="flex-1 min-h-0 overflow-y-auto flex items-center justify-center">
+            {runState === 'success' ? (
+                <div className="flex-1 min-h-0 overflow-hidden">
+                    <WorkspacePreviewPane projectId={projectId} sessionId={sessionId} deployInfo={result} />
+                </div>
+            ) : (
+                <div className="flex-1 min-h-0 overflow-y-auto flex items-center justify-center">
                 {runState === 'idle' && (
                     <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8">
                         <Rocket className="w-9 h-9 text-zinc-300" />
-                        <div className="text-sm text-zinc-500">尚未部署</div>
-                        <div className="text-xs text-zinc-400">点击右上角「Deploy」按钮开始一键部署</div>
+                        <div className="text-sm text-zinc-500">{t('deploy:idle.empty')}</div>
+                        <div className="text-xs text-zinc-400">{t('deploy:idle.hint')}</div>
                     </div>
                 )}
                 {runState === 'running' && (
-                    <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8">
-                        <Loader2 className="w-9 h-9 animate-spin text-blue-600" />
-                        {phase === 'B' ? (
-                            <div className="space-y-1 flex flex-col items-center">
-                                <div className="flex items-center gap-1.5 text-sm font-medium text-zinc-900">
-                                    <CheckCircle2 className="w-4 h-4 text-green-600" />
-                                    阶段 1 分析完成
-                                </div>
-                                <div className="text-sm font-medium text-zinc-900">阶段 2：正在部署测试中</div>
-                            </div>
-                        ) : phase === 'preview' ? (
-                            <div className="text-sm font-medium text-zinc-900">正在开启预览…</div>
-                        ) : (
-                            <div className="text-sm font-medium text-zinc-900">阶段 1：正在分析项目…</div>
-                        )}
-                    </div>
-                )}
-                {runState === 'success' && result && (
-                    <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8">
-                        <CheckCircle2 className="w-10 h-10 text-green-600" />
-                        <div className="text-base font-semibold text-zinc-900">部署完成 ✓</div>
-                        <div className="text-xs text-zinc-500">正在打开预览…</div>
+                    <div className="flex flex-col items-center justify-center gap-3 px-6 py-8">
+                        <CreationProgress
+                            steps={deploySteps}
+                            currentStep={phase === 'B' || phase === 'preview' ? 'build' : 'analyze'}
+                        />
+                        {phase === 'preview' && <div className="text-sm text-zinc-500">{t('deploy:running.opening_preview')}</div>}
                     </div>
                 )}
                 {runState === 'aborted' && (
                     <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8">
                         <AlertCircle className="w-9 h-9 text-zinc-400" />
-                        <div className="text-sm font-semibold text-zinc-700">部署已中止</div>
+                        <div className="text-sm font-semibold text-zinc-700">{t('deploy:aborted')}</div>
                     </div>
                 )}
                 {runState === 'failed' && result && (
                     <FailureView result={result} />
                 )}
-            </div>
+                </div>
+            )}
         </div>
     );
 });
 
 function FailureView({ result }) {
+    const { t } = useTranslation();
     const [showDetails, setShowDetails] = useState(false);
     const trail = result?.verify?.trail || [];
     const fallback = result?.verify?.fallback;
@@ -267,13 +266,29 @@ function FailureView({ result }) {
     return (
         <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8 w-full max-w-lg">
             <AlertCircle className="w-9 h-9 text-red-600" />
-            <div className="text-sm font-semibold text-red-700">部署失败</div>
+            <div className="text-sm font-semibold text-red-700">{t(result?.code === 'quota_exceeded' ? 'deploy:failed.quota_title' : 'deploy:failed.title')}</div>
             {(() => {
-                const line = result?.error || result?.verify?.warning || '';
+                const line = result?.code === 'quota_exceeded'
+                    ? t('deploy:error.quota_exceeded', { current: result?.current, limit: result?.limit })
+                    : (result?.error || result?.verify?.warning || '');
                 return line ? (
                     <div className="text-xs text-zinc-600 max-w-md break-words px-4">{line}</div>
                 ) : null;
             })()}
+            {result?.code === 'quota_exceeded' && Array.isArray(result?.occupants) && result.occupants.length > 0 && (
+                <div className="w-full max-w-md text-left bg-amber-50 border border-amber-200 rounded p-3">
+                    <div className="text-xs font-semibold text-amber-800 mb-1">{t('deploy:failed.occupants_title')}</div>
+                    <ul className="text-xs text-amber-900 space-y-0.5">
+                        {result.occupants.map((o, i) => (
+                            <li key={i}>
+                                · 「{o.projectName || o.projectId}」{o.kind === 'preview' ? t('deploy:occupant.preview_running') : t('deploy:occupant.deploying')}
+                                {o.sessionId ? t('deploy:occupant.session', { id: o.sessionId.slice(-8) }) : ''}
+                            </li>
+                        ))}
+                    </ul>
+                    <div className="text-[11px] text-amber-700 mt-1">{t('deploy:failed.occupants_hint')}</div>
+                </div>
+            )}
             {hasDetails && (
                 <>
                     <button
@@ -282,13 +297,13 @@ function FailureView({ result }) {
                         className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-900"
                     >
                         {showDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                        {showDetails ? '收起报错详情' : '查看报错详情'}
+                        {showDetails ? t('deploy:failed.hide_details') : t('deploy:failed.show_details')}
                     </button>
                     {showDetails && (
                         <div className="w-full text-left">
                             {showFallback && (
                                 <div className="mb-3 text-xs text-red-800 bg-red-50 border border-red-200 rounded p-2">
-                                    <div className="font-semibold mb-1">按计划直接执行时发现：</div>
+                                    <div className="font-semibold mb-1">{t('deploy:failed.fallback_title')}</div>
                                     <div className="font-mono text-[10px] whitespace-pre-wrap break-words max-h-32 overflow-y-auto">{fallback.finalStderr || fallback.warning}</div>
                                     <div className="mt-1 text-[10px] text-zinc-500">{fallback.tested?.join(' · ')}</div>
                                 </div>

@@ -15,11 +15,10 @@ function pickActiveDeployment(list) {
   // 部署中（building/pending）优先：右上角显示"部署中"转圈
   const building = list.find((d) => d.status === 'building' || d.status === 'pending');
   if (building) return building;
-  // 运行中的 preview 优先于 kind='deploy' running：Stop 一次即停真正的预览，
-  // 不会先停部署记录、轮询后又切回 running 导致"要按两次"
+  // 只有真正的 preview running 才代表"有预览"；不要把 kind='deploy' running（部署完成记录）
+  // 误当 preview，否则右上角会出现"stop preview"但实际没有预览可停
   const runningPreview = list.find((d) => d.kind === 'preview' && d.status === 'running');
-  if (runningPreview) return runningPreview;
-  return list[0];
+  return runningPreview || null;
 }
 
 const PREVIEW_WINDOW_NAME = 'xensemble-preview';
@@ -118,7 +117,7 @@ export function usePreview(projectId, token, sessionId) {
           ? `${data.public_url}${data.public_url.includes('?') ? '&' : '?'}preview_token=${encodeURIComponent(data.preview_token)}`
           : null;
         if (url && !openPreviewWindow(url, previewWindowRef)) {
-          showToast('error', 'Preview is running. Allow pop-ups to open the preview window.');
+          showToast('error', t('deploy:action.popups_preview_running'));
         }
       }
     } catch (e) {
@@ -177,7 +176,7 @@ export function usePreview(projectId, token, sessionId) {
       const url = await resolveEmbedUrl();
       if (!url) return;
       if (!openPreviewWindow(url, previewWindowRef)) {
-        showToast('error', 'Allow pop-ups to open the preview window.');
+        showToast('error', t('deploy:action.allow_popups'));
       }
     } catch (e) {
       showToast('error', e.message);
@@ -202,13 +201,14 @@ const ICON_BTN =
   'rounded-md p-1.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 disabled:opacity-50';
 
 export function PreviewStatus({ deployStatus, status }) {
+  const { t } = useTranslation();
   // 部署流程状态：running（部署中）/ failed（失败）；成功(finished)后跟随 deployment
   // 实际状态 —— 若已被停止则显示 stopped，避免残留 finished。aborted / idle 不显示。
   if (deployStatus === 'running') {
     return (
       <div className="flex items-center gap-1.5 shrink-0">
         <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
-          running
+          {t('deploy:status.deploying')}
         </span>
       </div>
     );
@@ -217,18 +217,18 @@ export function PreviewStatus({ deployStatus, status }) {
     return (
       <div className="flex items-center gap-1.5 shrink-0">
         <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-red-50 text-red-600">
-          failed
+          {t('deploy:status.failed')}
         </span>
       </div>
     );
   }
   if (deployStatus !== 'finished') return null;
-  const display = status === 'stopped' ? 'stopped' : 'finished';
+  const display = status === 'stopped' ? t('deploy:status.stopped') : t('deploy:status.finished');
   return (
     <div className="flex items-center gap-1.5 shrink-0">
       <span
         className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
-          display === 'stopped' ? 'bg-zinc-100 text-zinc-500' : 'bg-emerald-50 text-emerald-600'
+          status === 'stopped' ? 'bg-zinc-100 text-zinc-500' : 'bg-emerald-50 text-emerald-600'
         }`}
       >
         {display}

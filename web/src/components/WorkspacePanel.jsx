@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo, memo, lazy, Suspense
 import { createPortal } from 'react-dom';
 import {
   FileText, Files, FolderPlus, Plus, PanelLeftClose, PanelLeft, Loader2,
-  Terminal, Globe, Monitor, GitBranch, GitPullRequest, X, ArrowLeft,
+  Terminal, Globe, GitBranch, GitPullRequest, X, ArrowLeft,
   Trash2, Pencil, ClipboardCopy, FilePlus, Rocket,
 } from 'lucide-react';
 import WorkspaceFileTree from './WorkspaceFileTree';
@@ -11,7 +11,6 @@ import { ConsoleDialogShell } from './ConsoleDialog';
 import { confirm } from './ConfirmDialog';
 import { WorkspacePanelPanelContext } from './workspacePanelContext';
 import SourceControlPanel from './SourceControlPanel';
-import WorkspacePreviewPane from './WorkspacePreviewPane';
 import WorkspaceBrowserPane from './WorkspaceBrowserPane';
 import MergeRequestListPanel from './git/MergeRequestListPanel';
 import CodeReviewPanel from './git/CodeReviewPanel';
@@ -40,7 +39,6 @@ const PINNED_TAB_DEFS = [
 const ADDABLE_TAB_DEFS = [
   { key: 'pullrequests', labelKey: 'git:pull_requests', icon: GitPullRequest },
   { key: 'terminal', labelKey: 'workspace:tabs.terminal', icon: Terminal },
-  { key: 'preview', labelKey: 'workspace:tabs.preview', icon: Monitor },
   { key: 'browser', labelKey: 'workspace:tabs.browser', icon: Globe },
   { key: 'deploy', labelKey: 'workspace:tabs.deploy', icon: Rocket },
 ];
@@ -62,8 +60,9 @@ function readExtraTabs(sessionId) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         // deploy 面板也恢复：部署进行中时切走/刷新后能找回进度（DeployPanel 挂载会查状态，
-        // 有进行中则恢复、无则才部署，不会因恢复 tab 而重复部署）
-        return parsed.map(migrateTabKey).filter((k) => ADDABLE_KEYS.has(k));
+        // 有进行中则恢复、无则才部署，不会因恢复 tab 而重复部署）。
+        // preview 已并入 deploy 面板，不再恢复独立的 preview tab。
+        return parsed.map(migrateTabKey).filter((k) => ADDABLE_KEYS.has(k) && k !== 'preview');
       }
     }
   } catch {
@@ -113,7 +112,6 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   onRenameFile,
   onCopyPath,
   deployContent,
-  previewDeployInfo,
 }, ref) {
   const { t } = useTranslation();
   const [showNewFile, setShowNewFile] = useState(false);
@@ -695,12 +693,6 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
         <div className={mainTab === 'deploy' ? 'flex-1 min-h-0 overflow-hidden' : 'hidden'}>
           {deployContent || null}
         </div>
-
-        {mainTab === 'preview' && (
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <WorkspacePreviewPane projectId={projectId} deployInfo={previewDeployInfo} />
-          </div>
-        )}
 
         {mainTab === 'browser' && (
           <div className="flex-1 min-h-0 overflow-hidden">

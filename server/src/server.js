@@ -24,7 +24,7 @@ const agentGatewayConfig = require('./admin/AgentGatewayConfig');
 const userAdmin = require('./admin/UserAdminService');
 const { startPreviewLifecycle } = require('./preview/lifecycle');
 const { stopTunnel } = require('./preview/tunnelServer');
-const { abortDeploy } = require('./deployments/activeDeploys');
+const { abortDeploy, listByUser } = require('./deployments/activeDeploys');
 const sessionManager = require('./session/SessionManager');
 const { WorkspaceShellManager, subscribeWorkspaceShell } = require('./session/workspaceShell');
 const { reconcileRunningSessions } = require('./session/reconcileRunningSessions');
@@ -42,6 +42,7 @@ const {
     sendWebSocketReady,
 } = require('./auth/websocket');
 const { addSseClient, broadcastSse } = require('./session/sseManager');
+const { t } = require('./i18n');
 const { getProjectForUser, invalidateProjectCache } = require('./projects/getProjectForUser');
 const { registerAuthHooks } = require('./auth/hooks');
 const { detectLocale } = require('./i18n/localeDetector');
@@ -2166,6 +2167,36 @@ fastify.get('/api/v1/runtimes', { preValidation: [fastify.authenticate] }, async
 });
 
 // Deployments — CRUD + preview start/stop（Architecture.md 步骤 2）
+
+// 当前占用并发额度的部署/预览（进行中部署 + 运行中 preview/deploy），
+// 前端据此在左侧会话列表标记"占用限额"的会话（标红/闪烁）
+fastify.get('/api/v1/active-deployments', { preValidation: [fastify.authenticate] }, async (request, reply) => {
+    const userId = request.user.id;
+    const items = [];
+    const seen = new Set();
+    for (const { projectId, sessionId } of listByUser(userId)) {
+        const key = `deploy:${projectId}:${sessionId || ''}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        items.push({ sessionId: sessionId || null, projectId, kind: 'deploy', status: 'building' });
+    }
+    try {
+        const rows = await db.select({
+            projectId: schema.deployments.projectId,
+            sessionId: schema.deployments.sessionId,
+            kind: schema.deployments.kind,
+        }).from(schema.deployments)
+            .where(and(eq(schema.deployments.userId, userId), eq(schema.deployments.status, 'running')));
+        for (const r of rows) {
+            const key = `${r.kind}:${r.projectId}:${r.sessionId || ''}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            items.push({ sessionId: r.sessionId || null, projectId: r.projectId, kind: r.kind, status: 'running' });
+        }
+    } catch (e) { /* ignore */ }
+    return items;
+});
+
 fastify.get('/api/v1/deployments', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const projectId = request.query.project_id;
     if (!projectId) return reply.code(400).send({ error: 'project_id is required' });

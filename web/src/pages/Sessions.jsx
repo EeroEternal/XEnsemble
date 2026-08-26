@@ -179,7 +179,7 @@ export default React.forwardRef(function Sessions({
     const onDeployFinished = (e) => {
       const d = e.detail;
       if (!d || typeof d.ok !== 'boolean') return;
-      showToast(d.ok ? 'success' : 'error', d.ok ? '部署完成' : (d.aborted ? '部署已中止' : '部署失败'));
+      showToast(d.ok ? 'success' : 'error', d.ok ? t('deploy:toast.finished') : (d.aborted ? t('deploy:toast.aborted') : t('deploy:toast.failed')));
     };
     window.addEventListener('xensemble:deploy_finished', onDeployFinished);
     return () => window.removeEventListener('xensemble:deploy_finished', onDeployFinished);
@@ -198,18 +198,12 @@ export default React.forwardRef(function Sessions({
     setDeployStatus('idle');
     setAbortRequested(false);
   }, [activeSession?.sessionId]);
-  // 最近一次自动部署成功后的结果摘要，展示在 Preview 面板的"部署详情"里
-  const [lastDeployInfo, setLastDeployInfo] = useState(null);
   // 当前会话的部署状态（idle/running/finished/aborted），驱动右上角状态与中止按钮
   const [deployStatus, setDeployStatus] = useState('idle');
   // 中止信号：点 Stop 时置 true，让 DeployPanel 立即显示"已中止"（不等后端 abort 返回）
   const [abortRequested, setAbortRequested] = useState(false);
-  // 自动部署成功 → 关闭 Deploy tab，跳转到 Preview tab（Preview 面板常驻，可展开部署详情）
-  const onDeploySuccess = useCallback((info) => {
-    setLastDeployInfo(info);
-    panelRef.current?.addTab('preview');
-    panelRef.current?.selectMainTab('preview');
-    panelRef.current?.closeExtraTab('deploy');
+  // 部署成功：就地显示预览（DeployPanel 内嵌 WorkspacePreviewPane），不再弹出 preview tab
+  const onDeploySuccess = useCallback(() => {
     preview.loadDeployments();
   }, [preview.loadDeployments]);
 
@@ -1447,7 +1441,6 @@ export default React.forwardRef(function Sessions({
                          abortRequested={abortRequested}
                        />
                     ) : null}
-                    previewDeployInfo={lastDeployInfo}
                     refreshTrigger={editorTabs.treeRefreshTrigger}
                     onDeleteFile={handleDeleteFile}
                     onDeleteDir={handleDeleteDir}

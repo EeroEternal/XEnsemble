@@ -11,17 +11,19 @@ import {
 } from '../lib/consoleTokens';
 import { buttonClass } from '../lib/buttonStyles';
 
-const STEPS = [
+const DEFAULT_STEPS = [
   { id: 'import', labelKey: 'sessions:creation.import_repository', icon: GitBranch },
   { id: 'session', labelKey: 'sessions:creation.start_session', icon: Rocket },
 ];
 
-export default function CreationProgress({ currentStep, error, onDismiss }) {
+// 通用两阶段步骤进度条。steps 可自定义（label 直接文案，或 labelKey 走 i18n）；
+// currentStep = 当前步骤 id；error 非空时当前步骤显示错误并可 onDismiss。
+export default function CreationProgress({ currentStep, error, onDismiss, steps = DEFAULT_STEPS }) {
   const { t } = useTranslation();
   const hasError = Boolean(error);
   const stepStatus = (stepId) => {
-    const idx = STEPS.findIndex((s) => s.id === stepId);
-    const currentIdx = STEPS.findIndex((s) => s.id === currentStep);
+    const idx = steps.findIndex((s) => s.id === stepId);
+    const currentIdx = steps.findIndex((s) => s.id === currentStep);
     if (hasError && idx === currentIdx) return 'error';
     if (idx < currentIdx) return 'done';
     if (idx === currentIdx) return 'active';
@@ -31,11 +33,12 @@ export default function CreationProgress({ currentStep, error, onDismiss }) {
   return (
     <div className="flex flex-col items-center gap-5">
       <div className="flex flex-col items-stretch w-full max-w-xs">
-        {STEPS.map((step, idx) => {
+        {steps.map((step, idx) => {
           const status = stepStatus(step.id);
           const Icon = step.icon;
-          const showConnector = idx < STEPS.length - 1;
-          const connectorStatus = stepStatus(STEPS[idx].id);
+          const showConnector = idx < steps.length - 1;
+          const connectorStatus = stepStatus(steps[idx].id);
+          const label = step.label ?? t(step.labelKey);
           return (
             <div key={step.id} className="flex flex-col items-stretch w-full">
               <div className="flex items-center gap-3">
@@ -69,7 +72,7 @@ export default function CreationProgress({ currentStep, error, onDismiss }) {
                       status === 'pending' && textPlaceholder,
                     )}
                   >
-                    {t(step.labelKey)}
+                    {label}
                   </span>
                 </div>
               </div>

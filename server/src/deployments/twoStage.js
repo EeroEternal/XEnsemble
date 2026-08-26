@@ -10,7 +10,7 @@ const crypto = require('crypto');
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { eq, and } = require('drizzle-orm');
+const { eq, and, inArray } = require('drizzle-orm');
 const { getRuntime } = require('../runtime/registry');
 const { ensureProjectRuntime } = require('../runtime/RuntimeService');
 const { analyzeProjectDeploy } = require('./analyzeDeploy');
@@ -18,7 +18,7 @@ const { analyzeProjectVerify } = require('./analyzeVerify');
 const { createTunnel, stopTunnel } = require('../preview/tunnelServer');
 const deploymentService = require('./DeploymentService');
 const workspace = require('../workspace');
-const { registerDeploy, unregisterDeploy, isAborted, countByUser } = require('./activeDeploys');
+const { registerDeploy, unregisterDeploy, isAborted, countByUser, listProjectIdsByUser, listByUser } = require('./activeDeploys');
 const { ensureUserQuota, getUsage } = require('../auth/PolicyService');
 const { broadcastSse } = require('../session/sseManager');
 const { db } = require('../db');
@@ -39,6 +39,49 @@ function withTimeout(promise, ms, fallback) {
             () => { clearTimeout(timer); resolve(fallback); },
         );
     });
+}
+
+// 并发超限时，返回"当前占用额度"的部署/预览（结构化，含 sessionId + projectName），
+// 供前端在超限报错时展示"哪个 project 的哪个 session 正在部署/运行"。
+async function buildConcurrencyOccupants(userId, getProjectForUser) {
+    const items = [];
+    const seen = new Set();
+    const nameCache = new Map();
+    const getProjectName = async (projectId) => {
+        if (nameCache.has(projectId)) return nameCache.get(projectId);
+        let name = projectId;
+        try { const p = await getProjectForUser(userId, projectId); if (p?.name) name = p.name; } catch { /* ignore */ }
+        nameCache.set(projectId, name);
+        return name;
+    };
+    try {
+        // 进行中的部署（activeDeploys）
+        for (const { projectId, sessionId } of listByUser(userId)) {
+            const key = `deploy:${projectId}:${sessionId || ''}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            items.push({ sessionId: sessionId || null, projectId, projectName: await getProjectName(projectId), kind: 'deploy', status: 'building' });
+        }
+        // 运行中 / building / pending 的 preview 与部署记录（与 previews 计数口径一致）
+        const rows = await db.select({
+            projectId: schema.deployments.projectId,
+            sessionId: schema.deployments.sessionId,
+            kind: schema.deployments.kind,
+        }).from(schema.deployments)
+            .where(and(
+                eq(schema.deployments.userId, userId),
+                inArray(schema.deployments.status, ['running', 'building', 'pending']),
+            ));
+        for (const r of rows) {
+            const key = `${r.kind}:${r.projectId}:${r.sessionId || ''}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            items.push({ sessionId: r.sessionId || null, projectId: r.projectId, projectName: await getProjectName(r.projectId), kind: r.kind, status: 'running' });
+        }
+    } catch (e) {
+        console.error('[twoStage] buildConcurrencyOccupants error:', e?.message || e);
+    }
+    return items;
 }
 
 // 修复 host workspace 目录属主。
@@ -382,17 +425,28 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
         const current = countByUser(userId) + usage.previews;
         if (current > limit) {
             unregisterDeploy(project.id, sessionId);
+            const occupants = await buildConcurrencyOccupants(userId, getProjectForUser);
+            console.error(`[twoStage] quota_exceeded user=${userId} current=${current} limit=${limit} countByUser=${countByUser(userId)} previews=${usage.previews} listByUser=${JSON.stringify(listByUser(userId))} occupants=${JSON.stringify(occupants)}`);
             return {
                 ok: false,
-                error: `已达并发部署上限（${current}/${limit}），请等待其他部署或预览完成后再试`,
+                error: `已达并发部署上限（${current}/${limit}），请到对应会话停止预览或等待部署完成后再试`,
                 code: 'quota_exceeded',
                 dimension: 'max_previews',
                 limit,
                 current,
+                occupants,
             };
         }
     } catch (e) {
-        console.error('[twoStage] concurrency gate error (ignored):', e.message);
+        console.error('[twoStage] concurrency gate error:', e?.message || e);
+        // 并发检查失败时保守拒绝：绝不因检查异常放行（否则限额失效、多个部署同时跑）
+        unregisterDeploy(project.id, sessionId);
+        return {
+            ok: false,
+            error: '并发检查异常，请稍后重试',
+            code: 'quota_gate_error',
+            dimension: 'max_previews',
+        };
     }
     const startedAt = Date.now();
     // 持久化"进行中部署"记录（kind='deploy'）的 id；report 用它实时更新阶段

@@ -295,6 +295,8 @@ export function useWorkspaces(user) {
     saveConsoleCache(userId, { agents, sessions, projects, activeSession });
   }, [user, agents, sessions, projects, activeSession]);
 
+  // 占用并发额度的会话标记已移至 AppSidebar 内部轮询（避免经 props 传递导致 esbuild 不重命名 → ReferenceError）
+
   return {
     agents,
     setAgents,

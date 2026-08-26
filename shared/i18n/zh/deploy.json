@@ -15,9 +15,11 @@
     "deploy": "部署",
     "deploy_preview": "部署预览",
     "stop_deployment": "停止部署",
+    "stop_deploy": "停止部署",
     "open_preview_window": "打开预览窗口",
     "restart_preview": "重启预览",
-    "stop_preview": "停止预览"
+    "allow_popups": "请允许弹窗以打开预览窗口",
+    "popups_preview_running": "预览运行中，请允许弹窗打开"
   },
   "field": {
     "public_url": "公网 URL",
@@ -26,13 +28,60 @@
     "created": "创建时间",
     "expires": "过期时间"
   },
+  "idle": {
+    "empty": "尚未部署",
+    "hint": "点击右上角「Deploy」按钮开始一键部署"
+  },
+  "steps": {
+    "analyze": "阶段 1：分析项目",
+    "build": "阶段 2：部署测试"
+  },
+  "running": {
+    "opening_preview": "正在开启预览…"
+  },
+  "aborted": "部署已中止",
+  "failed": {
+    "title": "部署失败",
+    "quota_title": "已达并发部署上限",
+    "occupants_title": "当前占用并发额度的部署/预览：",
+    "occupants_hint": "请到对应会话停止预览或等待部署完成后重试",
+    "show_details": "查看报错详情",
+    "hide_details": "收起报错详情",
+    "fallback_title": "按计划直接执行时发现："
+  },
+  "occupant": {
+    "deploying": "部署中",
+    "preview_running": "预览运行中",
+    "session": "（会话 {{id}}）"
+  },
+  "preview": {
+    "running": "你的应用正在运行",
+    "not_running": "应用未运行",
+    "url": "访问地址",
+    "copy_url": "复制访问地址",
+    "open_new_window": "在新窗口打开",
+    "ttl": "剩余可用时间",
+    "elapsed": "本次部署用时",
+    "expired": "已过期",
+    "empty": "部署预览后在此查看应用",
+    "details": "部署详情",
+    "show_details": "查看部署详情",
+    "hide_details": "收起部署详情",
+    "copied": "访问地址已复制",
+    "copy_failed": "复制失败，请手动复制",
+    "deploying": "正在部署预览…",
+    "loading": "加载中…"
+  },
   "status": {
     "pending": "等待中",
     "building": "构建中",
     "running": "运行中",
     "stopped": "已停止",
     "failed": "失败",
-    "expired": "已过期"
+    "expired": "已过期",
+    "deploying": "部署中",
+    "finished": "已完成",
+    "aborted": "已中止"
   },
   "error": {
     "start_failed": "启动失败",
@@ -41,6 +90,12 @@
     "preview_token_failed": "签发预览令牌失败",
     "load_preview_failed": "加载预览失败",
     "preview_deploy_failed": "预览部署失败",
-    "auto_deploy_failed": "自动部署失败 ({{status}})"
+    "auto_deploy_failed": "自动部署失败 ({{status}})",
+    "quota_exceeded": "已达并发部署上限（{{current}}/{{limit}}）"
+  },
+  "toast": {
+    "finished": "部署完成",
+    "aborted": "部署已中止",
+    "failed": "部署失败"
   }
 }

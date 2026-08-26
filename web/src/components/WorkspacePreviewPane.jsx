@@ -13,20 +13,21 @@ import { usePreview } from './PreviewPanel';
 import { consoleButtonFocusClass } from '@/lib/consoleTokens';
 import { useToast } from './Toast';
 import { useTranslation } from 'react-i18next';
+import i18next from 'i18next';
 
 function formatTtl(expiresAt) {
   if (!expiresAt) return '';
   const ms = expiresAt - Date.now();
-  if (ms <= 0) return '已过期';
+  if (ms <= 0) return i18next.t('deploy:preview.expired');
   const h = Math.floor(ms / 3600000);
   const m = Math.floor((ms % 3600000) / 60000);
   return h > 0 ? `${h} 小时 ${m} 分钟` : `${m} 分钟`;
 }
 
 /** Deployed app preview (start/stop + embed). */
-export default function WorkspacePreviewPane({ projectId, deployInfo }) {
+export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo }) {
   const { t } = useTranslation();
-  const preview = usePreview(projectId, true);
+  const preview = usePreview(projectId, true, sessionId);
   const { status, previewUrl, isBusy, resolveEmbedUrl, openPreview } = preview;
   const { showToast } = useToast();
   const [embedUrl, setEmbedUrl] = useState(null);
@@ -68,10 +69,10 @@ export default function WorkspacePreviewPane({ projectId, deployInfo }) {
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
-      showToast('success', '访问地址已复制');
+      showToast('success', t('deploy:preview.copied'));
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      showToast('error', '复制失败，请手动复制');
+      showToast('error', t('deploy:preview.copy_failed'));
     }
   };
 
@@ -89,10 +90,10 @@ export default function WorkspacePreviewPane({ projectId, deployInfo }) {
             type="button"
             onClick={() => setShowDetails((v) => !v)}
             className={`ml-auto flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-900 shrink-0 ${consoleButtonFocusClass}`}
-            title={showDetails ? '收起部署详情' : '查看部署详情'}
+            title={showDetails ? t('deploy:preview.hide_details') : t('deploy:preview.show_details')}
           >
             {showDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            部署详情
+            {t('deploy:preview.details')}
           </button>
         </div>
       )}
@@ -103,24 +104,24 @@ export default function WorkspacePreviewPane({ projectId, deployInfo }) {
             {status === 'running' ? (
               <>
                 <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
-                <span className="font-medium text-zinc-900">你的应用正在运行</span>
+                <span className="font-medium text-zinc-900">{t('deploy:preview.running')}</span>
               </>
             ) : (
               <>
                 <XCircle className="w-4 h-4 text-red-500 shrink-0" />
-                <span className="font-medium text-zinc-900">应用未运行</span>
+                <span className="font-medium text-zinc-900">{t('deploy:preview.not_running')}</span>
               </>
             )}
           </div>
           {previewUrl && (
             <div className="flex items-center gap-2">
-              <span className="text-zinc-500 shrink-0">访问地址</span>
+              <span className="text-zinc-500 shrink-0">{t('deploy:preview.url')}</span>
               <span className="font-mono text-zinc-800 truncate flex-1 min-w-0">{previewUrl}</span>
               <button
                 type="button"
                 onClick={copyUrl}
                 className={`p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-[#E8EAED] shrink-0 ${consoleButtonFocusClass}`}
-                title="复制访问地址"
+                title={t('deploy:preview.copy_url')}
               >
                 {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
@@ -128,7 +129,7 @@ export default function WorkspacePreviewPane({ projectId, deployInfo }) {
                 type="button"
                 onClick={openPreview}
                 className={`p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-[#E8EAED] shrink-0 ${consoleButtonFocusClass}`}
-                title="在新窗口打开"
+                title={t('deploy:preview.open_new_window')}
               >
                 <ExternalLink className="w-3.5 h-3.5" />
               </button>
@@ -137,13 +138,13 @@ export default function WorkspacePreviewPane({ projectId, deployInfo }) {
           <div className="flex flex-wrap gap-x-6 gap-y-1">
             {deployment?.expires_at && status === 'running' && (
               <div>
-                <span className="text-zinc-500">剩余可用时间：</span>
+                <span className="text-zinc-500">{t('deploy:preview.ttl')}：</span>
                 <span className="text-zinc-800">{formatTtl(deployment.expires_at)}</span>
               </div>
             )}
             {elapsedMs != null && (
               <div>
-                <span className="text-zinc-500">本次部署用时：</span>
+                <span className="text-zinc-500">{t('deploy:preview.elapsed')}：</span>
                 <span className="text-zinc-800">{(elapsedMs / 1000).toFixed(1)} 秒</span>
               </div>
             )}
@@ -155,7 +156,7 @@ export default function WorkspacePreviewPane({ projectId, deployInfo }) {
         {embedLoading || isBusy ? (
           <div className="flex h-full items-center justify-center gap-2 text-zinc-400">
             <Loader2 className="h-4 w-4 animate-spin" />
-            <span className="text-sm">{isBusy ? 'Deploying preview…' : 'Loading…'}</span>
+            <span className="text-sm">{isBusy ? t('deploy:preview.deploying') : t('deploy:preview.loading')}</span>
           </div>
         ) : embedUrl ? (
           <iframe
@@ -167,7 +168,7 @@ export default function WorkspacePreviewPane({ projectId, deployInfo }) {
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-zinc-400 px-6 text-center">
             <Monitor className="h-10 w-10" />
-            <p className="text-sm">{embedError || 'Deploy a Preview to view your app here'}</p>
+            <p className="text-sm">{embedError || t('deploy:preview.empty')}</p>
           </div>
         )}
       </div>
