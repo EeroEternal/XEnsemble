@@ -96,6 +96,7 @@ const sessions = pgTable('sessions', {
   recoverable: boolean('recoverable').default(false),
   status: text('status').default('running'),
   title: text('title'),
+  titleManual: boolean('title_manual').default(false),
   customImageId: text('custom_image_id'),
   provisioningError: text('provisioning_error'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),

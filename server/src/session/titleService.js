@@ -95,12 +95,14 @@ async function loadAgentName(agentId) {
 
 async function generateSessionTitle(sessionId) {
     const sessionRow = await db
-        .select({ id: schema.sessions.id, agentId: schema.sessions.agentId, title: schema.sessions.title })
+        .select({ id: schema.sessions.id, agentId: schema.sessions.agentId, title: schema.sessions.title, titleManual: schema.sessions.titleManual })
         .from(schema.sessions)
         .where(eq(schema.sessions.id, sessionId))
         .limit(1);
 
     if (!sessionRow.length) return null;
+    // User has manually set a title — never overwrite it.
+    if (sessionRow[0].titleManual) return sessionRow[0].title || null;
     if (sessionRow[0].title) return sessionRow[0].title;
 
     const sessionManager = require('./SessionManager');

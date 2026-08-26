@@ -22,6 +22,7 @@
   "action": {
     "stop_and_remove": "Stop and remove",
     "remove": "Remove",
+    "rename_session": "Rename",
     "restart_session": "Restart session",
     "start_session": "Start session",
     "restarting": "Restarting…",

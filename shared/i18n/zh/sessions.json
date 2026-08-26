@@ -22,6 +22,7 @@
   "action": {
     "stop_and_remove": "停止并移除",
     "remove": "移除",
+    "rename_session": "重命名",
     "restart_session": "重启会话",
     "start_session": "启动会话",
     "restarting": "重启中…",

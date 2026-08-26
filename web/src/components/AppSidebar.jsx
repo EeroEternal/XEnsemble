@@ -14,6 +14,7 @@ import {
   PanelLeft,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { useToast } from './Toast';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
 import {
   loadSidebarPrefs,
@@ -220,6 +221,53 @@ export default function AppSidebar({
   });
   const [sessionListExpanded, setSessionListExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const { showToast } = useToast();
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const renameInputRef = useRef(null);
+
+  useEffect(() => {
+    if (renamingId && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renamingId]);
+
+  const startRename = useCallback((s) => {
+    setRenamingId(s.id);
+    setRenameValue(s.title?.trim() || '');
+  }, []);
+
+  const cancelRename = useCallback(() => {
+    setRenamingId(null);
+    setRenameValue('');
+    setRenaming(false);
+  }, []);
+
+  const submitRename = useCallback(async (s) => {
+    const trimmed = renameValue.trim();
+    if (!trimmed && !s.title) {
+      cancelRename();
+      return;
+    }
+    if (trimmed === (s.title?.trim() || '')) {
+      cancelRename();
+      return;
+    }
+    setRenaming(true);
+    try {
+      await apiFetch(`/api/v1/sessions/${encodeURIComponent(s.id)}/title`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title: trimmed }),
+      });
+    } catch (err) {
+      showToast('error', err.message);
+    } finally {
+      setRenaming(false);
+      cancelRename();
+    }
+  }, [renameValue, cancelRename, showToast]);
 
   const setSidebarCollapsed = useCallback((next) => {
     setCollapsed(next);
@@ -279,6 +327,7 @@ export default function AppSidebar({
     const label = s.title?.trim() || getAgentLabel(s.agentId);
     const timestamp = s.createdAt ? formatRelativeTime(s.createdAt) : '';
     const imageName = s.customImageId ? customImageMap[s.customImageId] : null;
+    const isRenaming = renamingId === s.id;
 
     return (
       <div
@@ -290,32 +339,62 @@ export default function AppSidebar({
         {isActive && (
           <span className="absolute left-1 top-1.5 bottom-1.5 w-1 rounded-full bg-zinc-900" />
         )}
-        <button
-          type="button"
-          onClick={() => selectSession(s)}
-          className="flex flex-1 min-w-0 items-center gap-2 text-left"
-          title={imageName ? `${label} · ${imageName}` : label}
-        >
-          <span className={`flex-1 truncate text-[13px] ${isActive ? 'font-medium text-zinc-900' : 'text-zinc-700'}`}>
-            {label}
-          </span>
-          {imageName && (
-            <span className="shrink-0 inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[10px] bg-zinc-100 text-zinc-500 max-w-[80px] truncate">
-              <Container className="w-2.5 h-2.5 shrink-0" />
-              {imageName}
+        {isRenaming ? (
+          <input
+            ref={renameInputRef}
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onBlur={() => submitRename(s)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); submitRename(s); }
+              if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
+            }}
+            maxLength={80}
+            disabled={renaming}
+            className={`flex-1 min-w-0 bg-white border border-zinc-300 rounded px-1.5 py-0.5 text-[13px] text-zinc-900 outline-none focus:border-zinc-400 disabled:opacity-50 ${consoleButtonFocusClass}`}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => selectSession(s)}
+            onDoubleClick={() => startRename(s)}
+            className="flex flex-1 min-w-0 items-center gap-2 text-left"
+            title={imageName ? `${label} · ${imageName}` : label}
+          >
+            <span className={`flex-1 truncate text-[13px] ${isActive ? 'font-medium text-zinc-900' : 'text-zinc-700'}`}>
+              {label}
             </span>
-          )}
-          {isPending && (
-            <Loader2 className="w-3 h-3 shrink-0 animate-spin text-amber-500" />
-          )}
-          {isFailed && (
-            <span className="w-1.5 h-1.5 rounded-full bg-red-600 shrink-0" />
-          )}
-          {timestamp && (
-            <span className={`shrink-0 text-[11px] ${textPlaceholder}`}>{timestamp}</span>
-          )}
-        </button>
+            {imageName && (
+              <span className="shrink-0 inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[10px] bg-zinc-100 text-zinc-500 max-w-[80px] truncate">
+                <Container className="w-2.5 h-2.5 shrink-0" />
+                {imageName}
+              </span>
+            )}
+            {isPending && (
+              <Loader2 className="w-3 h-3 shrink-0 animate-spin text-amber-500" />
+            )}
+            {isFailed && (
+              <span className="w-1.5 h-1.5 rounded-full bg-red-600 shrink-0" />
+            )}
+            {timestamp && (
+              <span className={`shrink-0 text-[11px] ${textPlaceholder}`}>{timestamp}</span>
+            )}
+          </button>
+        )}
         <div className="flex items-center shrink-0 opacity-0 group-hover/session:opacity-100 focus-within:opacity-100">
+          {!isRenaming && (
+            <button
+              type="button"
+              title={t('sessions:action.rename_session', { defaultValue: 'Rename' })}
+              onClick={(e) => {
+                e.stopPropagation();
+                startRename(s);
+              }}
+              className={`p-1 rounded-md ${textPlaceholder} ${hoverTextPrimary}`}
+            >
+              <PenSquare className="w-3 h-3" />
+            </button>
+          )}
           <button
             type="button"
             title={isLive ? t('sessions:action.stop_and_remove') : t('sessions:action.remove')}

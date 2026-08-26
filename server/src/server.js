@@ -935,7 +935,7 @@ fastify.get('/api/v1/projects/:projectId/repository/file', {
 fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const result = await db.execute(sql`
         SELECT s.id, s.project_id, s.agent_id, s.status, s.recoverable,
-               s.custom_image_id, s.title, s.created_at,
+               s.custom_image_id, s.title, s.title_manual, s.created_at,
                p.name AS project_name,
                s.provisioning_error
         FROM sessions s
@@ -956,9 +956,36 @@ fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async
         alive: sessionManager.isAlive(row.id),
         projectName: row.project_id ? row.project_name : null,
         title: row.title || null,
+        titleManual: Boolean(row.title_manual),
         createdAt: Number(row.created_at),
         updatedAt: null,
     }));
+});
+
+// Rename a session — sets titleManual=true so AI auto-naming never overwrites it.
+// Sending an empty title clears the title but keeps titleManual=true (user explicitly cleared it).
+fastify.patch('/api/v1/sessions/:sessionId/title', { preValidation: [fastify.authenticate, fastify.requireActive] }, async (request, reply) => {
+    const { sessionId } = request.params;
+    const rows = await db.select().from(schema.sessions)
+        .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
+
+    const rawTitle = String(request.body?.title ?? '').trim();
+    if (rawTitle.length > 80) {
+        return reply.code(400).send({ error: 'Title too long (max 80 characters)', code: 'title_too_long' });
+    }
+
+    const title = rawTitle || null;
+    await db.update(schema.sessions)
+        .set({ title, titleManual: true })
+        .where(eq(schema.sessions.id, sessionId));
+
+    try {
+        const { broadcastSse } = require('./session/sseManager');
+        broadcastSse({ type: 'session_title', sessionId, title });
+    } catch (_) {}
+
+    return { ok: true, sessionId, title, titleManual: true };
 });
 
 fastify.post('/api/v1/sessions/:sessionId/stop', { preValidation: [fastify.authenticate] }, async (request, reply) => {
