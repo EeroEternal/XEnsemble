@@ -1,4 +1,5 @@
 import { GitBranch, Loader2, Unlink } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/utils';
 import {
   bgActive,
@@ -22,6 +23,7 @@ export default function GitConnectButton({
   disabledReason,
   className,
 }) {
+  const { t } = useTranslation();
   const label = getProviderLabel(provider) || provider;
   const username = connection?.remote_username || connection?.remoteUsername
     || connection?.github_username || connection?.githubUsername || '';
@@ -45,10 +47,10 @@ export default function GitConnectButton({
             {username || label}
           </p>
           <p className={`text-xs ${textSecondary}`}>
-            Connected to {label}
+            {t('git:connected_to', { label })}
             {connection.connection_type === 'pat' && (
               <span className="ml-1 rounded bg-zinc-100 px-1 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
-                via PAT
+                {t('git:via_pat')}
               </span>
             )}
           </p>
@@ -57,8 +59,8 @@ export default function GitConnectButton({
           type="button"
           onClick={onDisconnect}
           disabled={loading}
-          title={`Disconnect ${label}`}
-          aria-label={`Disconnect ${label}`}
+          title={t('git:disconnect', { label })}
+          aria-label={t('git:disconnect', { label })}
           className={cn(consoleIconButtonClass, 'ml-auto')}
         >
           {loading ? (
@@ -76,7 +78,7 @@ export default function GitConnectButton({
       type="button"
       onClick={onConnect}
       disabled={loading || disabled}
-      title={disabled ? (disabledReason || 'OAuth not configured') : undefined}
+      title={disabled ? (disabledReason || t('git:oauth_not_configured_short')) : undefined}
       className={cn(
         `inline-flex h-9 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium ${bgInverse} ${textInverse} hover:bg-zinc-700 disabled:opacity-50 ${transitionBase}`,
         className,
@@ -87,7 +89,7 @@ export default function GitConnectButton({
       ) : (
         <GitBranch className="h-4 w-4" />
       )}
-      Connect to {label}
+      {t('git:connect_to', { label })}
     </button>
   );
 }

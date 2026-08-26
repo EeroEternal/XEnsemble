@@ -59,5 +59,10 @@
     "provider_deleted": "Provider deleted.",
     "settings_saved": "Gateway settings saved."
   },
-  "removing": "Removing…"
+  "removing": "Removing…",
+  "verifying_provider": "Verifying provider",
+  "verified_at": "Verified at",
+  "not_verified": "Not verified",
+  "available": "Available",
+  "unavailable": "Unavailable"
 }

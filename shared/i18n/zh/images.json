@@ -66,5 +66,17 @@
   "actions_for": "操作",
   "rebuilding": "重建中…",
   "deleting": "删除中…",
-  "delete_confirm": "确定删除 \"{{name}}\" 吗？此操作不可撤销。"
+  "delete_confirm": "确定删除 \"{{name}}\" 吗？此操作不可撤销。",
+  "category": {
+    "agent": "Agent",
+    "language": "语言",
+    "database": "数据库",
+    "devops": "DevOps",
+    "package-manager": "包管理器",
+    "shell-tool": "Shell 工具"
+  },
+  "no_components_match": "没有匹配的组件。",
+  "no_components_available": "暂无可用组件。",
+  "no_components_selected": "尚未选择组件。从列表中选择添加。",
+  "start_build": "开始构建"
 }

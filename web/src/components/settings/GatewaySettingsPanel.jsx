@@ -75,8 +75,9 @@ function TestConnectionButton({
   iconClassName = 'w-3.5 h-3.5',
   title = 'Verify provider',
 }) {
+  const { t } = useTranslation();
   const busy = testing || health?.status === 'testing';
-  const label = busy ? 'Verifying provider' : title;
+  const label = busy ? t('gateway:verifying_provider') : title;
   return (
     <button
       type="button"
@@ -96,7 +97,8 @@ function TestConnectionButton({
 }
 
 function FetchModelsButton({ fetching, disabled, onClick, iconClassName = 'w-3.5 h-3.5' }) {
-  const label = fetching ? 'Fetching models' : 'Fetch models';
+  const { t } = useTranslation();
+  const label = fetching ? t('gateway:fetching_models') : t('gateway:fetch_models');
   return (
     <button
       type="button"
@@ -123,29 +125,30 @@ function formatTestTime(value) {
 }
 
 function ProviderStatusBadge({ health }) {
+  const { t } = useTranslation();
   const status = health?.status || 'unknown';
   const testedAt = formatTestTime(health?.tested_at);
   const detailTitle = [
     health?.message,
     health?.latency_ms != null ? `Latency: ${health.latency_ms}ms` : null,
-    testedAt && `Verified at ${testedAt}`,
+    testedAt && `${t('gateway:verified_at')} ${testedAt}`,
   ].filter(Boolean).join('\n');
 
-  let label = 'Not verified';
+  let label = t('gateway:not_verified');
   let tone = 'neutral';
   let icon = Clock;
   let spinning = false;
 
   if (status === 'testing') {
-    label = 'Verifying…';
+    label = t('gateway:verifying');
     tone = 'info';
     spinning = true;
   } else if (status === 'ok') {
-    label = 'Available';
+    label = t('gateway:available');
     tone = 'success';
     icon = CheckCircle;
   } else if (status === 'error') {
-    label = 'Unavailable';
+    label = t('gateway:unavailable');
     tone = 'danger';
     icon = XCircle;
   }
@@ -208,6 +211,7 @@ function ProviderFormFields({
   testingConnection,
   connectionHealth,
 }) {
+  const { t } = useTranslation();
   return (
     <div className={`${consoleCardClass} bg-zinc-50/70 p-4 space-y-4`}>
       {!isEdit && (

@@ -18,12 +18,6 @@ const REGISTRATION_MODE_LABELS = {
   invite_only: 'settings:general.mode_invite',
 };
 
-const TIER_LABELS = {
-  basic: 'users:tier.basic',
-  pro: 'users:tier.pro',
-  enterprise: 'users:tier.enterprise',
-};
-
 export default function GeneralSettingsPanel() {
   const { t } = useTranslation();
   const { user } = useContext(AuthContext);
@@ -179,27 +173,6 @@ export default function GeneralSettingsPanel() {
               <ReadOnlyField
                 label={t('settings:quota.previews')}
                 value={String(quota.max_previews ?? '')}
-              />
-            )}
-            {isEdit ? (
-              <div className="flex items-center justify-between gap-4 min-h-[38px]">
-                <span className="text-xs text-zinc-500 shrink-0">{t('settings:general.tier')}</span>
-                <div className="w-48">
-                  <SelectMenu
-                    value={draftQuota.resource_tier ?? 'basic'}
-                    onChange={(v) => editMode.setDraft({ ...draft, default_user_quota: { ...draftQuota, resource_tier: v } })}
-                    options={[
-                      { value: 'basic', label: t('users:tier.basic') },
-                      { value: 'pro', label: t('users:tier.pro') },
-                      { value: 'enterprise', label: t('users:tier.enterprise') },
-                    ]}
-                  />
-                </div>
-              </div>
-            ) : (
-              <ReadOnlyField
-                label={t('settings:general.tier')}
-                value={t(TIER_LABELS[quota.resource_tier] || 'users:tier.basic')}
               />
             )}
           </div>

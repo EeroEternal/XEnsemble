@@ -49,7 +49,6 @@
   "manual_merge_hint": "自行编辑合并后的最终文件内容",
   "manual_merge_save_hint": "保存将写入文件并标记冲突为已解决",
   "save_and_resolve": "保存并解决",
-  "resolve": "解决",
   "merge_conflict_title": "解决冲突",
   "use_ours": "使用本地",
   "use_theirs": "使用远端",
@@ -172,5 +171,10 @@
   "import_repository": "导入仓库",
   "select_file": "选择文件",
   "search_files": "搜索文件...",
-  "search_repositories": "搜索仓库…"
+  "search_repositories": "搜索仓库…",
+  "connect_to": "连接到 {{label}}",
+  "disconnect": "断开 {{label}}",
+  "connected_to": "已连接到 {{label}}",
+  "via_pat": "通过 PAT",
+  "oauth_not_configured_short": "OAuth 未配置"
 }

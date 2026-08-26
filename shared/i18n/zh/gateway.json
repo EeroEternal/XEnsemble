@@ -59,5 +59,10 @@
   "stop_gateway": "停止网关",
   "restart_gateway": "重启网关",
   "listen_host": "监听地址",
-  "port": "端口"
+  "port": "端口",
+  "verifying_provider": "验证提供商中",
+  "verified_at": "验证于",
+  "not_verified": "未验证",
+  "available": "可用",
+  "unavailable": "不可用"
 }

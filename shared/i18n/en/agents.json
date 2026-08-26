@@ -74,6 +74,17 @@
     "saved_toast": "Agent configuration saved.",
     "saving": "Saving…",
     "save": "Save",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "provider": "Provider",
+    "model": "Model",
+    "select_models": "Select models...",
+    "add_models_in_gateway": "Add models in Settings - Gateway",
+    "loading_defaults": "Loading defaults...",
+    "gateway_not_running": "UniGateway is not running. Start it under Settings - Gateway.",
+    "vm_resources": "VM Resources",
+    "vm_resources_desc": "CPU / memory / disk limits for the sandbox VM. Leave empty to use system defaults.",
+    "disk_gb": "Disk (GB)",
+    "cpus": "CPUs",
+    "memory_mb": "Memory (MB)"
   }
 }

@@ -425,18 +425,6 @@ export default function UsersAdmin() {
                         className="h-8 py-1"
                       />
                     </div>
-                    <div>
-                      <label className="text-xs text-zinc-500" title={t('users:field.tier_hint', { defaultValue: 'Controls LLM request rate' })}>{t('users:field.resource_tier', { defaultValue: 'Tier' })}</label>
-                      <SelectMenu
-                        value={form.resource_tier}
-                        onChange={(v) => setForm({ ...form, resource_tier: v })}
-                        options={[
-                          { value: 'basic', label: t('users:tier.basic', { defaultValue: 'Basic' }) },
-                          { value: 'pro', label: t('users:tier.pro', { defaultValue: 'Pro' }) },
-                          { value: 'enterprise', label: t('users:tier.enterprise', { defaultValue: 'Enterprise' }) },
-                        ]}
-                      />
-                    </div>
                   </div>
                 </div>
                 )}

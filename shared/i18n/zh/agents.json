@@ -74,6 +74,17 @@
     "saved_toast": "Agent 配置已保存。",
     "saving": "保存中…",
     "save": "保存",
-    "cancel": "取消"
+    "cancel": "取消",
+    "provider": "Provider",
+    "model": "模型",
+    "select_models": "选择模型...",
+    "add_models_in_gateway": "在 设置 - 网关 中添加模型",
+    "loading_defaults": "加载默认值...",
+    "gateway_not_running": "UniGateway 未运行。请在 设置 - 网关 中启动。",
+    "vm_resources": "VM 资源",
+    "vm_resources_desc": "沙箱 VM 的 CPU / 内存 / 磁盘限制。留空使用系统默认值。",
+    "disk_gb": "磁盘 (GB)",
+    "cpus": "CPU",
+    "memory_mb": "内存 (MB)"
   }
 }

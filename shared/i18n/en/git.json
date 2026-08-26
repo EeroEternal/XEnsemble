@@ -172,5 +172,10 @@
   "import_repository": "Import Repository",
   "select_file": "Select file",
   "search_files": "Search files...",
-  "search_repositories": "Search repositories…"
+  "search_repositories": "Search repositories…",
+  "connect_to": "Connect to {{label}}",
+  "disconnect": "Disconnect {{label}}",
+  "connected_to": "Connected to {{label}}",
+  "via_pat": "via PAT",
+  "oauth_not_configured_short": "OAuth not configured"
 }

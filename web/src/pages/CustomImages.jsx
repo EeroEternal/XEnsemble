@@ -52,9 +52,9 @@ function componentIds(components) {
 
 const CATEGORY_ORDER = ['agent', 'language', 'database', 'devops', 'package-manager', 'shell-tool'];
 
-const CATEGORY_LABELS = {
-  agent: 'Agents', language: 'Languages', database: 'Databases',
-  devops: 'DevOps', 'package-manager': 'Package Managers', 'shell-tool': 'Shell Tools',
+const CATEGORY_LABEL_KEYS = {
+  agent: 'images:category.agent', language: 'images:category.language', database: 'images:category.database',
+  devops: 'images:category.devops', 'package-manager': 'images:category.package-manager', 'shell-tool': 'images:category.shell-tool',
 };
 
 async function fetchCatalog() {
@@ -358,7 +358,7 @@ export function CustomImagesContent() {
                     <div className="mt-1.5 border border-zinc-200 rounded-lg flex-1 min-h-0 overflow-y-auto scrollbar-hover">
                       {!filteredComponents.length ? (
                         <p className="px-3 py-4 text-xs text-zinc-400">
-                          {catalog?.components?.length ? 'No components match your search.' : 'No components available.'}
+                          {catalog?.components?.length ? t('images:no_components_match') : t('images:no_components_available')}
                         </p>
                       ) : (
                         (() => {
@@ -384,7 +384,7 @@ export function CustomImagesContent() {
                                   ? <ChevronDown className="h-3 w-3 shrink-0" />
                                   : <ChevronRight className="h-3 w-3 shrink-0" />}
                                 <span className="flex-1 text-left">
-                                  {CATEGORY_LABELS[cat] || cat}
+                                  {CATEGORY_LABEL_KEYS[cat] ? t(CATEGORY_LABEL_KEYS[cat]) : cat}
                                   {cat === 'agent' && <span className="text-red-500 ml-0.5">*</span>}
                                 </span>
                                 <span className="font-normal normal-case text-zinc-400">{grouped[cat].length}</span>
@@ -463,7 +463,7 @@ export function CustomImagesContent() {
                     <div className="mt-1.5 border border-zinc-200 rounded-lg flex-1 min-h-0 overflow-y-auto scrollbar-hover">
                       {selectedComponentIds.length === 0 ? (
                         <p className="px-3 py-4 text-xs text-zinc-400">
-                          No components selected yet. Pick from the list to add.
+                          {t('images:no_components_selected')}
                         </p>
                       ) : (
                         selectedComponentIds.map((id) => {
@@ -524,13 +524,13 @@ export function CustomImagesContent() {
             <ConsoleStructuredDialogFooter>
               <div className="flex items-center gap-2 w-full justify-end">
                 <Button type="button" onClick={resetForm} disabled={creating} variant="secondary" size="sm">
-                  Cancel
+                  {t('common:action.cancel')}
                 </Button>
                 <Button type="submit" disabled={creating || !imageName.trim() || selectedComponentIds.length === 0 || !agentSelected} size="sm">
                   {creating ? (
-                    <><Loader2 className="h-3.5 w-3.5 animate-spin" />Building…</>
+                    <><Loader2 className="h-3.5 w-3.5 animate-spin" />{t('images:status.building')}</>
                   ) : (
-                    'Start Build'
+                    t('images:start_build')
                   )}
                 </Button>
               </div>
@@ -556,7 +556,7 @@ export function CustomImagesContent() {
             <ConsoleStructuredDialogFooter>
               <div className="flex items-center gap-2 w-full justify-end">
                 <Button onClick={() => setConfirmDelete(null)} disabled={deletingId === confirmDelete.id} variant="secondary" size="sm">
-                  Cancel
+                  {t('common:action.cancel')}
                 </Button>
                 <Button
                   onClick={() => handleDelete(confirmDelete)}
@@ -565,9 +565,9 @@ export function CustomImagesContent() {
                   className="bg-red-600 hover:bg-red-700 text-white"
                 >
                   {deletingId === confirmDelete.id ? (
-                    <><Loader2 className="h-3.5 w-3.5 animate-spin" />Deleting…</>
+                    <><Loader2 className="h-3.5 w-3.5 animate-spin" />{t('images:deleting')}</>
                   ) : (
-                    'Delete'
+                    t('common:action.delete')
                   )}
                 </Button>
               </div>
@@ -601,7 +601,7 @@ export function CustomImagesContent() {
             {loading && images.length === 0 ? (
               <tr>
                 <td colSpan={6} className={cn(consoleTableBodyCellClass, 'text-center text-zinc-400')}>
-                  <Loader2 className="h-4 w-4 inline-block animate-spin" /> Loading…
+                  <Loader2 className="h-4 w-4 inline-block animate-spin" /> {t('common:state.loading')}
                 </td>
               </tr>
             ) : filteredImages.length === 0 ? (

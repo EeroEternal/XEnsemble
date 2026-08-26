@@ -66,5 +66,17 @@
   "actions_for": "Actions for",
   "rebuilding": "Rebuilding…",
   "deleting": "Deleting…",
-  "delete_confirm": "Are you sure you want to delete \"{{name}}\"? This cannot be undone."
+  "delete_confirm": "Are you sure you want to delete \"{{name}}\"? This cannot be undone.",
+  "category": {
+    "agent": "Agents",
+    "language": "Languages",
+    "database": "Databases",
+    "devops": "DevOps",
+    "package-manager": "Package Managers",
+    "shell-tool": "Shell Tools"
+  },
+  "no_components_match": "No components match your search.",
+  "no_components_available": "No components available.",
+  "no_components_selected": "No components selected yet. Pick from the list to add.",
+  "start_build": "Start Build"
 }

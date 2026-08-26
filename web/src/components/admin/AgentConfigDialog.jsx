@@ -186,7 +186,7 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
           <div className="space-y-3">
             <SectionLabel>{t('gateway:title', { defaultValue: 'Gateway' })}</SectionLabel>
             <div>
-              <label className={`block mb-1 ${consoleSectionLabelClass}`}>Provider</label>
+              <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('agents:config_dialog.provider')}</label>
               <SelectMenu
                 value={authDraft.provider}
                 onChange={(v) => setAuthDraft((d) => ({ ...d, provider: v, model: [] }))}
@@ -195,21 +195,21 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
               />
             </div>
             <div>
-              <label className={`block mb-1 ${consoleSectionLabelClass}`}>Model</label>
+              <label className={`block mb-1 ${consoleSectionLabelClass}`}>{t('agents:config_dialog.model')}</label>
               <MultiSelectMenu
                 value={authDraft.model}
                 onChange={(vals) => setAuthDraft((d) => ({ ...d, model: vals }))}
                 options={modelOptions}
-                placeholder={modelOptions.length ? 'Select models...' : 'Add models in Settings - Gateway'}
+                placeholder={modelOptions.length ? t('agents:config_dialog.select_models') : t('agents:config_dialog.add_models_in_gateway')}
                 disabled={modelOptions.length === 0}
               />
             </div>
             {gatewayPreviewLoading && !gatewayPreview && (
-              <p className="text-sm text-zinc-500">Loading defaults...</p>
+              <p className="text-sm text-zinc-500">{t('agents:config_dialog.loading_defaults')}</p>
             )}
             {!gatewayPreviewLoading && gatewayPreview && !gatewayPreview.gateway_running && (
               <p className="text-sm text-amber-700">
-                UniGateway is not running. Start it under Settings - Gateway.
+                {t('agents:config_dialog.gateway_not_running')}
               </p>
             )}
           </div>
@@ -218,13 +218,13 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
         {/* Section: VM Resources */}
         <SectionDivider>
           <div className="space-y-3">
-            <SectionLabel>VM Resources</SectionLabel>
+            <SectionLabel>{t('agents:config_dialog.vm_resources')}</SectionLabel>
             <p className="text-xs text-zinc-400">
-              CPU / memory / disk limits for the sandbox VM. Leave empty to use system defaults.
+              {t('agents:config_dialog.vm_resources_desc')}
             </p>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs text-zinc-500 mb-1">Disk (GB)</label>
+                <label className="block text-xs text-zinc-500 mb-1">{t('agents:config_dialog.disk_gb')}</label>
                 <Input
                   type="number"
                   min="1"
@@ -235,7 +235,7 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
                 />
               </div>
               <div>
-                <label className="block text-xs text-zinc-500 mb-1">CPUs</label>
+                <label className="block text-xs text-zinc-500 mb-1">{t('agents:config_dialog.cpus')}</label>
                 <Input
                   type="number"
                   min="1"
@@ -246,7 +246,7 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
                 />
               </div>
               <div>
-                <label className="block text-xs text-zinc-500 mb-1">Memory (MB)</label>
+                <label className="block text-xs text-zinc-500 mb-1">{t('agents:config_dialog.memory_mb')}</label>
                 <Input
                   type="number"
                   min="1"
