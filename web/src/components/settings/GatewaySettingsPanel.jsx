@@ -1117,7 +1117,7 @@ export default function GatewaySettingsPanel() {
           panelClassName={consoleStructuredDialogPanelClass}
         >
           <ConsoleStructuredDialogHeader
-            title={providerDialog.mode === 'edit' ? providerDialog.form.name : 'Add provider'}
+            title={providerDialog.mode === 'edit' ? providerDialog.form.name : t('gateway:add_provider')}
             subtitle={t('gateway:upstream_subtitle', { defaultValue: 'Upstream LLM account for UniGateway routing.' })}
           />
           <ConsoleStructuredDialogBody className="scrollbar-hover">
