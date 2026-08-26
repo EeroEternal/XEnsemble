@@ -4,7 +4,7 @@
   "tabs": {
     "general": "通用",
     "terminal": "终端",
-    "agent": "智能体",
+    "agent": "Agent",
     "github": "GitHub",
     "git_providers": "Git 提供商",
     "quota": "配额",
@@ -54,7 +54,7 @@
     "save_config_failed": "保存配置失败"
   },
   "agent": {
-    "title": "智能体设置",
+    "title": "Agent 设置",
     "byok_config": "BYOK 配置",
     "gateway_config": "网关配置"
   },

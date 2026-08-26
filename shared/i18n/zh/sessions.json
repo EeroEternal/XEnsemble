@@ -5,12 +5,12 @@
   "launch": {
     "title": "新建会话",
     "repository": "仓库",
-    "agent": "智能体",
-    "select_agent": "选择智能体",
-    "search_agents": "搜索智能体…",
+    "agent": "Agent",
+    "select_agent": "选择 Agent",
+    "search_agents": "搜索 Agent…",
     "cancel": "取消",
     "starting": "启动中…",
-    "start_agent": "启动智能体",
+    "start_agent": "启动 Agent",
     "create_workspace": "创建工作空间",
     "custom": "自定义"
   },
@@ -56,7 +56,7 @@
     "save_keys_failed": "保存密钥失败",
     "load_files_failed": "加载工作空间文件失败",
     "read_file_failed": "读取文件失败",
-    "not_granted": "你没有使用此智能体的权限。"
+    "not_granted": "你没有使用此 Agent 的权限。"
   },
   "toast": {
     "file_deleted": "文件已删除。",
@@ -67,7 +67,7 @@
     "workspace_deleted": "工作空间已删除。"
   },
   "dialog": {
-    "agent_configuration": "智能体配置",
+    "agent_configuration": "Agent 配置",
     "workspace_files_deleted": "服务器上的所有工作空间文件将被删除。这将释放你的工作空间配额。"
   },
   "terminal": {
@@ -82,7 +82,7 @@
     "system_prefix": "[系统]"
   },
   "guide": {
-    "title": "告诉智能体你想构建什么",
+    "title": "告诉 Agent 你想构建什么",
     "prompt_1": "用 Express 构建 REST API",
     "prompt_2": "创建带图表的 React 仪表盘",
     "prompt_3": "用 Python 编写 CLI 工具"

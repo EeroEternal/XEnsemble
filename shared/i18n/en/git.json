@@ -6,12 +6,9 @@
   "changes": "Changes",
   "staged": "Staged",
   "unstaged": "Unstaged",
-  "commit": {
-    "commit": "Commit",
-    "commit_message": "Commit message",
-    "ai_generating": "AI is generating…"
-  },
+  "commit": "Commit",
   "commit_message": "Commit message",
+  "commit_ai_generating": "AI is generating…",
   "push": "Push",
   "pull": "Pull",
   "fetch": "Fetch",

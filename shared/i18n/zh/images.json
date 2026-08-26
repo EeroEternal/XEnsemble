@@ -1,6 +1,6 @@
 {
   "title": "镜像",
-  "agent_images": "智能体镜像",
+  "agent_images": "Agent 镜像",
   "custom_images": "自定义镜像",
   "build": "构建",
   "build_log": "构建日志",

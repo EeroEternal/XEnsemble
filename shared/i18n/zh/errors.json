@@ -3,9 +3,9 @@
   "forbidden": "禁止访问",
   "project_not_found": "项目不存在",
   "session_not_found": "会话不存在",
-  "agent_not_found": "智能体不存在",
-  "agent_not_granted": "你没有使用此智能体的权限。",
-  "agent_not_installed": "智能体未安装",
+  "agent_not_found": "Agent 不存在",
+  "agent_not_granted": "你没有使用此 Agent 的权限。",
+  "agent_not_installed": "Agent 未安装",
   "quota_exceeded": "{{dimension}} 配额已超限 ({{current}}/{{limit}})。",
   "account_inactive": "账号未激活",
   "account_pending": "你的账号正在等待管理员审批。",
@@ -66,6 +66,6 @@
   "current_password_incorrect": "当前密码不正确",
   "registration_requires_invite": "注册需要邀请码。",
   "cannot_suspend_last_admin": "无法封禁最后一个活跃的管理员",
-  "unknown_agent": "未知的智能体: {{agents}}",
+  "unknown_agent": "未知的 Agent: {{agents}}",
   "username_password_required": "用户名和密码为必填项"
 }
