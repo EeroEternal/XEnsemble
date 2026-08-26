@@ -2,7 +2,7 @@ import { useState, useEffect, useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AuthContext } from '../../App';
 import Button from '../Button';
-import Input, { FormLabel } from '../Input';
+import Input from '../Input';
 import ReadOnlyField from '../ReadOnlyField';
 import { useToast } from '../Toast';
 import { useEditMode } from '../../hooks/useEditMode';
@@ -214,7 +214,7 @@ export default function GitProvidersSettingsPanel() {
               if (editMode.isEditing) {
                 const draft = editMode.draft;
                 return (
-                  <div className="space-y-3">
+                  <div className="space-y-1">
                     {provider.fields.map((field) => {
                       const key = providerKey(provider.id, field);
                       const isSecret = field === 'CLIENT_SECRET';
@@ -222,28 +222,27 @@ export default function GitProvidersSettingsPanel() {
                       const placeholder = isSecret
                         ? t('git:providers.client_secret_placeholder')
                         : t(`git:providers.${field.toLowerCase()}_placeholder`);
+                      const isMono = field === 'CALLBACK_URL' || field === 'API_BASE';
                       return (
-                        <div key={key} className="space-y-1.5">
-                          <FormLabel htmlFor={key}>
+                        <div key={key} className="flex items-center justify-between gap-4 min-h-[38px] py-1">
+                          <label htmlFor={key} className="text-xs text-zinc-500 shrink-0">
                             {label}
                             {field !== 'CLIENT_SECRET' && <span className="text-red-500 ml-0.5">*</span>}
-                          </FormLabel>
+                          </label>
                           <Input
                             id={key}
                             type={isSecret ? 'password' : 'text'}
-                            value={isSecret ? (draft[key] || '') : (draft[key] || '')}
+                            value={draft[key] || ''}
                             onChange={(e) => editMode.setDraft({ ...draft, [key]: e.target.value })}
                             placeholder={placeholder}
-                            className={`h-8 py-1 ${
-                              field === 'CALLBACK_URL' || field === 'API_BASE' ? 'font-mono' : ''
-                            }`}
+                            className={`h-8 py-1 w-64 ${isMono ? 'font-mono' : ''}`}
                             autoFocus={field === 'CLIENT_ID'}
                           />
                         </div>
                       );
                     })}
 
-                    <div className="pt-2 flex justify-end gap-2">
+                    <div className="pt-4 flex justify-end gap-2">
                       <Button variant="secondary" size="md" onClick={editMode.cancelEdit} disabled={editMode.saving}>
                         {t('common:action.cancel')}
                       </Button>

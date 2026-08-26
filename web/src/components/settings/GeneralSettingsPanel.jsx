@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext, useMemo } from 'react';
+import { useState, useEffect, useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AuthContext } from '../../App';
 import Button from '../Button';
@@ -62,7 +62,6 @@ export default function GeneralSettingsPanel() {
 
   const editMode = useEditMode({ onSave: handleSave });
 
-  // Keep sourceRef in sync so enterEdit always clones the latest server data
   useEffect(() => {
     editMode.setSource(settings);
   }, [settings, editMode]);
@@ -78,50 +77,53 @@ export default function GeneralSettingsPanel() {
   const quota = settings.default_user_quota || {};
   const draft = editMode.isEditing ? editMode.draft : settings;
   const draftQuota = draft?.default_user_quota || {};
+  const isEdit = editMode.isEditing;
 
   return (
     <div className="h-full flex flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto console-scroll-hidden">
         <div className={`${consoleCardClass} p-6`}>
-          {/* Registration */}
+          {/* Registration — horizontal label:value in both modes */}
           <div className="mb-3">
             <h3 className={consoleSectionLabelClass}>{t('settings:general.registration')}</h3>
           </div>
 
-          {editMode.isEditing ? (
-            <div className="mb-6">
-              <label className="block mb-1 text-xs text-zinc-500">{t('settings:general.registration_mode')}</label>
-              <SelectMenu
-                value={draft.registration_mode}
-                onChange={(v) => editMode.setDraft({ ...draft, registration_mode: v })}
-                options={[
-                  { value: 'open', label: t('settings:general.mode_open') },
-                  { value: 'approval', label: t('settings:general.mode_approval') },
-                  { value: 'admin_only', label: t('settings:general.mode_admin') },
-                  { value: 'invite_only', label: t('settings:general.mode_invite') },
-                ]}
-              />
-            </div>
-          ) : (
-            <div className="mb-6">
+          <div className="mb-6">
+            {isEdit ? (
+              <div className="flex items-center justify-between gap-4 min-h-[38px]">
+                <span className="text-xs text-zinc-500 shrink-0">{t('settings:general.registration_mode')}</span>
+                <div className="w-48">
+                  <SelectMenu
+                    value={draft.registration_mode}
+                    onChange={(v) => editMode.setDraft({ ...draft, registration_mode: v })}
+                    options={[
+                      { value: 'open', label: t('settings:general.mode_open') },
+                      { value: 'approval', label: t('settings:general.mode_approval') },
+                      { value: 'admin_only', label: t('settings:general.mode_admin') },
+                      { value: 'invite_only', label: t('settings:general.mode_invite') },
+                    ]}
+                  />
+                </div>
+              </div>
+            ) : (
               <ReadOnlyField
                 label={t('settings:general.registration_mode')}
                 value={t(REGISTRATION_MODE_LABELS[settings.registration_mode] || 'settings:general.mode_open')}
               />
-            </div>
-          )}
+            )}
+          </div>
 
           <div className="border-t border-zinc-100 my-4" />
 
-          {/* Default Quota */}
+          {/* Default Quota — same 2-col grid structure in both modes */}
           <div className="mb-3">
             <h3 className={consoleSectionLabelClass}>{t('settings:general.default_quota')}</h3>
           </div>
 
-          {editMode.isEditing ? (
-            <div className="grid grid-cols-2 gap-3 mb-6">
-              <div>
-                <label className="text-xs text-zinc-500">{t('settings:quota.projects')}</label>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1 mb-6">
+            {isEdit ? (
+              <div className="flex items-center justify-between gap-4 min-h-[38px] py-1">
+                <span className="text-xs text-zinc-500 shrink-0">{t('settings:quota.projects')}</span>
                 <Input
                   type="number"
                   min={0}
@@ -130,11 +132,18 @@ export default function GeneralSettingsPanel() {
                     ...draft,
                     default_user_quota: { ...draftQuota, max_projects: e.target.value },
                   })}
-                  className="h-8 py-1"
+                  className="h-8 py-1 w-24"
                 />
               </div>
-              <div>
-                <label className="text-xs text-zinc-500">{t('settings:quota.sessions')}</label>
+            ) : (
+              <ReadOnlyField
+                label={t('settings:quota.projects')}
+                value={String(quota.max_projects ?? '')}
+              />
+            )}
+            {isEdit ? (
+              <div className="flex items-center justify-between gap-4 min-h-[38px] py-1">
+                <span className="text-xs text-zinc-500 shrink-0">{t('settings:quota.sessions')}</span>
                 <Input
                   type="number"
                   min={0}
@@ -143,11 +152,18 @@ export default function GeneralSettingsPanel() {
                     ...draft,
                     default_user_quota: { ...draftQuota, max_sessions: e.target.value },
                   })}
-                  className="h-8 py-1"
+                  className="h-8 py-1 w-24"
                 />
               </div>
-              <div>
-                <label className="text-xs text-zinc-500">{t('settings:quota.previews')}</label>
+            ) : (
+              <ReadOnlyField
+                label={t('settings:quota.sessions')}
+                value={String(quota.max_sessions ?? '')}
+              />
+            )}
+            {isEdit ? (
+              <div className="flex items-center justify-between gap-4 min-h-[38px] py-1">
+                <span className="text-xs text-zinc-500 shrink-0">{t('settings:quota.previews')}</span>
                 <Input
                   type="number"
                   min={0}
@@ -156,76 +172,71 @@ export default function GeneralSettingsPanel() {
                     ...draft,
                     default_user_quota: { ...draftQuota, max_previews: e.target.value },
                   })}
-                  className="h-8 py-1"
+                  className="h-8 py-1 w-24"
                 />
               </div>
-              <div>
-                <label className="text-xs text-zinc-500">{t('settings:general.tier')}</label>
-                <SelectMenu
-                  value={draftQuota.resource_tier ?? 'basic'}
-                  onChange={(v) => editMode.setDraft({
-                    ...draft,
-                    default_user_quota: { ...draftQuota, resource_tier: v },
-                  })}
-                  options={[
-                    { value: 'basic', label: t('users:tier.basic') },
-                    { value: 'pro', label: t('users:tier.pro') },
-                    { value: 'enterprise', label: t('users:tier.enterprise') },
-                  ]}
-                />
+            ) : (
+              <ReadOnlyField
+                label={t('settings:quota.previews')}
+                value={String(quota.max_previews ?? '')}
+              />
+            )}
+            {isEdit ? (
+              <div className="flex items-center justify-between gap-4 min-h-[38px] py-1">
+                <span className="text-xs text-zinc-500 shrink-0">{t('settings:general.tier')}</span>
+                <div className="w-32">
+                  <SelectMenu
+                    value={draftQuota.resource_tier ?? 'basic'}
+                    onChange={(v) => editMode.setDraft({
+                      ...draft,
+                      default_user_quota: { ...draftQuota, resource_tier: v },
+                    })}
+                    options={[
+                      { value: 'basic', label: t('users:tier.basic') },
+                      { value: 'pro', label: t('users:tier.pro') },
+                      { value: 'enterprise', label: t('users:tier.enterprise') },
+                    ]}
+                  />
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 gap-3 mb-6">
-              <div className="rounded-md border border-zinc-200 px-3 py-2">
-                <p className="text-xs text-zinc-500">{t('settings:quota.projects')}</p>
-                <p className="text-lg font-semibold text-zinc-900">{quota.max_projects ?? '—'}</p>
-              </div>
-              <div className="rounded-md border border-zinc-200 px-3 py-2">
-                <p className="text-xs text-zinc-500">{t('settings:quota.sessions')}</p>
-                <p className="text-lg font-semibold text-zinc-900">{quota.max_sessions ?? '—'}</p>
-              </div>
-              <div className="rounded-md border border-zinc-200 px-3 py-2">
-                <p className="text-xs text-zinc-500">{t('settings:quota.previews')}</p>
-                <p className="text-lg font-semibold text-zinc-900">{quota.max_previews ?? '—'}</p>
-              </div>
-              <div className="col-span-3">
-                <ReadOnlyField
-                  label={t('settings:general.tier')}
-                  value={t(TIER_LABELS[quota.resource_tier] || 'users:tier.basic')}
-                />
-              </div>
-            </div>
-          )}
+            ) : (
+              <ReadOnlyField
+                label={t('settings:general.tier')}
+                value={t(TIER_LABELS[quota.resource_tier] || 'users:tier.basic')}
+              />
+            )}
+          </div>
 
           <div className="border-t border-zinc-100 my-4" />
 
-          {/* Session TTL */}
+          {/* Session TTL — horizontal label:value in both modes */}
           <div className="mb-3">
             <h3 className={consoleSectionLabelClass}>{t('sessions:title')}</h3>
           </div>
 
-          {editMode.isEditing ? (
-            <div>
-              <label className="block mb-1 text-xs text-zinc-500">{t('settings:general.session_ttl')}</label>
-              <Input
-                type="number"
-                min={1}
-                value={draft.session_ttl_hours ?? 24}
-                onChange={(e) => editMode.setDraft({ ...draft, session_ttl_hours: e.target.value })}
-                className="h-8 py-1 w-32"
+          <div className="mb-6">
+            {isEdit ? (
+              <div className="flex items-center justify-between gap-4 min-h-[38px]">
+                <span className="text-xs text-zinc-500 shrink-0">{t('settings:general.session_ttl')}</span>
+                <Input
+                  type="number"
+                  min={1}
+                  value={draft.session_ttl_hours ?? 24}
+                  onChange={(e) => editMode.setDraft({ ...draft, session_ttl_hours: e.target.value })}
+                  className="h-8 py-1 w-32"
+                />
+              </div>
+            ) : (
+              <ReadOnlyField
+                label={t('settings:general.session_ttl')}
+                value={settings.session_ttl_hours ? `${settings.session_ttl_hours} ${t('settings:general.hours_unit')}` : null}
               />
-            </div>
-          ) : (
-            <ReadOnlyField
-              label={t('settings:general.session_ttl')}
-              value={settings.session_ttl_hours ? `${settings.session_ttl_hours} ${t('settings:general.hours_unit')}` : null}
-            />
-          )}
+            )}
+          </div>
 
           {/* Action buttons */}
-          <div className="pt-6 flex justify-end gap-2">
-            {editMode.isEditing ? (
+          <div className="pt-2 flex justify-end gap-2">
+            {isEdit ? (
               <>
                 <Button variant="secondary" size="md" onClick={editMode.cancelEdit} disabled={editMode.saving}>
                   {t('common:action.cancel')}
