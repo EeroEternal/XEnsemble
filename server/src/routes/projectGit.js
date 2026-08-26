@@ -44,13 +44,24 @@ async function generateCommitMessage(project, gitOperationService, { locale } = 
 
 async function generatePRDescription(project, gitOperationService, { sourceBranch, targetBranch, locale } = {}) {
     const base = targetBranch || 'main';
+    // Fetch the target branch so origin/<base> is up-to-date for the
+    // three-dot diff. Non-fatal if fetch fails (fall back to stale refs).
+    try {
+        await gitOperationService._execGit(project, ['fetch', 'origin', base], { timeoutMs: 30_000 });
+    } catch { /* non-fatal */ }
+    // Use three-dot diff (origin/<base>...HEAD) so we only capture commits
+    // unique to the source branch, not the full divergence from base.
     const result = await generateAIDescription(project, gitOperationService, 'pr', { base, locale });
     return result;
 }
 
 async function generateAIDescription(project, gitOperationService, type, opts = {}) {
+    // For PRs, use three-dot diff (origin/<base>...HEAD) to capture only the
+    // source branch's unique commits — not the full divergence from base.
+    // Two-dot diff (base HEAD) would include base-side changes the branch
+    // never made, producing inaccurate AI descriptions.
     const diffOpts = type === 'pr'
-        ? { base: opts.base || 'main', head: 'HEAD' }
+        ? { threeDot: true, base: `origin/${opts.base || 'main'}`, head: 'HEAD' }
         : { base: 'HEAD' };
     const result = await gitOperationService.getDiff(project, diffOpts);
     let diff = (result?.diff || '').trim();

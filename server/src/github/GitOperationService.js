@@ -636,10 +636,16 @@ class GitOperationService {
         });
     }
 
-    async getDiff(project, { base, head } = {}) {
+    async getDiff(project, { base, head, threeDot = false } = {}) {
         const args = ['diff'];
         if (base && head) {
-            args.push(assertGitRef(base), assertGitRef(head));
+            if (threeDot) {
+                // Three-dot diff (base...head): shows changes on head since
+                // it diverged from base (merge-base), excluding base-side changes.
+                args.push(`${assertGitRef(base)}...${assertGitRef(head)}`);
+            } else {
+                args.push(assertGitRef(base), assertGitRef(head));
+            }
         } else if (base) {
             args.push(assertGitRef(base));
         }
