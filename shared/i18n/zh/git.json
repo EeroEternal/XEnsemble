@@ -106,5 +106,23 @@
     "ai_filling": "AI 正在生成…",
     "body_placeholder": "描述改动内容和原因"
   },
-  "commit_ai_generating": "AI 正在生成…"
+  "commit_ai_generating": "AI 正在生成…",
+  "providers": {
+    "title": "Git 提供商",
+    "git_account": "Git 账户",
+    "oauth_apps": "OAuth 应用",
+    "client_id": "Client ID",
+    "client_secret": "Client Secret",
+    "callback_url": "Callback URL",
+    "api_base_url": "API Base URL",
+    "client_id_placeholder": "Application ID…",
+    "client_secret_placeholder": "输入新密钥…",
+    "callback_url_placeholder": "https://app.example.com/api/v1/git/callback",
+    "api_base_url_placeholder": "留空使用默认值",
+    "ask_admin_to_configure": "请联系管理员配置 Git 提供商 OAuth 设置。",
+    "configured": "已配置",
+    "not_configured": "未配置",
+    "loading_settings": "加载中…",
+    "saved": "{{provider}} 设置已保存。"
+  }
 }

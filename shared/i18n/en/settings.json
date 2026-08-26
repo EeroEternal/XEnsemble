@@ -41,7 +41,10 @@
     "tier": "Tier",
     "session_ttl": "Session TTL (hours)",
     "saving": "Saving…",
-    "save": "Save"
+    "save": "Save",
+    "default_value": "(default)",
+    "not_configured": "Not configured",
+    "hours_unit": "hours"
   },
   "toast": {
     "saved": "Saved.",

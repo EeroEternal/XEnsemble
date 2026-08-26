@@ -41,7 +41,10 @@
     "tier": "等级",
     "session_ttl": "会话有效期（小时）",
     "saving": "保存中…",
-    "save": "保存"
+    "save": "保存",
+    "default_value": "（默认）",
+    "not_configured": "未配置",
+    "hours_unit": "小时"
   },
   "toast": {
     "saved": "已保存。",

@@ -1,8 +1,11 @@
 import { useState, useEffect, useContext } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AuthContext } from '../../App';
 import Button from '../Button';
 import Input, { FormLabel } from '../Input';
+import ReadOnlyField from '../ReadOnlyField';
 import { useToast } from '../Toast';
+import { useEditMode } from '../../hooks/useEditMode';
 import { consoleSectionLabelClass, consoleCardClass } from '../../lib/consoleTokens';
 import { apiFetch } from '../../lib/api';
 import GitConnectButton from '../git/GitConnectButton';
@@ -19,22 +22,21 @@ const PROVIDERS = [
   { id: 'gitea', label: 'Gitea', fields: ['CLIENT_ID', 'CLIENT_SECRET', 'CALLBACK_URL', 'API_BASE'] },
 ];
 
-const FIELD_META = {
-  CLIENT_ID: { label: 'Client ID', placeholder: 'Application ID…', type: 'text' },
-  CLIENT_SECRET: { label: 'Client Secret', placeholder: '••••••••', type: 'password' },
-  CALLBACK_URL: { label: 'Callback URL', placeholder: 'https://app.example.com/api/v1/git/callback', type: 'text', mono: true },
-  API_BASE: { label: 'API Base URL', placeholder: 'Leave empty for default', type: 'text', mono: true },
-};
-
 function providerKey(provider, field) {
   return `${provider.toUpperCase()}_${field}`;
 }
 
+/** Mask a Client ID for display: show first 4 and last 4 chars. */
+function maskClientId(value) {
+  if (!value || value.length <= 8) return value ? '••••' : '';
+  return `${value.slice(0, 4)}…${value.slice(-4)}`;
+}
+
 export default function GitProvidersSettingsPanel() {
+  const { t } = useTranslation();
   const { user } = useContext(AuthContext);
   const { showToast } = useToast();
   const [settings, setSettings] = useState(null);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [activeProvider, setActiveProvider] = useState('github');
   const [providerOAuthConfigured, setProviderOAuthConfigured] = useState({});
@@ -78,54 +80,64 @@ export default function GitProvidersSettingsPanel() {
     loadSettings();
   }, [isAdmin]);
 
-  const handleSave = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      const provider = PROVIDERS.find((p) => p.id === activeProvider);
-      if (!provider) return;
+  const handleSave = async (draft) => {
+    const provider = PROVIDERS.find((p) => p.id === activeProvider);
+    if (!provider) return;
 
-      const payload = {};
-      for (const field of provider.fields) {
-        const key = providerKey(provider.id, field);
-        payload[key] = settings[key] || '';
-      }
-
-      const res = await apiFetch('/api/v1/admin/platform-settings', {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-
-      for (const p of PROVIDERS) {
-        const secretKey = providerKey(p.id, 'CLIENT_SECRET');
-        if (data[secretKey]) data[secretKey] = MASK;
-      }
-      setSettings((prev) => ({ ...prev, ...data }));
-      showToast('success', `${provider.label} settings saved.`);
-    } catch (err) {
-      showToast('error', err.message);
-    } finally {
-      setSaving(false);
+    const payload = {};
+    for (const field of provider.fields) {
+      const key = providerKey(provider.id, field);
+      // Skip empty CLIENT_SECRET — server keeps the existing value
+      if (field === 'CLIENT_SECRET' && !draft[key]) continue;
+      payload[key] = draft[key] || '';
     }
+
+    const res = await apiFetch('/api/v1/admin/platform-settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+    // Re-mask secrets in the merged result
+    for (const p of PROVIDERS) {
+      const secretKey = providerKey(p.id, 'CLIENT_SECRET');
+      if (data[secretKey]) data[secretKey] = MASK;
+    }
+    setSettings((prev) => ({ ...prev, ...data }));
+    showToast('success', t('git:providers.saved', { provider: provider.label }));
   };
+
+  const editMode = useEditMode({ onSave: handleSave });
+
+  // Keep sourceRef in sync
+  useEffect(() => {
+    editMode.setSource(settings);
+  }, [settings, editMode]);
 
   if (!isAdmin) {
     return (
       <div className="space-y-4">
-        <h3 className={consoleSectionLabelClass}>Git Providers</h3>
+        <h3 className={consoleSectionLabelClass}>{t('git:providers.title')}</h3>
         <p className="text-sm text-zinc-500">
-          Ask an administrator to configure Git provider OAuth settings.
+          {t('git:providers.ask_admin_to_configure')}
         </p>
-    </div>
-  );
-}
+      </div>
+    );
+  }
+
+  const providerTabClass = (isActive) =>
+    `px-3 py-1.5 text-xs font-medium rounded-t-md transition-colors border-b-2 -mb-px ${
+      isActive
+        ? 'border-zinc-900 text-zinc-900 bg-white'
+        : 'border-transparent text-zinc-500 hover:text-zinc-900'
+    }`;
+
   return (
     <div className="space-y-8">
       {/* Git Account Configuration */}
       <section className={`${consoleCardClass} p-6 space-y-4`}>
-        <h3 className={consoleSectionLabelClass}>Git Account</h3>
+        <h3 className={consoleSectionLabelClass}>{t('git:providers.git_account')}</h3>
 
         <div className="space-y-4">
           <div className="flex gap-1 border-b border-zinc-200 pb-0">
@@ -134,11 +146,7 @@ export default function GitProvidersSettingsPanel() {
                 key={p.id}
                 type="button"
                 onClick={() => setActiveProvider(p.id)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-t-md transition-colors border-b-2 -mb-px ${
-                  activeProvider === p.id
-                    ? 'border-zinc-900 text-zinc-900 bg-white'
-                    : 'border-transparent text-zinc-500 hover:text-zinc-900'
-                }`}
+                className={providerTabClass(activeProvider === p.id)}
               >
                 {getProviderLabel(p.id)}
               </button>
@@ -162,18 +170,21 @@ export default function GitProvidersSettingsPanel() {
           disabled={providerOAuthConfigured[activeProvider] === false}
         />
       </section>
+
       {/* OAuth Application Configuration */}
       <section className={`${consoleCardClass} p-6 space-y-4`}>
-        <h3 className={consoleSectionLabelClass}>OAuth Apps</h3>
+        <h3 className={consoleSectionLabelClass}>{t('git:providers.oauth_apps')}</h3>
+
         {error ? (
           <div className="space-y-4">
             <p className="text-sm text-red-600">{error}</p>
-            <Button type="button" size="md" onClick={loadSettings}>Retry</Button>
+            <Button type="button" size="md" onClick={loadSettings}>{t('common:action.retry')}</Button>
           </div>
         ) : !settings ? (
-          <p className="text-sm text-zinc-500">Loading…</p>
+          <p className="text-sm text-zinc-500">{t('git:providers.loading_settings')}</p>
         ) : (
-          <form onSubmit={handleSave} className="space-y-4">
+          <>
+            {/* Provider tabs with configured indicator */}
             <div className="flex gap-1 border-b border-zinc-200 pb-0">
               {PROVIDERS.map((p) => {
                 const isConfigured = Boolean(settings[providerKey(p.id, 'CLIENT_ID')]);
@@ -181,12 +192,11 @@ export default function GitProvidersSettingsPanel() {
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => setActiveProvider(p.id)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-t-md transition-colors border-b-2 -mb-px ${
-                      activeProvider === p.id
-                        ? 'border-zinc-900 text-zinc-900 bg-white'
-                        : 'border-transparent text-zinc-500 hover:text-zinc-900'
-                    }`}
+                    onClick={() => {
+                      setActiveProvider(p.id);
+                      if (editMode.isEditing) editMode.cancelEdit();
+                    }}
+                    className={providerTabClass(activeProvider === p.id)}
                   >
                     {p.label}
                     {isConfigured && (
@@ -200,35 +210,92 @@ export default function GitProvidersSettingsPanel() {
             {(() => {
               const provider = PROVIDERS.find((p) => p.id === activeProvider);
               if (!provider) return null;
+
+              if (editMode.isEditing) {
+                const draft = editMode.draft;
+                return (
+                  <div className="space-y-3">
+                    {provider.fields.map((field) => {
+                      const key = providerKey(provider.id, field);
+                      const isSecret = field === 'CLIENT_SECRET';
+                      const label = t(`git:providers.${field.toLowerCase()}`);
+                      const placeholder = isSecret
+                        ? t('git:providers.client_secret_placeholder')
+                        : t(`git:providers.${field.toLowerCase()}_placeholder`);
+                      return (
+                        <div key={key} className="space-y-1.5">
+                          <FormLabel htmlFor={key}>
+                            {label}
+                            {field !== 'CLIENT_SECRET' && <span className="text-red-500 ml-0.5">*</span>}
+                          </FormLabel>
+                          <Input
+                            id={key}
+                            type={isSecret ? 'password' : 'text'}
+                            value={isSecret ? (draft[key] || '') : (draft[key] || '')}
+                            onChange={(e) => editMode.setDraft({ ...draft, [key]: e.target.value })}
+                            placeholder={placeholder}
+                            className={`h-8 py-1 ${
+                              field === 'CALLBACK_URL' || field === 'API_BASE' ? 'font-mono' : ''
+                            }`}
+                            autoFocus={field === 'CLIENT_ID'}
+                          />
+                        </div>
+                      );
+                    })}
+
+                    <div className="pt-2 flex justify-end gap-2">
+                      <Button variant="secondary" size="md" onClick={editMode.cancelEdit} disabled={editMode.saving}>
+                        {t('common:action.cancel')}
+                      </Button>
+                      <Button variant="primary" size="md" onClick={editMode.save} disabled={editMode.saving}>
+                        {editMode.saving ? t('settings:general.saving') : t('settings:general.save')}
+                      </Button>
+                    </div>
+                  </div>
+                );
+              }
+
+              // View mode
+              const clientId = settings[providerKey(provider.id, 'CLIENT_ID')];
+              const callbackUrl = settings[providerKey(provider.id, 'CALLBACK_URL')];
+              const apiBase = settings[providerKey(provider.id, 'API_BASE')];
+
               return (
-                <div className="space-y-3">
-                  {provider.fields.map((field) => {
-                    const key = providerKey(provider.id, field);
-                    const meta = FIELD_META[field];
-                    return (
-                      <div key={key} className="space-y-1.5">
-                        <FormLabel htmlFor={key}>{meta.label}</FormLabel>
-                        <Input
-                          id={key}
-                          type={meta.type}
-                          value={settings[key] || ''}
-                          onChange={(e) => setSettings({ ...settings, [key]: e.target.value })}
-                          placeholder={meta.placeholder}
-                          className={`h-8 py-1 ${meta.mono ? 'font-mono' : ''}`}
-                        />
-                      </div>
-                    );
-                  })}
+                <div className="space-y-1">
+                  <ReadOnlyField
+                    label={t('git:providers.client_id')}
+                    value={maskClientId(clientId)}
+                    mono
+                    emptyText={t('git:providers.not_configured')}
+                  />
+                  <ReadOnlyField
+                    label={t('git:providers.client_secret')}
+                    value={settings[providerKey(provider.id, 'CLIENT_SECRET')] || null}
+                    mono
+                    emptyText={t('git:providers.not_configured')}
+                  />
+                  <ReadOnlyField
+                    label={t('git:providers.callback_url')}
+                    value={callbackUrl}
+                    mono
+                    emptyText={t('git:providers.not_configured')}
+                  />
+                  <ReadOnlyField
+                    label={t('git:providers.api_base_url')}
+                    value={apiBase}
+                    mono
+                    emptyText={t('settings:general.default_value')}
+                  />
+
+                  <div className="pt-4 flex justify-end">
+                    <Button variant="secondary" size="md" onClick={() => editMode.enterEdit()}>
+                      {t('common:action.edit')}
+                    </Button>
+                  </div>
                 </div>
               );
             })()}
-
-            <div className="pt-2 flex justify-start">
-              <Button type="submit" size="md" disabled={saving}>
-                {saving ? 'Saving…' : 'Save'}
-              </Button>
-            </div>
-          </form>
+          </>
         )}
       </section>
     </div>

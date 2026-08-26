@@ -110,5 +110,23 @@
     "ai_filling": "AI is generating…",
     "body_placeholder": "What changed and why"
   },
-  "commit_ai_generating": "AI is generating…"
+  "commit_ai_generating": "AI is generating…",
+  "providers": {
+    "title": "Git Providers",
+    "git_account": "Git Account",
+    "oauth_apps": "OAuth Apps",
+    "client_id": "Client ID",
+    "client_secret": "Client Secret",
+    "callback_url": "Callback URL",
+    "api_base_url": "API Base URL",
+    "client_id_placeholder": "Application ID…",
+    "client_secret_placeholder": "Enter new secret…",
+    "callback_url_placeholder": "https://app.example.com/api/v1/git/callback",
+    "api_base_url_placeholder": "Leave empty for default",
+    "ask_admin_to_configure": "Ask an administrator to configure Git provider OAuth settings.",
+    "configured": "Configured",
+    "not_configured": "Not configured",
+    "loading_settings": "Loading…",
+    "saved": "{{provider}} settings saved."
+  }
 }
