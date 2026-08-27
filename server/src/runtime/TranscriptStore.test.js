@@ -75,6 +75,90 @@ test('TranscriptStore derives reattach cursor from the current execution only', 
     }
 });
 
+test('readTail anchors sync-only streams (no alt screen) at the last complete repaint block', () => {
+    const root = makeTempRoot();
+    try {
+        const store = new TranscriptStore({ workspaceRoot: root, db: null, schema: null });
+        const ref = 'local:pty:sync';
+
+        store.append(ref, { kind: 'out', data: 'prelude output\r\n' });
+
+        // Earlier full repaint block (self-contained, worth falling back to).
+        const fullRepaintHead =
+            '\x1b[?2026h\x1b[2J\x1b[H\x1b[3J \x1b[38;2;79;168;255m╭── OLD SCREEN ──╮';
+        store.append(ref, { kind: 'out', data: fullRepaintHead });
+        for (let i = 0; i < 8; i++) {
+            store.append(ref, { kind: 'out', data: `\x1b[?2026l\x1b[?2026h line ${i} of old screen` });
+        }
+        store.append(ref, { kind: 'out', data: '\x1b[?2026l done' });
+
+        // Late micro-sync brackets WITHOUT a clear/home signature must not
+        // be treated as anchors (this is what breaks opencode refresh today).
+        store.append(ref, { kind: 'out', data: '\x1b[?2026h' });
+        store.append(ref, { kind: 'out', data: '\x1b[1;1H cursor nudge \x1b[?2026l' });
+
+        const { frames, omittedCount } = store.readTail(ref);
+        assert.ok(omittedCount > 0);
+        const first = frames.find((f) => f.kind === 'out');
+        assert.ok(
+            /^\x1b\[\?2026h\x1b\[2J/.test(first.data),
+            `replay must begin at a complete repaint block start, got ${JSON.stringify(first.data.slice(0, 40))}`,
+        );
+        // The trailing cursor-nudge frames after the last complete block are kept.
+        const joined = frames.map((f) => f.data || '').join('');
+        assert.ok(joined.includes('cursor nudge'));
+        assert.ok(joined.includes('OLD SCREEN'));
+    } finally {
+        cleanup(root);
+    }
+});
+
+test('readTail still prefers the real alt-screen enter when present', () => {
+    const root = makeTempRoot();
+    try {
+        const store = new TranscriptStore({ workspaceRoot: root, db: null, schema: null });
+        const ref = 'local:pty:altscreen';
+
+        store.append(ref, { kind: 'out', data: 'legacy scrollback before TUI\r\n' });
+        store.append(ref, { kind: 'out', data: '\x1b[?1049h\x1b[H welcome pane' });
+        store.append(ref, { kind: 'out', data: '\x1b[?2026h\x1b[2J\x1b[H sync repaint pane' });
+        store.append(ref, { kind: 'out', data: '\x1b[?2026l' });
+
+        const { frames } = store.readTail(ref);
+        const first = frames.find((f) => f.kind === 'out');
+        assert.ok(first.data.startsWith('\x1b[?1049h'), 'must anchor at alt-screen enter');
+        const joined = frames.map((f) => f.data || '').join('');
+        assert.ok(joined.includes('welcome pane') && joined.includes('sync repaint pane'));
+        assert.ok(!joined.includes('legacy scrollback'));
+    } finally {
+        cleanup(root);
+    }
+});
+
+test('readTail generic fallback (no TUI markers) keeps newest bytes and first frame', () => {
+    const root = makeTempRoot();
+    try {
+        const store = new TranscriptStore({ workspaceRoot: root, db: null, schema: null });
+        const ref = 'local:pty:plain';
+        const chunk = 'x'.repeat(64 * 1024);
+        store.append(ref, { kind: 'out', data: 'first-line\r\n' });
+        for (let i = 0; i < 32; i++) store.append(ref, { kind: 'out', data: `${chunk}\r\n` });
+        store.append(ref, { kind: 'out', data: 'the-latest-line\r\n' });
+
+        const { frames, omittedCount } = store.readTail(ref, 256 * 1024);
+        assert.ok(omittedCount > 0, 'older frames should be reported as omitted');
+        const joined = frames.map((f) => f.data || '').join('');
+        // The front of an oversized stream is trimmed down to the byte cap,
+        // except the very first frame which is intentionally always kept.
+        assert.ok(joined.includes('the-latest-line'), 'newest content must survive trimming');
+        const keptBytes = frames.reduce((sum, f) => sum + (f.kind === 'out' ? f.data.length : 0), 0);
+        assert.ok(keptBytes <= 512 * 1024 + 128 * 1024, `trimmed tail should be bounded, got ${keptBytes}`);
+        assert.equal(frames.find((f) => f.kind === 'out').data.startsWith('first-line'), true, 'first frame preserved by design');
+    } finally {
+        cleanup(root);
+    }
+});
+
 test('TranscriptStore updates session_streams metadata on bind and exit', async () => {
     const root = makeTempRoot();
     let ctx;

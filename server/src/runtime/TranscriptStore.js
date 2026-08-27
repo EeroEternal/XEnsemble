@@ -16,7 +16,14 @@ const ALT_SCREEN_TAIL_BYTES = Number(process.env.TRANSCRIPT_ALT_SCREEN_TAIL_BYTE
 const TAIL_READ_THRESHOLD = Number(process.env.TRANSCRIPT_TAIL_READ_THRESHOLD) || 67108864; // 64MB
 const MAX_FILE_SIZE = Number(process.env.TRANSCRIPT_MAX_FILE_SIZE) || 134217728; // 128MB
 const ROTATE_TAIL_BYTES = Number(process.env.TRANSCRIPT_ROTATE_TAIL_BYTES) || 33554432; // 32MB — keep last 32MB when rotating
-const TUI_ENTER_RE = /\x1b\[\?(?:1049|47|1047)h|\x1b\[\?2026h/;
+const TUI_SESSION_ENTER_RE = /\x1b\[\?(?:1049|47|1047)h/;
+// Transient synchronized-update open bracket. Agents like opencode wrap every
+// full-screen redraw in \x1b[?2026h ... \x1b[?2026l pairs (tens of thousands
+// per long session), so a bare 2026h is NOT a session-enter anchor. A repaint
+// block starts only when the open bracket is immediately followed by a
+// clear/home sequence (e.g. "\x1b[?2026h\x1b[2J\x1b[H\x1b[3J").
+const SYNC_UPDATE_OPEN = '\x1b[?2026h';
+const SYNC_REPAINT_RE = /^\x1b\[\?2026h[\s\S]{0,64}?\x1b\[(?:2J|3J|\d*[HJ])/;
 
 function safeRef(ref) {
     return String(ref || '').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -250,23 +257,26 @@ class TranscriptStore {
     /**
      * Return frames for initial-load replay.
      *
-     * TUI agents (opencode/cline/qwen) use alt screen (\x1b[?1049h) or
-     * sync-term (\x1b[?2026h) for screen rendering. The replay must include
-     * a TUI enter so the client enters the correct buffer mode.
+     * Anchor hierarchy (newest-first search, replay to EOF so the terminal
+     * ends at the latest screen state):
      *
-     * When the transcript spans multiple resume cycles (same storage_ref
-     * reused across resumes), there are multiple TUI enters. We find the
-     * LAST one — this ensures the replay ends at the latest terminal state
-     * rather than an ancient session cycle. For full-screen redraw agents
-     * (sync-term, e.g. qwen), each block is self-contained, so the last
-     * block is the current screen. For incremental agents (alt-screen),
-     * the last enter starts a fresh rendering session.
+     * 1. Real alt-screen enter (\x1b[?1049h / 47h / 1047h): replay from the
+     *    LAST one found in memory. This covers classic TUI agents and any
+     *    resume cycle (each respawn re-enters alt screen).
      *
-     * Uses a generous byte cap (20MB) to prevent unbounded memory. When
-     * trimming is needed, we trim from the FRONT (keep newest) so the
-     * replay always ends at the latest terminal state.
+     * 2. Sync-repaint block start: agents like opencode never enter the alt
+     *    screen — they wrap every full redraw in "\x1b[?2026h <clear/home>
+     *    ... \x1b[?2026l". A bare 2026h is transient (may occur tens of
+     *    thousands of times per session) and must NOT anchor mid-history:
+     *    replaying from a bare bracket yields only a partial diff on an
+     *    empty terminal (gray/blank reconnect screen). We instead anchor at
+     *    the last bracket that opens a complete repaint block. Long sessions
+     *    may have evicted any earlier real enter beyond the load window, so
+     *    this tier also covers them.
      *
-     * CLI agents (claude code) have neither — use byte-capped tail (1MB).
+     * 3. Generic fallback: linear-scrollback CLIs get a byte-capped tail
+     *    (default 1MB), trimmed from the front while keeping the newest
+     *    content.
      *
      * Returns { frames, omittedCount }.
      */
@@ -278,38 +288,67 @@ class TranscriptStore {
             return { frames: [], omittedCount: 0 };
         }
 
-        // Find the LAST TUI enter (alt-screen or sync-term).
-        // Using the LAST instead of the FIRST ensures the replay includes
-        // the latest terminal state when the transcript is large.
-        let lastTuiEnterIdx = -1;
+        let lastEnterIdx = -1;
         for (let i = state.frames.length - 1; i >= 0; i--) {
             const f = state.frames[i];
-            if (f.kind === 'out' && typeof f.data === 'string' && TUI_ENTER_RE.test(f.data)) {
-                lastTuiEnterIdx = i;
+            if (f.kind === 'out' && typeof f.data === 'string' && TUI_SESSION_ENTER_RE.test(f.data)) {
+                lastEnterIdx = i;
                 break;
             }
         }
 
-        if (lastTuiEnterIdx >= 0) {
-            return this._readTailFromIndex(state, lastTuiEnterIdx, ALT_SCREEN_TAIL_BYTES);
+        if (lastEnterIdx >= 0) {
+            return this._readTailFromIndex(state, lastEnterIdx, ALT_SCREEN_TAIL_BYTES);
+        }
+
+        const repaintAnchor = this._findSyncRepaintAnchor(state);
+        if (repaintAnchor) {
+            const source = state.frames[repaintAnchor.index];
+            const headFrame = { ...source, data: source.data.slice(repaintAnchor.sliceFrom) };
+            const tail = [headFrame].concat(state.frames.slice(repaintAnchor.index + 1));
+            return this._trimFromFront(tail, ALT_SCREEN_TAIL_BYTES, state.frames.length - tail.length);
         }
 
         return this._readTailFromIndex(state, 0, maxBytes);
     }
 
+    /**
+     * Scan backwards for the most recent frame containing a synchronized-
+     * update open bracket that starts a complete repaint block (open bracket
+     * followed by clear/home within SYNC_REPAINT_RE's window). Returns the
+     * frame index plus the offset of the opening bracket inside its data, or
+     * null when no such block exists.
+     */
+    _findSyncRepaintAnchor(state) {
+        for (let i = state.frames.length - 1; i >= 0; i--) {
+            const f = state.frames[i];
+            if (f.kind !== 'out' || typeof f.data !== 'string') continue;
+            let pos = f.data.indexOf(SYNC_UPDATE_OPEN);
+            while (pos >= 0) {
+                if (SYNC_REPAINT_RE.test(f.data.slice(pos))) {
+                    return { index: i, sliceFrom: pos };
+                }
+                pos = f.data.indexOf(SYNC_UPDATE_OPEN, pos + SYNC_UPDATE_OPEN.length);
+            }
+        }
+        return null;
+    }
+
     _readTailFromIndex(state, startIdx, maxBytes) {
-        const tail = state.frames.slice(startIdx);
+        return this._trimFromFront(state.frames.slice(startIdx), maxBytes, startIdx);
+    }
+
+    _trimFromFront(tail, maxBytes, baseOmitted) {
         let totalBytes = 0;
         for (const f of tail) {
             if (f.kind === 'out' && typeof f.data === 'string') totalBytes += f.data.length;
         }
-        const omittedCount = startIdx;
         if (totalBytes <= maxBytes) {
-            return { frames: tail, omittedCount };
+            return { frames: tail, omittedCount: baseOmitted };
         }
         // Trim from the FRONT to keep the newest content (latest terminal
-        // state). Always keep the first frame (TUI enter) so the terminal
-        // enters the correct buffer mode.
+        // state). Always keep the first frame (TUI enter / repaint start) so
+        // the terminal enters the correct buffer mode.
         let trimStart = 1;
         let keptBytes = totalBytes;
         while (trimStart < tail.length - 1 && keptBytes > maxBytes) {
@@ -318,7 +357,7 @@ class TranscriptStore {
             trimStart++;
         }
         const trimmed = [tail[0]].concat(tail.slice(trimStart));
-        return { frames: trimmed, omittedCount: omittedCount + trimStart - 1 };
+        return { frames: trimmed, omittedCount: baseOmitted + trimStart - 1 };
     }
 
     head(streamRef) {
