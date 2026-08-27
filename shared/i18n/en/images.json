@@ -46,7 +46,10 @@
     "components": "Components",
     "image_ref": "Image Ref",
     "tag": "Tag",
-    "digest": "Digest"
+    "digest": "Digest",
+    "started": "Started",
+    "finished": "Finished",
+    "duration": "Duration"
   },
   "empty": {
     "no_images": "No images",
@@ -78,5 +81,6 @@
   "no_components_match": "No components match your search.",
   "no_components_available": "No components available.",
   "no_components_selected": "No components selected yet. Pick from the list to add.",
-  "start_build": "Start Build"
+  "start_build": "Start Build",
+  "build_not_started": "Build has not started yet."
 }
