@@ -788,16 +788,33 @@ class LocalGitService {
             throw err;
         }
 
-        // For conflict resolution, "theirs" is MERGE_HEAD during a merge, but
-        // REBASE_HEAD during a rebase. Try the requested ref first, then fall
-        // back so the conflict UI works in both scenarios.
-        const refsToTry = ref === 'MERGE_HEAD'
-            ? ['MERGE_HEAD', 'REBASE_HEAD']
-            : [ref];
+        // For conflict resolution, "theirs" is MERGE_HEAD during a merge,
+        // REBASE_HEAD during a rebase, or index stage 3 (:3:) during a
+        // stash pop (which does not create MERGE_HEAD/REBASE_HEAD).
+        // Try the requested ref first, then fall back so the conflict UI
+        // works in all scenarios.
+        let refsToTry;
+        if (ref === 'MERGE_HEAD') {
+            refsToTry = [
+                { ref: 'MERGE_HEAD', format: 'show' },
+                { ref: 'REBASE_HEAD', format: 'show' },
+                { ref: ':3:', format: 'stage' },
+            ];
+        } else if (ref === 'HEAD') {
+            refsToTry = [
+                { ref: 'HEAD', format: 'show' },
+                { ref: ':2:', format: 'stage' },
+            ];
+        } else {
+            refsToTry = [{ ref, format: 'show' }];
+        }
 
-        for (const tryRef of refsToTry) {
+        for (const { ref: tryRef, format } of refsToTry) {
             try {
-                const result = await this._git(workspacePath, ['show', `${tryRef}:${normalized}`]);
+                const gitArg = format === 'stage'
+                    ? ['show', `${tryRef}${normalized}`]
+                    : ['show', `${tryRef}:${normalized}`];
+                const result = await this._git(workspacePath, gitArg);
                 return { path: normalized, ref: tryRef, content: result.stdout };
             } catch {
                 // try next ref
