@@ -36,7 +36,9 @@
     "show_side_panel": "Show side panel",
     "back_to_workspaces": "Back to workspaces",
     "removing": "Removing…",
-    "clear_all": "Clear all"
+    "clear_all": "Clear all",
+    "delete_session": "Delete session",
+    "dismiss": "Dismiss"
   },
   "label": {
     "unassigned": "Unassigned",
@@ -49,7 +51,8 @@
   "state": {
     "preparing_environment": "Preparing your environment…",
     "preparing_environment_desc": "Pulling image and starting virtual machine. This usually takes less than a minute.",
-    "session_failed": "Session failed to start"
+    "session_failed": "Session failed to start",
+    "provisioning_error": "An unexpected error occurred during provisioning."
   },
   "error": {
     "no_workspace": "Could not create workspace for this session.",

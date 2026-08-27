@@ -194,5 +194,20 @@
   "loading_more": "加载更多…",
   "no_matches": "无匹配。",
   "no_repositories": "未找到仓库。",
-  "no_branches": "无分支"
+  "no_branches": "无分支",
+  "importing": "导入中…",
+  "fetch_repository": "获取仓库",
+  "fetching_repository": "获取中…",
+  "connect": "连接",
+  "connecting": "连接中…",
+  "browse": "浏览",
+  "paste_url": "粘贴 URL",
+  "via_oauth": "通过 OAuth",
+  "import_subtitle": "选择一个仓库作为工作空间导入。",
+  "connect_subtitle": "连接 Git 提供商以导入仓库。",
+  "connect_account_hint": "连接你的 {{label}} 账户以导入仓库。",
+  "oauth_admin_required": "管理员必须先配置 {{label}} OAuth，然后你才能连接。",
+  "auto_create_work_branch": "自动创建 work branch",
+  "cloning_repository": "正在克隆仓库，请稍候…",
+  "search_repositories_label": "搜索仓库"
 }

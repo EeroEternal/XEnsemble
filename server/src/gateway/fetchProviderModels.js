@@ -1,8 +1,8 @@
 function buildModelsUrl(baseUrl) {
     const trimmed = String(baseUrl || '').trim().replace(/\/+$/, '');
     if (!trimmed) return null;
-    if (trimmed.endsWith('/v1')) return `${trimmed}/models`;
-    return `${trimmed}/v1/models`;
+    // 与 UniGateway 核心一致的拼接，不强制插入 /v1
+    return `${trimmed}/models`;
 }
 
 function extractModelIds(payload) {

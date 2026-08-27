@@ -195,5 +195,20 @@
   "loading_more": "Loading more…",
   "no_matches": "No matches.",
   "no_repositories": "No repositories found.",
-  "no_branches": "No branches"
+  "no_branches": "No branches",
+  "importing": "Importing…",
+  "fetch_repository": "Fetch repository",
+  "fetching_repository": "Fetching…",
+  "connect": "Connect",
+  "connecting": "Connecting…",
+  "browse": "Browse",
+  "paste_url": "Paste URL",
+  "via_oauth": "via OAuth",
+  "import_subtitle": "Select a repository to import as a workspace.",
+  "connect_subtitle": "Connect a Git provider to import repositories.",
+  "connect_account_hint": "Connect your {{label}} account to import repositories.",
+  "oauth_admin_required": "An administrator must configure {{label}} OAuth before you can connect.",
+  "auto_create_work_branch": "Auto-create work branch",
+  "cloning_repository": "Cloning repository, please wait…",
+  "search_repositories_label": "Search repositories"
 }

@@ -5,11 +5,12 @@ import Input from '../components/Input';
 import PageHeader from '../components/PageHeader';
 import {
   consoleAdminPageClass,
+  consoleAdminTableScrollClass,
+  consoleAdminTableShellClass,
   consoleIconButtonClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
   consoleTableHeadRowClass,
-  consoleTableShellClass,
 } from '../lib/consoleTokens';
 import { loadAdminAgentsCache, saveAdminAgentsCache } from '../lib/adminAgentsCache';
 import { apiFetch } from '../lib/api';
@@ -109,8 +110,8 @@ export default function AgentsAdmin() {
         onSaved={() => fetchAgents({ silent: true })}
       />
 
-      <div className={consoleTableShellClass}>
-        <div className="overflow-auto max-h-[calc(100vh-200px)]">
+      <div className={consoleAdminTableShellClass}>
+        <div className={consoleAdminTableScrollClass}>
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
               <col className="w-1/4" />

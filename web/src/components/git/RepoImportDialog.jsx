@@ -353,8 +353,8 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
             <>
               <p className={textSecondary}>
                 {oauthNotConfigured
-                  ? `An administrator must configure ${providerLabel} OAuth before you can connect.`
-                  : `Connect your ${providerLabel} account to import repositories.`}
+                  ? t('git:oauth_admin_required', { label: providerLabel })
+                  : t('git:connect_account_hint', { label: providerLabel })}
               </p>
               <div className="flex gap-3">
                 <button
@@ -368,8 +368,8 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
                   }`}
                 >
                   <GitBranch className="h-5 w-5" />
-                  <span className="text-sm font-medium">Connect {providerLabel}</span>
-                  <span className="text-[11px] text-zinc-400">via OAuth</span>
+                  <span className="text-sm font-medium">{t('git:connect_to', { label: providerLabel })}</span>
+                  <span className="text-[11px] text-zinc-400">{t('git:via_oauth')}</span>
                 </button>
                 <button
                   type="button"
@@ -377,8 +377,8 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
                   className={`flex-1 flex flex-col items-center gap-1.5 px-4 py-3 rounded-lg border-2 border-zinc-200 hover:border-zinc-900 hover:bg-zinc-50 transition-colors ${consoleButtonFocusClass}`}
                 >
                   <Link2 className="h-5 w-5" />
-                  <span className="text-sm font-medium">{t('git:personal_access_token', { defaultValue: 'Personal Access Token' })}</span>
-                  <span className="text-[11px] text-zinc-400">via PAT</span>
+                  <span className="text-sm font-medium">{t('git:personal_access_token')}</span>
+                  <span className="text-[11px] text-zinc-400">{t('git:via_pat')}</span>
                 </button>
               </div>
             </>
@@ -401,7 +401,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
               disabled={connectionLoading}
               className="text-xs text-zinc-500 hover:text-zinc-900"
             >
-              Disconnect
+              {t('git:disconnect', { label: providerLabel })}
             </button>
           </div>
 
@@ -412,7 +412,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${mode === 'browse' ? 'bg-black text-white' : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'}`}
             >
               <Search className="h-3 w-3" />
-              Browse
+              {t('git:browse')}
             </button>
             <button
               type="button"
@@ -420,7 +420,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${mode === 'url' ? 'bg-black text-white' : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'}`}
             >
               <Link2 className="h-3 w-3" />
-              Paste URL
+              {t('git:paste_url')}
             </button>
           </div>
 
@@ -458,7 +458,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
           ) : (
           <>
           <div>
-            <FormLabel htmlFor="repo-search">Search repositories</FormLabel>
+            <FormLabel htmlFor="repo-search">{t('git:search_repositories_label')}</FormLabel>
             <div className="relative mt-1.5">
               <Search className={`pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 ${textPlaceholder}`} />
               <Input
@@ -540,7 +540,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
                   onChange={(e) => setAutoCreateBranch(e.target.checked)}
                   className="rounded border-zinc-300 text-zinc-900 focus:ring-black"
                 />
-                Auto-create work branch
+                {t('git:auto_create_work_branch')}
               </label>
 
               {autoCreateBranch && (
@@ -565,7 +565,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
               ) : (
                 <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
               )}
-              {cloneError || 'Cloning repository, please wait…'}
+              {cloneError || t('git:cloning_repository')}
             </div>
           )}
         </div>
@@ -594,9 +594,9 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
           {patConnecting ? (
             <>
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              Connecting…
+              {t('git:connecting')}
             </>
-          ) : 'Connect'}
+          ) : t('git:connect')}
         </Button>
       )}
       {connection && mode === 'url' && !selectedRepo && (
@@ -609,9 +609,9 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
           {urlFetching ? (
             <>
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              Fetching…
+              {t('git:fetching_repository')}
             </>
-          ) : 'Fetch repository'}
+          ) : t('git:fetch_repository')}
         </Button>
       )}
       {connection && (selectedRepo || mode === 'browse') && (
@@ -624,10 +624,10 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
           {importing ? (
             <>
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              Importing…
+              {t('git:importing')}
             </>
           ) : (
-            'Import repository'
+            t('git:import_repository')
           )}
         </Button>
       )}
@@ -651,8 +651,8 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
       panelClassName={`${consoleDialogLgClass} max-h-[calc(100vh-2rem)]`}
     >
       <ConsoleStructuredDialogHeader
-        title={t('git:import_repository', { defaultValue: 'Import Repository' })}
-        subtitle={connection ? 'Select a repository to import as a workspace.' : 'Connect a Git provider to import repositories.'}
+        title={t('git:import_repository')}
+        subtitle={connection ? t('git:import_subtitle') : t('git:connect_subtitle')}
       />
       <ConsoleStructuredDialogBody>
         {dialogBody}

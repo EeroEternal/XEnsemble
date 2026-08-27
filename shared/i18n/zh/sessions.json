@@ -36,7 +36,9 @@
     "show_side_panel": "显示侧边栏",
     "back_to_workspaces": "返回工作空间",
     "removing": "移除中…",
-    "clear_all": "全部清除"
+    "clear_all": "全部清除",
+    "delete_session": "删除会话",
+    "dismiss": "关闭"
   },
   "label": {
     "unassigned": "未分配",
@@ -49,7 +51,8 @@
   "state": {
     "preparing_environment": "正在准备你的环境…",
     "preparing_environment_desc": "正在拉取镜像并启动虚拟机。通常不到一分钟。",
-    "session_failed": "会话启动失败"
+    "session_failed": "会话启动失败",
+    "provisioning_error": "配置过程中发生意外错误。"
   },
   "error": {
     "no_workspace": "无法为此会话创建工作空间。",

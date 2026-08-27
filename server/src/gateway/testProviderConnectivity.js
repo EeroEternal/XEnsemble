@@ -11,9 +11,9 @@ function buildTestUrl(baseUrl, providerType) {
         if (trimmed.endsWith('/v1')) return `${trimmed}/messages`;
         return `${trimmed}/v1/messages`;
     }
-    // openai
-    if (trimmed.endsWith('/v1')) return `${trimmed}/chat/completions`;
-    return `${trimmed}/v1/chat/completions`;
+    // OpenAI 兼容：与 UniGateway 核心 join_url 一致，base_url 直接拼接，
+    // 不强制插入 /v1（智谱 GLM 等端点是 .../paas/v4/chat/completions）。
+    return `${trimmed}/chat/completions`;
 }
 
 function authFailureMessage(status, detail) {
