@@ -174,7 +174,9 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 if (row.status === 'building' || row.status === 'pending') {
                     setPhase(row.stage === 'B' ? 'B' : row.stage === 'preview' ? 'preview' : 'A');
                 } else if (row.status === 'running') {
-                    setRunState('success'); setRecoveredId(null);
+                    setRunState('success');
+                    setResult({ ok: true, deploymentId: row.id, elapsedMs: (row.updated_at - row.created_at) || 0 });
+                    setRecoveredId(null);
                 } else if (row.status === 'failed') {
                     setRunState('failed'); setResult({ ok: false, error: row.stage_message || '部署失败', stage: row.stage }); setRecoveredId(null);
                 } else if (row.status === 'stopped') {

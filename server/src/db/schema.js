@@ -185,6 +185,15 @@ const deployVerifyStates = pgTable('deploy_verify_states', {
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 });
 
+// 阶段 A（分析）产出的部署计划缓存：每项目一份。
+// 二次部署命中时跳过 opencode/LLM 探索分析（通常 1~4 分钟），TTL 内未命中则重新分析。
+const deployPlanCache = pgTable('deploy_plan_cache', {
+  projectId: text('project_id').primaryKey().references(() => projects.id),
+  plan: jsonb('plan').notNull(),
+  source: text('source'),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+});
+
 const events = pgTable('events', {
   id: text('id').primaryKey(),
   userId: text('user_id').references(() => users.id),
@@ -410,6 +419,7 @@ module.exports = {
   runtimes,
   deployments,
   deployVerifyStates,
+  deployPlanCache,
   events,
   devEnvironmentProfiles,
   repoSnapshots,

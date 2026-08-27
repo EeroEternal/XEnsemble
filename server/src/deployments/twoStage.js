@@ -13,7 +13,7 @@ const path = require('path');
 const { eq, and, inArray } = require('drizzle-orm');
 const { getRuntime } = require('../runtime/registry');
 const { ensureProjectRuntime } = require('../runtime/RuntimeService');
-const { analyzeProjectDeploy } = require('./analyzeDeploy');
+const { analyzeProjectDeploy, collectProjectContext } = require('./analyzeDeploy');
 const { analyzeProjectVerify } = require('./analyzeVerify');
 const { createTunnel, stopTunnel } = require('../preview/tunnelServer');
 const deploymentService = require('./DeploymentService');
@@ -30,10 +30,14 @@ const VERIFY_STATE_TTL_MS = 30 * 60 * 1000;
 // 后台化（缺少 &/nohup）而挂起，必须有总超时自动中止，否则部署永不结束、前端一直显示 running。
 const DEPLOY_TOTAL_TIMEOUT_MS = Number(process.env.DEPLOY_TOTAL_TIMEOUT_MS) || 25 * 60 * 1000;
 
-// 给长耗时异步操作加总超时：超时返回 fallback（不阻塞调用方），挂起的 promise 由内部超时机制兜底。
-function withTimeout(promise, ms, fallback) {
+// 给长耗时异步操作加总超时：超时返回 fallback（不阻塞调用方），并通过 onTimeout 通知真正中止底层工作，
+// 避免只丢弃结果而底层 agent 继续跑（僵尸进程/资源泄漏）。
+function withTimeout(promise, ms, fallback, onTimeout) {
     return new Promise((resolve) => {
-        const timer = setTimeout(() => resolve(fallback), ms);
+        const timer = setTimeout(() => {
+            if (onTimeout) onTimeout();
+            resolve(fallback);
+        }, ms);
         promise.then(
             (v) => { clearTimeout(timer); resolve(v); },
             () => { clearTimeout(timer); resolve(fallback); },
@@ -180,6 +184,43 @@ async function clearVerifyState(projectId) {
     }
 }
 
+// —— 阶段 A 部署计划缓存：二次部署复用上次分析结果，跳过 opencode/LLM 探索 ——
+const PLAN_CACHE_TTL_MS = Number(process.env.DEPLOY_PLAN_CACHE_TTL_MS) || 24 * 60 * 60 * 1000;
+
+async function loadPlanCache(projectId) {
+    try {
+        const rows = await db.select().from(schema.deployPlanCache).where(eq(schema.deployPlanCache.projectId, projectId));
+        if (!rows.length) return null;
+        const row = rows[0];
+        const plan = row.plan || {};
+        if (!Array.isArray(plan.steps) || !plan.steps.length) return null;
+        if (Date.now() - Number(row.updatedAt || 0) > PLAN_CACHE_TTL_MS) return null; // 过期失效
+        return { steps: plan.steps, configFiles: plan.configFiles || [], source: row.source || 'cache', context: plan.context || {} };
+    } catch (e) {
+        console.error('[twoStage] loadPlanCache error:', e.message);
+        return null;
+    }
+}
+
+async function savePlanCache(projectId, plan) {
+    try {
+        const values = {
+            projectId,
+            plan: JSON.parse(JSON.stringify({
+                steps: plan.steps || [],
+                configFiles: plan.configFiles || [],
+                context: plan.context || {},
+            })),
+            source: plan.source || null,
+            updatedAt: Date.now(),
+        };
+        await db.insert(schema.deployPlanCache).values(values)
+            .onConflictDoUpdate({ target: schema.deployPlanCache.projectId, set: values });
+    } catch (e) {
+        console.error('[twoStage] savePlanCache error:', e.message);
+    }
+}
+
 function detectProjectType(hostWorkspacePath) {
     if (!hostWorkspacePath) {
         return { type: 'unknown', defaultPort: 3000, installCmd: null, buildCmd: null, startCmd: null };
@@ -226,6 +267,100 @@ async function getGuestFreePort(runtimeRef) {
         const p = Number((r.stdout || '').trim().split('\n')[0]);
         return p > 0 && p < 65535 ? p : 0;
     } catch { return 0; }
+}
+
+// 依赖缓存检测：node_modules 存在且比 lockfile 新，说明上次安装的依赖仍匹配当前 lockfile，
+// 可跳过 install 直接 build/serve（否则重装走全新下载，耗时长）。
+// 无 lockfile 或 node_modules 缺失时保守返回 false（不跳过）。
+async function detectDepsCached(runtimeRef, workspacePath) {
+    const runtime = getRuntime();
+    try {
+        const r = await runtime.exec.exec(
+            'sh',
+            ['-c', 'test -d node_modules && (test node_modules -nt package-lock.json 2>/dev/null || test node_modules -nt pnpm-lock.yaml 2>/dev/null || test node_modules -nt yarn.lock 2>/dev/null || test node_modules -nt requirements.txt 2>/dev/null) && echo CACHED || echo STALE'],
+            {},
+            { runtimeRef, cwd: workspacePath, timeoutMs: 15000 },
+        );
+        return String(r.stdout || '').includes('CACHED');
+    } catch { return false; }
+}
+
+// 从阶段 A 产出的 configFiles（.env 模板）里解析 PostgreSQL 连接信息，供系统侧直接建库建用户，
+// 避免 verify agent 用 su/runuser/sudo 变体反复试错（历史 3 轮≈60s 的浪费点）。
+// 只接受安全字符（user/db 为字母数字下划线），host 一律由 agent 强制 127.0.0.1。
+function parseDbInfoFromPlan(plan) {
+    const cfs = Array.isArray(plan?.configFiles) ? plan.configFiles : [];
+    const haystacks = cfs.map((c) => `${c.path || ''}\n${c.template || ''}`).join('\n');
+    if (!haystacks) return null;
+
+    // DATABASE_URL=postgres://user:password@host:port/db
+    const urlMatch = haystacks.match(/DATABASE_URL\s*=\s*['\"]?(?:postgres(?:ql)?:\/\/)([^:\s@'\"\/]+):([^@\s'\"]+)@[^\/\s'\"]+\/([A-Za-z0-9_-]+)/);
+    if (urlMatch) {
+        const [, user, pass, db] = urlMatch;
+        if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(user) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(db)) {
+            return { user, pass, db };
+        }
+        return null;
+    }
+    // POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB（或 DB_USER / DB_PASSWORD / DB_NAME 等变体）
+    const pick = (keys) => keys.map((k) => haystacks.match(new RegExp(`${k}\\s*=\\s*['\\\"]?([^\\s'\\\"]+)`))?.[1]).find(Boolean) || null;
+    const user = pick(['POSTGRES_USER', 'DB_USER', 'PGUSER']);
+    const pass = pick(['POSTGRES_PASSWORD', 'DB_PASSWORD', 'PGPASSWORD']);
+    const db = pick(['POSTGRES_DB', 'DB_NAME', 'PGDATABASE']);
+    if (user && /^[A-Za-z_][A-Za-z0-9_]*$/.test(user) && db && /^[A-Za-z_][A-Za-z0-9_]*$/.test(db)) {
+        return { user, pass: pass || user, db };
+    }
+    return null;
+}
+
+// 系统侧自动 provision PostgreSQL：检测项目是否需要 PG，需要则启动沙箱内 PG，
+// 并尝试从配置解析出连接信息后直接建库建用户（幂等），使 verify agent 只需跑 migration。
+async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
+    const runtime = getRuntime();
+    let needs = false;
+    try {
+        const r = await runtime.exec.exec('sh', ['-c', `
+            grep -lE '\\"(pg|postgres)\\"|pg-promise|pgx' package.json server/package.json 2>/dev/null
+            find . -maxdepth 3 \\( -name 'schema.sql' -o -name 'init.sql' \\) 2>/dev/null | grep -v node_modules | head -3
+            grep -lE 'DATABASE_URL|POSTGRES_HOST|POSTGRES_DB|POSTGRES_USER' .env server/.env .env.example server/.env.example 2>/dev/null
+        `], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+        needs = Boolean(String(r.stdout || '').trim());
+    } catch { needs = false; }
+    if (!needs) return { ready: false };
+
+    try {
+        await runtime.exec.exec('sh', ['-c', `
+            pkill -9 apt-get 2>/dev/null; pkill -9 dpkg 2>/dev/null; sleep 1
+            rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock
+            (service postgresql start 2>/dev/null || pg_ctlcluster $(ls /etc/postgresql 2>/dev/null | head -1) main start 2>/dev/null) || true
+            sleep 2
+            pg_lsclusters 2>/dev/null || true
+        `], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
+    } catch (e) {
+        console.error('[twoStage] postgres start failed (fallback to agent):', e.message);
+        return { ready: false };
+    }
+
+    // PG 已运行后，若能从配置解析出连接信息则直接建库建用户（幂等），免去 agent 试错。
+    const info = parseDbInfoFromPlan(plan);
+    if (info) {
+        const pqPass = String(info.pass || '').replace(/'/g, "''"); // SQL 单引号转义
+        const create = `
+            su postgres -c "psql -tAc \\"SELECT 1 FROM pg_roles WHERE rolname='${info.user}'\\"" 2>/dev/null | grep -q 1 \\
+              || su postgres -c "psql -c \\"CREATE USER ${info.user} WITH PASSWORD '${pqPass}'\\""
+            su postgres -c "psql -tAc \\"SELECT 1 FROM pg_database WHERE datname='${info.db}'\\"" 2>/dev/null | grep -q 1 \\
+              || su postgres -c "createdb -O ${info.user} ${info.db}"
+        `;
+        try {
+            await runtime.exec.exec('sh', ['-c', create], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
+            console.error(`[twoStage] postgres db provisioned user=${info.user} db=${info.db}`);
+            return { ready: true, dbUser: info.user, dbName: info.db };
+        } catch (e) {
+            console.error('[twoStage] postgres db create failed (fallback to agent):', e.message);
+            return { ready: true }; // PG 已运行，建库失败则让 agent 兜底
+        }
+    }
+    return { ready: true };
 }
 
 // 部署通过后，系统侧在沙箱内保持前后端服务，并起一个"单端口聚合服务器"
@@ -431,6 +566,10 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
     // 均在用户管理/个人配额里配置，避免无限制并发部署同时跑多个 VM 耗尽沙箱资源）。
     // 先注册（内存计数原子）再校验，避免多个并发请求同时通过；超限则注销并拒绝。
     registerDeploy(project.id, userId, sessionId);
+    // 真正的中止通道：用户中止（activeDeploys.aborted）或部署总超时（deployState.cancelled）
+    // 都使该函数返回 true，让阶段 A/B 的 agent 循环在下一轮退出，而不是只丢弃结果继续跑。
+    const deployState = { cancelled: false };
+    const aborted = () => deployState.cancelled || isAborted(project.id, sessionId);
     try {
         const limit = Number((await ensureUserQuota(userId)).maxPreviews ?? 0);
         const usage = await getUsage(userId);
@@ -467,7 +606,18 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
     // 用 promise 队列串行写库，避免阶段 A/B 的异步 update 乱序完成导致 DB stage 回退
     // （否则部署已到阶段 2，刷新后却恢复显示阶段 1）。
     let reportQueue = Promise.resolve();
+    // 阶段级耗时打点：记录每次 stage 切换的耗时并打印日志 + 随 SSE 透传 elapsedMs，
+    // 让运维/前端能定位 A（分析）/B（验证）/preview 各自的时间消耗。
+    let lastStage = null;
+    let lastStageAt = startedAt;
     const report = (p) => {
+        const now = Date.now();
+        if (p?.stage && p.stage !== lastStage) {
+            if (lastStage) console.error(`[twoStage] project=${projectId} stage ${lastStage} took ${now - lastStageAt}ms`);
+            lastStage = p.stage;
+            lastStageAt = now;
+        }
+        const payload = { ...p, elapsedMs: now - startedAt };
         if (p?.stage && deployRef.id) {
             const status = p.stage === 'done' ? 'running' : 'building';
             const stageVal = p.stage === 'done' ? null : p.stage;
@@ -478,11 +628,11 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
                     .where(eq(schema.deployments.id, deployRef.id)))
                 .catch(() => {});
         }
-        if (onProgress) onProgress(p);
+        if (onProgress) onProgress(payload);
     };
     let result;
     try {
-        result = await runDeployInner({ project, userId, projectId, sessionId, resume, report, startedAt, deployRef });
+        result = await runDeployInner({ project, userId, projectId, sessionId, resume, report, startedAt, deployRef, isAborted: aborted, deployState });
         return result;
     } finally {
         unregisterDeploy(project.id, sessionId);
@@ -522,7 +672,7 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
 }
 
 // 实际的两阶段部署逻辑（编排层负责并发闸门 + 注册表 + 持久化终态）
-async function runDeployInner({ project, userId, projectId, sessionId, resume, report, startedAt, deployRef }) {
+async function runDeployInner({ project, userId, projectId, sessionId, resume, report, startedAt, deployRef, isAborted, deployState }) {
 
     // A new deploy attempt supersedes any existing 'running' deployment for
     // this project. Mark them 'stopped' so a failed retry doesn't leave a
@@ -584,6 +734,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
 
     // 断点续修：resume=true 时优先复用上次保存的 plan + 对话，跳过阶段 1 重新分析。
     let plan = null;
+    let planFresh = false; // 本次是否真正执行了阶段 A 分析（决定是否需要回写 plan 缓存）
     let resumeState = null;
     if (resume) {
         resumeState = await loadVerifyState(project.id);
@@ -593,6 +744,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
                 configFiles: resumeState.plan.configFiles || [],
                 source: resumeState.plan.source || 'resume',
                 warning: resumeState.plan.warning,
+                _tree: resumeState.plan.context?.tree || null,
             };
             report({ stage: 'A', message: `断点续修：复用上次分析计划（${plan.steps.length} 步）` });
         } else {
@@ -600,23 +752,63 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         }
     }
 
+    // 先查跨次部署的计划缓存：命中则跳过 opencode/LLM 探索分析（二次部署省 1~4 分钟）
+    if (!plan) {
+        const cached = await loadPlanCache(project.id);
+        if (cached) {
+            plan = {
+                steps: cached.steps,
+                configFiles: cached.configFiles || [],
+                source: cached.source || 'cache',
+                _tree: cached.context?.tree || null,
+            };
+            report({ stage: 'A', message: `复用部署计划缓存（${plan.steps.length} 步）` });
+        }
+    }
+
     if (!plan) {
         report({ stage: 'A', message: '阶段 1：调用 LLM 1 出部署计划' });
-        const planResult = await analyzeProjectDeploy({ workspacePath: wsPath, hostWorkspacePath: hostWs, runtimeRef: ref, isAborted: () => isAborted(project.id, sessionId) });
+        const planResult = await analyzeProjectDeploy({ workspacePath: wsPath, hostWorkspacePath: hostWs, runtimeRef: ref, isAborted: () => isAborted() });
         if (planResult?.aborted) {
             return { ok: false, aborted: true, error: '部署已中止', elapsedMs: Date.now() - startedAt };
         }
         if (!planResult || !planResult.steps?.length) {
             return { ok: false, error: '阶段 1 失败：未生成计划', planResult };
         }
-        plan = { steps: planResult.steps, configFiles: planResult.configFiles || [], source: planResult.source, warning: planResult.warning };
+        plan = { steps: planResult.steps, configFiles: planResult.configFiles || [], source: planResult.source, warning: planResult.warning, _tree: planResult.contextTree || null };
+        planFresh = true;
         report({ stage: 'A', message: `阶段 1 完成: ${plan.steps.length} 步, ${plan.configFiles.length} configs (${planResult.source || 'fallback'})` });
     }
 
     report({ stage: 'B', message: resumeState ? '阶段 2：续修（接回上次对话继续修复）' : '阶段 2：调用 LLM 2（agent）准备环境 + 测试 + 自动修复' });
     const detected = hostWs ? detectProjectType(hostWs) : { type: 'unknown', defaultPort: 3000 };
-    if (isAborted(project.id, sessionId)) {
+    if (isAborted()) {
         return { ok: false, aborted: true, error: '部署已中止', elapsedMs: Date.now() - startedAt };
+    }
+    // 项目树只扫一次：优先复用阶段 A 已收集的树（fallback 路径已收集；opencode 成功为 null 才在此补一次），
+    // 并注入 verify 的 system prompt，避免 verify agent 重新 list_dir/read_file 探索。
+    let depsCached = false;
+    {
+        let tree = plan._tree || null;
+        if (!tree) {
+            try {
+                const fsAdapter = getRuntime().fs;
+                const ctx = await collectProjectContext(fsAdapter, wsPath, ref);
+                tree = String(ctx.treeText || '').slice(0, 12000);
+            } catch (e) {
+                console.error('[twoStage] collect project context for verify failed (ignored):', e.message);
+                tree = null;
+            }
+        }
+        delete plan._tree;
+        depsCached = await detectDepsCached(ref, wsPath);
+        // 系统侧预启动 PostgreSQL（检测到需要时），避免 verify agent 用 su/runuser/sudo 试错
+        const dbProvision = await provisionPostgresIfNeeded(ref, wsPath, plan);
+        plan = { ...plan, context: { tree, depsCached, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null } };
+        // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）
+        if (planFresh) {
+            await savePlanCache(project.id, { steps: plan.steps, configFiles: plan.configFiles, source: plan.source, context: { tree } });
+        }
     }
     const verify = await withTimeout(
         analyzeProjectVerify({
@@ -626,7 +818,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             plan,
             projectType: detected,
             resume: resumeState ? { messages: resumeState.messages, trail: resumeState.trail, roundsUsed: resumeState.roundsUsed } : undefined,
-            isAborted: () => isAborted(project.id, sessionId),
+            isAborted: () => isAborted(),
         }),
         DEPLOY_TOTAL_TIMEOUT_MS,
         {
@@ -634,6 +826,11 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             aborted: true,
             error: `部署验证超时（超过 ${Math.round(DEPLOY_TOTAL_TIMEOUT_MS / 60000)} 分钟）已自动中止`,
             warning: '部署验证卡住超时，已自动中止。常见原因是沙箱内启动服务的命令未后台化（缺少 & / nohup ... &），run_shell 一直等待。',
+        },
+        () => {
+            // 超时真正中止：置 cancelled，让仍在跑的 verify agent 在下一轮检查时退出
+            deployState.cancelled = true;
+            console.error(`[twoStage] deploy total timeout (${Math.round(DEPLOY_TOTAL_TIMEOUT_MS / 60000)}min), cancelling verify agent project=${project.id}`);
         },
     );
     if (verify.aborted) {

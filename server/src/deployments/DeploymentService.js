@@ -10,6 +10,7 @@ const { singleflight } = require('../runtime/singleflight');
 const { createCheckpoint } = require('../repositories/RepositoryEnvironmentService');
 const previewRegistry = require('../runtime/localPreviewRegistry');
 const { resolveRuntimeProvider } = require('../config/runtimeProvider');
+const { tryRecoverPreview, checkPreviewEntryHealth } = require('../workspace/ensurePreview');
 
 const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 

@@ -174,9 +174,9 @@ async function probePort({ runtimeRef, workspacePath, port, boxDefaultPorts }) {
     try {
         const r = await runtime.exec.exec(
             'sh',
-            ['-c', `curl -s -m 4 -w "\\n__HTTPCODE__:%{http_code}" http://127.0.0.1:${port}/ | head -c 3000`],
+            ['-c', `curl -s -m 2 -w "\\n__HTTPCODE__:%{http_code}" http://127.0.0.1:${port}/ | head -c 3000`],
             {},
-            { runtimeRef, cwd: workspacePath, timeoutMs: 10000 },
+            { runtimeRef, cwd: workspacePath, timeoutMs: 6000 },
         );
         const out = String(r.stdout || '');
         const codeMatch = out.match(/__HTTPCODE__:(\d{3})/);
@@ -208,8 +208,7 @@ async function probePort({ runtimeRef, workspacePath, port, boxDefaultPorts }) {
 // 并返回该端口供 preview tunnel 使用。agent 用哪个端口运行不写死，灵活处理端口占用。
 async function assertAppIsServed({ runtimeRef, workspacePath, preferredPort }) {
     const runtime = getRuntime();
-    // 常见应用端口 + 自包含全栈 server 端口（如 xensemble 的 3888）。
-    const base = [Number(preferredPort) || 3000, 3000, 3888, 3889, 5173, 4173, 8080, 8000, 9000, 5000, 3001, 4000, 8081];
+    const preferred = Number(preferredPort) || 0;
     let listenPorts = [];
     // 优先用 ss；blink guest 里 ss 常不可用，退回 /proc/net/tcp（不依赖 ss）。
     try {
@@ -233,20 +232,46 @@ async function assertAppIsServed({ runtimeRef, workspacePath, preferredPort }) {
             listenPorts = (r.stdout || '').split('\n').map((s) => Number(s)).filter((n) => n > 0 && n < 65535);
         } catch { /* ignore */ }
     }
-    const candidates = [...new Set([...base, ...listenPorts])].slice(0, 40);
-    const errors = [];
+    // 常见应用端口，用于给真实监听端口的探测排序（preferred 排最前，其余常见端口次之）。
+    const commonPorts = [3000, 3888, 3889, 5173, 4173, 8080, 8000, 9000, 5000, 3001, 4000, 8081];
     // box 沙箱常驻默认预览端口：3000（欢迎页）与 5173（preview.json serve . --listen 5173）。
     const boxDefaultPorts = [Number(process.env.BOXLITE_DEFAULT_PREVIEW_PORT || 3000), 5173];
+    const errors = [];
     const probeDetail = [];
-    for (const port of candidates) {
+
+    const probeLoop = async (ports) => {
+        for (const port of ports) {
             const res = await probePort({ runtimeRef, workspacePath, port, boxDefaultPorts });
-        probeDetail.push(`${port}=${res.httpCode || (res.listen ? 'listen' : 'down')}${res.ok ? '(app)' : ''}`);
-        if (res.ok) {
-            return { ok: true, port, httpCode: res.httpCode, snippet: res.snippet };
+            probeDetail.push(`${port}=${res.httpCode || (res.listen ? 'listen' : 'down')}${res.ok ? '(app)' : ''}`);
+            if (res.ok) {
+                return { ok: true, port, httpCode: res.httpCode, snippet: res.snippet };
+            }
+            if (res.listen) errors.push(res.reason);
         }
-        if (res.listen) errors.push(res.reason);
+        return null;
+    };
+
+    // 收敛：优先只探测真实监听的端口（避免对 down 端口空 curl 等待），
+    // 顺序 preferred → 监听中的常见端口 → 其余监听端口。
+    if (listenPorts.length) {
+        const listened = new Set(listenPorts);
+        const ordered = [];
+        if (preferred && listened.has(preferred)) ordered.push(preferred);
+        for (const p of commonPorts) {
+            if (p !== preferred && listened.has(p)) ordered.push(p);
+        }
+        for (const p of [...listenPorts].sort((a, b) => a - b)) {
+            if (!ordered.includes(p)) ordered.push(p);
+        }
+        const hit = await probeLoop(ordered);
+        if (hit) return hit;
+    } else {
+        // 保底：ss + /proc/net/tcp 都拿不到监听端口时，回退全量 base 探测（curl 已收窄 2s）。
+        const base = [...new Set([preferred, ...commonPorts])];
+        const hit = await probeLoop(base);
+        if (hit) return hit;
     }
-    console.error(`[analyzeVerify] app port discovery failed. listenPorts=${JSON.stringify(listenPorts)} candidates=${JSON.stringify(candidates)} probes=${probeDetail.join(', ')} errors=${errors.join('; ')}`);
+    console.error(`[analyzeVerify] app port discovery failed. listenPorts=${JSON.stringify(listenPorts)} probes=${probeDetail.join(', ')} errors=${errors.join('; ')}`);
     return { ok: false, reason: errors.length ? `未发现真实应用端口（${errors.join('；')}）` : '未发现监听的应用端口' };
 }
 
@@ -269,12 +294,30 @@ function buildSystemPrompt(plan) {
         'Deploy plan to execute:',
         JSON.stringify(plan?.steps || [], null, 2),
         '',
+        'Config files to create/verify (from analysis; create/overwrite with edit_file as needed):',
+        JSON.stringify(plan?.configFiles || [], null, 2),
+        '',
+        'Project structure (from analysis — DO NOT re-explore):',
+        (plan?.context?.tree || '(none)'),
+        '',
+        'DEPENDENCY CACHE:',
+        (plan?.context?.depsCached
+            ? '- The workspace already has node_modules installed and its package-manager lockfile is unchanged from the previous deploy. SKIP the install step and go straight to build/serve. Only reinstall if a later step actually fails with a missing-dependency error.'
+            : '- Dependencies are NOT cached — run the install step normally.'
+        ),
+        '',
+        'IMPORTANT: The project has already been analyzed — structure, configs, the plan, and the project tree above are all provided. DO NOT call list_dir / read_file to explore the project or re-read files already covered (package.json, README, configs, server files). Execute the plan steps directly. Read a specific file ONLY if a step fails and you need its exact contents to fix it — never to re-discover what is already described above.',
+        '',
         'Workflow:',
         '1. Run the prepare steps one by one (install deps, build, migrate, prisma generate, etc.). If the project needs native build deps, `apt-get update && apt-get install -y python3 build-essential` first.',
-        '2. Start the full app (frontend + backend) on a port, health-check it with curl.',
+        '2. Start the full app (frontend + backend) on a port, then CONFIRM it is actually up with ONE curl: `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:<port>/`. If it is 2xx/3xx, output your final answer IMMEDIATELY — do NOT curl the same port again.',
         '3. If you also see a `npm test` / test script that is quick, run it too and count it as tested.',
-        '4. Iterate until the health check passes.',
+        '4. When a health check fails, READ the app log / error output to find the ROOT CAUSE (port in use, missing env/config, build or startup error) and fix it with edit_file / correct command — do not blindly rerun the same thing or keep checking the process. Iterate until the health check passes.',
         'OUTPUT SIZE RULE (MANDATORY): a TOOL CALL must be ONE compact JSON under 800 characters. NEVER paste file contents, logs or commands into your JSON — use read_file / edit_file / run_shell tools for that. If you were about to write a long reply, STOP and output the short JSON tool call instead. The FINAL answer may be up to 4000 characters so you can include the key error output in finalStderr.',
+        'HEALTH CHECK (MANDATORY):',
+        '- Confirm the app is up with ONE successful curl (2xx/3xx). Then IMMEDIATELY output your final answer.',
+        '- Never curl / pgrep / ps the same port repeatedly. Repeating curls wastes rounds — once a single 2xx/3xx curl succeeds, the platform performs the final port discovery and health verification itself.',
+        '- If a curl fails, do NOT just curl again — read the log, fix the root cause, restart if needed, then curl ONCE to confirm.',
         'SERVING RULES (MANDATORY):',
         '- Exception for plain static sites: IF the project really is a static site — its root has a NON-EMPTY index.html and there is NO package.json / build tooling / backend — then serving that directory is CORRECT (e.g. `python3 -m http.server` or `npx serve .`). This is the ONLY case where serving a workspace dir is allowed.',
         '- In EVERY other case: NEVER serve the raw workspace root or source directories (no `npx serve .`, `serve -s .`, `python3 -m http.server`, `caddy file-server` at /workspace or inside src/). That would expose source code and is a FAILURE. Serve ONLY a built artifact directory (e.g. `web/dist`, `build/`, `out/`) or the real app entry; for a monorepo, build and serve the frontend app under the correct subdir, and start the backend too when present.',
@@ -283,10 +326,17 @@ function buildSystemPrompt(plan) {
         '- Health check must return the REAL application content (HTML with a <title> and app markup, or the backend API JSON). A 200 on a file listing or an empty page is NOT success.',
         '- If you cannot install deps / build / start the app for real, report ok:false with the real reason. Do NOT fake success to satisfy the check.',
         'DATABASE SETUP (MANDATORY when the backend needs a database):',
-        '- Detect it: the backend uses pg/postgres (server/package.json deps, a db/ dir, or DATABASE_URL / POSTGRES_* in .env files). A backend whose DB-dependent endpoints hang or error is NOT a passing app.',
-        '- BEFORE apt install, clear stale apt/dpkg locks left by previous runs: `pkill -9 apt-get; pkill -9 dpkg; sleep 1; rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock; sleep 1`. Then `apt-get update -qq && apt-get install -y postgresql postgresql-contrib`. If a lock error still appears, retry the clear+install once.',
-        '- Install and start PostgreSQL INSIDE the sandbox: after install run `service postgresql start` (or `pg_ctlcluster <ver> main start`).',
-        '- Create a user + database matching the app config (run psql as the postgres user): CREATE USER myuser WITH PASSWORD mypass; then CREATE DATABASE mydb OWNER myuser;',
+        (plan?.context?.dbReady
+            ? (plan?.context?.dbName
+                ? `- PostgreSQL is ALREADY installed, run, and the database \`${plan.context.dbName}\` (user \`${plan.context.dbUser}\`) has ALREADY been created by the platform. SKIP installing PG / creating user / creating database. Point the app at 127.0.0.1 and run migrations directly — do NOT run any CREATE USER / CREATE DATABASE.`
+                : '- PostgreSQL is ALREADY installed and started by the platform inside this sandbox. SKIP installing/starting it. Create the user/database only if the app config requires names that do not exist yet, then run migrations.')
+            : '- Detect it: the backend uses pg/postgres (server/package.json deps, a db/ dir, or DATABASE_URL / POSTGRES_* in .env files). A backend whose DB-dependent endpoints hang or error is NOT a passing app.'),
+        ...(plan?.context?.dbReady ? [] : [
+            '- BEFORE apt install, clear stale apt/dpkg locks left by previous runs: `pkill -9 apt-get; pkill -9 dpkg; sleep 1; rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock; sleep 1`. Then `apt-get update -qq && apt-get install -y postgresql postgresql-contrib`. If a lock error still appears, retry the clear+install once.',
+            '- Install and start PostgreSQL INSIDE the sandbox: after install run `service postgresql start` (or `pg_ctlcluster <ver> main start`).',
+        ]),
+        '- Create a user + database matching the app config. Run psql as the postgres user via `su postgres -c "psql -c \\"...\\""` — in this sandbox `su postgres -c` is the CORRECT way; do NOT waste rounds trying `sudo -u postgres` / `runuser -u postgres` variants. Create the user, then `CREATE DATABASE mydb OWNER myuser;`, and run each CREATE only ONCE.',
+        '- MIGRATIONS / PRE-START SCRIPTS RUN EXACTLY ONCE: `alembic upgrade`, `npm run db:migrate`, `prestart.sh`, `prisma migrate` etc. are typically idempotent or only need ONE successful run. Before running one, check whether it has already succeeded (table exists / previous exit=0 with no error in output / `alembic current` already up to date); if yes, SKIP it. NEVER re-run the same migration/prestart command just because a later step failed for an unrelated reason.',
         '- Create the tables: look for schema.sql / init.sql / migrations / README "Database Schema" section / the SQL in code (db/*.db.js), and run the DDL so real queries work.',
         '- Point the app at the LOCAL database: edit server/.env (and client env if needed) so POSTGRES_HOST/DATABASE_URL use 127.0.0.1 (or localhost), with the user/password/database you created.',
         '- SECURITY (MANDATORY) — the sandbox shares a network with the HOST machine. NEVER point the app at a database on the host or anywhere outside the sandbox: no host / LAN IP (e.g. 172.28.x.x, 10.x.x.x, 192.168.x.x), no cloud hostname. The database MUST run INSIDE the sandbox at 127.0.0.1. If a repo .env already contains a DATABASE_URL / POSTGRES_HOST, always re-point its host to 127.0.0.1 and start local PostgreSQL. Using the host database is a hard FAILURE: it breaks isolation and lets the preview authenticate with host accounts.',

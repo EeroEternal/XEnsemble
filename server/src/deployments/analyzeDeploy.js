@@ -3,7 +3,14 @@ const { RuntimeError } = require('../runtime/interfaces');
 const { analyzeProjectWithOpencode } = require('./analyzeOpencode');
 
 const API_KEY = process.env.LLM_ANALYZE_API_KEY;
-const API_URL = process.env.LLM_ANALYZE_API_URL || 'https://api.deepseek.com/chat/completions';
+// OpenAI 兼容端点：配置可能给 base URL（如 …/api/v1）或完整 chat/completions URL；
+// 统一归一化为完整端点，否则这里直接 POST 到 base URL 会 404，部署必挂。
+function chatCompletionsUrl(url) {
+    const u = String(url || '').trim().replace(/\/+$/, '');
+    if (/\/chat\/completions\/?$/i.test(u)) return u;
+    return `${u}/chat/completions`;
+}
+const API_URL = chatCompletionsUrl(process.env.LLM_ANALYZE_API_URL || 'https://api.deepseek.com/chat/completions');
 const MODEL = process.env.LLM_ANALYZE_MODEL || 'deepseek-chat';
 const LLM_TIMEOUT_MS = 180000;
 
@@ -286,7 +293,7 @@ async function callLlm(messages) {
             const res = await fetch(API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
-                body: JSON.stringify({ model: MODEL, messages, max_tokens: 16000, temperature: 0.2, response_format: { type: 'json_object' } }),
+                body: JSON.stringify({ model: MODEL, messages, max_tokens: 16000, temperature: 0.2, response_format: { type: 'json_object' }, thinking: { type: 'disabled' } }),
                 signal: controller.signal,
             });
             if (!res.ok) {
@@ -397,15 +404,20 @@ async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeR
     const opencodeResult = await analyzeProjectWithOpencode(opencodeWs, isAborted);
     if (opencodeResult && opencodeResult.ok && opencodeResult.steps && opencodeResult.steps.length) {
         const normalized = { steps: normalizeSteps(opencodeResult.steps), configFiles: opencodeResult.configFiles || [] };
-        const check = await runSelfCheck({ ...normalized, runtimeRef, workspacePath });
-        return { ...normalized, source: 'opencode', checked: check.passed, ...(check.passed ? {} : { warning: `opencode produced plan but self-check found ${check.issues.length} issue(s)` }) };
+        // opencode 跑 host 只出计划，没扫 guest 文件树；这里补扫 guest 树供阶段 B（verify）复用，
+        // 避免 verify agent 重新 list_dir/read_file 探索。自查与扫描在 guest 上可并行。
+        const [check, guestCtx] = await Promise.all([
+            runSelfCheck({ ...normalized, runtimeRef, workspacePath }),
+            collectProjectContext(getRuntime().fs, workspacePath, runtimeRef).catch(() => null),
+        ]);
+        return { ...normalized, source: 'opencode', checked: check.passed, contextTree: guestCtx?.treeText || null, ...(check.passed ? {} : { warning: `opencode produced plan but self-check found ${check.issues.length} issue(s)` }) };
     }
 
     const fsAdapter = getRuntime().fs;
     const { treeText, fileContentsText } = await collectProjectContext(fsAdapter, workspacePath, runtimeRef);
 
     if (!API_KEY) {
-        return { steps: normalizeSteps(fallbackSteps(fileContentsText)), configFiles: [], source: 'fallback' };
+        return { steps: normalizeSteps(fallbackSteps(fileContentsText)), configFiles: [], source: 'fallback', contextTree: treeText };
     }
 
     const messages = [
@@ -472,8 +484,9 @@ async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeR
         ...(lastResult || { steps: normalizeSteps(fallbackSteps(fileContentsText)), configFiles: [] }),
         source: 'ai',
         checked: false,
+        contextTree: treeText,
         ...(lastResult ? { warning: 'Agent could not produce a fully validated plan (max rounds reached)' } : { warning: 'Agent did not produce a plan; used fallback' }),
     };
 }
 
-module.exports = { analyzeProjectDeploy };
+module.exports = { analyzeProjectDeploy, collectProjectContext };
