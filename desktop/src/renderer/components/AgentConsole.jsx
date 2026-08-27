@@ -169,6 +169,40 @@ function AgentConsole({
     terminal.unicode.activeVersion = '11';
     host.replaceChildren();
     terminal.open(host);
+ // opencode TUI writes the clipboard via the OSC 52 escape sequence
+ // (ESC ] 52 ; c ; <base64> BEL). xterm.js 5.5.0 has no built-in OSC 52
+ // write handler, so without this the agent prints "copied to clipboard"
+ // but the browser clipboard is never written. Register a handler that
+ // decodes the payload and writes it to the real clipboard.
+ // SECURITY: only the write direction (selector c/p) is handled; the read
+ // query ("?" selector) is explicitly ignored so the agent cannot exfiltrate
+ // the user's clipboard.
+ terminal.parser.registerOscHandler(52, (data) => {
+ const semicolon = data.indexOf(';');
+ if (semicolon < 0) return true;
+ const selector = data.slice(0, semicolon);
+ if (selector.indexOf('?') !== -1) return true; // read query - ignore
+ const payload = data.slice(semicolon + 1);
+ if (!payload) return true;
+ try {
+  const binary = atob(payload);
+  const text = new TextDecoder().decode(Uint8Array.from(binary, c => c.charCodeAt(0)));
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).catch(() => {});
+  } else {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-999px';
+    textarea.style.left = '-999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try { document.execCommand('copy'); } catch (_) {}
+    document.body.removeChild(textarea);
+  }
+ } catch (_) {}
+ return true;
+ });
     // Fit terminal to container BEFORE creating WebSocket so transcript
     // replay doesn't wrap at the wrong width.
     try { fitAddon.fit(); } catch (_) {}
