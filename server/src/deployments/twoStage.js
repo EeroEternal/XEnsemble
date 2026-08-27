@@ -140,7 +140,28 @@ function repairHostWorkspaceOwnership(hostPath) {
     }
 }
 
-// —— 断点续修：verify 超轮数失败后把对话历史存库，resume 时接回继续修 ——
+// 部署通过后清理可续状态，并提取「成功执行轨迹」：既跑成功又能产生实际结果的命令，
+// 供下次部署复用（去掉 ls/cat/grep 等纯探索命令和成功的 curl 健康检查）。
+function extractSuccessCommands(trail) {
+    const cmds = [];
+    const seen = new Set();
+    for (const t of (Array.isArray(trail) ? trail : [])) {
+        if (t.action !== 'tool' || t.tool !== 'run_shell') continue;
+        const cmd = String(t.cmd || (t.args && t.args.cmd) || '').trim();
+        if (!cmd) continue;
+        // 只保留 exit=0 的命令（out 前缀为 exit=0）
+        if (!/^exit=0\b/.test(String(t.out || ''))) continue;
+        // 跳过只读探索/健康检查命令，只留「产生实际结果」的命令
+        if (/^(ls|cat|pwd|which|grep|head|tail|find|test|echo|curl|pgrep|ps)\b/i.test(cmd)) continue;
+        if (seen.has(cmd)) continue;
+        seen.add(cmd);
+        if (cmds.length >= 12) break;
+        cmds.push(cmd);
+    }
+    return cmds;
+}
+
+// 断点续修：verify 超轮数失败后把对话历史存库，resume 时接回继续修 ——
 async function loadVerifyState(projectId) {
     try {
         const rows = await db.select().from(schema.deployVerifyStates).where(eq(schema.deployVerifyStates.projectId, projectId));
@@ -791,6 +812,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
                 configFiles: cached.configFiles || [],
                 source: cached.source || 'cache',
                 _tree: cached.context?.tree || null,
+                _successRun: cached.context?.successRun || null,
             };
             report({ stage: 'A', message: `复用部署计划缓存（${plan.steps.length} 步）` });
         }
@@ -834,7 +856,8 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         depsCached = await detectDepsCached(ref, wsPath);
         // 系统侧预启动 PostgreSQL（检测到需要时），避免 verify agent 用 su/runuser/sudo 试错
         const dbProvision = await provisionPostgresIfNeeded(ref, wsPath, plan);
-        plan = { ...plan, context: { tree, depsCached, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null } };
+        plan = { ...plan, context: { tree, depsCached, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, successRun: plan._successRun || null } };
+        delete plan._successRun;
         // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）。
         // 防护：若阶段 A 把项目误判为“纯静态”（serve 根目录），但 host 检测出真实应用类型
         // （node/python/unknown 且有后端目录），则此 plan 可疑，不写缓存，避免污染二次部署。
@@ -891,6 +914,21 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
 
     // 通过 → 清理可续状态
     await clearVerifyState(project.id);
+    // 提取并回写「成功执行轨迹」，供二次部署直接把成功命令注入 verify agent 快速复现
+    try {
+        const successRun = extractSuccessCommands(verify.trail);
+        if (successRun.length) {
+            await savePlanCache(project.id, {
+                steps: plan.steps,
+                configFiles: plan.configFiles || [],
+                source: plan.source,
+                context: { tree: plan.context?.tree || null, fingerprint: planFingerprint, successRun },
+            });
+            console.error(`[twoStage] success run cached (${successRun.length} commands)`);
+        }
+    } catch (e) {
+        console.error('[twoStage] save success run error:', e.message);
+    }
 
     report({ stage: 'preview', message: '阶段 2 通过，创建预览隧道' });
     let preview = null;

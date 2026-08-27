@@ -302,6 +302,14 @@ function buildSystemPrompt(plan) {
         'Deploy plan to execute:',
         JSON.stringify(plan?.steps || [], null, 2),
         '',
+        (plan?.context?.successRun?.length
+            ? [
+                'PREVIOUS SUCCESSFUL RUN (from the last successful deploy of this project — follow it to go fast, verify each step still works):',
+                plan.context.successRun.map((c) => `  - ${c}`).join('\n'),
+                '- Execute these commands in order. Each one previously succeeded, so do NOT re-explore or wonder how to install/build/serve — just re-run them. Only deviate / fix if one actually fails (e.g. port already in use, dependency changed).',
+                '',
+            ].join('\n')
+            : ''),
         'Config files to create/verify (from analysis; create/overwrite with edit_file as needed):',
         JSON.stringify(plan?.configFiles || [], null, 2),
         '',
@@ -440,7 +448,10 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
                 repeatCount = 0;
             }
             const out = await runTool(parsed.tool, parsed.args || {}, runtimeRef, workspacePath);
-            trail.push({ round, action: 'tool', tool: parsed.tool, args: summarizeArgs(parsed.args), out: summarize(out) });
+            const trailEntry = { round, action: 'tool', tool: parsed.tool, args: summarizeArgs(parsed.args), out: summarize(out) };
+            // 保留完整命令，供成功后提取「成功执行轨迹」复用（summarizeArgs 会截断长命令）
+            if (parsed.tool === 'run_shell') trailEntry.cmd = String(parsed.args?.cmd || '');
+            trail.push(trailEntry);
             console.error(`[analyzeVerify] round ${round}: tool=${parsed.tool} args=${JSON.stringify(summarizeArgs(parsed.args))} out_len=${String(out).length}`);
             messages.push({ role: 'user', content: `Tool "${parsed.tool}" result:\n${out}` });
             messages = trimContext(messages);
