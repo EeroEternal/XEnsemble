@@ -375,18 +375,21 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
     if (!projectId || !mergeRequestId) return;
     if (!silent) setLoading(true);
     try {
-      const [reviewsRes, commentsRes, issueRes, filesRes, mrRes] = await Promise.all([
+      // Use allSettled so a single failed request (common after merge when
+      // GitHub APIs may briefly 410/409) doesn't block the rest from
+      // updating the UI.
+      const [reviewsRes, commentsRes, issueRes, filesRes, mrRes] = await Promise.allSettled([
         gitApi.listReviews(projectId, mergeRequestId),
         gitApi.listReviewComments(projectId, mergeRequestId, { per_page: COMMENTS_PER_PAGE }),
         gitApi.listIssueComments(projectId, mergeRequestId, { per_page: COMMENTS_PER_PAGE }),
         gitApi.listMrFiles(projectId, mergeRequestId),
-        gitApi.getMergeRequest(projectId, mergeRequestId).catch(() => null),
+        gitApi.getMergeRequest(projectId, mergeRequestId),
       ]);
-      setReviews(reviewsRes.reviews || []);
-      setComments(commentsRes.comments || []);
-      setIssueComments(issueRes.comments || []);
-      setMrFiles(filesRes.files || []);
-      if (mrRes) setLocalMR(mrRes);
+      if (reviewsRes.status === 'fulfilled') setReviews(reviewsRes.value?.reviews || []);
+      if (commentsRes.status === 'fulfilled') setComments(commentsRes.value?.comments || []);
+      if (issueRes.status === 'fulfilled') setIssueComments(issueRes.value?.comments || []);
+      if (filesRes.status === 'fulfilled') setMrFiles(filesRes.value?.files || []);
+      if (mrRes.status === 'fulfilled' && mrRes.value) setLocalMR(mrRes.value);
     } catch (err) {
       showToast('error', err.message);
     } finally {
@@ -488,10 +491,14 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
   const canClose = perms ? perms.can_close !== false : true;
   const canReopen = perms ? perms.can_reopen !== false : true;
 
-  const refreshMR = () => {
-    fetchData();
+  const refreshMR = useCallback(async () => {
+    // Give the remote API a brief moment to reflect the state change
+    // (merge/close/reopen) before we re-fetch — otherwise we may still
+    // see the old "open" state.
+    await new Promise((r) => setTimeout(r, 800));
+    await fetchData(true);
     onChanged?.();
-  };
+  }, [fetchData]);
 
   const handleReopen = async () => {
     setActionLoading('reopen');
