@@ -67,26 +67,30 @@
   "create_pull_request_btn": "创建 Pull Request",
   "merge_pull_request": "合并 Pull Request",
   "close_pull_request": "关闭 Pull Request",
-  "close": "关闭",
-  "approve": "批准",
-  "reopen": "重新打开",
+  "close": "Close",
+  "approve": "Approve",
+  "reopen": "Reopen",
   "approve_hint": "批准此 Pull Request",
   "merge_hint": "合并 Pull Request",
   "close_hint": "关闭 Pull Request",
   "reopen_hint": "重新打开 Pull Request",
   "back_to_list": "返回列表",
   "select_pr_hint": "从列表中选择一个 Pull Request 以查看审查",
-  "reply": "回复",
+  "reply": "Reply",
+  "comment": "Comment",
   "reply_placeholder": "回复…",
   "comment_placeholder": "发表评论…",
   "comment_shortcut": "评论 (Ctrl+Enter)",
+  "show_diff_context": "显示差异上下文",
+  "no_reviews_yet": "暂无审查。",
+  "no_conversation_yet": "暂无讨论。",
   "merge_confirm": "合并此 Pull Request？此操作无法撤销。",
   "close_confirm": "关闭此 Pull Request 而不合并？",
   "status_filter": {
-    "open": "开放",
-    "merged": "已合并",
-    "closed": "已关闭",
-    "all": "全部"
+    "open": "Open",
+    "merged": "Merged",
+    "closed": "Closed",
+    "all": "All"
   },
   "status": {
     "modified": "已修改",
@@ -97,6 +101,8 @@
   },
   "empty": {
     "no_changes": "无更改",
+    "no_changes_yet": "暂无更改",
+    "no_changes_yet_hint": "先让 Agent 编辑一些代码。",
     "no_commits": "暂无提交",
     "no_prs": "暂无 Pull Request。",
     "no_prs_hint_create": "创建你的第一个 Pull Request 吧。",
@@ -140,7 +146,8 @@
   "model_other": "{{count}} 个模型",
   "pr": {
     "ai_filling": "AI 正在生成…",
-    "body_placeholder": "描述改动内容和原因"
+    "body_placeholder": "描述改动内容和原因",
+    "title_placeholder": "feat: 描述本次改动"
   },
   "commit_ai_generating": "AI 正在生成…",
   "providers": {

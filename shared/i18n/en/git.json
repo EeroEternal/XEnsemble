@@ -77,9 +77,13 @@
   "back_to_list": "Back to list",
   "select_pr_hint": "Select a pull request from the list to view review",
   "reply": "Reply",
+  "comment": "Comment",
   "reply_placeholder": "Reply…",
   "comment_placeholder": "Leave a comment…",
   "comment_shortcut": "Comment (Ctrl+Enter)",
+  "show_diff_context": "Show diff context",
+  "no_reviews_yet": "No reviews yet.",
+  "no_conversation_yet": "No conversation yet.",
   "merge_confirm": "Merge this pull request? This action cannot be undone.",
   "close_confirm": "Close this pull request without merging?",
   "status_filter": {
@@ -97,6 +101,8 @@
   },
   "empty": {
     "no_changes": "No changes",
+    "no_changes_yet": "No changes yet",
+    "no_changes_yet_hint": "Let the agent edit some code first.",
     "no_commits": "No commits yet",
     "no_prs": "No pull requests yet.",
     "no_prs_hint_create": "Create your first pull request to get started.",
@@ -142,7 +148,8 @@
   "model_other": "{{count}} models",
   "pr": {
     "ai_filling": "AI is generating…",
-    "body_placeholder": "What changed and why"
+    "body_placeholder": "What changed and why",
+    "title_placeholder": "feat: describe the change"
   },
   "providers": {
     "title": "Git Providers",

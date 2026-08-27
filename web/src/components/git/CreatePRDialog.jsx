@@ -182,7 +182,7 @@ export default function CreatePRDialog({
             onChange={(e) => setTitle(e.target.value)}
             placeholder={aiLoading
               ? t('git:pr.ai_filling', { defaultValue: 'AI is generating…' })
-              : 'feat: describe the change'}
+              : t('git:pr.title_placeholder', { defaultValue: 'feat: describe the change' })}
             className="mt-1.5"
             autoFocus
           />

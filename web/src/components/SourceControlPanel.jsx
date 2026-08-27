@@ -633,8 +633,8 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             {!gitHasChanges && conflictFiles.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 gap-2 text-zinc-400">
                 <GitCommit className="h-6 w-6" />
-                <p className="text-[10px]">No changes yet</p>
-                <p className="text-[10px] text-zinc-400">Let the agent edit some code first.</p>
+                <p className="text-[10px]">{t('git:empty.no_changes_yet', { defaultValue: 'No changes yet' })}</p>
+                <p className="text-[10px] text-zinc-400">{t('git:empty.no_changes_yet_hint', { defaultValue: 'Let the agent edit some code first.' })}</p>
               </div>
             ) : (
               <div className="flex flex-col">
