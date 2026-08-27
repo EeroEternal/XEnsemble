@@ -45,7 +45,12 @@
     "create_image_failed": "创建镜像失败",
     "rebuild_image_failed": "重新构建镜像失败",
     "delete_image_failed": "删除镜像失败",
-    "load_build_log_failed": "加载构建日志失败"
+    "load_build_log_failed": "加载构建日志失败",
+    "load_catalog": "加载组件目录失败",
+    "load_images": "加载镜像失败",
+    "create_image": "创建镜像失败",
+    "rebuild_image": "重新构建镜像失败",
+    "delete_image": "删除镜像失败"
   },
   "table": {
     "name": "名称",
@@ -82,5 +87,7 @@
   "no_components_available": "暂无可用组件。",
   "no_components_selected": "尚未选择组件。从列表中选择添加。",
   "start_build": "开始构建",
-  "build_not_started": "构建尚未开始。"
+  "build_not_started": "构建尚未开始。",
+  "no_components": "暂无可用组件。",
+  "no_images_match": "没有匹配的镜像。"
 }

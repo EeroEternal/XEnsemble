@@ -238,6 +238,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const {
     agents,
@@ -331,7 +332,7 @@ function App() {
   if (!authReady) {
     return (
       <div className="flex h-full items-center justify-center bg-zinc-100">
-        <div className="text-sm text-zinc-500">Loading…</div>
+        <div className="text-sm text-zinc-500">{t('common:state.loading')}</div>
       </div>
     );
   }

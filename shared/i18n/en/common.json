@@ -105,5 +105,8 @@
   },
   "placeholder": {
     "default": "Default"
+  },
+  "label": {
+    "saved": "Saved"
   }
 }

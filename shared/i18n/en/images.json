@@ -49,7 +49,8 @@
     "digest": "Digest",
     "started": "Started",
     "finished": "Finished",
-    "duration": "Duration"
+    "duration": "Duration",
+    "digest": "Digest"
   },
   "empty": {
     "no_images": "No images",
@@ -64,7 +65,12 @@
     "create_image_failed": "Failed to create image",
     "rebuild_image_failed": "Failed to rebuild image",
     "delete_image_failed": "Failed to delete image",
-    "load_build_log_failed": "Failed to load build log"
+    "load_build_log_failed": "Failed to load build log",
+    "load_catalog": "Failed to load catalog",
+    "load_images": "Failed to load images",
+    "create_image": "Failed to create image",
+    "rebuild_image": "Failed to rebuild image",
+    "delete_image": "Failed to delete image"
   },
   "actions_for": "Actions for",
   "rebuilding": "Rebuilding…",
@@ -82,5 +88,7 @@
   "no_components_available": "No components available.",
   "no_components_selected": "No components selected yet. Pick from the list to add.",
   "start_build": "Start Build",
-  "build_not_started": "Build has not started yet."
+  "build_not_started": "Build has not started yet.",
+  "no_components": "No components available.",
+  "no_images_match": "No images match your search."
 }

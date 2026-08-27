@@ -109,7 +109,8 @@
     "no_changes_to_describe": "无更改可描述",
     "generate_message_failed": "生成信息失败",
     "connection_failed": "{{label}} 连接失败。",
-    "oauth_not_configured": "{{label}} OAuth 未配置。请联系管理员在 设置 → Git 中配置 OAuth 凭据。"
+    "oauth_not_configured": "{{label}} OAuth 未配置。请联系管理员在 设置 → Git 中配置 OAuth 凭据。",
+    "load_branches_failed": "加载分支失败"
   },
   "toast": {
     "committed": "更改已提交。",
@@ -126,7 +127,12 @@
     "pr_merged": "Pull request 已合并。",
     "pr_closed": "Pull request 已关闭。",
     "pr_approved": "Pull request 已批准。",
-    "already_approved": "您已经批准过此合并请求。"
+    "already_approved": "您已经批准过此合并请求。",
+    "waiting_authorization": "正在等待 {{provider}} 授权…",
+    "connected_as": "已连接到 {{provider}}，用户：{{username}}",
+    "authorization_failed": "{{provider}} 授权失败，请重试。",
+    "authorization_window_closed": "{{provider}} 授权窗口在完成前已关闭，请重试。",
+    "authorization_timed_out": "{{provider}} 授权超时，请重试。"
   },
   "count_one": "{{count}} 个会话",
   "count_other": "{{count}} 个会话",
@@ -176,5 +182,10 @@
   "disconnect": "断开 {{label}}",
   "connected_to": "已连接到 {{label}}",
   "via_pat": "通过 PAT",
-  "oauth_not_configured_short": "OAuth 未配置"
+  "oauth_not_configured_short": "OAuth 未配置",
+  "loading_repositories": "正在加载仓库…",
+  "loading_more": "加载更多…",
+  "no_matches": "无匹配。",
+  "no_repositories": "未找到仓库。",
+  "no_branches": "无分支"
 }

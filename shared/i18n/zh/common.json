@@ -105,5 +105,8 @@
   },
   "placeholder": {
     "default": "默认"
+  },
+  "label": {
+    "saved": "已保存"
   }
 }

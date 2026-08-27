@@ -48,7 +48,7 @@ export default function CreatePRDialog({
       })
       .catch((err) => {
         setBranches([]);
-        setBranchesError(err.message || 'Failed to load branches');
+        setBranchesError(err.message || t('git:error.load_branches_failed', { defaultValue: 'Failed to load branches' }));
       });
   }, [open, projectId]);
 

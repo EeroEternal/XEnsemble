@@ -174,14 +174,14 @@ export default function ProjectSourceSelect({
             {isLoading && allRepos.length === 0 ? (
               <div className="flex items-center gap-2 px-3 py-3 text-xs text-zinc-400">
                 <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
-                Loading repositories…
+                {t('git:loading_repositories', { defaultValue: 'Loading repositories…' })}
               </div>
             ) : allRepos.length === 0 ? (
               filteredRepos.length === 0 ? null : (
-                <p className="px-3 py-3 text-xs text-zinc-400">No matches.</p>
+                <p className="px-3 py-3 text-xs text-zinc-400">{t('git:no_matches', { defaultValue: 'No matches.' })}</p>
               )
             ) : filteredRepos.length === 0 ? (
-              <p className="px-3 py-3 text-xs text-zinc-400">No matches.</p>
+              <p className="px-3 py-3 text-xs text-zinc-400">{t('git:no_matches', { defaultValue: 'No matches.' })}</p>
             ) : (
               <>
                 {filteredRepos.map((r) => {
@@ -204,7 +204,7 @@ export default function ProjectSourceSelect({
                 {isLoading && (
                   <div className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-400">
                     <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
-                    Loading more…
+                    {t('git:loading_more', { defaultValue: 'Loading more…' })}
                   </div>
                 )}
               </>

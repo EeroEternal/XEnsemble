@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import i18next from 'i18next';
 import { ChevronDown, ChevronRight, Loader2, Plus, RefreshCw, RotateCw, ScrollText, Search, Trash2, X } from 'lucide-react';
 
 import Button from '../components/Button';
@@ -60,14 +61,14 @@ const CATEGORY_LABEL_KEYS = {
 async function fetchCatalog() {
   const res = await apiFetch('/api/v1/custom-images/catalog');
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Failed to load catalog');
+  if (!res.ok) throw new Error(data.error || i18next.t('images:error.load_catalog', { defaultValue: 'Failed to load catalog' }));
   return data;
 }
 
 async function fetchImages() {
   const res = await apiFetch('/api/v1/custom-images');
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Failed to load images');
+  if (!res.ok) throw new Error(data.error || i18next.t('images:error.load_images', { defaultValue: 'Failed to load images' }));
   return { images: data.images ?? data, count: data.count, max: data.max };
 }
 
@@ -226,7 +227,7 @@ export function CustomImagesContent() {
         body: JSON.stringify({ name: imageName.trim(), selection }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Failed to create image');
+      if (!res.ok) throw new Error(data.error || t('images:error.create_image', { defaultValue: 'Failed to create image' }));
 
       setImages((prev) => [data, ...prev]);
       setImageQuota((prev) => ({ ...prev, count: prev.count + 1 }));
@@ -234,7 +235,7 @@ export function CustomImagesContent() {
       resetForm();
       showToast('success', 'Image build started');
     } catch (err) {
-      showToast('error', err.message || 'Failed to create image');
+      showToast('error', err.message || t('images:error.create_image', { defaultValue: 'Failed to create image' }));
     } finally {
       setCreating(false);
     }
@@ -245,13 +246,13 @@ export function CustomImagesContent() {
     try {
       const res = await apiFetch(`/api/v1/custom-images/${image.id}/rebuild`, { method: 'POST' });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Failed to rebuild image');
+      if (!res.ok) throw new Error(data.error || t('images:error.rebuild_image', { defaultValue: 'Failed to rebuild image' }));
 
       setImages((prev) => prev.map((img) => (img.id === image.id ? data : img)));
       setPollIds((prev) => new Set([...prev, image.id]));
       showToast('success', `Rebuild started for "${image.name}"`);
     } catch (err) {
-      showToast('error', err.message || 'Failed to rebuild image');
+      showToast('error', err.message || t('images:error.rebuild_image', { defaultValue: 'Failed to rebuild image' }));
     } finally {
       setRebuildingId(null);
     }
@@ -262,7 +263,7 @@ export function CustomImagesContent() {
     try {
       const res = await apiFetch(`/api/v1/custom-images/${image.id}`, { method: 'DELETE' });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Failed to delete image');
+      if (!res.ok) throw new Error(data.error || t('images:error.delete_image', { defaultValue: 'Failed to delete image' }));
 
       setImages((prev) => prev.filter((img) => img.id !== image.id));
       setImageQuota((prev) => ({ ...prev, count: Math.max(0, prev.count - 1) }));
@@ -274,7 +275,7 @@ export function CustomImagesContent() {
       setConfirmDelete(null);
       showToast('success', `Deleted "${image.name}"`);
     } catch (err) {
-      showToast('error', err.message || 'Failed to delete image');
+      showToast('error', err.message || t('images:error.delete_image', { defaultValue: 'Failed to delete image' }));
     } finally {
       setDeletingId(null);
     }
@@ -609,7 +610,7 @@ export function CustomImagesContent() {
                 <td colSpan={6} className={cn(consoleTableBodyCellClass, 'text-center text-zinc-400')}>
                   {images.length === 0
                     ? t('images:empty.no_custom_images', { defaultValue: 'No custom images yet. Click "New Image" to create one.' })
-                    : 'No images match your search.'}
+                    : t('images:no_images_match', { defaultValue: 'No images match your search.' })}
                 </td>
               </tr>
             ) : (

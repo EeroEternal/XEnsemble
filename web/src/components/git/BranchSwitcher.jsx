@@ -46,7 +46,7 @@ export default function BranchSwitcher({ projectId, project, git }) {
       setBranches(data.branches || []);
     } catch (err) {
       setBranches([]);
-      setError(err.message || 'Failed to load branches');
+      setError(err.message || t('git:error.load_branches_failed', { defaultValue: 'Failed to load branches' }));
     } finally {
       setLoading(false);
     }
@@ -121,7 +121,7 @@ export default function BranchSwitcher({ projectId, project, git }) {
             </div>
           ) : branches.length === 0 ? (
             <div className="px-3 py-2 text-xs text-zinc-400">
-              {error || 'No branches'}
+              {error || t('git:no_branches', { defaultValue: 'No branches' })}
               {error && (
                 <button
                   type="button"

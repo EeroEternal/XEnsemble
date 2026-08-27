@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { HelpCircle, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { apiFetch } from '../lib/api';
@@ -13,6 +14,7 @@ import {
 } from '../lib/consoleTokens';
 
 export default function ByokConfigForm({ agentId, loading, onSave }) {
+  const { t } = useTranslation();
   const [fields, setFields] = useState([]);
   const [description, setDescription] = useState('');
   const [values, setValues] = useState({});
@@ -46,7 +48,7 @@ export default function ByokConfigForm({ agentId, loading, onSave }) {
       }
       setValues(savedValues);
     }).catch(() => {
-      setError('Failed to load configuration fields.');
+      setError(t('settings:error.load_fields_failed', { defaultValue: 'Failed to load configuration fields.' }));
     }).finally(() => {
       setValuesLoading(false);
     });
@@ -77,7 +79,7 @@ export default function ByokConfigForm({ agentId, loading, onSave }) {
         body: JSON.stringify({ values }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to save configuration');
+      if (!res.ok) throw new Error(data.error || t('settings:error.save_config_failed'));
       onSave?.();
     } catch (err) {
       setError(err.message);

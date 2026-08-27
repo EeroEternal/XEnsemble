@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import i18next from 'i18next';
 
 export function useSaveFile({ projectId, writeFile, onSaved, showToast }) {
   const [saving, setSaving] = useState(false);
@@ -9,15 +10,15 @@ export function useSaveFile({ projectId, writeFile, onSaved, showToast }) {
     setConflict(null);
     try {
       await writeFile(projectId, path, content);
-      showToast?.('success', 'Saved');
+      showToast?.('success', i18next.t('common:label.saved'));
       onSaved?.(path, content);
       return true;
     } catch (err) {
       if (err.status === 409) {
         setConflict({ path, content });
-        showToast?.('error', 'Conflict: file was modified externally');
+        showToast?.('error', i18next.t('workspace:error.conflict'));
       } else {
-        showToast?.('error', err.message || 'Save failed');
+        showToast?.('error', err.message || i18next.t('workspace:error.save_failed'));
       }
       return false;
     } finally {

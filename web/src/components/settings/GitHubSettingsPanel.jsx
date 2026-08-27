@@ -1,4 +1,5 @@
 import { useState, useEffect, useContext } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AuthContext } from '../../App';
 import Button from '../Button';
 import Input, { FormLabel } from '../Input';
@@ -16,6 +17,7 @@ const MASK = '••••••••';
 const USER_PROVIDERS = ['github', 'gitlab', 'gitea'];
 
 export default function GitHubSettingsPanel() {
+  const { t } = useTranslation();
   const { user } = useContext(AuthContext);
   const { showToast } = useToast();
   const [settings, setSettings] = useState(null);
@@ -53,7 +55,7 @@ export default function GitHubSettingsPanel() {
       })
       .catch((err) => {
         setSettings(null);
-        setError(err.message || 'Failed to load settings');
+        setError(err.message || t('settings:error.load_settings_failed', { defaultValue: 'Failed to load settings' }));
       });
   };
 
@@ -107,7 +109,7 @@ export default function GitHubSettingsPanel() {
     }
 
     if (!settings) {
-      return <p className="text-sm text-zinc-500">Loading…</p>;
+      return <p className="text-sm text-zinc-500">{t('common:state.loading')}</p>;
     }
 
     return (

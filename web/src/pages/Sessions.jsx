@@ -1134,8 +1134,8 @@ export default React.forwardRef(function Sessions({
       {/* Simple delete confirm */}
       {deleteConfirmSession && (
         <ConsoleInlineDialog onClose={() => setDeleteConfirmSession(null)} panelClassName={`${consoleDialogPanelClass} w-full max-w-md`}>
-          <div className={`${consoleStructuredDialogHeaderClass}`}>{t('common:dialog.confirm_title', { defaultValue: 'Confirm' })}</div>
-          <div className="p-5 text-sm">{t('sessions:dialog.remove_session', { defaultValue: 'Remove this session?' })}</div>
+          <div className={`${consoleStructuredDialogHeaderClass}`}>{t('common:dialog.confirm_title')}</div>
+          <div className="p-5 text-sm">{t('sessions:dialog.remove_session')}</div>
           <div className={consoleStructuredDialogFooterClass}>
             <button onClick={() => setDeleteConfirmSession(null)} className="h-9 px-4 border rounded-md">{t('common:action.cancel')}</button>
             <button onClick={() => handleDeleteSession(deleteConfirmSession.sessionId)} className="h-9 px-4 bg-red-600 text-white rounded-md">{t('sessions:action.remove')}</button>
@@ -1151,39 +1151,38 @@ export default React.forwardRef(function Sessions({
           <div className={`${consoleStructuredDialogHeaderClass} flex items-center gap-3`}>
             <Trash2 className={`w-5 h-5 shrink-0 ${textPlaceholder}`} />
             <h3 className={`font-semibold text-sm ${textPrimary}`}>
-              {deleteConfirmWorkspace.isOrphan ? t('sessions:dialog.clear_unassigned', { defaultValue: 'Clear unassigned sessions' }) : t('sessions:dialog.delete_workspace', { defaultValue: 'Delete workspace' })}
+              {deleteConfirmWorkspace.isOrphan ? t('sessions:dialog.clear_unassigned') : t('sessions:dialog.delete_workspace')}
             </h3>
           </div>
           <div className={`p-5 text-sm ${textSecondary}`}>
             {deleteConfirmWorkspace.isOrphan ? (
               <>
-                {t('sessions:dialog.remove_all_sessions_in', { name: t('sessions:label.unassigned') })}
+                {t('sessions:dialog.remove_all_sessions_in')} <span className={`font-medium ${textPrimary}`}>{t('sessions:label.unassigned')}</span>?
                 {deleteConfirmWorkspace.sessionCount > 0 && (
                   <span>
                     {' '}
-                    {t('sessions:dialog.this_will_remove', { defaultValue: 'This will remove' })} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount })}
+                    {t('sessions:dialog.this_will_remove')} {deleteConfirmWorkspace.sessionCount} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount })}
                     {deleteConfirmWorkspace.liveCount > 0 && (
-                      <> ({t('sessions:dialog.including_running', { count: deleteConfirmWorkspace.liveCount, defaultValue: 'including {{count}} running' })})</>
+                      <> ({t('sessions:dialog.including_running', { count: deleteConfirmWorkspace.liveCount })})</>
                     )}
                     .
                   </span>
                 )}
-                <p className={`mt-2 text-xs ${textPlaceholder}`}>{t('sessions:dialog.unassigned_description', { defaultValue: 'Unassigned is not a workspace — it groups sessions without a project. Clearing it removes those sessions from history.' })}</p>
+                <p className={`mt-2 text-xs ${textPlaceholder}`}>{t('sessions:dialog.unassigned_description')}</p>
               </>
             ) : (
               <>
-                {t('sessions:dialog.permanently_delete', { defaultValue: 'Permanently delete' })} <span className={`font-medium ${textPrimary}`}>{deleteConfirmWorkspace.workspaceName}</span>?
+                {t('sessions:dialog.permanently_delete')} <span className={`font-medium ${textPrimary}`}>{deleteConfirmWorkspace.workspaceName}</span>?
                 {deleteConfirmWorkspace.sessionCount > 0 && (
                   <span>
                     {' '}
-                    {t('sessions:dialog.this_will_remove', { defaultValue: 'This will remove' })} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount })}
+                    {t('sessions:dialog.this_will_remove')} {deleteConfirmWorkspace.sessionCount} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount })}
                     {deleteConfirmWorkspace.liveCount > 0 && (
-                      <> ({t('sessions:dialog.including_running', { count: deleteConfirmWorkspace.liveCount, defaultValue: 'including {{count}} running' })})</>
+                      <> ({t('sessions:dialog.including_running', { count: deleteConfirmWorkspace.liveCount })})</>
                     )}
                     .
                   </span>
                 )}
-                <p className={`mt-2 text-xs ${textPlaceholder}`}>{t('sessions:dialog.workspace_files_deleted', { defaultValue: 'All workspace files on the server will be deleted. This frees your workspace quota.' })}</p>
               </>
             )}
           </div>

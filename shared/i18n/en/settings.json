@@ -53,6 +53,12 @@
     "save_keys_failed": "Failed to save keys",
     "save_config_failed": "Failed to save configuration"
   },
+  "error": {
+    "load_fields_failed": "Failed to load configuration fields.",
+    "load_settings_failed": "Failed to load settings",
+    "save_config_failed": "Failed to save configuration",
+    "save_keys_failed": "Failed to save keys"
+  },
   "agent": {
     "title": "Agent Settings",
     "byok_config": "BYOK Configuration",

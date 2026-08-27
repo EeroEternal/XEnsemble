@@ -72,6 +72,8 @@
   },
   "error": {
     "load_files_failed": "加载工作空间文件失败",
-    "read_file_failed": "读取文件失败"
+    "read_file_failed": "读取文件失败",
+    "conflict": "冲突：文件已被外部修改",
+    "save_failed": "保存失败"
   }
 }

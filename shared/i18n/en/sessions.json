@@ -61,7 +61,8 @@
     "save_keys_failed": "Failed to save keys",
     "load_files_failed": "Failed to load workspace files",
     "read_file_failed": "Failed to read file",
-    "not_granted": "You do not have permission to use this agent."
+    "not_granted": "You do not have permission to use this agent.",
+    "load_history_failed": "Failed to load session history"
   },
   "toast": {
     "file_deleted": "File deleted.",
@@ -77,7 +78,7 @@
     "remove_session": "Remove this session?",
     "clear_unassigned": "Clear unassigned sessions",
     "delete_workspace": "Delete workspace",
-    "remove_all_sessions_in": "Remove all sessions in {{name}}?",
+    "remove_all_sessions_in": "Remove all sessions in",
     "this_will_remove": "This will remove",
     "including_running_one": "including {{count}} running",
     "including_running_other": "including {{count}} running",

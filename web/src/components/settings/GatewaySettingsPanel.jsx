@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import i18next from 'i18next';
 import { Plus, Settings2, Play, Square, RotateCw, RefreshCw, Loader2, Pencil, Trash2, Activity, List, CheckCircle, XCircle, Clock, Search } from 'lucide-react';
 import Button from '../Button';
 import Input, { FormLabel, Textarea } from '../Input';
@@ -190,7 +191,7 @@ async function fetchSavedApiKey(name) {
   const res = await apiFetch(`/api/v1/admin/gateway/providers/${encodeURIComponent(name)}/api-key`);
   const data = await res.json();
   if (!res.ok) {
-    throw new Error(data.error || 'Failed to load API Key.');
+    throw new Error(data.error || i18next.t('gateway:error.load_api_key', { defaultValue: 'Failed to load API Key.' }));
   }
   return String(data.data?.api_key || '').trim();
 }
@@ -684,14 +685,14 @@ export default function GatewaySettingsPanel() {
       });
       const data = await res.json();
       if (!res.ok || data.success === false) {
-        const msg = data.error?.message || data.error || 'Failed to update provider';
-        throw new Error(typeof msg === 'string' ? msg : 'Failed to update provider');
+        const msg = data.error?.message || data.error || t('gateway:error.update_provider', { defaultValue: 'Failed to update provider' });
+        throw new Error(typeof msg === 'string' ? msg : t('gateway:error.update_provider', { defaultValue: 'Failed to update provider' }));
       }
       return;
     }
 
     if (!payload.api_key) {
-      throw new Error('API Key is required for new providers.');
+      throw new Error(t('gateway:error.api_key_required', { defaultValue: 'API Key is required for new providers.' }));
     }
     payload.api_key = body.api_key.trim();
     const res = await apiFetch('/api/v1/admin/gateway/providers', {
@@ -701,8 +702,8 @@ export default function GatewaySettingsPanel() {
     });
     const data = await res.json();
     if (!res.ok || data.success === false) {
-      const msg = data.error?.message || data.error || 'Failed to save provider';
-      throw new Error(typeof msg === 'string' ? msg : 'Failed to save provider');
+      const msg = data.error?.message || data.error || t('gateway:error.save_provider', { defaultValue: 'Failed to save provider' });
+      throw new Error(typeof msg === 'string' ? msg : t('gateway:error.save_provider', { defaultValue: 'Failed to save provider' }));
     }
   };
 
@@ -818,8 +819,8 @@ export default function GatewaySettingsPanel() {
       });
       const data = await res.json();
       if (!res.ok || data.success === false) {
-        const msg = data.error?.message || data.error || 'Failed to delete provider';
-        throw new Error(typeof msg === 'string' ? msg : 'Failed to delete provider');
+        const msg = data.error?.message || data.error || t('gateway:error.delete_provider', { defaultValue: 'Failed to delete provider' });
+        throw new Error(typeof msg === 'string' ? msg : t('gateway:error.delete_provider', { defaultValue: 'Failed to delete provider' }));
       }
       if (providerDialog?.form?.name === name) setProviderDialog(null);
       await loadData();
@@ -832,7 +833,7 @@ export default function GatewaySettingsPanel() {
   };
 
   if (loading) {
-    return <p className="text-sm text-zinc-500">Loading…</p>;
+    return <p className="text-sm text-zinc-500">{t('common:state.loading')}</p>;
   }
 
   const agentBaseUrl = status?.llm_proxy_url || status?.baseUrl || `http://${processConfig.host === '0.0.0.0' ? '127.0.0.1' : processConfig.host}:${processConfig.port}/api/v1/llm`;
@@ -954,7 +955,7 @@ export default function GatewaySettingsPanel() {
           </div>
           {filteredProviders.length === 0 ? (
             <p className="text-sm text-zinc-500">
-              {providers.length === 0 ? 'No providers yet.' : 'No providers match your search.'}
+              {providers.length === 0 ? t('gateway:no_providers', { defaultValue: 'No providers yet.' }) : t('gateway:no_providers_match', { defaultValue: 'No providers match your search.' })}
             </p>
           ) : (
             <div className={consoleTableShellClass}>

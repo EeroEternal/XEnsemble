@@ -116,7 +116,7 @@ export default function GitProvidersSettingsPanel() {
       })
       .catch((err) => {
         setSettings(null);
-        setError(err.message || 'Failed to load settings');
+        setError(err.message || t('settings:error.load_settings_failed', { defaultValue: 'Failed to load settings' }));
       });
   };
 

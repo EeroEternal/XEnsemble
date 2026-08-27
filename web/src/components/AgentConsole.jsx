@@ -356,7 +356,7 @@ function AgentConsole({
         try {
           const response = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/transcript`);
           const data = await response.json();
-          if (!response.ok) throw new Error(data.error || 'Failed to load session history');
+          if (!response.ok) throw new Error(data.error || t('sessions:error.load_history_failed', { defaultValue: 'Failed to load session history' }));
           if (data.head != null && data.head > 0) setCachedSeq(sessionId, data.head);
           const systemMsg = `\r\n\x1b[33m${t('sessions:terminal.system_prefix')} ${t('sessions:terminal.paused')}\x1b[0m\r\n`;
           // Use terminal.write callback to hide overlay only AFTER xterm.js

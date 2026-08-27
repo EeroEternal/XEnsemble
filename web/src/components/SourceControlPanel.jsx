@@ -246,11 +246,11 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
         body: '{}',
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to generate message');
+      if (!res.ok) throw new Error(data.error || t('git:error.generate_message_failed'));
       if (data.message) setCommitMessage(data.message);
       else showToast('error', data.error || 'No changes to describe');
     } catch (err) {
-      showToast('error', err.message || 'Failed to generate message');
+      showToast('error', err.message || t('git:error.generate_message_failed'));
     } finally {
       setGeneratingMsg(false);
     }

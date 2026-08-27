@@ -111,7 +111,8 @@
     "no_changes_to_describe": "No changes to describe",
     "generate_message_failed": "Failed to generate message",
     "connection_failed": "{{label}} connection failed.",
-    "oauth_not_configured": "{{label}} OAuth is not configured. Ask an administrator to set up OAuth credentials in Settings → Git."
+    "oauth_not_configured": "{{label}} OAuth is not configured. Ask an administrator to set up OAuth credentials in Settings → Git.",
+    "load_branches_failed": "Failed to load branches"
   },
   "toast": {
     "committed": "Changes committed.",
@@ -128,7 +129,12 @@
     "pr_merged": "Pull request merged.",
     "pr_closed": "Pull request closed.",
     "pr_approved": "Pull request approved.",
-    "already_approved": "You have already approved this merge request."
+    "already_approved": "You have already approved this merge request.",
+    "waiting_authorization": "Waiting for {{provider}} authorization…",
+    "connected_as": "Connected to {{provider}} as {{username}}",
+    "authorization_failed": "{{provider}} authorization failed. Please try again.",
+    "authorization_window_closed": "{{provider}} authorization window was closed before completing. Please try again.",
+    "authorization_timed_out": "{{provider}} authorization timed out. Please try again."
   },
   "count_one": "{{count}} session",
   "count_other": "{{count}} sessions",
@@ -177,5 +183,10 @@
   "disconnect": "Disconnect {{label}}",
   "connected_to": "Connected to {{label}}",
   "via_pat": "via PAT",
-  "oauth_not_configured_short": "OAuth not configured"
+  "oauth_not_configured_short": "OAuth not configured",
+  "loading_repositories": "Loading repositories…",
+  "loading_more": "Loading more…",
+  "no_matches": "No matches.",
+  "no_repositories": "No repositories found.",
+  "no_branches": "No branches"
 }

@@ -53,6 +53,12 @@
     "save_keys_failed": "保存密钥失败",
     "save_config_failed": "保存配置失败"
   },
+  "error": {
+    "load_fields_failed": "加载配置字段失败。",
+    "load_settings_failed": "加载设置失败",
+    "save_config_failed": "保存配置失败",
+    "save_keys_failed": "保存密钥失败"
+  },
   "agent": {
     "title": "Agent 设置",
     "byok_config": "BYOK 配置",

@@ -475,11 +475,11 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
             {reposLoading ? (
               <div className="flex items-center justify-center gap-2 p-4 text-sm text-zinc-500">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Loading repositories…
+                {t('git:loading_repositories', { defaultValue: 'Loading repositories…' })}
               </div>
             ) : filteredRepos.length === 0 ? (
               <div className="p-4 text-center text-sm text-zinc-500">
-                {repos.length === 0 ? 'No repositories found.' : 'No matches.'}
+                {repos.length === 0 ? t('git:no_repositories', { defaultValue: 'No repositories found.' }) : t('git:no_matches', { defaultValue: 'No matches.' })}
               </div>
             ) : (
               <ul className="divide-y divide-zinc-200">

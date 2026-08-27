@@ -61,7 +61,8 @@
     "save_keys_failed": "保存密钥失败",
     "load_files_failed": "加载工作空间文件失败",
     "read_file_failed": "读取文件失败",
-    "not_granted": "你没有使用此 Agent 的权限。"
+    "not_granted": "你没有使用此 Agent 的权限。",
+    "load_history_failed": "加载会话历史失败"
   },
   "toast": {
     "file_deleted": "文件已删除。",
@@ -77,7 +78,7 @@
     "remove_session": "移除这个会话？",
     "clear_unassigned": "清除未分配的会话",
     "delete_workspace": "删除工作空间",
-    "remove_all_sessions_in": "移除「{{name}}」中的所有会话？",
+    "remove_all_sessions_in": "移除所有会话中的",
     "this_will_remove": "这将移除",
     "including_running_one": "含 {{count}} 个运行中",
     "including_running_other": "含 {{count}} 个运行中",

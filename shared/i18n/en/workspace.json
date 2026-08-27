@@ -72,6 +72,8 @@
   },
   "error": {
     "load_files_failed": "Failed to load workspace files",
-    "read_file_failed": "Failed to read file"
+    "read_file_failed": "Failed to read file",
+    "conflict": "Conflict: file was modified externally",
+    "save_failed": "Save failed"
   }
 }

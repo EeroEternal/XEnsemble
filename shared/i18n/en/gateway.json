@@ -50,7 +50,12 @@
     "delete_failed": "Failed to delete provider",
     "provider_not_found": "Provider \"{{name}}\" not found.",
     "no_api_key": "No API Key configured.",
-    "no_base_url": "Provider has no Base URL configured."
+    "no_base_url": "Provider has no Base URL configured.",
+    "load_api_key": "Failed to load API Key.",
+    "update_provider": "Failed to update provider",
+    "api_key_required": "API Key is required for new providers.",
+    "save_provider": "Failed to save provider",
+    "delete_provider": "Failed to delete provider"
   },
   "toast": {
     "models_fetched_one": "Fetched {{count}} model",
@@ -70,5 +75,7 @@
   "add": "Add",
   "upstream_url_hint": "Leave empty to use the embedded local UniGateway process.",
   "auto_start_hint": "Start automatically when the server boots",
-  "providers_count": "{{count}} providers"
+  "providers_count": "{{count}} providers",
+  "no_providers": "No providers yet.",
+  "no_providers_match": "No providers match your search."
 }

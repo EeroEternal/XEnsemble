@@ -25,7 +25,12 @@
     "delete_failed": "删除提供商失败",
     "provider_not_found": "未找到提供商 \"{{name}}\"。",
     "no_api_key": "未配置 API Key。",
-    "no_base_url": "提供商未配置 Base URL。"
+    "no_base_url": "提供商未配置 Base URL。",
+    "load_api_key": "加载 API 密钥失败。",
+    "update_provider": "更新提供商失败",
+    "api_key_required": "新提供商必须填写 API 密钥。",
+    "save_provider": "保存提供商失败",
+    "delete_provider": "删除提供商失败"
   },
   "toast": {
     "models_fetched_one": "已获取 {{count}} 个模型",
@@ -70,5 +75,7 @@
   "add": "添加",
   "upstream_url_hint": "留空使用内置的本地 UniGateway 进程。",
   "auto_start_hint": "服务器启动时自动启动",
-  "providers_count": "{{count}} 个提供商"
+  "providers_count": "{{count}} 个提供商",
+  "no_providers": "暂无提供商。",
+  "no_providers_match": "没有匹配的提供商。"
 }
