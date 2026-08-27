@@ -17,7 +17,10 @@
   "empty": {
     "no_sessions": "No sessions in this workspace yet.",
     "select_workspace": "Select a workspace to view its sessions.",
-    "no_matching": "No matching sessions"
+    "no_matching": "No matching sessions",
+    "no_active_session": "No active session",
+    "create_workspace_hint": "Create a workspace, then use New Agent in the sidebar to get started.",
+    "select_session_hint": "Select a session from the sidebar, or use New Agent to start one in a workspace."
   },
   "action": {
     "stop_and_remove": "Stop and remove",
@@ -31,7 +34,9 @@
     "starting_session": "Starting session",
     "hide_side_panel": "Hide side panel",
     "show_side_panel": "Show side panel",
-    "back_to_workspaces": "Back to workspaces"
+    "back_to_workspaces": "Back to workspaces",
+    "removing": "Removing…",
+    "clear_all": "Clear all"
   },
   "label": {
     "unassigned": "Unassigned",
@@ -68,7 +73,16 @@
   },
   "dialog": {
     "agent_configuration": "Agent Configuration",
-    "workspace_files_deleted": "All workspace files on the server will be deleted. This frees your workspace quota."
+    "workspace_files_deleted": "All workspace files on the server will be deleted. This frees your workspace quota.",
+    "remove_session": "Remove this session?",
+    "clear_unassigned": "Clear unassigned sessions",
+    "delete_workspace": "Delete workspace",
+    "remove_all_sessions_in": "Remove all sessions in {{name}}?",
+    "this_will_remove": "This will remove",
+    "including_running_one": "including {{count}} running",
+    "including_running_other": "including {{count}} running",
+    "unassigned_description": "Unassigned is not a workspace — it groups sessions without a project. Clearing it removes those sessions from history.",
+    "permanently_delete": "Permanently delete"
   },
   "terminal": {
     "not_running": "Session is not running.",

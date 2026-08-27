@@ -1157,11 +1157,11 @@ export default React.forwardRef(function Sessions({
           <div className={`p-5 text-sm ${textSecondary}`}>
             {deleteConfirmWorkspace.isOrphan ? (
               <>
-                {t('sessions:dialog.remove_all_sessions_in', { defaultValue: 'Remove all sessions in' })} <span className={`font-medium ${textPrimary}`}>{t('sessions:label.unassigned')}</span>?
+                {t('sessions:dialog.remove_all_sessions_in', { name: t('sessions:label.unassigned') })}
                 {deleteConfirmWorkspace.sessionCount > 0 && (
                   <span>
                     {' '}
-                    {t('sessions:dialog.this_will_remove', { defaultValue: 'This will remove' })} {deleteConfirmWorkspace.sessionCount} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount, defaultValue: 'session' })}
+                    {t('sessions:dialog.this_will_remove', { defaultValue: 'This will remove' })} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount })}
                     {deleteConfirmWorkspace.liveCount > 0 && (
                       <> ({t('sessions:dialog.including_running', { count: deleteConfirmWorkspace.liveCount, defaultValue: 'including {{count}} running' })})</>
                     )}
@@ -1176,7 +1176,7 @@ export default React.forwardRef(function Sessions({
                 {deleteConfirmWorkspace.sessionCount > 0 && (
                   <span>
                     {' '}
-                    {t('sessions:dialog.this_will_remove', { defaultValue: 'This will remove' })} {deleteConfirmWorkspace.sessionCount} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount, defaultValue: 'session' })}
+                    {t('sessions:dialog.this_will_remove', { defaultValue: 'This will remove' })} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount })}
                     {deleteConfirmWorkspace.liveCount > 0 && (
                       <> ({t('sessions:dialog.including_running', { count: deleteConfirmWorkspace.liveCount, defaultValue: 'including {{count}} running' })})</>
                     )}
@@ -1193,7 +1193,7 @@ export default React.forwardRef(function Sessions({
               onClick={() => setDeleteConfirmWorkspace(null)}
               className={`h-9 px-4 ${bgCanvas} border ${borderHairline} ${textPrimary} rounded-md text-sm font-medium ${hoverBgSecondary} ${transitionBase}`}
             >
-              Cancel
+              {t('common:action.cancel')}
             </button>
             <button
               type="button"

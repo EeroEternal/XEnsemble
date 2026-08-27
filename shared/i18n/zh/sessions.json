@@ -17,7 +17,10 @@
   "empty": {
     "no_sessions": "此工作空间暂无会话。",
     "select_workspace": "选择一个工作空间以查看其会话。",
-    "no_matching": "无匹配会话"
+    "no_matching": "无匹配会话",
+    "no_active_session": "暂无活动会话",
+    "create_workspace_hint": "先创建一个工作空间，然后在侧边栏使用 New Agent 开始。",
+    "select_session_hint": "从侧边栏选择一个会话，或使用 New Agent 在工作空间中启动一个。"
   },
   "action": {
     "stop_and_remove": "停止并移除",
@@ -31,7 +34,9 @@
     "starting_session": "正在启动会话",
     "hide_side_panel": "隐藏侧边栏",
     "show_side_panel": "显示侧边栏",
-    "back_to_workspaces": "返回工作空间"
+    "back_to_workspaces": "返回工作空间",
+    "removing": "移除中…",
+    "clear_all": "全部清除"
   },
   "label": {
     "unassigned": "未分配",
@@ -68,7 +73,16 @@
   },
   "dialog": {
     "agent_configuration": "Agent 配置",
-    "workspace_files_deleted": "服务器上的所有工作空间文件将被删除。这将释放你的工作空间配额。"
+    "workspace_files_deleted": "服务器上的所有工作空间文件将被删除。这将释放你的工作空间配额。",
+    "remove_session": "移除这个会话？",
+    "clear_unassigned": "清除未分配的会话",
+    "delete_workspace": "删除工作空间",
+    "remove_all_sessions_in": "移除「{{name}}」中的所有会话？",
+    "this_will_remove": "这将移除",
+    "including_running_one": "含 {{count}} 个运行中",
+    "including_running_other": "含 {{count}} 个运行中",
+    "unassigned_description": "未分配不是工作空间——它聚合了没有项目的会话。清除会将那些会话从历史记录中移除。",
+    "permanently_delete": "永久删除"
   },
   "terminal": {
     "not_running": "会话未运行。",
