@@ -105,13 +105,15 @@ pub fn build_chat_request(
 /// meaning in the OpenAI Chat Completions schema.  When an Anthropic-protocol
 /// client (e.g. Claude Code) sends a request that gets translated to an
 /// OpenAI upstream, these fields must be stripped — otherwise strict OpenAI
-/// endpoints (e.g. tokenhub) reject the payload with HTTP 400.
+/// endpoints (e.g. tokenhub, zhipu coding endpoint on GLM-5.3+) reject the
+/// payload with HTTP 400.
 fn is_anthropic_only_extra_key(key: &str) -> bool {
     matches!(
         key,
         "thinking"
             | "enable_thinking"
             | "service_tier"
+            | "metadata"
             | "anthropic_version"
             | "anthropic_beta"
     ) || key.starts_with("anthropic_")

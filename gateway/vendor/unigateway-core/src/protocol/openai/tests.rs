@@ -413,6 +413,10 @@ fn build_chat_request_strips_anthropic_only_extra_keys() {
                 ("thinking".to_string(), json!({"type": "enabled", "budget_tokens": 1024})),
                 ("service_tier".to_string(), json!("priority")),
                 ("anthropic_version".to_string(), json!("2023-06-01")),
+                (
+                    "metadata".to_string(),
+                    json!({"user_id": "user_abc_account__session_abc12345-6789"}),
+                ),
                 ("reasoning_effort".to_string(), json!("high")),
             ]),
             metadata: HashMap::new(),
@@ -424,6 +428,10 @@ fn build_chat_request_strips_anthropic_only_extra_keys() {
     assert!(body.get("thinking").is_none(), "thinking should be stripped");
     assert!(body.get("service_tier").is_none(), "service_tier should be stripped");
     assert!(body.get("anthropic_version").is_none(), "anthropic_version should be stripped");
+    assert!(
+        body.get("metadata").is_none(),
+        "metadata should be stripped"
+    );
     assert_eq!(
         body.get("reasoning_effort").and_then(Value::as_str),
         Some("high"),
