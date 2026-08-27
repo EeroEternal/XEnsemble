@@ -147,8 +147,10 @@ async function createUser({ username, password, role = 'user', status = 'active'
     const userId = `usr_${crypto.randomBytes(6).toString('hex')}`;
     const now = Date.now();
     const usersCount = await db.select({ count: sql`count(*)` }).from(schema.users);
-    const effectiveRole = usersCount[0].count === 0 ? 'admin' : role;
-    const effectiveStatus = usersCount[0].count === 0 ? 'active' : status;
+    // postgres-js 返回 count 为字符串，须转数字再比较
+    const isFirstUser = Number(usersCount[0].count) === 0;
+    const effectiveRole = isFirstUser ? 'admin' : role;
+    const effectiveStatus = isFirstUser ? 'active' : status;
 
     try {
         await db.insert(schema.users).values({
@@ -219,7 +221,7 @@ async function registerUser({ username, password }) {
     }
 
     const usersCount = await db.select({ count: sql`count(*)` }).from(schema.users);
-    const isFirst = usersCount[0].count === 0;
+    const isFirst = Number(usersCount[0].count) === 0;
     const role = isFirst ? 'admin' : 'user';
     const status = mode === 'approval' && !isFirst ? 'pending' : 'active';
 

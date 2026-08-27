@@ -366,6 +366,14 @@ fn split_provider_model(raw: &str) -> (String, String) {
     }
 }
 
+/// Strip the `anthropic.` discovery prefix the control plane adds to
+/// `/v1/models` ids for claude-code (which otherwise filters out non-Anthropic
+/// shaped ids). After stripping, the target routes like any other bare or
+/// `provider/model` id.
+fn strip_model_discovery_prefix(raw: &str) -> &str {
+    raw.strip_prefix("anthropic.").unwrap_or(raw)
+}
+
 /// Resolve the routing hint for a raw model string.
 /// - `provider/model` → the explicit provider hint.
 /// - a bare model alias (e.g. `deepseek-v4-flash`) → the bound provider whose
@@ -451,6 +459,7 @@ async fn anthropic_messages(
         .get("model")
         .and_then(Value::as_str)
         .unwrap_or("claude-sonnet-4-20250514");
+    let raw_model = strip_model_discovery_prefix(raw_model);
     let (_, default_model) = split_provider_model(raw_model);
     let provider_hint = resolve_provider_hint(&state, &service_id, raw_model).await;
 

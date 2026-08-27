@@ -232,6 +232,11 @@ async function applyAgentGatewayModel(agentId, env) {
         out.HERMES_MODEL = target;
     }
     if (CLAUDE_CODE_AGENT_IDS.has(agentId)) {
+        // claude-code >= 2.1.236: ANTHROPIC_MODEL pins the model, so a /model
+        // pick is silently ignored. ANTHROPIC_DEFAULT_MODEL sets the starting
+        // model while still letting /model override and persist it.
+        delete out.ANTHROPIC_MODEL;
+        out.ANTHROPIC_DEFAULT_MODEL = target;
         // Enable gateway /v1/models discovery so /model lists the configured
         // gateway models. The LLM proxy returns an Anthropic-compatible format
         // that passes claude-code's validation.
@@ -374,6 +379,10 @@ async function buildGatewaySpawnEnv(agentId, envRequired, { draftModel, draftPro
         const target = composeGatewayModelTarget(provider, model);
         for (const key of GATEWAY_MODEL_ENV_KEYS) env[key] = target;
         if (agentId === 'hermes') env.HERMES_MODEL = target;
+        if (CLAUDE_CODE_AGENT_IDS.has(agentId)) {
+            delete env.ANTHROPIC_MODEL;
+            env.ANTHROPIC_DEFAULT_MODEL = target;
+        }
     }
     env = applySpawnDefaults({ ...platform, ...env }, effectiveRequired);
     env = applyGatewayAgentEnv(agentId, env, platform, effectiveRequired);
