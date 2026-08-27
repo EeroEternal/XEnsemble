@@ -187,14 +187,42 @@ async function clearVerifyState(projectId) {
 // —— 阶段 A 部署计划缓存：二次部署复用上次分析结果，跳过 opencode/LLM 探索 ——
 const PLAN_CACHE_TTL_MS = Number(process.env.DEPLOY_PLAN_CACHE_TTL_MS) || 24 * 60 * 60 * 1000;
 
-async function loadPlanCache(projectId) {
+// 项目内容指纹：优先 git HEAD（host 上有 .git 时），否则回退关键 manifest 文件的哈希。
+// 用于缓存失效判断——内容变了立即失效而非靠时间猜测，避免「项目已改仍用旧计划」。
+function computeProjectFingerprint(hostWs, wsPath) {
+    const base = (hostWs && fs.existsSync(hostWs)) ? hostWs : (wsPath || '');
+    if (!base) return null;
+    try {
+        const sha = execSync('git rev-parse HEAD', { cwd: base, stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000 })
+            .toString().trim();
+        if (sha) return `git:${sha}`;
+    } catch { /* 无 git 仓库或失败，回退 manifest 哈希 */ }
+    const manifests = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'requirements.txt', 'go.mod', 'Cargo.toml', 'pyproject.toml', 'package.json'];
+    const h = crypto.createHash('sha256');
+    let any = false;
+    for (const m of manifests) {
+        const p = path.join(base, m);
+        try {
+            if (fs.existsSync(p)) { h.update(`${m}:${fs.readFileSync(p, 'utf8')}\n`); any = true; }
+        } catch { /* ignore */ }
+    }
+    return any ? `files:${h.digest('hex').slice(0, 16)}` : null;
+}
+
+async function loadPlanCache(projectId, fingerprint) {
     try {
         const rows = await db.select().from(schema.deployPlanCache).where(eq(schema.deployPlanCache.projectId, projectId));
         if (!rows.length) return null;
         const row = rows[0];
         const plan = row.plan || {};
         if (!Array.isArray(plan.steps) || !plan.steps.length) return null;
-        if (Date.now() - Number(row.updatedAt || 0) > PLAN_CACHE_TTL_MS) return null; // 过期失效
+        if (Date.now() - Number(row.updatedAt || 0) > PLAN_CACHE_TTL_MS) return null; // 过期兜底
+        // 指纹不匹配 → 项目内容已变，缓存作废（比 TTL 更精确的失效判断）。
+        // 无 fingerprint 的旧格式缓存也一并作废，让下次保存带上指纹（渐进升级）。
+        if (fingerprint && plan.context?.fingerprint !== fingerprint) {
+            console.error(`[twoStage] plan cache stale (fingerprint ${plan.context?.fingerprint ? 'changed' : 'missing'}), re-analyzing`);
+            return null;
+        }
         return { steps: plan.steps, configFiles: plan.configFiles || [], source: row.source || 'cache', context: plan.context || {} };
     } catch (e) {
         console.error('[twoStage] loadPlanCache error:', e.message);
@@ -752,9 +780,11 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         }
     }
 
-    // 先查跨次部署的计划缓存：命中则跳过 opencode/LLM 探索分析（二次部署省 1~4 分钟）
+    // 先查跨次部署的计划缓存：命中则跳过 opencode/LLM 探索分析（二次部署省 1~4 分钟）。
+    // 用项目内容指纹做失效判断：内容变了即使 TTL 内也会重新分析。
+    let planFingerprint = computeProjectFingerprint(hostWs, wsPath);
     if (!plan) {
-        const cached = await loadPlanCache(project.id);
+        const cached = await loadPlanCache(project.id, planFingerprint);
         if (cached) {
             plan = {
                 steps: cached.steps,
@@ -813,7 +843,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         if (planFresh && staticServe && detected.type !== 'static') {
             console.error(`[twoStage] skip caching suspicious static-serve plan (project type=${detected.type})`);
         } else if (planFresh) {
-            await savePlanCache(project.id, { steps: plan.steps, configFiles: plan.configFiles, source: plan.source, context: { tree } });
+            await savePlanCache(project.id, { steps: plan.steps, configFiles: plan.configFiles, source: plan.source, context: { tree, fingerprint: planFingerprint } });
         }
     }
     const verify = await withTimeout(

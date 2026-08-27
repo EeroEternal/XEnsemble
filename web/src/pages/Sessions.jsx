@@ -234,6 +234,18 @@ export default React.forwardRef(function Sessions({
     } catch { /* ignore */ }
   }, [activeSession?.projectId]);
 
+  // 方案 B：deployStatus 不永久凝固——它是一次性"部署动作"状态，成功后若预览资源已消失
+  // （stopped/expired/被回收 → usePreview 的 status 变为 none 或 stopped），则重置回 idle，
+  // 避免右上角永久残留「已完成」徽章与底下的 Deploy 按钮自相矛盾。
+  const previewStatus = preview.status;
+  useEffect(() => {
+    if (deployStatus === 'finished' || deployStatus === 'aborted') {
+      if (previewStatus === 'none' || previewStatus === 'stopped') {
+        setDeployStatus('idle');
+      }
+    }
+  }, [deployStatus, previewStatus]);
+
   const [gitDiffView, setGitDiffView] = useState(null);
 
   const [configEnvVars, setConfigEnvVars] = useState([{ key: '', value: '' }]);
