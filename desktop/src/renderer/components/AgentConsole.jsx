@@ -64,11 +64,6 @@ function stripAlternateScreen(text) {
     .replace(/\x1b\[\?1015l/g, '');
 }
 
-// Mouse-tracking SET sequences that capture mouse events, preventing text
-// selection.  Stripped in live mode so xterm.js handles mouse selection
-// natively.  Wheel scrolling is preserved via a wheel event listener.
-const MOUSE_TRACKING_SET_RE = /\x1b\[\?(?:1000|1002|1003|1005|1006|1015|1016)h/g;
-
 function parseMessage(raw) {
   if (typeof raw === 'string') return JSON.parse(raw);
   return JSON.parse(raw.toString());
@@ -208,7 +203,6 @@ function AgentConsole({
     let lastSentCols = 0;
     let lastSentRows = 0;
     let writeRafId = null;
-    let coalesceTimer = null;
     const resizeTimers = [];
 
     // Virtual screen for ANSI diff: declared at useEffect scope so fitTerminal
@@ -313,22 +307,12 @@ function AgentConsole({
       }
     };
 
-    const handleWheel = (e) => {
-      const inAlt = terminal.buffer.active === terminal.buffer.alternate;
-      if (!inAlt || serverEnded || disposed) return;
-      if (wsRef.current?.readyState !== WebSocket.OPEN) return;
-      e.preventDefault();
-      e.stopPropagation();
-      wsRef.current.send(JSON.stringify({ type: 'input', data: e.deltaY > 0 ? '\x1b[6~' : '\x1b[5~' }));
-    };
-
     const focusTerminal = () => {
       if (!serverEnded) terminal.focus();
     };
     host.addEventListener('mousedown', focusTerminal);
     host.addEventListener('click', focusTerminal);
     host.addEventListener('contextmenu', handleContextMenu);
-    host.addEventListener('wheel', handleWheel, { passive: false });
 
     let lastHostWidth = 0;
     let lastHostHeight = 0;
@@ -590,12 +574,10 @@ function AgentConsole({
 
           const flushWriteBuffer = () => {
             writeRafId = null;
-            if (disposed) return;
             if (pendingSeq != null) {
               setCachedSeq(sessionId, pendingSeq);
               pendingSeq = null;
             }
-            if (!writeBuffer && !syncTermPending) return;
 
             let remaining = syncTermPending + (writeBuffer || '');
             syncTermPending = '';
@@ -652,85 +634,14 @@ function AgentConsole({
             }
 
             if (inAltScreen) {
-              // Buffer incomplete sync-term blocks even in alt screen.
-              // xterm.js ignores ?2026h/l wrappers but executes internal
-              // content (cursor positioning, space-fill). If a block is
-              // split across flushes, the first fragment clears/overwrites
-              // rows whose full content hasn't arrived yet, leaving blank
-              // gaps. Buffer until the matching ?2026l arrives.
-              //
-              // Coalesce multiple complete blocks across animation frames:
-              // agents like qwen-code emit full-screen redraws at 96% gaps
-              // < 100ms.  Writing every intermediate block causes xterm.js
-              // to process 5+ full-screen redraws per second, producing
-              // visible flickering.  Keep only the last block (full-screen
-              // redraws overwrite each other).  A 100ms timer lets blocks
-              // from subsequent animation frames accumulate before the write.
-              if (remaining.includes('\x1b[?2026h')) {
-                const syncEnd = remaining.indexOf('\x1b[?2026l');
-                if (syncEnd === -1) {
-                  const syncStart = remaining.indexOf('\x1b[?2026h');
-                  const before = remaining.slice(0, syncStart);
-                  syncTermPending = remaining.slice(syncStart);
-                  if (before) writeTerminalData(before);
-                } else {
-                  // Complete block(s) found.  Buffer and coalesce with a
-                  // timer so blocks arriving in subsequent animation frames
-                  // are accumulated before the final write.
-                  syncTermPending = remaining;
-                  if (coalesceTimer) return;
-                  coalesceTimer = setTimeout(() => {
-                    coalesceTimer = null;
-                    if (disposed) return;
-                    const data = syncTermPending;
-                    syncTermPending = '';
-                    if (!data) return;
-                    // Find the last COMPLETE sync-term block (has both
-                    // ?2026h and ?2026l).  Use lastIndexOf('?2026l') to
-                    // find the last block end, then locate its matching
-                    // '?2026h'.  This correctly handles trailing incomplete
-                    // blocks (a ?2026h without a matching ?2026l) which
-                    // occur when the server's flush splits a block across
-                    // WS messages.  Previously, a trailing incomplete block
-                    // caused ALL complete blocks to be discarded (the code
-                    // only emitted data before the FIRST ?2026h), leaving
-                    // the screen frozen in 98.6% of timer fires.
-                    const lastCompleteEnd = data.lastIndexOf('\x1b[?2026l');
-                    if (lastCompleteEnd === -1) {
-                      // No complete block yet; keep buffering everything.
-                      syncTermPending = data;
-                      return;
-                    }
-                    const lastCompleteStart = data.lastIndexOf('\x1b[?2026h', lastCompleteEnd);
-                    const blockEnd = lastCompleteEnd + '\x1b[?2026l'.length;
-                    // Save any trailing incomplete block (data after the
-                    // last complete block) for the next coalesce cycle.
-                    const afterBlock = data.slice(blockEnd);
-                    if (afterBlock.includes('\x1b[?2026h')) {
-                      syncTermPending = afterBlock.slice(afterBlock.indexOf('\x1b[?2026h'));
-                    }
-                    // Extract all non-sync-term data (content outside
-                    // ?2026h...?2026l blocks), stopping before any trailing
-                    // incomplete block.  This preserves terminal-state
-                    // sequences while discarding intermediate full-screen
-                    // redraws.
-                    let nonSync = '';
-                    let pos = 0;
-                    while (pos < data.length) {
-                      const h = data.indexOf('\x1b[?2026h', pos);
-                      if (h === -1) { nonSync += data.slice(pos); break; }
-                      nonSync += data.slice(pos, h);
-                      const l = data.indexOf('\x1b[?2026l', h);
-                      if (l === -1) break;
-                      pos = l + '\x1b[?2026l'.length;
-                    }
-                    writeTerminalData(
-                      nonSync
-                      + data.slice(lastCompleteStart, blockEnd)
-                      + '\x1b[?25l'
-                    );
-                  }, 100);
-                }
+              // In alt screen mode, write all data directly to terminal.
+              // The previous sync-term buffering caused data loss when
+              // WebSocket messages split sync-term blocks across reconnects:
+              // incomplete blocks were stuck in syncTermPending and lost
+              // when a new connect() created a fresh syncTermPending.
+              if (syncTermPending) {
+                writeTerminalData(syncTermPending + remaining);
+                syncTermPending = '';
               } else {
                 writeTerminalData(remaining);
               }
@@ -743,7 +654,6 @@ function AgentConsole({
           };
 
           function writeTerminalData(processed) {
-            processed = processed.replace(MOUSE_TRACKING_SET_RE, '');
             const buf = terminal.buffer.active;
             const atBottom = buf.baseY + terminal.rows >= buf.length;
             terminal.write(processed, () => {
@@ -800,7 +710,6 @@ function AgentConsole({
             }
             if (msg.type === 'error') {
               if (writeRafId !== null) { cancelAnimationFrame(writeRafId); clearTimeout(writeRafId); writeRafId = null; }
-              if (coalesceTimer) { clearTimeout(coalesceTimer); coalesceTimer = null; }
               flushWriteBuffer();
               hideOverlay();
               connectedRef.current = false;
@@ -811,7 +720,6 @@ function AgentConsole({
             }
             if (msg.type === 'exit') {
               if (writeRafId !== null) { cancelAnimationFrame(writeRafId); clearTimeout(writeRafId); writeRafId = null; }
-              if (coalesceTimer) { clearTimeout(coalesceTimer); coalesceTimer = null; }
               flushWriteBuffer();
               hideOverlay();
               if (msg.message) terminal.write(msg.message);
@@ -862,14 +770,12 @@ function AgentConsole({
     return () => {
       disposed = true;
       if (writeRafId !== null) { cancelAnimationFrame(writeRafId); clearTimeout(writeRafId); }
-      if (coalesceTimer) { clearTimeout(coalesceTimer); coalesceTimer = null; }
       if (reconnectTimer) clearTimeout(reconnectTimer);
       resizeTimers.forEach((t) => clearTimeout(t));
       resizeObserver.disconnect();
       host.removeEventListener('mousedown', focusTerminal);
       host.removeEventListener('click', focusTerminal);
       host.removeEventListener('contextmenu', handleContextMenu);
-      host.removeEventListener('wheel', handleWheel);
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;

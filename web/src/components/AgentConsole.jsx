@@ -217,7 +217,6 @@ function AgentConsole({
     let lastSentCols = 0;
     let lastSentRows = 0;
     let writeRafId = null;
-    let coalesceTimer = null;
     const resizeTimers = [];
 
     // Virtual screen for ANSI diff: declared at useEffect scope so fitTerminal
@@ -728,7 +727,6 @@ function AgentConsole({
             }
             if (msg.type === 'error') {
               if (writeRafId !== null) { clearTimeout(writeRafId); writeRafId = null; }
-              if (coalesceTimer) { clearTimeout(coalesceTimer); coalesceTimer = null; }
               flushWriteBuffer();
               hideOverlay();
               connectedRef.current = false;
@@ -739,7 +737,6 @@ function AgentConsole({
             }
             if (msg.type === 'exit') {
               if (writeRafId !== null) { clearTimeout(writeRafId); writeRafId = null; }
-              if (coalesceTimer) { clearTimeout(coalesceTimer); coalesceTimer = null; }
               flushWriteBuffer();
               hideOverlay();
               if (msg.message) terminal.write(msg.message);
@@ -790,7 +787,6 @@ function AgentConsole({
     return () => {
       disposed = true;
       if (writeRafId !== null) { clearTimeout(writeRafId); }
-      if (coalesceTimer) { clearTimeout(coalesceTimer); coalesceTimer = null; }
       if (reconnectTimer) clearTimeout(reconnectTimer);
       resizeTimers.forEach((t) => clearTimeout(t));
       resizeObserver.disconnect();
