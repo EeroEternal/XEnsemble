@@ -1161,7 +1161,7 @@ export default React.forwardRef(function Sessions({
                 {deleteConfirmWorkspace.sessionCount > 0 && (
                   <span>
                     {' '}
-                    {t('sessions:dialog.this_will_remove')} {deleteConfirmWorkspace.sessionCount} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount })}
+                    {t('sessions:dialog.this_will_remove')} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount })}
                     {deleteConfirmWorkspace.liveCount > 0 && (
                       <> ({t('sessions:dialog.including_running', { count: deleteConfirmWorkspace.liveCount })})</>
                     )}
@@ -1176,7 +1176,7 @@ export default React.forwardRef(function Sessions({
                 {deleteConfirmWorkspace.sessionCount > 0 && (
                   <span>
                     {' '}
-                    {t('sessions:dialog.this_will_remove')} {deleteConfirmWorkspace.sessionCount} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount })}
+                    {t('sessions:dialog.this_will_remove')} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount })}
                     {deleteConfirmWorkspace.liveCount > 0 && (
                       <> ({t('sessions:dialog.including_running', { count: deleteConfirmWorkspace.liveCount })})</>
                     )}

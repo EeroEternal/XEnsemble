@@ -19,8 +19,8 @@
     "select_workspace": "选择一个工作空间以查看其会话。",
     "no_matching": "无匹配会话",
     "no_active_session": "暂无活动会话",
-    "create_workspace_hint": "先创建一个工作空间，然后在侧边栏使用 New Agent 开始。",
-    "select_session_hint": "从侧边栏选择一个会话，或使用 New Agent 在工作空间中启动一个。"
+    "create_workspace_hint": "先创建一个工作空间，然后在侧边栏使用新建会话开始。",
+    "select_session_hint": "从侧边栏选择一个会话，或使用新建会话在工作空间中启动一个。"
   },
   "action": {
     "stop_and_remove": "停止并移除",

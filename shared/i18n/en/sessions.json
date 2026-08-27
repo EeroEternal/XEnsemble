@@ -19,8 +19,8 @@
     "select_workspace": "Select a workspace to view its sessions.",
     "no_matching": "No matching sessions",
     "no_active_session": "No active session",
-    "create_workspace_hint": "Create a workspace, then use New Agent in the sidebar to get started.",
-    "select_session_hint": "Select a session from the sidebar, or use New Agent to start one in a workspace."
+    "create_workspace_hint": "Create a workspace, then use New Session in the sidebar to get started.",
+    "select_session_hint": "Select a session from the sidebar, or use New Session to start one in a workspace."
   },
   "action": {
     "stop_and_remove": "Stop and remove",
