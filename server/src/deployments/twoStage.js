@@ -805,8 +805,14 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         // 系统侧预启动 PostgreSQL（检测到需要时），避免 verify agent 用 su/runuser/sudo 试错
         const dbProvision = await provisionPostgresIfNeeded(ref, wsPath, plan);
         plan = { ...plan, context: { tree, depsCached, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null } };
-        // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）
-        if (planFresh) {
+        // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）。
+        // 防护：若阶段 A 把项目误判为“纯静态”（serve 根目录），但 host 检测出真实应用类型
+        // （node/python/unknown 且有后端目录），则此 plan 可疑，不写缓存，避免污染二次部署。
+        const serveStep = plan.steps?.find((s) => s.kind === 'serve');
+        const staticServe = serveStep && /(npx\s+(--yes\s+)?serve\s*\.|python3?\s+-m\s+http\.server|serve\s+-s\s*\.)/i.test(serveStep.command || '');
+        if (planFresh && staticServe && detected.type !== 'static') {
+            console.error(`[twoStage] skip caching suspicious static-serve plan (project type=${detected.type})`);
+        } else if (planFresh) {
             await savePlanCache(project.id, { steps: plan.steps, configFiles: plan.configFiles, source: plan.source, context: { tree } });
         }
     }

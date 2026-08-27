@@ -265,6 +265,14 @@ async function assertAppIsServed({ runtimeRef, workspacePath, preferredPort }) {
         }
         const hit = await probeLoop(ordered);
         if (hit) return hit;
+        // 监听端口里没找到真实应用（可能 ss/proc 漏报、serve 刚起来、或监听端口非 HTTP），
+        // 回退探测常见应用端口（preferred + commonPorts），避免漏掉真实应用端口。
+        const probed = new Set(ordered);
+        const fallback = [preferred, ...commonPorts].filter((p) => p > 0 && !probed.has(p));
+        if (fallback.length) {
+            const fbHit = await probeLoop(fallback);
+            if (fbHit) return fbHit;
+        }
     } else {
         // 保底：ss + /proc/net/tcp 都拿不到监听端口时，回退全量 base 探测（curl 已收窄 2s）。
         const base = [...new Set([preferred, ...commonPorts])];
