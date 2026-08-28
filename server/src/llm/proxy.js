@@ -1,4 +1,5 @@
 const { Readable } = require('stream');
+const crypto = require('crypto');
 const httpProxy = require('http-proxy');
 const unigateway = require('../gateway/unigatewayManager');
 const { verifySessionToken } = require('./sessionToken');
@@ -15,6 +16,41 @@ const agentGatewayConfig = require('../admin/AgentGatewayConfig');
 const { t } = require('../i18n');
 
 const LLM_PROXY_PREFIX = '/api/v1/llm';
+
+// Headers set by UniGateway to attribute failures to an upstream provider vs.
+// the gateway itself. Consumed by forwardToGateway and recorded in the audit.
+const HDR_REQUEST_ID = 'x-request-id';
+const HDR_UPSTREAM_STATUS = 'x-upstream-status';
+const HDR_UPSTREAM_ENDPOINT = 'x-upstream-endpoint';
+const HDR_GATEWAY_ATTRIBUTION = 'x-gateway-attribution';
+
+const ORIGIN_CONTROL_PLANE_QUOTA = 'control_plane_quota';
+const ORIGIN_GATEWAY_QUOTA = 'gateway_quota';
+const ORIGIN_UPSTREAM = 'upstream';
+const ORIGIN_GATEWAY_INFRA = 'gateway_infra';
+
+function headerValue(headers, name) {
+    const value = headers?.[name];
+    if (Array.isArray(value)) return value[0];
+    return value;
+}
+
+/**
+ * Classify where a forwarded failure originated.
+ *
+ * - `upstream`: UniGateway relayed a status code returned by the LLM provider.
+ * - `gateway_quota`: UniGateway's own key quota / runtime rate limit (429 with
+ *   no upstream attribution header).
+ * - `gateway_infra`: the gateway or the control-plane->gateway hop itself
+ *   failed (proxy error, no provider, transport, saturated).
+ */
+function classifyForwardFailure(statusCode, gatewayHeaders) {
+    const attribution = headerValue(gatewayHeaders, HDR_GATEWAY_ATTRIBUTION);
+    if (attribution === 'upstream') return ORIGIN_UPSTREAM;
+    if (attribution === 'gateway') return ORIGIN_GATEWAY_INFRA;
+    if (statusCode === 429) return ORIGIN_GATEWAY_QUOTA;
+    return ORIGIN_GATEWAY_INFRA;
+}
 
 const proxy = httpProxy.createProxyServer({
     xfwd: true,
@@ -166,10 +202,24 @@ function forwardToGateway(request, reply, { targetBaseUrl, gatewayKey, path }) {
         delete request.raw.headers['x-api-key'];
         delete request.raw.headers['X-Api-Key'];
 
+        // Correlation id for this forward, echoed back by UniGateway and
+        // recorded in the audit so log lines and events can be matched up.
+        if (!request.raw.headers[HDR_REQUEST_ID]) {
+            request.raw.headers[HDR_REQUEST_ID] = crypto.randomUUID();
+        }
+
         let statusCode = null;
+        let gatewayHeaders = null;
         const onProxyRes = (proxyRes, req) => {
             if (req !== request.raw) return;
             statusCode = proxyRes.statusCode || null;
+            const headers = proxyRes.headers || {};
+            gatewayHeaders = {
+                [HDR_REQUEST_ID]: headerValue(headers, HDR_REQUEST_ID) || null,
+                [HDR_UPSTREAM_STATUS]: headerValue(headers, HDR_UPSTREAM_STATUS) || null,
+                [HDR_UPSTREAM_ENDPOINT]: headerValue(headers, HDR_UPSTREAM_ENDPOINT) || null,
+                [HDR_GATEWAY_ATTRIBUTION]: headerValue(headers, HDR_GATEWAY_ATTRIBUTION) || null,
+            };
             proxy.off('proxyRes', onProxyRes);
         };
         proxy.on('proxyRes', onProxyRes);
@@ -188,7 +238,7 @@ function forwardToGateway(request, reply, { targetBaseUrl, gatewayKey, path }) {
         proxy.web(request.raw, reply.raw, options, (err) => {
             proxy.off('proxyRes', onProxyRes);
             if (err) reject(err);
-            else resolve({ statusCode });
+            else resolve({ statusCode, gatewayHeaders });
         });
     });
 }
@@ -226,8 +276,29 @@ async function proxyLlmRequest(request, reply) {
         : checkLlmRequestQuota(claims.uid, claims.role);
 
     const [quota, gateway] = await Promise.all([quotaPromise, gatewayPromise]);
+    const started = Date.now();
 
     if (!quota.ok) {
+        recordEvent({
+            userId: claims.uid,
+            projectId: claims.pid,
+            subjectType: 'session',
+            subjectId: claims.sid,
+            type: 'llm_proxy_forward',
+            data: {
+                agent_id: claims.aid,
+                path,
+                method: request.method,
+                ok: false,
+                status_code: quota.status,
+                origin: ORIGIN_CONTROL_PLANE_QUOTA,
+                error: quota.error,
+                limit: quota.limit,
+                window_seconds: quota.window_seconds,
+                latency_ms: Date.now() - started,
+                quota_exempt: quotaExempt,
+            },
+        }).catch((err) => request.log.warn(err, '[llm-proxy] failed to record event'));
         return reply.code(quota.status).send({
             error: quota.error,
             limit: quota.limit,
@@ -238,7 +309,6 @@ async function proxyLlmRequest(request, reply) {
     if (gateway.error) {
         return reply.code(gateway.status).send({ error: gateway.error });
     }
-    const started = Date.now();
     // The session-token model is the default chosen at session creation and
     // does NOT reflect /model switches inside the agent CLI. Extract the
     // actual model from the request body so the log shows what the agent
@@ -281,6 +351,18 @@ async function proxyLlmRequest(request, reply) {
             return reply.code(502).send({ error: t('errors:llm_proxy_error', {}, request.locale || 'en'), code: 'llm_proxy_error' });
         }
     } finally {
+        const gatewayHeaders = forwardResult?.gatewayHeaders || {};
+        const statusCode = forwardResult?.statusCode ?? (forwardError ? 502 : null);
+        const upstreamStatus = headerValue(gatewayHeaders, HDR_UPSTREAM_STATUS);
+        const upstreamStatusNum = upstreamStatus != null ? (Number(upstreamStatus) || upstreamStatus) : null;
+        let origin = null;
+        if (forwardError) {
+            origin = ORIGIN_GATEWAY_INFRA;
+        } else if (statusCode >= 200 && statusCode < 300) {
+            origin = ORIGIN_UPSTREAM;
+        } else {
+            origin = classifyForwardFailure(statusCode, gatewayHeaders);
+        }
         recordEvent({
             userId: claims.uid,
             projectId: claims.pid,
@@ -292,7 +374,13 @@ async function proxyLlmRequest(request, reply) {
                 path,
                 method: request.method,
                 ok: !forwardError,
-                status_code: forwardResult?.statusCode ?? (forwardError ? 502 : null),
+                status_code: statusCode,
+                origin,
+                upstream_status: upstreamStatusNum,
+                upstream_endpoint: headerValue(gatewayHeaders, HDR_UPSTREAM_ENDPOINT) || null,
+                request_id: headerValue(gatewayHeaders, HDR_REQUEST_ID)
+                    || request.raw.headers[HDR_REQUEST_ID]
+                    || null,
                 error: forwardError ? String(forwardError.message || forwardError) : null,
                 latency_ms: Date.now() - started,
                 quota_exempt: quotaExempt,
@@ -331,4 +419,9 @@ module.exports = {
     isQuotaExemptPath,
     isModelsDiscoveryPath,
     serveAgentModelsCatalog,
+    classifyForwardFailure,
+    headerValue,
+    ORIGIN_UPSTREAM,
+    ORIGIN_GATEWAY_QUOTA,
+    ORIGIN_GATEWAY_INFRA,
 };
