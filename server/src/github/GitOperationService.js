@@ -352,10 +352,39 @@ class GitOperationService {
         let branch = branchOut.stdout.trim();
         if (branch === 'HEAD') branch = null;
 
-        const aheadResult = await this._execGit(project, ['rev-list', '--count', 'HEAD', '--not', '--remotes']).catch(() => ({ stdout: '0' }));
-        const ahead = Number(aheadResult.stdout.trim()) || 0;
+        const divergence = await this._resolveAheadBehind(project, branch);
 
-        return { files, stagedFiles, unstagedFiles, dirty, branch, ahead };
+        return { files, stagedFiles, unstagedFiles, dirty, branch, ...divergence };
+    }
+
+    /**
+     * Resolve ahead/behind for the worktree's current branch, using the same
+     * basis as getStatus so light polling and full refresh never disagree
+     * (a stale divergence between the two previously made the UI flip
+     * between "17 unpushed" and "0 unpushed" on every 15s light poll).
+     *
+     * - branch known → compare HEAD against origin/<branch> (or @{upstream}).
+     * - branch unknown (detached HEAD, e.g. mid-rebase) → return nulls so the
+     *   client keeps the last known value instead of briefly showing 0. Do NOT
+     *   fall back to project.currentBranch: with per-session worktrees that is
+     *   the main checkout, not this worktree, so it would compare against the
+     *   wrong branch.
+     */
+    async _resolveAheadBehind(project, branch) {
+        if (!branch) {
+            return { ahead: null, behind: null };
+        }
+        const candidates = [
+            this._execGit(project, ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']),
+            this._execGit(project, ['rev-list', '--left-right', '--count', `HEAD...origin/${branch}`]),
+        ];
+        try {
+            const r = await Promise.any(candidates);
+            const [a, b] = r.stdout.trim().split('\t').map((n) => Number(n) || 0);
+            return { ahead: a, behind: b };
+        } catch {
+            return { ahead: null, behind: null };
+        }
     }
 
     async getStatus(project) {
@@ -398,30 +427,7 @@ class GitOperationService {
                     .then((r) => new Set(r.stdout.split('\n').filter(Boolean)))
                     .catch(() => new Set())
                 : Promise.resolve(new Set()),
-            (async () => {
-                const remoteBranch = branch || project.currentBranch;
-                const candidates = [
-                    this._execGit(project, ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']),
-                ];
-                if (remoteBranch) {
-                    candidates.push(
-                        this._execGit(project, ['rev-list', '--left-right', '--count', `HEAD...origin/${remoteBranch}`]),
-                    );
-                }
-                try {
-                    const r = await Promise.any(candidates);
-                    const [a, b] = r.stdout.trim().split('\t').map((n) => Number(n) || 0);
-                    return { ahead: a, behind: b };
-                } catch {
-                    try {
-                        const r2 = await this._execGit(project, ['rev-list', '--count', 'HEAD', '--not', '--remotes']);
-                        const ahead = Number(r2.stdout.trim()) || 0;
-                        return { ahead, behind: 0 };
-                    } catch {
-                        return { ahead: 0, behind: 0 };
-                    }
-                }
-            })(),
+            this._resolveAheadBehind(project, branch),
         ]);
 
         const ignoredSet = ignoredResult;

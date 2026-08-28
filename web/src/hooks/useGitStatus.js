@@ -44,7 +44,14 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
     if (!silent) setLoading(true);
     try {
       const data = await githubApi.getGitStatus(projectId);
-      setStatus(data);
+      // During transient detached HEAD (mid-rebase etc.) the server returns
+      // ahead/behind null; keep the last known values instead of showing 0.
+      setStatus((prev) => {
+        if (!prev) return data;
+        const ahead = data.ahead ?? prev.ahead;
+        const behind = data.behind ?? prev.behind;
+        return { ...data, ahead, behind };
+      });
       lastFullAtRef.current = Date.now();
       return data;
     } catch (err) {
@@ -59,7 +66,15 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
     if (!projectId) return;
     try {
       const data = await githubApi.getGitStatusLight(projectId);
-      setStatus((prev) => prev ? { ...prev, ...data } : data);
+      // Light polls only refresh file/working-tree state. Keep the last full
+      // ahead/behind (they are divergence info that light mode does not
+      // compute) so a 15s light poll can never flip "unpushed" between 17 and 0.
+      setStatus((prev) => {
+        if (!prev) return data;
+        const ahead = data.ahead ?? prev.ahead;
+        const behind = data.behind ?? prev.behind;
+        return { ...prev, ...data, ahead, behind };
+      });
     } catch {
       // ignore light poll errors silently
     }

@@ -291,6 +291,47 @@ describe('GitOperationService (mock exec)', () => {
         assert.strictEqual(untrackedEntry.path, 'nested-repo', 'trailing slash should be stripped');
     });
 
+    it('getStatus returns null divergence for detached HEAD instead of falling back to currentBranch', async () => {
+        // Detached HEAD → rev-parse --abbrev-ref HEAD returns "HEAD" → branch=null.
+        // Must NOT fall back to project.currentBranch (which could be 'main'
+        // while the worktree is on its own session branch) — that would compare
+        // against the wrong remote ref and show a bogus unpushed count.
+        const responses = new Map([
+            [JSON.stringify(['rev-parse', '--abbrev-ref', 'HEAD']), 'HEAD\n'],
+            [JSON.stringify(['rev-parse', 'HEAD']), 'detached-sha\n'],
+            [JSON.stringify(['status', '--porcelain=v1', '-uall']), ''],
+            [JSON.stringify(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']), '7\t0\n'],
+            [JSON.stringify(['rev-list', '--left-right', '--count', 'HEAD...origin/main']), '0\t0\n'],
+        ]);
+        const exec = makeMockExec((args) => responses.get(JSON.stringify(args)) ?? '');
+        const service = createService(exec);
+
+        const status = await service.getStatus({ id: 'p1', userId: 'u1', currentBranch: 'main' });
+        assert.strictEqual(status.branch, null);
+        assert.strictEqual(status.ahead, null, 'detached HEAD must not report a fabricated ahead');
+        assert.strictEqual(status.behind, null);
+    });
+
+    it('getStatusLight computes divergence against origin/<branch> (same basis as full status)', async () => {
+        // Light mode must use the same comparison basis as getStatus, so a
+        // 15s light poll can never flip the UI between "N unpushed" (full)
+        // and "0 unpushed" (the old --not --remotes behavior).
+        const responses = new Map([
+            [JSON.stringify(['rev-parse', '--abbrev-ref', 'HEAD']), 'agentharness/session-abc1\n'],
+            [JSON.stringify(['status', '--porcelain=v1', '-uall']), ''],
+            [JSON.stringify(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']), '17\t0\n'],
+            [JSON.stringify(['rev-list', '--left-right', '--count', 'HEAD...origin/agentharness/session-abc1']), '17\t0\n'],
+            [JSON.stringify(['rev-list', '--count', 'HEAD', '--not', '--remotes']), '0\n'],
+        ]);
+        const exec = makeMockExec((args) => responses.get(JSON.stringify(args)) ?? '');
+        const service = createService(exec);
+
+        const status = await service.getStatusLight({ id: 'p1', userId: 'u1', currentBranch: 'main' });
+        assert.strictEqual(status.branch, 'agentharness/session-abc1');
+        assert.strictEqual(status.ahead, 17, 'light must agree with full status basis');
+        assert.strictEqual(status.behind, 0);
+    });
+
     it('commitAll stages and commits', async () => {
         const exec = makeMockExec((args) => {
             if (args[0] === 'rev-parse' && args[1] === 'HEAD') {
