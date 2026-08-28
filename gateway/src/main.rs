@@ -2,20 +2,17 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use axum::{
     Json, Router,
     body::Body,
     extract::{Path, State},
-    http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, patch, post},
 };
 use futures_util::StreamExt;
-use futures_util::future::BoxFuture;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -23,13 +20,10 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use unigateway_config::core_sync::sync_core_pools;
 use unigateway_config::{AuthError, GatewayState, ProviderModelOptions, RuntimeLimitError};
-use unigateway_sdk::core::{
-    AttemptFinishedEvent, AttemptStartedEvent, GatewayErrorKind, GatewayHooks, RequestReport,
-    UniGatewayEngine,
-};
+use unigateway_sdk::core::UniGatewayEngine;
 use unigateway_sdk::host::{
-    HostContext, HostDispatchOutcome, HostDispatchTarget, HostError, HostFuture, HostProtocol,
-    HostRequest, PoolHost, PoolLookupOutcome, PoolLookupResult, dispatch_request,
+    HostContext, HostDispatchOutcome, HostDispatchTarget, HostFuture, HostProtocol, HostRequest,
+    PoolHost, PoolLookupOutcome, PoolLookupResult, dispatch_request,
 };
 use unigateway_sdk::protocol::{
     ProtocolResponseBody, anthropic_payload_to_chat_request,
@@ -64,239 +58,6 @@ impl PoolHost for EnginePoolHost {
     }
 }
 
-static X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
-static X_UPSTREAM_STATUS: HeaderName = HeaderName::from_static("x-upstream-status");
-static X_UPSTREAM_ENDPOINT: HeaderName = HeaderName::from_static("x-upstream-endpoint");
-static X_GATEWAY_ATTRIBUTION: HeaderName = HeaderName::from_static("x-gateway-attribution");
-
-/// Max bytes of an upstream error body to keep in the surfaced message.
-const MAX_ERROR_BODY: usize = 512;
-
-/// Monotonic counter used to build a cheap unique request id when the inbound
-/// `x-request-id` is missing, so control-plane audit rows can be correlated.
-static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn generate_request_id() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let seq = REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("ugw-{nanos:x}-{seq}")
-}
-
-/// Structured gateway-side telemetry for failure attribution.
-///
-/// Each attempt and each finished request is logged with the endpoint that
-/// served it, the upstream status code, the error classification, and latency.
-/// This is the data that lets an operator tell "the vendor returned 429"
-/// apart from "the gateway failed" purely from server logs.
-struct GatewayTelemetryHooks;
-
-impl GatewayHooks for GatewayTelemetryHooks {
-    fn on_attempt_started(&self, _event: AttemptStartedEvent) -> BoxFuture<'static, ()> {
-        Box::pin(async {})
-    }
-
-    fn on_attempt_finished(&self, event: AttemptFinishedEvent) -> BoxFuture<'static, ()> {
-        let request_id = event.request_id.clone();
-        let endpoint_id = event.endpoint_id.clone();
-        let provider_kind = event.provider_kind;
-        let success = event.success;
-        let status_code = event.status_code;
-        let error_kind = event.error_kind;
-        let latency_ms = event.latency_ms;
-        let error = event.error.clone().unwrap_or_default();
-        tracing::info!(
-            target = "gateway",
-            request_id = %request_id,
-            endpoint_id = %endpoint_id,
-            provider_kind = ?provider_kind,
-            success,
-            status_code,
-            error_kind = ?error_kind,
-            latency_ms,
-            error = %error,
-            "gateway attempt finished"
-        );
-        Box::pin(async {})
-    }
-
-    fn on_request_finished(&self, report: RequestReport) -> BoxFuture<'static, ()> {
-        let request_id = report.request_id.clone();
-        let selected_endpoint_id = report.selected_endpoint_id.clone();
-        let error_kind = report.error_kind;
-        let latency_ms = report.latency_ms;
-        let attempt_count = report.attempts.len();
-        let attempts = report
-            .attempts
-            .iter()
-            .map(|a| {
-                format!(
-                    "{}:{:?}:{:?}",
-                    a.endpoint_id, a.status, a.error_kind
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        tracing::info!(
-            target = "gateway",
-            request_id = %request_id,
-            selected_endpoint_id = %selected_endpoint_id,
-            error_kind = ?error_kind,
-            latency_ms,
-            attempt_count,
-            attempts = %attempts,
-            "gateway request finished"
-        );
-        Box::pin(async {})
-    }
-}
-
-/// Truncate an upstream error body to keep agent-facing messages bounded.
-fn truncate_body(body: Option<&str>) -> Option<String> {
-    body.map(|b| {
-        let b = b.trim();
-        if b.len() <= MAX_ERROR_BODY {
-            b.to_string()
-        } else {
-            let mut end = MAX_ERROR_BODY;
-            while !b.is_char_boundary(end) {
-                end -= 1;
-            }
-            format!("{}…", &b[..end])
-        }
-    })
-}
-
-/// Extract the upstream endpoint id that produced the error, if any.
-fn upstream_endpoint_id(error: &HostError) -> Option<&str> {
-    match error {
-        HostError::CoreUpstreamHttp { endpoint_id, .. } => Some(endpoint_id),
-        HostError::CoreTransport { endpoint_id: Some(e), .. } => Some(e),
-        HostError::CoreStreamAborted { endpoint_id, .. } => Some(endpoint_id),
-        HostError::CoreAllAttemptsFailed { last_error, .. } => upstream_endpoint_id(last_error),
-        _ => None,
-    }
-}
-
-/// Render an optional error classification without the `Some(...)` wrapper.
-fn format_optional_kind(kind: Option<GatewayErrorKind>) -> String {
-    match kind {
-        Some(kind) => format!("{kind:?}"),
-        None => "-".to_string(),
-    }
-}
-
-/// Build a human-readable, attribution-friendly error message for the agent.
-///
-/// Messages are prefixed so it is immediately clear whether the failure is on
-/// the upstream provider's side (`upstream http error … from endpoint …`) or on
-/// the gateway's own side (`gateway …`).
-fn format_host_error_message(error: &HostError) -> String {
-    match error {
-        HostError::CoreUpstreamHttp {
-            status,
-            body,
-            endpoint_id,
-            ..
-        } => match truncate_body(body.as_deref()) {
-            Some(body) => {
-                format!("upstream http error {status} from endpoint {endpoint_id}: {body}")
-            }
-            None => format!("upstream http error {status} from endpoint {endpoint_id}"),
-        },
-        HostError::CoreAllAttemptsFailed {
-            attempts,
-            last_error,
-            ..
-        } => {
-            let mut message = format!(
-                "core execution exhausted all attempts ({} attempt(s)): {}",
-                attempts.len(),
-                format_host_error_message(last_error)
-            );
-            if !attempts.is_empty() {
-                let trail = attempts
-                    .iter()
-                    .map(|a| {
-                        format!(
-                            "{}:{:?}:{}",
-                            a.endpoint_id,
-                            a.status,
-                            format_optional_kind(a.error_kind)
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                message.push_str(&format!("; attempts: {trail}"));
-            }
-            message
-        }
-        HostError::CoreTransport { message, endpoint_id, .. } => match endpoint_id {
-            Some(endpoint_id) => {
-                format!("gateway transport error on {endpoint_id}: {message}")
-            }
-            None => format!("gateway transport error: {message}"),
-        },
-        HostError::CoreStreamAborted {
-            message,
-            endpoint_id,
-            ..
-        } => format!("gateway stream aborted on {endpoint_id}: {message}"),
-        HostError::CorePoolNotFound(pool_id) => {
-            format!("gateway error: service '{pool_id}' has no configured providers")
-        }
-        HostError::CoreAllEndpointsSaturated { .. } => {
-            format!("gateway error: all providers saturated (too much concurrent load)")
-        }
-        HostError::CoreNoAvailableEndpoint { .. } => {
-            format!("gateway error: no available provider endpoint")
-        }
-        other => format!("gateway {other}"),
-    }
-}
-
-/// Map a host-level dispatch error into an HTTP response for the agent.
-///
-/// Attribution rule:
-/// - The upstream provider answered with an HTTP error: preserve that status so
-///   the agent can back off, and surface the endpoint + vendor body via headers.
-/// - The gateway itself failed (routing / transport / pool): return 502 so it
-///   is clearly not an upstream answer.
-fn host_error_to_response(error: &HostError) -> ApiError {
-    if let Some(status) = error.upstream_status_code() {
-        let status = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY);
-        let mut headers = vec![
-            (X_GATEWAY_ATTRIBUTION, "upstream".to_string()),
-            (X_UPSTREAM_STATUS, status.to_string()),
-        ];
-        if let Some(endpoint_id) = upstream_endpoint_id(error) {
-            headers.push((X_UPSTREAM_ENDPOINT, endpoint_id.to_string()));
-        }
-        return ApiError {
-            status,
-            message: format_host_error_message(error),
-            headers,
-        };
-    }
-    ApiError {
-        status: StatusCode::BAD_GATEWAY,
-        message: format_host_error_message(error),
-        headers: vec![(X_GATEWAY_ATTRIBUTION, "gateway".to_string())],
-    }
-}
-
-/// Attach attribution headers to any response (success or error).
-fn with_headers(mut response: Response, headers: &[(HeaderName, String)]) -> Response {
-    for (name, value) in headers {
-        if let Ok(value) = HeaderValue::from_str(value) {
-            response.headers_mut().insert(name.clone(), value);
-        }
-    }
-    response
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -318,7 +79,6 @@ async fn main() -> Result<()> {
 
     let engine = Arc::new(
         UniGatewayEngine::builder()
-            .with_hooks(Arc::new(GatewayTelemetryHooks))
             .with_builtin_http_drivers()
             .build()
             .context("build UniGateway engine")?,
@@ -446,15 +206,6 @@ fn extract_gateway_key(headers: &HeaderMap) -> Option<String> {
     None
 }
 
-/// Read the inbound correlation id sent by the control plane, if any.
-fn inbound_request_id(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get("x-request-id")
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-}
-
 fn require_admin(headers: &HeaderMap, expected: &Option<String>) -> Result<(), ApiError> {
     let Some(expected) = expected else {
         return Ok(());
@@ -522,28 +273,14 @@ async fn dispatch_for_service(
     hint: Option<&str>,
     request: HostRequest,
     endpoint: &str,
-    request_id: Option<&str>,
 ) -> Result<Response, ApiError> {
     let host = HostContext::from_parts(&state.engine, state.pool_host.as_ref());
     let target = HostDispatchTarget::Service(service_id);
-    let request_id = request_id
-        .filter(|id| !id.trim().is_empty())
-        .unwrap_or_else(generate_request_id);
-    let request_id_header = (X_REQUEST_ID, request_id.clone());
 
     let started = std::time::Instant::now();
-    let outcome = match dispatch_request(&host, target, protocol, hint, request).await {
-        Ok(outcome) => outcome,
-        Err(error) => {
-            let mut api_error = host_error_to_response(&error);
-            api_error.headers.push(request_id_header);
-            state
-                .gateway
-                .record_stat(endpoint, api_error.status.as_u16(), started.elapsed().as_millis() as i64)
-                .await;
-            return Err(api_error);
-        }
-    };
+    let outcome = dispatch_request(&host, target, protocol, hint, request)
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?;
 
     let latency_ms = started.elapsed().as_millis() as i64;
     match outcome {
@@ -553,57 +290,39 @@ async fn dispatch_for_service(
                 .gateway
                 .record_stat(endpoint, status.as_u16(), latency_ms)
                 .await;
-            let headers = [request_id_header];
             Ok(match body {
-                ProtocolResponseBody::Json(value) => {
-                    with_headers((status, Json(value)).into_response(), &headers)
-                }
-                ProtocolResponseBody::ServerSentEvents(stream) => with_headers(
-                    (
-                        status,
-                        [(header::CONTENT_TYPE, "text/event-stream")],
-                        Body::from_stream(stream.map(|chunk| -> Result<_, std::io::Error> {
-                            match chunk {
-                                Ok(bytes) => Ok(bytes),
-                                Err(error) => {
-                                    let error_json = json!({
-                                        "error": {
-                                            "message": error.to_string(),
-                                            "type": "gateway_error",
-                                        }
-                                    });
-                                    let sse_event = format!("data: {}\n\n", error_json);
-                                    Ok(sse_event.into_bytes().into())
-                                }
+                ProtocolResponseBody::Json(value) => (status, Json(value)).into_response(),
+                ProtocolResponseBody::ServerSentEvents(stream) => (
+                    status,
+                    [(header::CONTENT_TYPE, "text/event-stream")],
+                    Body::from_stream(stream.map(|chunk| -> Result<_, std::io::Error> {
+                        match chunk {
+                            Ok(bytes) => Ok(bytes),
+                            Err(error) => {
+                                let error_json = json!({
+                                    "error": {
+                                        "message": error.to_string(),
+                                        "type": "gateway_error",
+                                    }
+                                });
+                                let sse_event = format!("data: {}\n\n", error_json);
+                                Ok(sse_event.into_bytes().into())
                             }
-                        })),
-                    )
-                        .into_response(),
-                    &headers,
-                ),
+                        }
+                    })),
+                )
+                    .into_response(),
             })
         }
         other => {
             if matches!(other, HostDispatchOutcome::PoolNotFound) {
                 state.gateway.record_stat(endpoint, 400, latency_ms).await;
-                Err(ApiError {
-                    status: StatusCode::BAD_REQUEST,
-                    message: format!("service '{service_id}' has no configured providers"),
-                    headers: vec![
-                        (X_GATEWAY_ATTRIBUTION, "gateway".to_string()),
-                        request_id_header,
-                    ],
-                })
+                Err(ApiError::bad_request(format!(
+                    "service '{service_id}' has no configured providers"
+                )))
             } else {
                 state.gateway.record_stat(endpoint, 500, latency_ms).await;
-                Err(ApiError {
-                    status: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "unsupported gateway dispatch outcome".to_string(),
-                    headers: vec![
-                        (X_GATEWAY_ATTRIBUTION, "gateway".to_string()),
-                        request_id_header,
-                    ],
-                })
+                Err(ApiError::internal("unsupported gateway dispatch outcome"))
             }
         }
     }
@@ -706,7 +425,6 @@ async fn openai_chat(
         Some(&provider_hint),
         HostRequest::Chat(request),
         "/v1/chat/completions",
-        inbound_request_id(&headers),
     )
     .await;
 
@@ -759,7 +477,6 @@ async fn anthropic_messages(
         Some(&provider_hint),
         HostRequest::Chat(request),
         "/v1/messages",
-        inbound_request_id(&headers),
     )
     .await;
 
@@ -802,7 +519,6 @@ async fn openai_embeddings(
         Some(&provider_hint),
         HostRequest::Embeddings(request),
         "/v1/embeddings",
-        inbound_request_id(&headers),
     )
     .await;
 
@@ -1217,7 +933,6 @@ impl<T: serde::Serialize> AdminResponse<T> {
 struct ApiError {
     status: StatusCode,
     message: String,
-    headers: Vec<(HeaderName, String)>,
 }
 
 impl ApiError {
@@ -1225,7 +940,6 @@ impl ApiError {
         Self {
             status: StatusCode::UNAUTHORIZED,
             message: message.into(),
-            headers: Vec::new(),
         }
     }
 
@@ -1233,7 +947,6 @@ impl ApiError {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: message.into(),
-            headers: Vec::new(),
         }
     }
 
@@ -1241,7 +954,6 @@ impl ApiError {
         Self {
             status: StatusCode::NOT_FOUND,
             message: message.into(),
-            headers: Vec::new(),
         }
     }
 
@@ -1249,7 +961,6 @@ impl ApiError {
         Self {
             status: StatusCode::TOO_MANY_REQUESTS,
             message: message.into(),
-            headers: Vec::new(),
         }
     }
 
@@ -1257,7 +968,6 @@ impl ApiError {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: message.into(),
-            headers: Vec::new(),
         }
     }
 }
@@ -1270,7 +980,7 @@ impl IntoResponse for ApiError {
                 "type": "gateway_error",
             }
         }));
-        with_headers((self.status, body).into_response(), &self.headers)
+        (self.status, body).into_response()
     }
 }
 
@@ -1391,88 +1101,5 @@ is_active = true
         assert_eq!(hint, "some-unknown-model");
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    use unigateway_sdk::core::{
-        AttemptReport, AttemptStatus, GatewayError, GatewayErrorKind,
-    };
-
-    #[test]
-    fn upstream_http_error_preserves_status_and_attribution() {
-        let error = HostError::from(GatewayError::UpstreamHttp {
-            status: 429,
-            body: Some("{\"error\":{\"message\":\"rate limit exceeded\"}}".to_string()),
-            endpoint_id: "volcengine".to_string(),
-        });
-        let response = host_error_to_response(&error);
-        assert_eq!(response.status, StatusCode::TOO_MANY_REQUESTS);
-        assert!(response.message.contains("from endpoint volcengine"));
-        assert!(response.message.contains("rate limit exceeded"));
-        assert!(response
-            .headers
-            .iter()
-            .any(|(n, v)| n.as_str() == "x-gateway-attribution" && v == "upstream"));
-        assert!(response
-            .headers
-            .iter()
-            .any(|(n, v)| n.as_str() == "x-upstream-status" && v == "429"));
-        assert!(response
-            .headers
-            .iter()
-            .any(|(n, v)| n.as_str() == "x-upstream-endpoint" && v == "volcengine"));
-    }
-
-    #[test]
-    fn exhausted_attempts_include_trail() {
-        let error = HostError::from(GatewayError::AllAttemptsFailed {
-            attempts: vec![
-                AttemptReport {
-                    endpoint_id: "volcengine".to_string(),
-                    status: AttemptStatus::Retried,
-                    latency_ms: 120,
-                    error: Some("429".to_string()),
-                    error_kind: Some(GatewayErrorKind::RateLimited),
-                },
-                AttemptReport {
-                    endpoint_id: "volcengine".to_string(),
-                    status: AttemptStatus::Failed,
-                    latency_ms: 130,
-                    error: Some("429".to_string()),
-                    error_kind: Some(GatewayErrorKind::RateLimited),
-                },
-            ],
-            last_error: Box::new(GatewayError::UpstreamHttp {
-                status: 429,
-                body: None,
-                endpoint_id: "volcengine".to_string(),
-            }),
-        });
-        let response = host_error_to_response(&error);
-        assert_eq!(response.status, StatusCode::TOO_MANY_REQUESTS);
-        assert!(response.message.contains("2 attempt(s)"));
-        assert!(response.message.contains("volcengine:Retried:RateLimited"));
-    }
-
-    #[test]
-    fn transport_error_is_gateway_infra() {
-        let error = HostError::from(GatewayError::Transport {
-            message: "connection refused".to_string(),
-            endpoint_id: Some("volcengine".to_string()),
-        });
-        let response = host_error_to_response(&error);
-        assert_eq!(response.status, StatusCode::BAD_GATEWAY);
-        assert!(response.message.contains("gateway transport error on volcengine"));
-        assert!(response
-            .headers
-            .iter()
-            .any(|(n, v)| n.as_str() == "x-gateway-attribution" && v == "gateway"));
-    }
-
-    #[test]
-    fn truncate_body_bounds_message() {
-        let long = "x".repeat(1000);
-        let t = truncate_body(Some(&long)).expect("truncated");
-        assert!(t.len() < long.len());
-        assert!(t.len() <= MAX_ERROR_BODY + 3);
     }
 }
