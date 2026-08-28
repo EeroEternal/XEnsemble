@@ -41,17 +41,17 @@ if command -v getenforce >/dev/null 2>&1; then
     echo "==> [inner] SELinux config persisted -> Permissive"
   fi
 fi
-# Also allow nginx to bind :8088 (control plane) / :8089 (preview) in case
+# Also allow nginx to bind :8088 (control plane) / :8099 (preview) in case
 # SELinux is re-enabled later.
 if command -v semanage >/dev/null 2>&1; then
   semanage port -a -t http_port_t -p tcp 8088 2>/dev/null || semanage port -m -t http_port_t -p tcp 8088 2>/dev/null || true
-  semanage port -a -t http_port_t -p tcp 8089 2>/dev/null || semanage port -m -t http_port_t -p tcp 8089 2>/dev/null || true
+  semanage port -a -t http_port_t -p tcp 8099 2>/dev/null || semanage port -m -t http_port_t -p tcp 8099 2>/dev/null || true
 fi
 
-# Also open firewalld (if active) for :8088 / :8089 so nginx can serve both.
+# Also open firewalld (if active) for :8088 / :8099 so nginx can serve both.
 if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld 2>/dev/null; then
   firewall-cmd --permanent --add-port=8088/tcp >/dev/null 2>&1 || true
-  firewall-cmd --permanent --add-port=8089/tcp >/dev/null 2>&1 || true
+  firewall-cmd --permanent --add-port=8099/tcp >/dev/null 2>&1 || true
   firewall-cmd --reload >/dev/null 2>&1 || true
 fi
 
@@ -205,11 +205,11 @@ WantedBy=multi-user.target
 EOF
 
 # ---------------------------------------------------------------------------
-# 6. Overwrite nginx config: HTTP-only on :8088 (control plane) + :8089
+# 6. Overwrite nginx config: HTTP-only on :8088 (control plane) + :8099
 #    (preview portal), conf.d layout. Remove any upstream
 #    sites-available/enabled leftovers to avoid duplicate servers.
 # ---------------------------------------------------------------------------
-sed -e "s|__HTTP_PORT__|8088|g" -e "s|__PREVIEW_PORT__|8089|g" > /etc/nginx/conf.d/xensemble.conf <<'CONF'
+sed -e "s|__HTTP_PORT__|8088|g" -e "s|__PREVIEW_PORT__|8099|g" > /etc/nginx/conf.d/xensemble.conf <<'CONF'
 map $http_upgrade $connection_upgrade {
     default upgrade;
     ''      close;
@@ -283,13 +283,13 @@ if [ -n "$HOST_IP" ]; then
   echo "CONTROL_PLANE_PUBLIC_URL=http://${HOST_IP}:8088" >> "$ENV_FILE"
   echo "==> [inner] CONTROL_PLANE_PUBLIC_URL set to http://${HOST_IP}:8088"
 
-  # Preview portal on its own port (8089): preview traffic never mixes with the
+  # Preview portal on its own port (8099): preview traffic never mixes with the
   # control-plane port, so gateway.js isPreviewPort correctly routes every
   # preview command to the deployment tunnel instead of the host console.
   grep -v '^PREVIEW_PUBLIC_URL=' "$ENV_FILE" > "$ENV_FILE.tmp" 2>/dev/null || true
   mv "$ENV_FILE.tmp" "$ENV_FILE" 2>/dev/null || true
-  echo "PREVIEW_PUBLIC_URL=http://${HOST_IP}:8089" >> "$ENV_FILE"
-  echo "==> [inner] PREVIEW_PUBLIC_URL set to http://${HOST_IP}:8089"
+  echo "PREVIEW_PUBLIC_URL=http://${HOST_IP}:8099" >> "$ENV_FILE"
+  echo "==> [inner] PREVIEW_PUBLIC_URL set to http://${HOST_IP}:8099"
 fi
 
 sudo nginx -t

@@ -26,7 +26,7 @@ function loadAllowedPreviewHosts() {
             /* ignore invalid public url */
         }
     }
-    // 预览专用端口（PREVIEW_PUBLIC_URL，如 http://IP:8089）也纳入允许 host，
+    // 预览专用端口（PREVIEW_PUBLIC_URL，如 http://IP:8099）也纳入允许 host，
     // 否则 preview 请求带该 Host 会被 isAllowedPreviewHost 拒绝。
     const previewUrl = process.env.PREVIEW_PUBLIC_URL?.trim();
     if (previewUrl) {
