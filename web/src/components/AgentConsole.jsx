@@ -366,18 +366,40 @@ function AgentConsole({
     let lastHostWidth = 0;
     let lastHostHeight = 0;
     let resizeDebounce = null;
-    const resizeObserver = new ResizeObserver(() => {
-      if (resizeDebounce) clearTimeout(resizeDebounce);
-      resizeDebounce = setTimeout(() => {
-        if (disposed) return;
-        const rect = host.getBoundingClientRect();
-        const w = Math.floor(rect.width);
-        const h = Math.floor(rect.height);
+    // 宽度稳定检测：面板收起/展开有 width 过渡（约 150ms），期间容器宽度持续变化。
+    // 若每次变化都触发 fit → 向 PTY 发送 resize → TUI 应用清屏重绘，会造成闪烁。
+    // 因此：过渡期间每次 RO 触发都重置定时器并清空 pending（不 fit）；
+    // 宽度稳定后第一次测量记下 pending，延迟再测一次，尺寸一致才 fit —— 整个过渡只重绘一次。
+    let pendingW = 0;
+    let pendingH = 0;
+    const checkResizeStable = () => {
+      if (disposed) return;
+      const rect = host.getBoundingClientRect();
+      const w = Math.floor(rect.width);
+      const h = Math.floor(rect.height);
+      if (w <= 0 || h <= 0) {
+        pendingW = 0;
+        pendingH = 0;
+        return;
+      }
+      if (pendingW === w && pendingH === h) {
+        pendingW = 0;
+        pendingH = 0;
         if (Math.abs(w - lastHostWidth) <= 2 && Math.abs(h - lastHostHeight) <= 2) return;
         lastHostWidth = w;
         lastHostHeight = h;
         fitTerminal();
-      }, 100);
+      } else {
+        pendingW = w;
+        pendingH = h;
+        resizeDebounce = setTimeout(checkResizeStable, 120);
+      }
+    };
+    const resizeObserver = new ResizeObserver(() => {
+      if (resizeDebounce) clearTimeout(resizeDebounce);
+      pendingW = 0;
+      pendingH = 0;
+      resizeDebounce = setTimeout(checkResizeStable, 100);
     });
     resizeObserver.observe(host);
 
@@ -823,6 +845,7 @@ function AgentConsole({
       if (writeRafId !== null) { clearTimeout(writeRafId); }
       if (reconnectTimer) clearTimeout(reconnectTimer);
       resizeTimers.forEach((t) => clearTimeout(t));
+      if (resizeDebounce) clearTimeout(resizeDebounce);
       resizeObserver.disconnect();
       host.removeEventListener('mousedown', focusTerminal);
       host.removeEventListener('click', focusTerminal);

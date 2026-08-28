@@ -128,7 +128,12 @@ export default React.forwardRef(function Sessions({
     const maxW = typeof window !== 'undefined' ? Math.max(720, window.innerWidth - 240) : 800;
     return Math.min(Math.floor(maxW / 2), maxW);
   });
+  // 拖拽调整宽度时禁用 width 过渡，避免每次 setPanelWidth 都触发 150ms 动画导致拖拽滞后
+  const [panelDragging, setPanelDragging] = useState(false);
   const panelRowRef = useRef(null);
+  // 拖拽期间禁用面板容器指针事件：DeployPanel 的预览是 iframe，会吞掉 mousemove/mouseup，
+  // 导致拖拽冻结或面板跟着 iframe 内部行为乱跑；pointer-events:none 让事件穿透到父窗口。
+  const panelContainerRef = useRef(null);
   const [skipPendingSpinner, setSkipPendingSpinner] = useState(false);
 
   // Measure actual container width for true 1:1 ratio (sidebar width varies)
@@ -306,17 +311,37 @@ export default React.forwardRef(function Sessions({
     const startW = panelWidth;
     let moved = false;
     const maxW = Math.max(720, window.innerWidth - 240);
+    // 按下即禁用面板容器指针事件：DeployPanel/浏览器预览是 iframe，会吞掉 mousemove/mouseup，
+    // 导致拖拽冻结或面板跟着 iframe 乱跑；pointer-events:none 让事件穿透到父窗口。
+    if (panelContainerRef.current) panelContainerRef.current.style.pointerEvents = 'none';
+    // RAF 节流：高频 mousemove 只按帧更新宽度，避免 iframe（部署/浏览器预览）逐像素重排闪烁
+    let rafId = null;
+    let latestNext = startW;
+    const applyWidth = () => {
+      rafId = null;
+      setPanelWidth(latestNext);
+    };
     const onMove = (ev) => {
-      if (Math.abs(ev.clientX - startX) > 3) moved = true;
+      if (Math.abs(ev.clientX - startX) > 3) {
+        moved = true;
+        setPanelDragging(true);
+      }
       const delta = startX - ev.clientX;
-      const next = Math.min(maxW, Math.max(420, startW + delta));
-      setPanelWidth(next);
+      latestNext = Math.min(maxW, Math.max(420, startW + delta));
+      if (rafId === null) rafId = requestAnimationFrame(applyWidth);
     };
     const onUp = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        // flush 最后一次宽度，避免快速松手丢失最终尺寸
+        applyWidth();
+      }
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      setPanelDragging(false);
+      if (panelContainerRef.current) panelContainerRef.current.style.pointerEvents = '';
       // A click without dragging toggles the panel closed.
       if (!moved) setPanelOpen(false);
     };
@@ -1423,14 +1448,20 @@ export default React.forwardRef(function Sessions({
                   />
                 )}
               </div>
-              {panelOpen && (
-                <>
+              <div
+                ref={panelContainerRef}
+                className="flex min-h-0 shrink-0 overflow-hidden"
+                style={{
+                  width: panelOpen ? panelWidth + 4 : 0,
+                  transition: panelDragging ? 'none' : 'width 150ms ease-out',
+                }}
+              >
                 <div
                   onMouseDown={startPanelResize}
                   className="w-1 shrink-0 cursor-col-resize bg-zinc-200 hover:bg-black transition-colors"
                   title={t('workspace:action.click_to_hide_drag_to_resize', { defaultValue: 'Click to hide · drag to resize' })}
                 />
-                <div className="flex min-h-0 shrink-0 flex-col border-l border-zinc-200 bg-white" style={{ width: panelWidth }}>
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col border-l border-zinc-200 bg-white">
                   <WorkspacePanel
                     ref={panelRef}
                     projectId={activeSession.projectId}
@@ -1475,8 +1506,7 @@ export default React.forwardRef(function Sessions({
                     onTogglePanel={() => setPanelOpen((p) => !p)}
                   />
                 </div>
-                </>
-              )}
+              </div>
             </div>
             )
           ) : launchingSession ? (
