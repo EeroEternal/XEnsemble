@@ -12,7 +12,7 @@
   "pull": "拉取",
   "fetch": "获取",
   "branch": "分支",
-  "merge": "合并",
+  "merge": "Merge",
   "rebase": "变基",
   "conflict": "冲突",
   "resolve": "解决",

@@ -76,18 +76,16 @@ export default function CodeEditor({ content, path, readOnly: readOnlyProp, isBi
       () => onSaveRef.current?.()
     );
 
-    // Disable Monaco's default (English) context menu; we render our own
-    // localized one. Keep the OS paste working via the editor's clipboard
-    // service.
-    editor.onContextMenu(() => {
-      // Monaco fires this; default menu is suppressed via options.contextmenu:false
+    // Monaco suppresses the browser contextmenu on its DOM and fires this
+    // event instead. Use it to show our localized menu (Monaco's default
+    // menu is disabled via options.contextmenu:false).
+    editor.onContextMenu((e) => {
+      const ev = e?.event || e?.nativeEvent;
+      setCtxMenu({
+        x: ev?.clientX ?? window.innerWidth / 2,
+        y: ev?.clientY ?? window.innerHeight / 2,
+      });
     });
-  }, []);
-
-  const handleEditorContextMenu = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setCtxMenu({ x: e.clientX, y: e.clientY });
   }, []);
 
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
@@ -162,7 +160,6 @@ export default function CodeEditor({ content, path, readOnly: readOnlyProp, isBi
       )}
       <div
         className="flex-1 min-h-0 relative"
-        onContextMenu={handleEditorContextMenu}
         onClick={closeCtxMenu}
       >
         <Editor

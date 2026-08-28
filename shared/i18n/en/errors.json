@@ -33,6 +33,7 @@
   "only_failed_can_retry": "Only failed builds can be retried",
   "cannot_delete_active": "Cannot delete the active version. Deprecate it first.",
   "image_in_use": "Cannot delete image: {{count}} active session(s) are using it",
+  "custom_image_not_found": "Custom image not found",
   "image_version_not_found": "Image version not found",
   "custom_image_not_found": "Custom image not found",
   "custom_builds_unavailable": "Custom image builds are not available",

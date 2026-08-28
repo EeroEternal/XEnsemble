@@ -91,12 +91,18 @@ function registerCustomImageRoutes(fastify) {
       return await deleteImage(request.user.id, request.params.id);
     } catch (err) {
       const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
-      // Localize the "image in use" 409 error (code stays machine-readable).
+      // Localize known errors (code stays machine-readable).
       if (err.statusCode === 409 && /active session/i.test(err.message || '')) {
         const count = Number((err.message || '').match(/^Cannot delete image: (\d+)/)?.[1]) || 0;
         return reply.code(409).send({
           error: t('errors:image_in_use', { count }, request.locale || 'en'),
           code: 'image_in_use',
+        });
+      }
+      if (err.statusCode === 404 && /custom image not found/i.test(err.message || '')) {
+        return reply.code(404).send({
+          error: t('errors:custom_image_not_found', { defaultValue: 'Custom image not found' }, request.locale || 'en'),
+          code: 'custom_image_not_found',
         });
       }
       return sendPublicError(reply, err, 'Failed to delete custom image', statusCode);

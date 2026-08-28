@@ -34,7 +34,13 @@ export function getWorkspaceShellWsUrl(projectId, accessToken, sessionId) {
 }
 
 export function publicFetch(path, options = {}) {
-  return fetch(`${getApiBase()}${path}`, options);
+  const headers = { ...(options.headers || {}) };
+  if (!headers['Accept-Language']) {
+    let locale = 'en';
+    try { locale = localStorage.getItem('xe_locale') || 'en'; } catch { /* ignore */ }
+    headers['Accept-Language'] = locale;
+  }
+  return fetch(`${getApiBase()}${path}`, { ...options, headers });
 }
 
 export {
