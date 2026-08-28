@@ -2,7 +2,7 @@ const i18next = require('i18next');
 const path = require('path');
 const fs = require('fs');
 
-const SHARED_I18N_DIR = path.join(__dirname, '..', '..', '..', '..', 'shared', 'i18n');
+const SHARED_I18N_DIR = path.join(__dirname, '..', '..', '..', 'shared', 'i18n');
 
 function loadLocaleResources(locale) {
   const localeDir = path.join(SHARED_I18N_DIR, locale);

@@ -78,13 +78,15 @@ export default function CodeEditor({ content, path, readOnly: readOnlyProp, isBi
 
     // Monaco suppresses the browser contextmenu on its DOM and fires this
     // event instead. Use it to show our localized menu (Monaco's default
-    // menu is disabled via options.contextmenu:false).
+    // menu is disabled via options.contextmenu:false). e.event is an
+    // IMouseEvent (posx/posy + browserEvent); read clientX/Y from the
+    // underlying browser event — do NOT fall back to a screen-center guess.
     editor.onContextMenu((e) => {
-      const ev = e?.event || e?.nativeEvent;
-      setCtxMenu({
-        x: ev?.clientX ?? window.innerWidth / 2,
-        y: ev?.clientY ?? window.innerHeight / 2,
-      });
+      const browser = e?.event?.browserEvent;
+      const x = browser?.clientX ?? e?.event?.posx;
+      const y = browser?.clientY ?? e?.event?.posy;
+      if (x == null || y == null) return;
+      setCtxMenu({ x, y });
     });
   }, []);
 
