@@ -13,12 +13,13 @@ import {
   consoleCardClass,
   consoleDialogMdClass,
   consoleAdminPageClass,
+  consoleAdminTableScrollClass,
+  consoleAdminTableShellClass,
   consoleIconButtonClass,
   consoleSectionLabelClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
   consoleTableHeadRowClass,
-  consoleTableShellClass,
 } from '../lib/consoleTokens';
 
 import { apiFetch } from '../lib/api';
@@ -258,8 +259,8 @@ export default function UsersAdmin() {
         </div>
       </div>
 
-      <div className={consoleTableShellClass}>
-        <div className="overflow-x-auto">
+      <div className={consoleAdminTableShellClass}>
+        <div className={consoleAdminTableScrollClass}>
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
               <col className="w-1/6" />

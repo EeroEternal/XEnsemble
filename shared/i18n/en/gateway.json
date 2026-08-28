@@ -55,7 +55,14 @@
     "update_provider": "Failed to update provider",
     "api_key_required": "API Key is required for new providers.",
     "save_provider": "Failed to save provider",
-    "delete_provider": "Failed to delete provider"
+    "delete_provider": "Failed to delete provider",
+    "timeout": "Request timed out.",
+    "network_failed": "Failed to reach provider.",
+    "invalid_api_key": "Invalid API Key.",
+    "provider_status": "Provider returned {{status}}.",
+    "empty_response": "Provider returned an empty response. Check API Key and model.",
+    "no_models": "No models returned. Enter the list manually.",
+    "enter_models_manually": "You can enter models manually."
   },
   "toast": {
     "models_fetched_one": "Fetched {{count}} model",

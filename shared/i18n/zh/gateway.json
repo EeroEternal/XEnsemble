@@ -30,7 +30,14 @@
     "update_provider": "更新提供商失败",
     "api_key_required": "新提供商必须填写 API 密钥。",
     "save_provider": "保存提供商失败",
-    "delete_provider": "删除提供商失败"
+    "delete_provider": "删除提供商失败",
+    "timeout": "请求超时。",
+    "network_failed": "无法连接到提供商。",
+    "invalid_api_key": "API Key 无效。",
+    "provider_status": "提供商返回 {{status}}。",
+    "empty_response": "提供商返回了空响应。请检查 API Key 和模型。",
+    "no_models": "未返回任何模型。请手动填写模型列表。",
+    "enter_models_manually": "可手动填写模型列表。"
   },
   "toast": {
     "models_fetched_one": "已获取 {{count}} 个模型",

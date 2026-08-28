@@ -125,12 +125,24 @@ function formatTestTime(value) {
   return date.toLocaleString();
 }
 
+function providerErrorMessage(t, data) {
+  switch (data?.code) {
+    case 'timeout': return t('gateway:error.timeout');
+    case 'network_failed': return t('gateway:error.network_failed');
+    case 'invalid_api_key': return t('gateway:error.invalid_api_key');
+    case 'provider_status': return t('gateway:error.provider_status', { status: data?.httpStatus ?? data?.status ?? '' });
+    case 'empty_response': return t('gateway:error.empty_response');
+    case 'no_models': return t('gateway:error.no_models');
+    default: return data?.message || t('gateway:error.verify_failed');
+  }
+}
+
 function ProviderStatusBadge({ health }) {
   const { t } = useTranslation();
   const status = health?.status || 'unknown';
   const testedAt = formatTestTime(health?.tested_at);
   const detailTitle = [
-    health?.message,
+    providerErrorMessage(t, health),
     health?.latency_ms != null ? `Latency: ${health.latency_ms}ms` : null,
     testedAt && `${t('gateway:verified_at')} ${testedAt}`,
   ].filter(Boolean).join('\n');
@@ -376,6 +388,8 @@ export default function GatewaySettingsPanel() {
         if (p?.last_test && (p.last_test.status === 'ok' || p.last_test.status === 'error')) {
           initialHealth[p.name] = {
             status: p.last_test.status,
+            code: p.last_test.code,
+            httpStatus: p.last_test.status_code,
             message: p.last_test.message,
             latency_ms: p.last_test.latency_ms,
             tested_at: p.last_test.tested_at,
@@ -429,13 +443,20 @@ export default function GatewaySettingsPanel() {
       const result = data.data || {};
       const next = {
         status: result.ok ? 'ok' : 'error',
+        code: result.code,
+        httpStatus: result.status,
         message: result.message,
         latency_ms: result.latency_ms,
         tested_at: Date.now(),
       };
       setProviderHealth((prev) => ({ ...prev, [name]: next }));
       if (!silent) {
-        showToast(result.ok ? 'success' : 'error', result.message || (result.ok ? 'Provider available.' : 'Provider unavailable.'));
+        showToast(
+          result.ok ? 'success' : 'error',
+          result.ok
+            ? result.message || t('gateway:available')
+            : providerErrorMessage(t, result),
+        );
       }
       return next;
     } catch (err) {
@@ -595,6 +616,8 @@ export default function GatewaySettingsPanel() {
       const testedAt = Date.now();
       const next = {
         status: result.ok ? 'ok' : 'error',
+        code: result.code,
+        httpStatus: result.status,
         message: result.message,
         latency_ms: result.latency_ms,
         tested_at: testedAt,
@@ -605,7 +628,9 @@ export default function GatewaySettingsPanel() {
       }
       showToast(
         result.ok ? 'success' : 'error',
-        result.message || (result.ok ? 'Provider available.' : 'Provider unavailable.'),
+        result.ok
+          ? result.message || t('gateway:available')
+          : providerErrorMessage(t, result),
       );
     } catch (err) {
       setFormConnectionHealth({ status: 'error', message: err.message, tested_at: Date.now() });
@@ -645,7 +670,10 @@ export default function GatewaySettingsPanel() {
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || t('gateway:error.fetch_models_failed'));
+        throw Object.assign(new Error(data.error || t('gateway:error.fetch_models_failed')), {
+          code: data.code,
+          status: data.status,
+        });
       }
       const models = data.data?.models || [];
       const patch = { models: models.join('\n') };
@@ -655,7 +683,7 @@ export default function GatewaySettingsPanel() {
       updateProviderForm(patch);
       showToast('success', t('gateway:toast.models_fetched', { count: models.length }));
     } catch (err) {
-      showToast('error', `${err.message} You can enter models manually.`);
+      showToast('error', `${providerErrorMessage(t, err)} ${t('gateway:error.enter_models_manually')}`);
     } finally {
       setFetchingModels(false);
     }

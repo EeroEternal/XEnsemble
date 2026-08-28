@@ -18,6 +18,8 @@ import {
 import { useToast } from '../components/Toast';
 import {
   consoleAdminPageClass,
+  consoleAdminTableScrollClass,
+  consoleAdminTableShellClass,
   consoleButtonFocusClass,
   consoleDialogPanelClass,
   consoleIconButtonClass,
@@ -26,7 +28,6 @@ import {
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
   consoleTableHeadRowClass,
-  consoleTableShellClass,
 } from '../lib/consoleTokens';
 import { formatDuration, getBuildState } from '../lib/imageBuildStates';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
@@ -578,8 +579,9 @@ export function CustomImagesContent() {
       )}
 
       {/* Image List */}
-      <div className={cn(consoleTableShellClass, 'overflow-x-auto')}>
-        <table className="w-full table-fixed border-collapse text-left text-sm">
+      <div className={consoleAdminTableShellClass}>
+        <div className={consoleAdminTableScrollClass}>
+          <table className="w-full table-fixed border-collapse text-left text-sm">
           <colgroup>
             <col className="w-1/6" />
             <col className="w-1/6" />
@@ -688,6 +690,7 @@ export function CustomImagesContent() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </>
   );

@@ -333,7 +333,12 @@ function registerGatewayAdminRoutes(fastify) {
             });
             return { success: true, data: result };
         } catch (err) {
-            return reply.code(err.statusCode || 500).send({ error: err.message });
+            return reply.code(err.statusCode || 500).send({
+                error: err.message,
+                ...(err.code ? { code: err.code } : {}),
+                ...(err.status != null ? { status: err.status } : {}),
+                ...(err.detail != null ? { detail: err.detail } : {}),
+            });
         }
     });
 
@@ -343,7 +348,12 @@ function registerGatewayAdminRoutes(fastify) {
             const result = await fetchProviderModels({ base_url, api_key });
             return { success: true, data: result };
         } catch (err) {
-            return reply.code(err.statusCode || 500).send({ error: err.message });
+            return reply.code(err.statusCode || 500).send({
+                error: err.message,
+                ...(err.code ? { code: err.code } : {}),
+                ...(err.status != null ? { status: err.status } : {}),
+                ...(err.detail != null ? { detail: err.detail } : {}),
+            });
         }
     });
 
@@ -353,7 +363,10 @@ function registerGatewayAdminRoutes(fastify) {
             const result = await testProviderConnectivity({ base_url, api_key, model, default_model, models });
             return { success: true, data: result };
         } catch (err) {
-            return reply.code(err.statusCode || 500).send({ error: err.message });
+            return reply.code(err.statusCode || 500).send({
+                error: err.message,
+                ...(err.code ? { code: err.code } : {}),
+            });
         }
     });
 
@@ -378,13 +391,18 @@ function registerGatewayAdminRoutes(fastify) {
             });
             lastProviderTests.set(name, {
                 status: result.ok ? 'ok' : 'error',
+                code: result.code,
+                status_code: result.status,
                 message: result.message || '',
                 latency_ms: result.latency_ms ?? null,
                 tested_at: Date.now(),
             });
             return { success: true, data: result };
         } catch (err) {
-            return reply.code(err.statusCode || 500).send({ error: err.message });
+            return reply.code(err.statusCode || 500).send({
+                error: err.message,
+                ...(err.code ? { code: err.code } : {}),
+            });
         }
     });
 

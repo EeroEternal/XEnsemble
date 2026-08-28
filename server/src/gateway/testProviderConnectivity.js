@@ -114,11 +114,13 @@ async function testProviderConnectivity({ base_url, api_key, model, default_mode
             signal: AbortSignal.timeout(30000),
         });
     } catch (err) {
-        const message = err.name === 'TimeoutError'
+        const isTimeout = err.name === 'TimeoutError';
+        const message = isTimeout
             ? 'Request timed out.'
             : `Failed to reach provider: ${err.message}`;
         return {
             ok: false,
+            code: isTimeout ? 'timeout' : 'network_failed',
             latency_ms: latencyMs(),
             message,
         };
@@ -134,9 +136,12 @@ async function testProviderConnectivity({ base_url, api_key, model, default_mode
 
     if (!response.ok) {
         const detail = responseBody?.error?.message || responseBody?.message || responseBody?.error || raw?.slice(0, 200);
+        const isAuthError = response.status === 401 || response.status === 403;
         return {
             ok: false,
             status: response.status,
+            code: isAuthError ? 'invalid_api_key' : 'provider_status',
+            detail: detail ? String(detail) : undefined,
             latency_ms: latencyMs(),
             message: authFailureMessage(response.status, detail),
         };
@@ -147,6 +152,7 @@ async function testProviderConnectivity({ base_url, api_key, model, default_mode
         return {
             ok: false,
             status: response.status,
+            code: 'empty_response',
             latency_ms: latencyMs(),
             message: 'Provider returned an empty response. Check API Key and model.',
         };

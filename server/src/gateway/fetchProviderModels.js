@@ -51,11 +51,13 @@ async function fetchProviderModels({ base_url, api_key }) {
             signal: AbortSignal.timeout(15000),
         });
     } catch (err) {
-        const message = err.name === 'TimeoutError'
+        const isTimeout = err.name === 'TimeoutError';
+        const message = isTimeout
             ? 'Request timed out while fetching models.'
             : `Failed to reach provider: ${err.message}`;
         const error = new Error(message);
         error.statusCode = 502;
+        error.code = isTimeout ? 'timeout' : 'network_failed';
         throw error;
     }
 
@@ -72,6 +74,9 @@ async function fetchProviderModels({ base_url, api_key }) {
         const isAuthError = response.status === 401 || response.status === 403;
         const error = new Error(detail ? `Provider returned ${response.status}: ${detail}` : `Provider returned ${response.status}.`);
         error.statusCode = isAuthError ? 502 : (response.status >= 400 && response.status < 500 ? response.status : 502);
+        error.code = isAuthError ? 'invalid_api_key' : 'provider_status';
+        error.status = response.status;
+        error.detail = detail ? String(detail) : undefined;
         throw error;
     }
 
@@ -79,6 +84,7 @@ async function fetchProviderModels({ base_url, api_key }) {
     if (models.length === 0) {
         const err = new Error('No models returned. Enter the list manually.');
         err.statusCode = 404;
+        err.code = 'no_models';
         throw err;
     }
 

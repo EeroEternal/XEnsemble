@@ -8,7 +8,7 @@ export default function GatewayAdmin() {
   return (
     <div className={consoleAdminPageClass}>
       <PageHeader title={t('gateway:title')} />
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 overflow-auto">
         <GatewaySettingsPanel />
       </div>
     </div>

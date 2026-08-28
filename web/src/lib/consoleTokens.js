@@ -50,7 +50,7 @@ export const consoleAdminPageClass = 'flex h-full min-h-0 w-full flex-col gap-6'
 export const consoleToolPageClass =
   'flex h-full min-h-0 w-full flex-col bg-zinc-50 text-zinc-900';
 
-export const consoleAdminTableScrollClass = 'min-h-0 flex-1 overflow-auto console-scroll-hidden';
+export const consoleAdminTableScrollClass = 'min-h-0 flex-1 overflow-auto';
 
 export const consoleTableShellClass =
   'bg-white border border-zinc-200 rounded-lg overflow-hidden shadow-sm';
