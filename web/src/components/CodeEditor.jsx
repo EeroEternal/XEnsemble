@@ -1,6 +1,6 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
-import { FileWarning, Loader2 } from 'lucide-react';
+import { FileWarning, Loader2, Copy, Scissors, ClipboardPaste, CheckSquare } from 'lucide-react';
 import '@/lib/monacoSetup'; // Configure Monaco to load from local bundle, not CDN
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../hooks/useTheme';
@@ -64,6 +64,8 @@ export default function CodeEditor({ content, path, readOnly: readOnlyProp, isBi
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
 
+  const [ctxMenu, setCtxMenu] = useState(null);
+
   const canEdit = !readOnlyProp && !isBinary;
   const isReadOnly = !canEdit;
 
@@ -73,6 +75,38 @@ export default function CodeEditor({ content, path, readOnly: readOnlyProp, isBi
       monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
       () => onSaveRef.current?.()
     );
+
+    // Disable Monaco's default (English) context menu; we render our own
+    // localized one. Keep the OS paste working via the editor's clipboard
+    // service.
+    editor.onContextMenu(() => {
+      // Monaco fires this; default menu is suppressed via options.contextmenu:false
+    });
+  }, []);
+
+  const handleEditorContextMenu = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ x: e.clientX, y: e.clientY });
+  }, []);
+
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
+
+  const execEditorCommand = useCallback((command) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    try {
+      if (command === 'cut') {
+        editor.trigger('contextmenu', 'editor.action.clipboardCutAction', null);
+      } else if (command === 'copy') {
+        editor.trigger('contextmenu', 'editor.action.clipboardCopyAction', null);
+      } else if (command === 'paste') {
+        editor.trigger('contextmenu', 'editor.action.clipboardPasteAction', null);
+      } else if (command === 'selectAll') {
+        editor.trigger('contextmenu', 'editor.action.selectAll', null);
+      }
+    } catch { /* ignore */ }
+    setCtxMenu(null);
   }, []);
 
   const handleKeyDown = useCallback((e) => {
@@ -97,6 +131,14 @@ export default function CodeEditor({ content, path, readOnly: readOnlyProp, isBi
   const isLarge = content && content.length > LARGE_FILE_THRESHOLD;
   const showToolbar = isReadOnly || isLarge || saving;
 
+  const menuItems = [
+    { key: 'cut', label: t('common:action.cut', { defaultValue: 'Cut' }), icon: Scissors, disabled: isReadOnly },
+    { key: 'copy', label: t('common:action.copy', { defaultValue: 'Copy' }), icon: Copy },
+    { key: 'paste', label: t('common:action.paste', { defaultValue: 'Paste' }), icon: ClipboardPaste, disabled: isReadOnly },
+    { divider: true },
+    { key: 'selectAll', label: t('common:action.select_all', { defaultValue: 'Select All' }), icon: CheckSquare },
+  ];
+
   return (
     <div className="flex flex-col h-full w-full" onKeyDown={handleKeyDown}>
       {showToolbar && (
@@ -118,7 +160,11 @@ export default function CodeEditor({ content, path, readOnly: readOnlyProp, isBi
           </div>
         </div>
       )}
-      <div className="flex-1 min-h-0">
+      <div
+        className="flex-1 min-h-0 relative"
+        onContextMenu={handleEditorContextMenu}
+        onClick={closeCtxMenu}
+      >
         <Editor
           height="100%"
           language={language}
@@ -146,8 +192,36 @@ export default function CodeEditor({ content, path, readOnly: readOnlyProp, isBi
             cursorBlinking: 'smooth',
             smoothScrolling: true,
             padding: { top: 12, bottom: 12 },
+            contextmenu: false,
           }}
         />
+        {ctxMenu && (
+          <div
+            className="fixed z-[120] min-w-[160px] bg-white border border-zinc-200 rounded-md shadow-lg py-1"
+            style={{ top: Math.min(ctxMenu.y, window.innerHeight - 180), left: Math.min(ctxMenu.x, window.innerWidth - 180) }}
+            role="menu"
+            onContextMenu={(e) => e.preventDefault()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {menuItems.map((item, i) =>
+              item.divider ? (
+                <div key={`d${i}`} className="my-1 border-t border-zinc-200" />
+              ) : (
+                <button
+                  key={item.key}
+                  type="button"
+                  role="menuitem"
+                  disabled={item.disabled}
+                  onClick={() => execEditorCommand(item.key)}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 disabled:pointer-events-none"
+                >
+                  <item.icon className="h-3.5 w-3.5 text-zinc-400" />
+                  {item.label}
+                </button>
+              ),
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

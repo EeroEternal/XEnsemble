@@ -142,7 +142,7 @@ export default function CreatePRDialog({
     <ConsoleDialogShell onClose={onClose} panelClassName={`${consoleDialogMdClass} max-h-[calc(100vh-2rem)]`}>
       <ConsoleStructuredDialogHeader
         title={t('git:create_pull_request')}
-        subtitle={`From ${sourceBranch || 'current branch'}`}
+        subtitle={t('git:pr.from_source', { branch: sourceBranch || t('git:pr.current_branch', { defaultValue: 'current branch' }) })}
       />
       <ConsoleStructuredDialogBody>
         <div className="grid grid-cols-2 gap-3">
@@ -207,26 +207,26 @@ export default function CreatePRDialog({
             onClick={() => setShowDiff((v) => !v)}
             className="text-xs font-medium text-zinc-500 hover:text-zinc-900"
           >
-            {showDiff ? 'Hide diff preview' : 'Show diff preview'}
+            {showDiff ? t('git:pr.hide_diff_preview', { defaultValue: 'Hide diff preview' }) : t('git:pr.show_diff_preview', { defaultValue: 'Show diff preview' })}
           </button>
           {showDiff && (
             <div className="mt-2 max-h-48 overflow-auto rounded-md border border-zinc-200 bg-zinc-50 p-3">
               {diffLoading ? (
                 <div className="flex items-center gap-2 text-xs text-zinc-500">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Loading diff…
+                  {t('git:pr.loading_diff', { defaultValue: 'Loading diff…' })}
                 </div>
               ) : diffBinary ? (
-                <p className="text-xs text-zinc-500" data-testid="pr-diff-binary">Binary files are omitted from this preview.</p>
+                <p className="text-xs text-zinc-500" data-testid="pr-diff-binary">{t('git:pr.binary_omitted', { defaultValue: 'Binary files are omitted from this preview.' })}</p>
               ) : diff ? (
                 <>
                   <pre className="whitespace-pre-wrap font-mono text-xs text-zinc-700">{diff}</pre>
                   {diffTruncated && (
-                    <p className="mt-2 text-xs text-amber-700" data-testid="pr-diff-truncated">Diff truncated due to size.</p>
+                    <p className="mt-2 text-xs text-amber-700" data-testid="pr-diff-truncated">{t('git:pr.diff_truncated', { defaultValue: 'Diff truncated due to size.' })}</p>
                   )}
                 </>
               ) : (
-                <p className="text-xs text-zinc-500">No diff available.</p>
+                <p className="text-xs text-zinc-500">{t('git:pr.no_diff', { defaultValue: 'No diff available.' })}</p>
               )}
             </div>
           )}
@@ -234,12 +234,12 @@ export default function CreatePRDialog({
       </ConsoleStructuredDialogBody>
       {sourceBranch === targetBranch && (
         <div className="px-5 py-1.5 text-[11px] text-amber-700 bg-amber-50 border-t border-amber-200">
-          Source and target branches must be different.
+          {t('git:pr.same_branch_error', { defaultValue: 'Source and target branches must be different.' })}
         </div>
       )}
       <ConsoleStructuredDialogFooter>
         <Button type="button" variant="secondary" size="sm" onClick={onClose}>
-          Cancel
+          {t('common:action.cancel', { defaultValue: 'Cancel' })}
         </Button>
         <Button
           type="button"
@@ -250,7 +250,7 @@ export default function CreatePRDialog({
           {creating ? (
             <>
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              Creating…
+              {t('git:pr.creating', { defaultValue: 'Creating…' })}
             </>
           ) : (
             <>

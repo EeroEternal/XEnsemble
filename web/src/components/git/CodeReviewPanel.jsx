@@ -17,11 +17,19 @@ import {
 } from '../../lib/consoleTokens';
 
 const REVIEW_STATE_STYLES = {
-  APPROVED: { icon: Check, bg: 'bg-green-50', text: 'text-green-700', label: 'Approved' },
-  CHANGES_REQUESTED: { icon: X, bg: 'bg-red-50', text: 'text-red-700', label: 'Changes Requested' },
-  COMMENTED: { icon: MessageSquare, bg: 'bg-blue-50', text: 'text-blue-700', label: 'Commented' },
-  PENDING: { icon: CircleDot, bg: 'bg-yellow-50', text: 'text-yellow-700', label: 'Pending' },
-  DISMISSED: { icon: X, bg: 'bg-zinc-50', text: 'text-zinc-500', label: 'Dismissed' },
+  APPROVED: { icon: Check, bg: 'bg-green-50', text: 'text-green-700' },
+  CHANGES_REQUESTED: { icon: X, bg: 'bg-red-50', text: 'text-red-700' },
+  COMMENTED: { icon: MessageSquare, bg: 'bg-blue-50', text: 'text-blue-700' },
+  PENDING: { icon: CircleDot, bg: 'bg-yellow-50', text: 'text-yellow-700' },
+  DISMISSED: { icon: X, bg: 'bg-zinc-50', text: 'text-zinc-500' },
+};
+
+const REVIEW_STATE_LABEL_KEY = {
+  APPROVED: 'git:review_state_approved',
+  CHANGES_REQUESTED: 'git:review_state_changes_requested',
+  COMMENTED: 'git:review_state_commented',
+  PENDING: 'git:review_state_pending',
+  DISMISSED: 'git:review_state_dismissed',
 };
 
 function formatDate(ts) {
@@ -31,12 +39,14 @@ function formatDate(ts) {
 }
 
 function ReviewBadge({ state }) {
+  const { t } = useTranslation();
   const style = REVIEW_STATE_STYLES[state] || REVIEW_STATE_STYLES.COMMENTED;
+  const labelKey = REVIEW_STATE_LABEL_KEY[state] || 'git:review_state_commented';
   const Icon = style.icon;
   return (
     <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${style.bg} ${style.text}`}>
       <Icon className="h-3 w-3" />
-      {style.label}
+      {t(labelKey, { defaultValue: labelKey.split(':').pop() })}
     </span>
   );
 }
@@ -805,7 +815,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
                   : 'border-transparent text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-t-md'
               }`}
             >
-              Reviews ({reviews.length})
+              {t('git:tab_reviews', { defaultValue: 'Reviews' })} ({reviews.length})
             </button>
             <button
               type="button"
@@ -816,7 +826,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
                   : 'border-transparent text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-t-md'
               }`}
             >
-              Conversation ({conversation.length})
+              {t('git:tab_conversation', { defaultValue: 'Conversation' })} ({conversation.length})
             </button>
             <button
               type="button"
@@ -827,7 +837,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
                   : 'border-transparent text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-t-md'
               }`}
             >
-              Changes ({mrFiles.length})
+              {t('git:tab_changes', { defaultValue: 'Changes' })} ({mrFiles.length})
             </button>
           </div>
 

@@ -75,6 +75,14 @@
   "close_hint": "Close pull request",
   "reopen_hint": "Reopen pull request",
   "back_to_list": "Back to list",
+  "tab_reviews": "Reviews",
+  "tab_conversation": "Conversation",
+  "tab_changes": "Changes",
+  "review_state_approved": "Approved",
+  "review_state_changes_requested": "Changes Requested",
+  "review_state_commented": "Commented",
+  "review_state_pending": "Pending",
+  "review_state_dismissed": "Dismissed",
   "select_pr_hint": "Select a pull request from the list to view review",
   "reply": "Reply",
   "comment": "Comment",
@@ -149,7 +157,17 @@
   "pr": {
     "ai_filling": "AI is generating…",
     "body_placeholder": "What changed and why",
-    "title_placeholder": "feat: describe the change"
+    "title_placeholder": "feat: describe the change",
+    "from_source": "From {{branch}}",
+    "current_branch": "current branch",
+    "show_diff_preview": "Show diff preview",
+    "hide_diff_preview": "Hide diff preview",
+    "loading_diff": "Loading diff…",
+    "binary_omitted": "Binary files are omitted from this preview.",
+    "diff_truncated": "Diff truncated due to size.",
+    "no_diff": "No diff available.",
+    "same_branch_error": "Source and target branches must be different.",
+    "creating": "Creating…"
   },
   "providers": {
     "title": "Git Providers",

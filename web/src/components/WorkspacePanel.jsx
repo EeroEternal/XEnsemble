@@ -729,7 +729,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
             {newHereBasePath && newHereBasePath !== '.' && (
               <p className="text-xs text-zinc-400 mb-2 font-mono">{newHereBasePath}/</p>
             )}
-            <input ref={newFolderInputRef} type="text" placeholder="folder name"
+            <input ref={newFolderInputRef} type="text" placeholder={t('workspace:action.folder_name_placeholder', { defaultValue: 'folder name' })}
               value={newName} onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleCreateDir(); }}
               className={consoleInputClass} />

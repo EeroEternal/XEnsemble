@@ -161,11 +161,11 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     setDiscardConfirm({
       kind: 'file',
       path,
-      title: 'Discard Changes',
-      message: `Discard changes to ${path}? This cannot be undone.`,
-      confirmLabel: 'Discard',
+      title: t('workspace:discard_dialog_title', { defaultValue: 'Discard Changes' }),
+      message: t('workspace:discard_dialog_message', { path, defaultValue: `Discard changes to ${path}? This cannot be undone.` }),
+      confirmLabel: t('workspace:discard_confirm_label', { defaultValue: 'Discard' }),
     });
-  }, []);
+  }, [t]);
 
   const requestDiscardAll = useCallback(() => {
     const allPaths = [...gitStagedFiles, ...gitUnstagedFiles].map((f) => f.path).filter(Boolean);
@@ -173,8 +173,8 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     setDiscardConfirm({
       kind: 'all',
       paths: allPaths,
-      title: 'Discard All Changes',
-      message: `Discard all ${allPaths.length} change(s)? This cannot be undone.`,
+      title: t('workspace:discard_all_dialog_title', { defaultValue: 'Discard All Changes' }),
+      message: t('workspace:discard_all_dialog_message', { count: allPaths.length, defaultValue: `Discard all ${allPaths.length} change(s)? This cannot be undone.` }),
       confirmLabel: t('workspace:action.discard_all'),
     });
   }, [gitStagedFiles, gitUnstagedFiles, t]);

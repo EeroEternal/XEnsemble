@@ -49,6 +49,13 @@ function registerAuthRoutes(fastify) {
                 quotas: result.quotas,
             };
         } catch (err) {
+            // Localize well-known auth errors (code stays machine-readable).
+            const code = err.code;
+            if (code === 'invalid_credentials' || code === 'account_pending' || code === 'account_suspended') {
+                const locale = request.locale || 'en';
+                const message = t(`errors:${code}`, {}, locale);
+                return reply.code(err.statusCode || 401).send({ error: message, code });
+            }
             return sendPublicError(reply, err, 'Login failed', 500, request.locale || 'en');
         }
     });

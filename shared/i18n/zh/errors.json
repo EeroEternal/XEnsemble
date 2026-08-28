@@ -32,6 +32,7 @@
   "build_not_found": "构建不存在",
   "only_failed_can_retry": "只有失败的构建可以重试",
   "cannot_delete_active": "无法删除当前活跃版本。请先废弃它。",
+  "image_in_use": "无法删除镜像：{{count}} 个活跃会话正在使用它",
   "image_version_not_found": "镜像版本不存在",
   "custom_image_not_found": "自定义镜像不存在",
   "custom_builds_unavailable": "自定义镜像构建不可用",

@@ -17,6 +17,8 @@
     "refresh": "Refresh",
     "search": "Search",
     "copy": "Copy",
+    "cut": "Cut",
+    "paste": "Paste",
     "retry": "Retry",
     "back": "Back",
     "next": "Next",

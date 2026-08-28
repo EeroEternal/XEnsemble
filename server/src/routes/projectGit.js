@@ -85,7 +85,7 @@ async function generateAIDescription(project, gitOperationService, type, opts = 
     const locale = opts.locale || 'en';
     const prompts = locale === 'zh' ? {
         commit: '你是一个 commit message 生成器。根据 git diff，用中文输出简洁的 conventional commit 消息（如 "feat: 添加登录表单"）。只输出消息本身，不要引号、markdown 或解释。',
-        pr: '你是一个 pull request 生成器。根据 git diff，用中文输出一个包含 "title" 和 "body" 字段的 JSON 对象。title 是简洁的 conventional commit 风格摘要（英文格式，如 "feat: 添加登录表单"）。body 是关于改了什么以及为什么的简短中文描述，用 markdown 列表格式。只输出有效 JSON，不要 markdown 代码块或解释。',
+        pr: '你是一个 pull request 生成器。根据 git diff，用中文输出一个包含 "title" 和 "body" 字段的 JSON 对象。title 和 body 都用中文编写；title 是简洁的 conventional commit 风格摘要（如 "feat: 添加登录表单"，用中文描述改动内容）。body 是关于改了什么以及为什么的简短中文描述，用 markdown 列表格式。只输出有效 JSON，不要 markdown 代码块或解释。',
     } : {
         commit: 'You are a commit message generator. Given a git diff, output a concise conventional commit message (e.g. "feat: add login form"). Respond with the message only, no quotes, no markdown, no explanation.',
         pr: 'You are a pull request generator. Given a git diff, output a JSON object with "title" and "body" fields. The title should be a concise conventional commit style summary. The body should be a brief description of what changed and why, in markdown bullet points. Respond with valid JSON only, no markdown code blocks, no explanation.',

@@ -1,5 +1,6 @@
 const { sendPublicError } = require('../http/publicError');
 const { RuntimeError } = require('../runtime/interfaces');
+const { t } = require('../i18n');
 const { getCatalog } = require('../runtime/customImageCatalog');
 const {
   getFeatureStatus,
@@ -90,6 +91,14 @@ function registerCustomImageRoutes(fastify) {
       return await deleteImage(request.user.id, request.params.id);
     } catch (err) {
       const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
+      // Localize the "image in use" 409 error (code stays machine-readable).
+      if (err.statusCode === 409 && /active session/i.test(err.message || '')) {
+        const count = Number((err.message || '').match(/^Cannot delete image: (\d+)/)?.[1]) || 0;
+        return reply.code(409).send({
+          error: t('errors:image_in_use', { count }, request.locale || 'en'),
+          code: 'image_in_use',
+        });
+      }
       return sendPublicError(reply, err, 'Failed to delete custom image', statusCode);
     }
   });

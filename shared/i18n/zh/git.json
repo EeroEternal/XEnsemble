@@ -75,6 +75,14 @@
   "close_hint": "关闭 Pull Request",
   "reopen_hint": "重新打开 Pull Request",
   "back_to_list": "返回列表",
+  "tab_reviews": "审查",
+  "tab_conversation": "讨论",
+  "tab_changes": "更改",
+  "review_state_approved": "已批准",
+  "review_state_changes_requested": "请求更改",
+  "review_state_commented": "已评论",
+  "review_state_pending": "待处理",
+  "review_state_dismissed": "已驳回",
   "select_pr_hint": "从列表中选择一个 Pull Request 以查看审查",
   "reply": "Reply",
   "comment": "Comment",
@@ -147,7 +155,17 @@
   "pr": {
     "ai_filling": "AI 正在生成…",
     "body_placeholder": "描述改动内容和原因",
-    "title_placeholder": "feat: 描述本次改动"
+    "title_placeholder": "feat: 描述本次改动",
+    "from_source": "来自 {{branch}}",
+    "current_branch": "当前分支",
+    "show_diff_preview": "显示差异预览",
+    "hide_diff_preview": "隐藏差异预览",
+    "loading_diff": "加载差异中…",
+    "binary_omitted": "二进制文件已从预览中省略。",
+    "diff_truncated": "差异过大，已截断。",
+    "no_diff": "无可用差异。",
+    "same_branch_error": "源分支与目标分支不能相同。",
+    "creating": "创建中…"
   },
   "commit_ai_generating": "AI 正在生成…",
   "providers": {
