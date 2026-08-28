@@ -2,6 +2,7 @@
   "title": "设置",
   "close": "关闭设置",
   "tabs": {
+    "preferences": "偏好",
     "general": "通用",
     "terminal": "终端",
     "agent": "Agent",
@@ -10,6 +11,13 @@
     "quota": "配额",
     "gateway": "网关",
     "language": "语言"
+  },
+  "preferences": {
+    "title": "偏好",
+    "appearance": "外观",
+    "theme_light": "浅色",
+    "theme_dark": "深色",
+    "theme_system": "跟随系统"
   },
   "language": {
     "label": "语言",

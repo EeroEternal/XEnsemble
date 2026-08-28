@@ -272,7 +272,7 @@ export function PreviewActions({
         type="button"
         onClick={onCancelDeploy}
         title={t('deploy:action.stop_deployment', { defaultValue: 'Stop deployment' })}
-        className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md bg-black text-white hover:bg-zinc-800 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-0"
+        className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md bg-zinc-900 text-zinc-50 hover:bg-zinc-800 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-0"
       >
         <Square className="w-3.5 h-3.5" />
         {t('deploy:action.stop_deploy', { defaultValue: 'Stop deploy' })}
@@ -311,7 +311,7 @@ export function PreviewActions({
       disabled={isBusy}
       onClick={onAnalyze || deployPreview}
       title={t('deploy:action.deploy_preview', { defaultValue: 'Deploy preview' })}
-      className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md bg-black text-white hover:bg-zinc-800 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-0"
+      className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md bg-zinc-900 text-zinc-50 hover:bg-zinc-800 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-0"
     >
       {isBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />}
       {t('deploy:action.deploy', { defaultValue: 'Deploy' })}

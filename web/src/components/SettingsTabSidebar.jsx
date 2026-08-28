@@ -8,6 +8,7 @@ import {
   Globe,
   GitBranch,
   Gauge,
+  Palette,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
@@ -17,6 +18,7 @@ import {
 import { SidebarAccountMenu } from './AppSidebar';
 
 const ALL_TABS = [
+  { id: 'preferences', labelKey: 'settings:tabs.preferences', icon: Palette, route: '/settings', adminOnly: false },
   { id: 'general', labelKey: 'settings:tabs.general', icon: Settings2, route: '/settings', adminOnly: true },
   { id: 'git', labelKey: 'settings:tabs.git_providers', icon: GitBranch, route: '/settings', adminOnly: false },
   { id: 'quota', labelKey: 'settings:tabs.quota', icon: Gauge, route: '/settings', adminOnly: false },
@@ -40,7 +42,7 @@ export default function SettingsTabSidebar({ activeTab, onSectionChange, user, o
           const Icon = tab.icon;
           const isActive = tab.id === activeTab;
           const handleClick = () => {
-            if (tab.id === 'general' || tab.id === 'git' || tab.id === 'quota') {
+            if (tab.id === 'general' || tab.id === 'git' || tab.id === 'quota' || tab.id === 'preferences') {
               onSectionChange?.(tab.id);
             } else if (tab.route) {
               navigate(tab.route);

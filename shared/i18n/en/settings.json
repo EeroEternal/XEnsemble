@@ -2,6 +2,7 @@
   "title": "Settings",
   "close": "Close settings",
   "tabs": {
+    "preferences": "Preferences",
     "general": "General",
     "terminal": "Terminal",
     "agent": "Agent",
@@ -10,6 +11,13 @@
     "quota": "Quota",
     "gateway": "Gateway",
     "language": "Language"
+  },
+  "preferences": {
+    "title": "Preferences",
+    "appearance": "Appearance",
+    "theme_light": "Light",
+    "theme_dark": "Dark",
+    "theme_system": "Follow system"
   },
   "language": {
     "label": "Language",

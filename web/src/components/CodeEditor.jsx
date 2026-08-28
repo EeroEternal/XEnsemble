@@ -3,6 +3,7 @@ import Editor from '@monaco-editor/react';
 import { FileWarning, Loader2 } from 'lucide-react';
 import '@/lib/monacoSetup'; // Configure Monaco to load from local bundle, not CDN
 import { useTranslation } from 'react-i18next';
+import { useTheme } from '../hooks/useTheme';
 
 const LANG_MAP = {
   js: 'javascript',
@@ -58,6 +59,7 @@ const LARGE_FILE_THRESHOLD = MEGABYTE;
 
 export default function CodeEditor({ content, path, readOnly: readOnlyProp, isBinary, onSave, onChange, saving }) {
   const { t } = useTranslation();
+  const { isDark } = useTheme();
   const editorRef = useRef(null);
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
@@ -123,7 +125,7 @@ export default function CodeEditor({ content, path, readOnly: readOnlyProp, isBi
           value={content}
           onChange={onChange}
           onMount={handleMount}
-          theme="vs"
+          theme={isDark ? 'vs-dark' : 'vs'}
           loading={
             <div className="flex items-center justify-center h-full gap-2">
               <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />

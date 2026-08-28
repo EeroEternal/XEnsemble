@@ -57,7 +57,7 @@ const EditorTabs = memo(function EditorTabs({ tabs, activePath, onSelectTab, onC
               data-active={isActive ? 'true' : 'false'}
               className={`group flex items-center gap-1.5 shrink-0 px-3 py-2 text-sm cursor-pointer border-r border-zinc-200 transition-colors duration-150 ${
                 isActive
-                  ? 'bg-white text-zinc-900 border-b-2 border-b-black -mb-px'
+                  ? 'bg-surface text-zinc-900 border-b-2 border-b-black -mb-px'
                   : 'text-zinc-500 hover:bg-zinc-100'
               }`}
               onClick={() => onSelectTab?.(tab.path)}

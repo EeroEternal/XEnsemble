@@ -322,7 +322,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
             onClick={() => { setProvider(p.id); setRepos([]); setSelectedFullName(''); }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
               provider === p.id
-                ? 'bg-black text-white'
+                ? 'bg-zinc-900 text-zinc-50'
                 : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900'
             }`}
           >
@@ -409,7 +409,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
             <button
               type="button"
               onClick={() => switchMode('browse')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${mode === 'browse' ? 'bg-black text-white' : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'}`}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${mode === 'browse' ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'}`}
             >
               <Search className="h-3 w-3" />
               {t('git:browse')}
@@ -417,7 +417,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
             <button
               type="button"
               onClick={() => switchMode('url')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${mode === 'url' ? 'bg-black text-white' : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'}`}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${mode === 'url' ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'}`}
             >
               <Link2 className="h-3 w-3" />
               {t('git:paste_url')}
@@ -538,7 +538,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
                   type="checkbox"
                   checked={autoCreateBranch}
                   onChange={(e) => setAutoCreateBranch(e.target.checked)}
-                  className="rounded border-zinc-300 text-zinc-900 focus:ring-black"
+                  className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
                 />
                 {t('git:auto_create_work_branch')}
               </label>

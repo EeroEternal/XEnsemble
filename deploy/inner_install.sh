@@ -41,9 +41,18 @@ if command -v getenforce >/dev/null 2>&1; then
     echo "==> [inner] SELinux config persisted -> Permissive"
   fi
 fi
-# Also allow nginx to bind :8088 in case SELinux is re-enabled later.
+# Also allow nginx to bind :8088 (control plane) / :8089 (preview) in case
+# SELinux is re-enabled later.
 if command -v semanage >/dev/null 2>&1; then
   semanage port -a -t http_port_t -p tcp 8088 2>/dev/null || semanage port -m -t http_port_t -p tcp 8088 2>/dev/null || true
+  semanage port -a -t http_port_t -p tcp 8089 2>/dev/null || semanage port -m -t http_port_t -p tcp 8089 2>/dev/null || true
+fi
+
+# Also open firewalld (if active) for :8088 / :8089 so nginx can serve both.
+if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld 2>/dev/null; then
+  firewall-cmd --permanent --add-port=8088/tcp >/dev/null 2>&1 || true
+  firewall-cmd --permanent --add-port=8089/tcp >/dev/null 2>&1 || true
+  firewall-cmd --reload >/dev/null 2>&1 || true
 fi
 
 # ---------------------------------------------------------------------------
@@ -196,10 +205,11 @@ WantedBy=multi-user.target
 EOF
 
 # ---------------------------------------------------------------------------
-# 6. Overwrite nginx config: HTTP-only on :8088, conf.d layout. Remove any
-#    upstream sites-available/enabled leftovers to avoid duplicate servers.
+# 6. Overwrite nginx config: HTTP-only on :8088 (control plane) + :8089
+#    (preview portal), conf.d layout. Remove any upstream
+#    sites-available/enabled leftovers to avoid duplicate servers.
 # ---------------------------------------------------------------------------
-sed -e "s|__HTTP_PORT__|8088|g" > /etc/nginx/conf.d/xensemble.conf <<'CONF'
+sed -e "s|__HTTP_PORT__|8088|g" -e "s|__PREVIEW_PORT__|8089|g" > /etc/nginx/conf.d/xensemble.conf <<'CONF'
 map $http_upgrade $connection_upgrade {
     default upgrade;
     ''      close;
@@ -213,6 +223,32 @@ upstream xensemble_backend {
 server {
     listen __HTTP_PORT__;
     listen [::]:__HTTP_PORT__;
+    server_name localhost 127.0.0.1 _;
+
+    client_max_body_size 100m;
+
+    location / {
+        proxy_pass http://xensemble_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+        proxy_buffering off;
+    }
+}
+
+# Preview portal (PREVIEW_PUBLIC_URL). All traffic on this port is preview:
+# the server's preview gateway routes it to the deployment tunnel — it never
+# reaches the control-plane API (see gateway.js onRequest: "never fall into
+# the host console"). Keeps preview commands isolated from the host console.
+server {
+    listen __PREVIEW_PORT__;
+    listen [::]:__PREVIEW_PORT__;
     server_name localhost 127.0.0.1 _;
 
     client_max_body_size 100m;
@@ -246,6 +282,14 @@ if [ -n "$HOST_IP" ]; then
   mv "$ENV_FILE.tmp" "$ENV_FILE" 2>/dev/null || true
   echo "CONTROL_PLANE_PUBLIC_URL=http://${HOST_IP}:8088" >> "$ENV_FILE"
   echo "==> [inner] CONTROL_PLANE_PUBLIC_URL set to http://${HOST_IP}:8088"
+
+  # Preview portal on its own port (8089): preview traffic never mixes with the
+  # control-plane port, so gateway.js isPreviewPort correctly routes every
+  # preview command to the deployment tunnel instead of the host console.
+  grep -v '^PREVIEW_PUBLIC_URL=' "$ENV_FILE" > "$ENV_FILE.tmp" 2>/dev/null || true
+  mv "$ENV_FILE.tmp" "$ENV_FILE" 2>/dev/null || true
+  echo "PREVIEW_PUBLIC_URL=http://${HOST_IP}:8089" >> "$ENV_FILE"
+  echo "==> [inner] PREVIEW_PUBLIC_URL set to http://${HOST_IP}:8089"
 fi
 
 sudo nginx -t

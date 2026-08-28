@@ -78,7 +78,7 @@ export default function WorkspaceBrowserPane() {
             key={frameKey}
             title={t('workspace:label.browser', { defaultValue: 'Browser' })}
             src={activeUrl}
-            className="h-full w-full border-0 bg-white"
+            className="h-full w-full border-0 bg-surface"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
           />
         ) : (

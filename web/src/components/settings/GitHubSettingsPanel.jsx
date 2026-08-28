@@ -187,7 +187,7 @@ export default function GitHubSettingsPanel() {
             onClick={() => setActiveProvider(id)}
             className={`px-3 py-1.5 text-xs font-medium rounded-t-md transition-colors border-b-2 -mb-px ${
               activeProvider === id
-                ? 'border-zinc-900 text-zinc-900 bg-white'
+                ? 'border-zinc-900 text-zinc-900 bg-surface'
                 : 'border-transparent text-zinc-500 hover:text-zinc-900'
             }`}
           >

@@ -8,6 +8,7 @@ import { Editor } from '@monaco-editor/react';
 import '@/lib/monacoSetup';
 import * as gitApi from '../../lib/gitApi';
 import { useToast } from '../Toast';
+import { useTheme } from '../../hooks/useTheme';
 
 const LANG_MAP = {
   js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
@@ -95,6 +96,7 @@ const MONACO_OPTIONS_BASE = {
 
 export default function MergeEditorDialog({ open, file, projectId, oursContent, theirsContent, loading, onClose, onResolved }) {
   const { t } = useTranslation();
+  const { isDark } = useTheme();
   const { showToast } = useToast();
   const [mergedContent, setMergedContent] = useState('');
   const [saving, setSaving] = useState(false);
@@ -192,7 +194,7 @@ export default function MergeEditorDialog({ open, file, projectId, oursContent, 
   return (
     <ConsoleDialogShell
       onClose={onClose}
-      panelClassName="w-[calc(100vw-3rem)] max-w-[1400px] bg-white border border-zinc-200 shadow-lg rounded-lg flex flex-col max-h-[90vh] overflow-hidden p-0"
+      panelClassName="w-[calc(100vw-3rem)] max-w-[1400px] bg-surface border border-zinc-200 shadow-lg rounded-lg flex flex-col max-h-[90vh] overflow-hidden p-0"
     >
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-200 bg-zinc-50 shrink-0">
@@ -253,7 +255,7 @@ export default function MergeEditorDialog({ open, file, projectId, oursContent, 
                 height="100%"
                 language={language}
                 value={oursContent || ''}
-                theme="vs"
+                theme={isDark ? 'vs-dark' : 'vs'}
                 onMount={handleOursMount}
                 options={{ ...MONACO_OPTIONS_BASE, readOnly: true }}
               />
@@ -272,7 +274,7 @@ export default function MergeEditorDialog({ open, file, projectId, oursContent, 
                 height="100%"
                 language={language}
                 value={mergedContent}
-                theme="vs"
+                theme={isDark ? 'vs-dark' : 'vs'}
                 onMount={handleMergedMount}
                 onChange={(val) => setMergedContent(val ?? '')}
                 options={MONACO_OPTIONS_BASE}
@@ -292,7 +294,7 @@ export default function MergeEditorDialog({ open, file, projectId, oursContent, 
                 height="100%"
                 language={language}
                 value={theirsContent || ''}
-                theme="vs"
+                theme={isDark ? 'vs-dark' : 'vs'}
                 onMount={handleTheirsMount}
                 options={{ ...MONACO_OPTIONS_BASE, readOnly: true }}
               />

@@ -91,7 +91,7 @@ function AuthenticatedLayout({
     <div className={`h-full flex flex-col ${bgCanvas}`}>
       {/* Full-width top bar (above the sidebar). */}
       <div
-        className="shrink-0 h-12 border-b border-zinc-200 bg-white flex items-center px-4 gap-3 relative z-30"
+        className="shrink-0 h-12 border-b border-zinc-200 bg-surface flex items-center px-4 gap-3 relative z-30"
       >
         <BrandMark className="h-7 w-7 shrink-0" iconClassName="h-3.5 w-3.5" />
         <div className="flex flex-col shrink-0 leading-tight">

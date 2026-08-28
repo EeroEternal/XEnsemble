@@ -132,7 +132,7 @@ export default function ProjectSourceSelect({
   return (
     <div className="relative" ref={rootRef}>
       {open ? (
-        <div className={`w-full flex items-center gap-2 h-9 px-3 rounded-md border border-zinc-300 bg-white ${consoleButtonFocusClass}`}>
+        <div className={`w-full flex items-center gap-2 h-9 px-3 rounded-md border border-zinc-300 bg-surface ${consoleButtonFocusClass}`}>
           <Search className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
           <input
             type="search"
@@ -156,7 +156,7 @@ export default function ProjectSourceSelect({
           type="button"
           disabled={disabled}
           onClick={() => setOpen(true)}
-          className={`w-full flex items-center justify-between gap-2 h-9 px-3 text-sm rounded-md border border-zinc-300 bg-white text-left transition-colors hover:bg-zinc-50 disabled:opacity-50 ${consoleButtonFocusClass}`}
+          className={`w-full flex items-center justify-between gap-2 h-9 px-3 text-sm rounded-md border border-zinc-300 bg-surface text-left transition-colors hover:bg-zinc-50 disabled:opacity-50 ${consoleButtonFocusClass}`}
         >
           <span className="flex items-center gap-2 min-w-0 truncate">
             <GitBranch className="w-3.5 h-3.5 shrink-0 text-zinc-400" />

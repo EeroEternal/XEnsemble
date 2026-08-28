@@ -7,9 +7,11 @@ import GeneralSettingsPanel from './GeneralSettingsPanel';
 import GitHubSettingsPanel from './GitHubSettingsPanel';
 import GitProvidersSettingsPanel from './GitProvidersSettingsPanel';
 import QuotaSettingsPanel from './QuotaSettingsPanel';
+import PreferencesPanel from './PreferencesPanel';
 
 const SECTION_TITLES = {
   general: 'General',
+  preferences: 'Preferences',
   git: 'Git',
   'git-providers': 'Git',
   github: 'Git',
@@ -23,7 +25,8 @@ export default function SettingsShell({ section = 'general' }) {
   const title = SECTION_TITLES[section] ? t(`settings:tabs.${SECTION_TITLES[section].toLowerCase()}`, { defaultValue: SECTION_TITLES[section] }) : t('settings:title');
 
   let panel = null;
-  if (section === 'general') panel = <GeneralSettingsPanel />;
+  if (section === 'preferences') panel = <PreferencesPanel />;
+  else if (section === 'general') panel = <GeneralSettingsPanel />;
   else if (section === 'git') panel = <GitProvidersSettingsPanel />;
   else if (section === 'git-providers' && isAdmin) panel = <GitProvidersSettingsPanel />;
   else if (section === 'github' && !isAdmin) panel = <GitHubSettingsPanel />;

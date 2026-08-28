@@ -56,6 +56,20 @@
     --sidebar-accent-foreground: oklch(0.214 0.009 43.1);
     --sidebar-border: oklch(0.922 0.005 34.3);
     --sidebar-ring: oklch(0.714 0.014 41.2);
+    color-scheme: light;
+    /* zinc scale (RGB channels) — inverted in .dark for dark mode */
+    --zinc-50: 250 250 250;
+    --zinc-100: 244 244 245;
+    --zinc-200: 228 228 231;
+    --zinc-300: 212 212 216;
+    --zinc-400: 161 161 170;
+    --zinc-500: 113 113 122;
+    --zinc-600: 82 82 91;
+    --zinc-700: 63 63 70;
+    --zinc-800: 39 39 42;
+    --zinc-900: 24 24 27;
+    --zinc-950: 9 9 11;
+    --surface: 255 255 255;
   }
   .dark {
     --background: oklch(0.147 0.004 49.3);
@@ -89,6 +103,20 @@
     --sidebar-accent-foreground: oklch(0.986 0.002 67.8);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.547 0.021 43.1);
+    color-scheme: dark;
+    /* zinc scale inverted: light shades become dark surfaces, dark shades become light text */
+    --zinc-50: 24 24 27;
+    --zinc-100: 39 39 42;
+    --zinc-200: 63 63 70;
+    --zinc-300: 82 82 91;
+    --zinc-400: 113 113 122;
+    --zinc-500: 161 161 170;
+    --zinc-600: 212 212 216;
+    --zinc-700: 228 228 231;
+    --zinc-800: 244 244 245;
+    --zinc-900: 250 250 250;
+    --zinc-950: 255 255 255;
+    --surface: 39 39 42;
   }
   .theme {
     --font-sans: 'Noto Sans Variable', sans-serif;
@@ -107,7 +135,7 @@
 
 @layer components {
   .console-input {
-    @apply w-full bg-white border border-zinc-300 rounded-md px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-black focus:ring-1 focus:ring-black transition-colors;
+    @apply w-full bg-surface border border-zinc-300 rounded-md px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-colors;
   }
 
   .console-input-mono {
@@ -150,7 +178,7 @@
 
   .scrollbar-hover:hover,
   .scrollbar-hover:focus-within {
-    scrollbar-color: #d4d4d8 transparent;
+    scrollbar-color: rgb(var(--zinc-300)) transparent;
   }
 
   .scrollbar-hover::-webkit-scrollbar {
@@ -169,12 +197,12 @@
 
   .scrollbar-hover:hover::-webkit-scrollbar-thumb,
   .scrollbar-hover:focus-within::-webkit-scrollbar-thumb {
-    background: #d4d4d8;
+    background: rgb(var(--zinc-300));
   }
 
   .scrollbar-hover:hover::-webkit-scrollbar-thumb:hover,
   .scrollbar-hover:focus-within::-webkit-scrollbar-thumb:hover {
-    background: #a1a1a8;
+    background: rgb(var(--zinc-400));
   }
 }
 

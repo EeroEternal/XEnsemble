@@ -315,7 +315,7 @@ function FailureView({ result }) {
                                 </div>
                             )}
                             {showTrail && (
-                                <div className="text-[10px] font-mono text-zinc-500 space-y-0.5 max-h-48 overflow-y-auto bg-white/60 border border-zinc-200 rounded p-2">
+                                <div className="text-[10px] font-mono text-zinc-500 space-y-0.5 max-h-48 overflow-y-auto bg-surface/60 border border-zinc-200 rounded p-2">
                                     {trail.slice(-20).map((t, i) => (
                                         <div key={`${t.round}-${i}`} className="whitespace-pre-wrap break-words">
                                             {t.action === 'tool' ? (

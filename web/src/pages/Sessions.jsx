@@ -1307,7 +1307,7 @@ export default React.forwardRef(function Sessions({
             <button
               type="button"
               onClick={() => { setShowRestartPrompt(false); handleRestartSession(); }}
-              className={`h-9 px-3 flex items-center justify-center gap-2 bg-black text-white rounded-md text-sm font-medium hover:bg-zinc-700 ${transitionBase}`}
+              className={`h-9 px-3 flex items-center justify-center gap-2 bg-zinc-900 text-zinc-50 rounded-md text-sm font-medium hover:bg-zinc-700 ${transitionBase}`}
             >
               <Power className="w-4 h-4" /> {t('sessions:action.restart_now', { defaultValue: 'Restart Now' })}
             </button>
@@ -1316,8 +1316,8 @@ export default React.forwardRef(function Sessions({
       )}
 
       {/* Main area */}
-      <div className="flex min-h-0 flex-1 w-full flex-row items-stretch bg-white">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
+      <div className="flex min-h-0 flex-1 w-full flex-row items-stretch bg-surface">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
           <>
           {topbarEl && createPortal(
             <>
@@ -1387,7 +1387,7 @@ export default React.forwardRef(function Sessions({
           )}
           {activeSession && !workspaceCreating ? (
             (sessionPending && !skipPendingSpinner) ? (
-              <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-white p-8 text-center">
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-surface p-8 text-center">
                 <Loader2 className="w-8 h-8 text-zinc-400 animate-spin mb-4" strokeWidth={1.5} />
                 <h3 className="text-lg font-semibold text-zinc-900 mb-1.5">{t('sessions:state.preparing_environment', { defaultValue: 'Preparing your environment…' })}</h3>
                 <p className="text-sm text-zinc-400 max-w-sm">
@@ -1395,7 +1395,7 @@ export default React.forwardRef(function Sessions({
                 </p>
               </div>
             ) : sessionFailed ? (
-              <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-white p-8 text-center">
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-surface p-8 text-center">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 mb-5">
                   <X className="w-7 h-7 text-red-600" strokeWidth={1.5} />
                 </div>
@@ -1415,7 +1415,7 @@ export default React.forwardRef(function Sessions({
                   <button
                     type="button"
                     onClick={() => setActiveSession(null)}
-                    className="h-9 px-4 flex items-center gap-2 bg-white border border-zinc-200 text-zinc-900 rounded-md text-sm font-medium hover:bg-zinc-100 transition-colors"
+                    className="h-9 px-4 flex items-center gap-2 bg-surface border border-zinc-200 text-zinc-900 rounded-md text-sm font-medium hover:bg-zinc-100 transition-colors"
                   >
                     {t('sessions:action.dismiss', { defaultValue: 'Dismiss' })}
                   </button>
@@ -1458,10 +1458,10 @@ export default React.forwardRef(function Sessions({
               >
                 <div
                   onMouseDown={startPanelResize}
-                  className="w-1 shrink-0 cursor-col-resize bg-zinc-200 hover:bg-black transition-colors"
+                  className="w-1 shrink-0 cursor-col-resize bg-zinc-200 hover:bg-zinc-900 transition-colors"
                   title={t('workspace:action.click_to_hide_drag_to_resize', { defaultValue: 'Click to hide · drag to resize' })}
                 />
-                <div className="flex min-h-0 min-w-0 flex-1 flex-col border-l border-zinc-200 bg-white">
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col border-l border-zinc-200 bg-surface">
                   <WorkspacePanel
                     ref={panelRef}
                     projectId={activeSession.projectId}
@@ -1510,7 +1510,7 @@ export default React.forwardRef(function Sessions({
             </div>
             )
           ) : launchingSession ? (
-            <div className="flex-1 bg-white flex flex-col items-center justify-center">
+            <div className="flex-1 bg-surface flex flex-col items-center justify-center">
               {workspaceCreating && creationStep ? (
                 <CreationProgress
                   currentStep={creationStep}
@@ -1525,7 +1525,7 @@ export default React.forwardRef(function Sessions({
               ) : null}
             </div>
           ) : (
-            <div className="flex h-full flex-col items-center justify-center bg-white p-8 text-center">
+            <div className="flex h-full flex-col items-center justify-center bg-surface p-8 text-center">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-100 mb-5">
                 <TerminalSquare className="w-7 h-7 text-zinc-400" strokeWidth={1.25} />
               </div>

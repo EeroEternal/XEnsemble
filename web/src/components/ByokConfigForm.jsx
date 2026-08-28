@@ -130,7 +130,7 @@ export default function ByokConfigForm({ agentId, loading, onSave }) {
                   'absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5',
                   'hidden group-hover:block z-10',
                   'px-2 py-1 text-[11px] rounded whitespace-nowrap',
-                  'bg-black text-white',
+                  'bg-zinc-900 text-zinc-50',
                   'pointer-events-none',
                 )}>
                   {f.tooltip}
@@ -157,7 +157,7 @@ export default function ByokConfigForm({ agentId, loading, onSave }) {
           onClick={handleSave}
           className={cn(
             'h-9 px-4 flex items-center justify-center gap-2',
-            'bg-black text-white rounded-md text-sm font-medium',
+            'bg-zinc-900 text-zinc-50 rounded-md text-sm font-medium',
             'hover:bg-zinc-700 disabled:opacity-50',
             consoleButtonFocusClass,
           )}

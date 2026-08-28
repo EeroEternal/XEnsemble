@@ -443,7 +443,7 @@ export function CustomImagesContent() {
                                           }
                                         }
                                       }}
-                                      className="h-4 w-4 shrink-0 rounded border-zinc-300 text-zinc-900 focus:ring-black"
+                                      className="h-4 w-4 shrink-0 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
                                     />
                                     <span className="flex-1 min-w-0 truncate text-sm text-zinc-800">
                                       {comp.name}

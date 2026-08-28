@@ -126,7 +126,7 @@ export default function BranchSwitcher({ projectId, project, git }) {
                 <button
                   type="button"
                   onClick={openMenu}
-                  className={`ml-2 text-black hover:text-zinc-800 ${consoleButtonFocusClass}`}
+                  className={`ml-2 text-zinc-900 hover:text-zinc-800 ${consoleButtonFocusClass}`}
                 >
                   Retry
                 </button>

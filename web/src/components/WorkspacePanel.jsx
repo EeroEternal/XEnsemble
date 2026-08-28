@@ -458,7 +458,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   return (
     <div ref={panelRootRef} className="relative flex h-full min-h-0 flex-col" data-testid="workspace-panel">
       <WorkspacePanelPanelContext.Provider value={panelRootRef}>
-      <div className="flex items-center border-b border-zinc-200 px-1 shrink-0 bg-white">
+      <div className="flex items-center border-b border-zinc-200 px-1 shrink-0 bg-surface">
         <div className="flex min-w-0 items-center overflow-x-auto console-scroll-hidden">
           {visibleTabs.map((tab) => {
             const Icon = tab.icon;
@@ -512,7 +512,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
       </div>
 
       {mainTab === 'files' && (
-        <div className="flex items-center justify-end gap-0.5 px-1 py-0.5 border-b border-zinc-200 shrink-0 bg-white">
+        <div className="flex items-center justify-end gap-0.5 px-1 py-0.5 border-b border-zinc-200 shrink-0 bg-surface">
           <button title={t('workspace:action.new_file')} onClick={() => { setNewName(''); setShowNewFile(true); }}
             className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}>
             <Plus className="h-3.5 w-3.5" />
@@ -796,7 +796,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
 
       {renaming && (
         <ConsoleDialogShell onClose={() => setRenaming(null)} container={panelRootRef.current}>
-          <div className="p-4 w-80 bg-white border border-zinc-200 shadow-sm rounded-lg">
+          <div className="p-4 w-80 bg-surface border border-zinc-200 shadow-sm rounded-lg">
             <h3 className="font-bold text-lg text-zinc-900 mb-3">{t('workspace:action.rename')}</h3>
             <input ref={renameInputRef} type="text" placeholder="new name"
               value={renaming.newName} onChange={(e) => setRenaming((prev) => prev ? { ...prev, newName: e.target.value } : prev)}

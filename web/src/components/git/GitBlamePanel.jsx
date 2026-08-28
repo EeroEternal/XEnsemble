@@ -174,7 +174,7 @@ export default function GitBlamePanel({ projectId }) {
                 value={fileSearch}
                 onChange={(e) => setFileSearch(e.target.value)}
                 autoFocus={showFilePicker}
-                className="w-full pl-7 pr-2 py-1 text-xs rounded border border-zinc-300 bg-white focus:outline-none focus:border-black"
+                className="w-full pl-7 pr-2 py-1 text-xs rounded border border-zinc-300 bg-surface focus:outline-none focus:border-zinc-900"
               />
             </div>
           </div>

@@ -97,7 +97,7 @@ export default function RowActionsMenu({ label = 'Actions', items, className }) 
               : { top: pos.top + DROPDOWN_GAP }),
           }}
           className={cn(
-            'w-52 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg shadow-zinc-200/50',
+            'w-52 rounded-lg border border-zinc-200 bg-surface py-1 shadow-lg shadow-zinc-200/50',
             consoleMenuDropdownZClass,
           )}
         >

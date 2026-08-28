@@ -45,13 +45,13 @@ export function renderDiffLines(raw, { showLineNumbers = false } = {}) {
     newLine++;
     if (showLineNumbers) {
       return (
-        <div key={i} className="bg-white text-zinc-900 flex">
+        <div key={i} className="bg-surface text-zinc-900 flex">
           <span className="text-zinc-400 select-none w-10 text-right pr-1.5 shrink-0 border-r border-zinc-200 mr-1.5">{nl}</span>
           <span className="pl-0.5 whitespace-pre">{line.slice(1) || ' '}</span>
         </div>
       );
     }
-    return <div key={i} className="bg-white text-zinc-900 pl-2 whitespace-pre">{line.slice(1) || ' '}</div>;
+    return <div key={i} className="bg-surface text-zinc-900 pl-2 whitespace-pre">{line.slice(1) || ' '}</div>;
   });
 }
 

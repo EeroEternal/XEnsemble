@@ -351,7 +351,7 @@ export default function AppSidebar({
             }}
             maxLength={80}
             disabled={renaming}
-            className={`flex-1 min-w-0 bg-white border border-zinc-300 rounded px-1.5 py-0.5 text-[13px] text-zinc-900 outline-none focus:border-zinc-400 disabled:opacity-50 ${consoleButtonFocusClass}`}
+            className={`flex-1 min-w-0 bg-surface border border-zinc-300 rounded px-1.5 py-0.5 text-[13px] text-zinc-900 outline-none focus:border-zinc-400 disabled:opacity-50 ${consoleButtonFocusClass}`}
           />
         ) : (
           <button

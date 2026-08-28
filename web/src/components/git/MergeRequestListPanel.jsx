@@ -146,7 +146,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 shrink-0 bg-white">
+      <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 shrink-0 bg-surface">
         <div className="flex items-center gap-1 shrink-0">
           {FILTER_KEYS.map((opt) => {
             const active = statusFilter === opt.value;
@@ -157,7 +157,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
                 onClick={() => setStatusFilter(opt.value)}
                 className={`px-2.5 py-1 text-[11px] font-medium rounded-full transition-colors ${consoleButtonFocusClass} ${
                   active
-                    ? 'bg-black text-white'
+                    ? 'bg-zinc-900 text-zinc-50'
                     : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'
                 }`}
               >
@@ -296,7 +296,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
       </div>
 
       {totalPages > 1 && (
-        <div className="flex items-center justify-between gap-2 border-t border-zinc-200 px-3 py-1.5 shrink-0 bg-white">
+        <div className="flex items-center justify-between gap-2 border-t border-zinc-200 px-3 py-1.5 shrink-0 bg-surface">
           <span className="text-[11px] text-zinc-500 tabular-nums">
             {currentPage * PAGE_SIZE - PAGE_SIZE + 1}-{Math.min(currentPage * PAGE_SIZE, totalItems)} of {totalItems}
           </span>

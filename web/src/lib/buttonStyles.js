@@ -10,7 +10,7 @@ export const buttonSizes = {
 };
 
 export const buttonVariants = {
-  primary: 'bg-black text-white hover:bg-zinc-800',
+  primary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
   secondary:
     'bg-transparent border border-zinc-300 text-zinc-900 hover:bg-zinc-50',
   ghost: 'p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-md',

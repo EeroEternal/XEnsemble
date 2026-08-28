@@ -36,7 +36,7 @@ const GIT_STATUS_COLORS = {
   'A ': 'text-emerald-600', 'AM': 'text-emerald-600',
   'D ': 'text-red-600',
   '??': 'text-emerald-600',
-  'R ': 'text-black',
+  'R ': 'text-zinc-900',
 };
 
 function getGitStatusDesc(status, t) {
@@ -761,7 +761,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               <button
                 type="button"
                 onClick={() => setShowAuthorDialog(true)}
-                className={`text-xs text-black hover:text-zinc-800 shrink-0 ${consoleButtonFocusClass}`}
+                className={`text-xs text-zinc-900 hover:text-zinc-800 shrink-0 ${consoleButtonFocusClass}`}
               >
                 {authorName ? t('workspace:action.edit') : t('workspace:action.set')}
               </button>
@@ -837,7 +837,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
             role="dialog"
             aria-modal="true"
             aria-label={discardConfirm.title}
-            className="pointer-events-auto w-full max-w-sm rounded-lg border border-zinc-200 bg-white shadow-lg"
+            className="pointer-events-auto w-full max-w-sm rounded-lg border border-zinc-200 bg-surface shadow-lg"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-4 pt-4 pb-2">

@@ -164,7 +164,7 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo 
           <iframe
             title={t('workspace:tabs.preview')}
             src={embedUrl}
-            className="h-full w-full border-0 bg-white"
+            className="h-full w-full border-0 bg-surface"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
           />
         ) : (

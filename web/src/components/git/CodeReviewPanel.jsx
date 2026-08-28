@@ -43,7 +43,7 @@ function ReviewBadge({ state }) {
 
 function ReviewItem({ review }) {
   return (
-    <div className="rounded-xl bg-white shadow-sm border border-zinc-200 p-3.5 transition-shadow hover:shadow-md">
+    <div className="rounded-xl bg-surface shadow-sm border border-zinc-200 p-3.5 transition-shadow hover:shadow-md">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           {review.user?.avatarUrl ? (
@@ -128,7 +128,7 @@ function CommentItem({ comment, mrFiles, renderDiffLines, isOwnComment, onReply,
   };
 
   return (
-    <div className={`rounded-xl bg-white shadow-sm border border-zinc-200 p-3.5 transition-shadow hover:shadow-md group ${comment._isReply ? 'ml-6 border-l-2 border-l-black/30' : ''}`}>
+    <div className={`rounded-xl bg-surface shadow-sm border border-zinc-200 p-3.5 transition-shadow hover:shadow-md group ${comment._isReply ? 'ml-6 border-l-2 border-l-black/30' : ''}`}>
       <div className="flex items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-2 min-w-0">
           {comment.user?.avatarUrl ? (
@@ -204,7 +204,7 @@ function CommentItem({ comment, mrFiles, renderDiffLines, isOwnComment, onReply,
               type="button"
               onClick={handleSaveEdit}
               disabled={!editBody.trim() || actionLoading?.pending}
-              className={`flex items-center gap-1 px-2 h-6 text-[11px] font-medium rounded-md text-white bg-black hover:bg-zinc-800 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
+              className={`flex items-center gap-1 px-2 h-6 text-[11px] font-medium rounded-md text-zinc-50 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
             >
               {actionLoading?.pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
               {t('common:action.save', { defaultValue: 'Save' })}
@@ -237,7 +237,7 @@ function ThreadGroup({ thread, mrFiles, renderDiffLines, onReply, onEdit, onDele
   const [codeExpanded, setCodeExpanded] = useState(true);
 
   return (
-    <div className="rounded-xl border border-zinc-200 overflow-hidden bg-white shadow-sm">
+    <div className="rounded-xl border border-zinc-200 overflow-hidden bg-surface shadow-sm">
       <button
         type="button"
         onClick={() => setCollapsed((v) => !v)}
@@ -275,7 +275,7 @@ function ThreadGroup({ thread, mrFiles, renderDiffLines, onReply, onEdit, onDele
             <button
               type="button"
               onClick={() => setCodeExpanded(true)}
-              className={`text-[10px] text-black hover:text-zinc-800 ${consoleButtonFocusClass}`}
+              className={`text-[10px] text-zinc-900 hover:text-zinc-800 ${consoleButtonFocusClass}`}
             >
               {t('git:show_diff_context', { defaultValue: 'Show diff context' })}
             </button>
@@ -315,7 +315,7 @@ function ThreadGroup({ thread, mrFiles, renderDiffLines, onReply, onEdit, onDele
                 type="button"
                 onClick={onSendReply}
                 disabled={!replyText.trim() || actionLoading?.pending}
-                className={`shrink-0 flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-white bg-black hover:bg-zinc-800 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
+                className={`shrink-0 flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-zinc-50 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
               >
                 {actionLoading?.pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
                 {t('git:reply', { defaultValue: 'Reply' })}
@@ -436,7 +436,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
   };
 
   const STATUS_LABELS = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' };
-  const STATUS_COLORS = { added: 'text-emerald-600', modified: 'text-red-600', deleted: 'text-red-600', renamed: 'text-black' };
+  const STATUS_COLORS = { added: 'text-emerald-600', modified: 'text-red-600', deleted: 'text-red-600', renamed: 'text-zinc-900' };
 
   const approvedCount = reviews.filter((r) => r.state === 'APPROVED').length;
   const changesCount = reviews.filter((r) => r.state === 'CHANGES_REQUESTED').length;
@@ -681,7 +681,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex items-center justify-between border-b border-zinc-300 px-3 py-2 shrink-0 bg-white shadow-sm z-10">
+      <div className="flex items-center justify-between border-b border-zinc-300 px-3 py-2 shrink-0 bg-surface shadow-sm z-10">
         <div className="flex items-center gap-2 min-w-0">
           {onBack && (
             <button
@@ -763,7 +763,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
                   onClick={handleReopen}
                   disabled={actionLoading !== null}
                   title={t('git:reopen_hint')}
-                  className={`flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-black bg-blue-50 hover:bg-blue-100 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
+                  className={`flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-zinc-900 bg-blue-50 hover:bg-blue-100 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
                 >
                   {actionLoading === 'reopen' ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
                   {t('git:reopen', { defaultValue: 'Reopen' })}
@@ -795,7 +795,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
         </div>
       ) : (
         <>
-          <div className="flex border-b border-zinc-300 px-3 shrink-0 bg-white gap-1 shadow-sm">
+          <div className="flex border-b border-zinc-300 px-3 shrink-0 bg-surface gap-1 shadow-sm">
             <button
               type="button"
               onClick={() => setActiveTab('reviews')}
@@ -844,7 +844,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
                   <p className={`text-sm ${textSecondary}`}>No file changes.</p>
                 </div>
               ) : (
-                <div className="rounded-xl bg-white shadow-sm border border-zinc-200 overflow-hidden">
+                <div className="rounded-xl bg-surface shadow-sm border border-zinc-200 overflow-hidden">
                 {mrFiles.map((f) => {
                   const fileName = f.path.split('/').pop();
                   const dirPath = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '';
@@ -974,7 +974,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
                               type="button"
                               onClick={handleSendReply}
                               disabled={!replyText.trim() || commentActionLoading?.pending}
-                              className={`shrink-0 flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-white bg-black hover:bg-zinc-800 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
+                              className={`shrink-0 flex items-center gap-1 px-2 h-7 text-[11px] font-medium rounded-md text-zinc-50 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
                             >
                               {commentActionLoading?.pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
                               {t('git:reply', { defaultValue: 'Reply' })}
@@ -1016,7 +1016,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
                           }
                         }}
                         disabled={loadingMore}
-                        className={`text-xs text-black hover:text-zinc-800 ${consoleButtonFocusClass}`}
+                        className={`text-xs text-zinc-900 hover:text-zinc-800 ${consoleButtonFocusClass}`}
                       >
                         {loadingMore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Load more'}
                       </button>
@@ -1030,7 +1030,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
         </>
       )}
       {isOpen && (
-        <div className="flex items-end gap-2 border-t border-zinc-300 px-3 py-2 shrink-0 bg-white">
+        <div className="flex items-end gap-2 border-t border-zinc-300 px-3 py-2 shrink-0 bg-surface">
           <textarea
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
@@ -1049,7 +1049,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
             onClick={handleSendComment}
             disabled={!commentText.trim() || commentSending}
             title={t('git:comment_shortcut', { defaultValue: 'Comment (Ctrl+Enter)' })}
-            className={`shrink-0 flex items-center gap-1 px-2.5 h-7 text-[11px] font-medium rounded-md text-white bg-black hover:bg-zinc-800 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
+            className={`shrink-0 flex items-center gap-1 px-2.5 h-7 text-[11px] font-medium rounded-md text-zinc-50 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 transition-colors ${consoleButtonFocusClass}`}
           >
             {commentSending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
             {t('git:comment', { defaultValue: 'Comment' })}

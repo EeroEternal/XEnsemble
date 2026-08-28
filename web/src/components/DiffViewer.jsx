@@ -4,6 +4,7 @@ import { DiffEditor } from '@monaco-editor/react';
 import { consoleButtonFocusClass } from '@/lib/consoleTokens';
 import '@/lib/monacoSetup'; // Configure Monaco to load from local bundle, not CDN
 import { useTranslation } from 'react-i18next';
+import { useTheme } from '../hooks/useTheme';
 
 const LANG_MAP = {
   js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
@@ -29,6 +30,7 @@ export default function DiffViewer({
   truncated = false,
 }) {
   const { t } = useTranslation();
+  const { isDark } = useTheme();
   const displayName = path ? path.split('/').pop() : '';
   const language = inferLanguage(path);
   const [diffReady, setDiffReady] = useState(false);
@@ -117,7 +119,7 @@ export default function DiffViewer({
             language={language}
             original={original}
             modified={modified}
-            theme="vs"
+            theme={isDark ? 'vs-dark' : 'vs'}
             onMount={handleMount}
             options={{
               readOnly: true,
@@ -131,7 +133,7 @@ export default function DiffViewer({
             }}
           />
           {showOverlay && (
-            <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-10" data-testid="diff-computing">
+            <div className="absolute inset-0 flex items-center justify-center bg-surface/80 z-10" data-testid="diff-computing">
               <Loader2 className="animate-spin h-6 w-6 text-zinc-400" />
             </div>
           )}
