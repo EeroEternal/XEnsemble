@@ -81,7 +81,7 @@ JWT claims（`typ: llm_session`）：`sid`、`uid`、`pid`、`aid`、`model`（�
 | `llm/gatewayUpstream.js` | 解析 UniGateway 上游地址 |
 | `llm/serviceRouter.js` | 派生并注册 per-agent UniGateway API key |
 | `llm/agentServiceSync.js` | 同步 `unigateway.toml` services/bindings（按 agent 替换 binding） |
-| `llm/quota.js` | 按 `resource_tier` 每分钟请求配额 |
+| `llm/quota.js` | 按用户每分钟固定配额（tier 前端下线后不再按 `resource_tier` 区分） |
 | `agents/agentEnv.js` | spawn env |
 | `admin/GatewaySettings.js` | `public_url`、`upstream_url` 配置 |
 
@@ -89,7 +89,7 @@ JWT claims（`typ: llm_session`）：`sid`、`uid`、`pid`、`aid`、`model`（�
 
 - 反代结构化日志：`sessionId`、`userId`、`agentId`、`path`
 - `events` 表写入 `llm_proxy_forward` 审计（含 `status_code` / 失败信息）
-- 按 user `resource_tier` 限流（`llm/quota.js`）；`/health` 与 `/v1/models*` 不占配额
+- 按 user 固定每分钟限流（`llm/quota.js`，`LLM_REQ_LIMIT_PER_MIN`；`/health` 与 `/v1/models*` 不占配额）
 - Agent Configure 保存时同步 UniGateway `service_id = agentId` binding（`agentServiceSync.js`，切换 provider 时替换而非追加）
 - 控制面为每个 agent 派生确定性 gateway key（`serviceRouter.js`），不再对 master key 做 per-request rebind
 - Agent 只持有 `xel_*` session token；控制面在转发时换成 gateway key

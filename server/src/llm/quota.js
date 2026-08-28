@@ -1,12 +1,9 @@
-const policy = require('../auth/PolicyService');
 const PlatformSettings = require('../admin/PlatformSettings');
 
-const TIER_QPS = {
-    basic: 12,
-    standard: 30,
-    pro: 60,
-    enterprise: 120,
-};
+// 固定每用户每分钟 LLM 请求上限（不再按 resource_tier 区分）。
+// tier 前端已下线，全员恒为 basic 时旧阈值 12/min 会误伤真实 Agent 会话；
+// 但仍保留一个宽松上限，防止单用户打爆共享上游网关的 QPS（上游 429 是当前排查的问题）。
+const LLM_REQ_LIMIT_PER_MIN = 120;
 
 const WINDOW_MS = 60_000;
 const buckets = new Map();
@@ -56,15 +53,14 @@ function persistBucketCount(key, count) {
 async function checkLlmRequestQuota(userId, role) {
     if (role === 'admin') return { ok: true };
 
-    const quotaRow = await policy.ensureUserQuota(userId);
-    const limit = TIER_QPS[quotaRow.resourceTier] ?? TIER_QPS.basic;
+    const limit = LLM_REQ_LIMIT_PER_MIN;
     const key = bucketKey(userId);
     const current = await loadBucketCount(key);
     if (current >= limit) {
         return {
             ok: false,
             status: 429,
-            error: 'LLM request quota exceeded for your resource tier',
+            error: 'LLM request quota exceeded',
             limit,
             window_seconds: WINDOW_MS / 1000,
         };
@@ -81,7 +77,7 @@ function resetLlmQuotaForTests() {
 }
 
 module.exports = {
-    TIER_QPS,
+    LLM_REQ_LIMIT_PER_MIN,
     checkLlmRequestQuota,
     resetLlmQuotaForTests,
 };
