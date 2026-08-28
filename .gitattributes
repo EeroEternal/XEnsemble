@@ -1,0 +1,10 @@
+# Normalize text file handling across platforms.
+# Shell scripts must keep LF endings: CRLF breaks them on Linux (`bash\r`,
+# `-- \r: No such file or directory`), especially in deploy targets.
+*.sh text eol=lf
+
+# Common config / data formats that are sensitive to line-ending changes.
+*.json text
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text
