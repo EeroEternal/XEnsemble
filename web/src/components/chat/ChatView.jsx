@@ -135,8 +135,8 @@ export default function ChatView({ sessionId, onSessionEnd }) {
     if (!trimmed || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     wsRef.current.send(JSON.stringify({ type: 'input', data: `${trimmed}\n` }));
     setInput('');
-    setSending(true);
-    setTimeout(() => setSending(false), 300);
+    setThinking(true);
+    setTimeout(() => setThinking(false), 300);
   }, [input]);
 
   const stop = useCallback(() => {
@@ -189,28 +189,13 @@ export default function ChatView({ sessionId, onSessionEnd }) {
   // visible in chat mode).
   const isThinking = useMemo(() => {
     if (!connected || ended) return false;
-    if (sending) return true;
+    if (thinking) return true;
     if (renderedItems.length === 0) return false;
     const last = renderedItems[renderedItems.length - 1];
     if (last.kind === 'message' && last.message.role === 'user') return true;
     if (last.kind === 'tool_call') return true;
     return false;
-  }, [connected, ended, sending, renderedItems]);
-
-  // "Agent is thinking" indicator: turns on after the user sends a message or
-  // when the agent kicks off a tool, and clears once the agent produces its
-  // first assistant reply / tool result for that step. Mirrors the visible
-  // "thinking" cue the TUI agent view shows via its spinner.
-  const isThinking = useMemo(() => {
-    if (!connected || ended) return false;
-    if (sending) return true;
-    if (renderedItems.length === 0) return false;
-    const last = renderedItems[renderedItems.length - 1];
-    if (last.kind === 'message' && last.message.role === 'user') return true;
-    if (last.kind === 'tool_call') return true;
-    return false;
-  }, [connected, ended, sending, renderedItems]);
-
+  }, [connected, ended, thinking, renderedItems]);
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
       {/* Message list */}
