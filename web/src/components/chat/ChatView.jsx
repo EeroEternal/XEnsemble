@@ -22,7 +22,7 @@ export default function ChatView({ sessionId, onSessionEnd }) {
   const [ended, setEnded] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [input, setInput] = useState('');
-  const [thinking, setThinking] = useState(false);
+  const [sending, setSending] = useState(false);
   const wsRef = useRef(null);
   const listRef = useRef(null);
   const inputRef = useRef(null);
@@ -130,13 +130,19 @@ export default function ChatView({ sessionId, onSessionEnd }) {
   }, [messages, loadingHistory]);
 
   const send = useCallback((text) => {
-    const value = text != null ? text : input;
-    const trimmed = value.trim();
-    if (!trimmed || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ type: 'input', data: `${trimmed}\n` }));
+    const raw = text != null ? text : input;
+    // Chat is not a terminal: collapse any embedded newlines (from copy-paste
+    // or Shift+Enter) into single spaces so the agent TUI sees one prompt.
+    // Submit with \r because Kimi/Claude TUI treat \n as a multi-line-edit
+    // newline and only \r as "Enter" — sending \n alone leaves the prompt
+    // unconfirmed (visible as a newline in the terminal view).
+    const singleLine = String(raw).replace(/\s*\n\s*/g, ' ').trim();
+    if (!singleLine) return;
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({ type: 'input', data: `${singleLine}\r` }));
     setInput('');
-    setThinking(true);
-    setTimeout(() => setThinking(false), 300);
+    setSending(true);
+    setTimeout(() => setSending(false), 300);
   }, [input]);
 
   const stop = useCallback(() => {
@@ -189,13 +195,13 @@ export default function ChatView({ sessionId, onSessionEnd }) {
   // visible in chat mode).
   const isThinking = useMemo(() => {
     if (!connected || ended) return false;
-    if (thinking) return true;
+    if (sending) return true;
     if (renderedItems.length === 0) return false;
     const last = renderedItems[renderedItems.length - 1];
     if (last.kind === 'message' && last.message.role === 'user') return true;
     if (last.kind === 'tool_call') return true;
     return false;
-  }, [connected, ended, thinking, renderedItems]);
+  }, [connected, ended, sending, renderedItems]);
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
       {/* Message list */}

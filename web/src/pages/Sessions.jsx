@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AgentConsole from '../components/AgentConsole';
 import ChatView from '../components/chat/ChatView';
-import { loadViewPref, saveViewPref } from '../lib/viewPrefs';
+import { loadViewPref, saveViewPref, subscribeViewPref } from '../lib/viewPrefs';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import WorkspaceShell from '../components/WorkspaceShell';
 import WorkspacePanel from '../components/WorkspacePanel';
@@ -129,6 +129,8 @@ export default React.forwardRef(function Sessions({
   const [panelOpen, setPanelOpen] = useState(true);
   // Agent 运行界面视图：'agent'（原生 TUI 终端，默认）| 'chat'（对话框风格）
   const [viewMode, setViewMode] = useState(() => loadViewPref());
+  // 当用户在偏好设置里切换对话风格时，无需刷新页面即可让工作空间立即生效。
+  useEffect(() => subscribeViewPref(() => setViewMode(loadViewPref())), []);
   const [panelWidth, setPanelWidth] = useState(() => {
     const maxW = typeof window !== 'undefined' ? Math.max(720, window.innerWidth - 240) : 800;
     return Math.min(Math.floor(maxW / 2), maxW);
