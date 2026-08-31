@@ -299,6 +299,9 @@ function buildSystemPrompt(plan) {
         '- Keep the serve process alive even after your shell exits: start it with nohup / setsid and disown. Pick any free port (export PORT=<port> if the app reads it; prefer the default port when free) — the platform auto-detects the real app port for the preview, so do not waste rounds fighting over one specific port.',
         '- Verify with an actual HTTP request, not just "process started": `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:<port>/`. A 2xx/3xx/expected response means success.',
         '- When a command fails, DO NOT just rerun it. Read the error, inspect files (read_file/list_dir), fix the root cause (edit_file), then retry.',
+        '- NEVER run `npm install` / `pip install` / `go mod download` more than once. If node_modules / site-packages already exist and the lockfile is unchanged, SKIP install entirely.',
+        '- NEVER run `npm run build` / `vite build` / `make` more than once. If the build artifact (web/dist, build/, out/) already exists and the source has not changed, SKIP rebuild and serve the existing artifact.',
+        '- Do NOT waste rounds on environment inspection (`free -m`, `nproc`, `which`, `node -v`, `cat package.json`) — those were already provided. Only run a check if it directly unblocks a failing step.',
         'Deploy plan to execute:',
         JSON.stringify(plan?.steps || [], null, 2),
         '',
@@ -307,6 +310,7 @@ function buildSystemPrompt(plan) {
                 'PREVIOUS SUCCESSFUL RUN (from the last successful deploy of this project — follow it to go fast, verify each step still works):',
                 plan.context.successRun.map((c) => `  - ${c}`).join('\n'),
                 '- Execute these commands in order. Each one previously succeeded, so do NOT re-explore or wonder how to install/build/serve — just re-run them. Only deviate / fix if one actually fails (e.g. port already in use, dependency changed).',
+                '- If the list contains DUPLICATE commands (e.g. `npm install` twice, or `npm run build` appears more than once), run each UNIQUE command only ONCE and skip the duplicates — they were historical retries, not required steps.',
                 '',
             ].join('\n')
             : ''),

@@ -103,10 +103,10 @@ async function markSessionFailed(sessionId, errMsg, log) {
             eq(schema.sessions.id, sessionId),
             inArray(schema.sessions.status, ['pending', 'running']),
         ))
-        .returning({ id: schema.sessions.id });
+        .returning({ id: schema.sessions.id, userId: schema.sessions.userId });
     if (!updated.length) return false;
     if (log) log({ sessionId }, `[sessions] provisioning failed: ${errMsg}`);
-    try { broadcastSse({ type: 'session_status', sessionId, status: 'failed' }); } catch (_) {}
+    try { broadcastSse({ type: 'session_status', sessionId, status: 'failed', userId: updated[0].userId }); } catch (_) {}
     return true;
 }
 
@@ -375,7 +375,7 @@ fastify.get('/api/v1/events', { preValidation: [fastify.authenticate] }, async (
         'Connection': 'keep-alive',
     });
     reply.raw.write(': ok\n\n');
-    addSseClient(reply.raw);
+    addSseClient(reply.raw, request.user.id);
     const heartbeat = setInterval(() => {
         try { reply.raw.write(': heartbeat\n\n'); } catch (_) { clearInterval(heartbeat); }
     }, 30000);
@@ -982,7 +982,7 @@ fastify.patch('/api/v1/sessions/:sessionId/title', { preValidation: [fastify.aut
 
     try {
         const { broadcastSse } = require('./session/sseManager');
-        broadcastSse({ type: 'session_title', sessionId, title });
+        broadcastSse({ type: 'session_title', sessionId, title, userId: request.user.id });
     } catch (_) {}
 
     return { ok: true, sessionId, title, titleManual: true };
@@ -1808,7 +1808,7 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
             status: 'running',
             streamRef: streamRef || null,
         }).where(eq(schema.sessions.id, sessionId));
-        broadcastSse({ type: 'session_status', sessionId, status: 'running' });
+        broadcastSse({ type: 'session_status', sessionId, status: 'running', userId: request.user.id });
     })().catch((err) => {
         fastify.log.error({ err, sessionId }, '[sessions] async provisioning uncaught error');
         markSessionFailed(sessionId, err.message || 'Unexpected error during session provisioning').catch(() => {});

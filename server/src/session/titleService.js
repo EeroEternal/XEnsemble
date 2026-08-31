@@ -95,7 +95,7 @@ async function loadAgentName(agentId) {
 
 async function generateSessionTitle(sessionId) {
     const sessionRow = await db
-        .select({ id: schema.sessions.id, agentId: schema.sessions.agentId, title: schema.sessions.title, titleManual: schema.sessions.titleManual })
+        .select({ id: schema.sessions.id, userId: schema.sessions.userId, agentId: schema.sessions.agentId, title: schema.sessions.title, titleManual: schema.sessions.titleManual })
         .from(schema.sessions)
         .where(eq(schema.sessions.id, sessionId))
         .limit(1);
@@ -124,7 +124,7 @@ async function generateSessionTitle(sessionId) {
 
     try {
         const { broadcastSse } = require('./sseManager');
-        broadcastSse({ type: 'session_title', sessionId, title });
+        broadcastSse({ type: 'session_title', sessionId, title, userId: sessionRow[0].userId });
     } catch (_) {}
 
     console.log(`[titleService] Generated title for ${sessionId}: "${title}"`);

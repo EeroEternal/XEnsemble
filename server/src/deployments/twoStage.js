@@ -382,9 +382,21 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
             pkill -9 apt-get 2>/dev/null; pkill -9 dpkg 2>/dev/null; sleep 1
             rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock
             (service postgresql start 2>/dev/null || pg_ctlcluster $(ls /etc/postgresql 2>/dev/null | head -1) main start 2>/dev/null) || true
-            sleep 2
-            pg_lsclusters 2>/dev/null || true
         `], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
+        // 等 PG 真正就绪（最多 15s），避免「启动命令返回了但 PG 还没监听」导致 agent 误判 dbReady=false
+        let pgReady = false;
+        for (let i = 0; i < 15; i++) {
+            await new Promise((r) => setTimeout(r, 1000));
+            try {
+                const chk = await runtime.exec.exec('sh', ['-c', 'pg_isready -q 2>/dev/null && echo UP || echo DOWN'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 8000 });
+                if (String(chk.stdout || '').trim() === 'UP') { pgReady = true; break; }
+            } catch { /* retry */ }
+        }
+        if (!pgReady) {
+            console.error('[twoStage] postgres start failed: pg_isready not UP after 15s (fallback to agent)');
+            return { ready: false };
+        }
+        console.error('[twoStage] postgres provisioned and ready (pg_isready UP)');
     } catch (e) {
         console.error('[twoStage] postgres start failed (fallback to agent):', e.message);
         return { ready: false };
@@ -833,7 +845,9 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
     }
 
     report({ stage: 'B', message: resumeState ? '阶段 2：续修（接回上次对话继续修复）' : '阶段 2：调用 LLM 2（agent）准备环境 + 测试 + 自动修复' });
-    const detected = hostWs ? detectProjectType(hostWs) : { type: 'unknown', defaultPort: 3000 };
+    // detected 用真实 host 路径（hostPath），而非 hostWs —— boxlite 下 hostWs 可能是 undefined，
+    // 用 undefined 会退化成 unknown 类型，连带使依赖缓存判断、PG 预启动、plan 缓存校验全部失效。
+    const detected = hostPath ? detectProjectType(hostPath) : { type: 'unknown', defaultPort: 3000 };
     if (isAborted()) {
         return { ok: false, aborted: true, error: '部署已中止', elapsedMs: Date.now() - startedAt };
     }
