@@ -242,7 +242,10 @@ export default function ChatView({ sessionId, onSessionEnd }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            rows={Math.min(4, Math.max(1, input.split('\n').length))}
+            // Grow up to 12 rows (3× the previous 4-row cap); scroll past that.
+            // Empty input still occupies the full 12-row height so the input
+            // area feels substantial.
+            rows={Math.min(12, Math.max(12, input.split('\n').length))}
             placeholder={t('chat:input_placeholder', { defaultValue: 'Message the agent… (Enter to send, Shift+Enter for newline)' })}
             disabled={ended}
             autoFocus
@@ -321,7 +324,11 @@ function ChatBubble({ message }) {
             <span className="text-zinc-400">· {message.model}</span>
           ) : null}
         </div>
-        <pre className="whitespace-pre-wrap break-words font-sans text-[13.5px] leading-relaxed text-zinc-800">
+        <pre className={`whitespace-pre-wrap break-words font-sans text-[13.5px] leading-relaxed ${
+          isUser
+            ? 'bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-zinc-800'
+            : 'text-zinc-800'
+        }`}>
           {message.content}
         </pre>
         <button
