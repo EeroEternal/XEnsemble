@@ -38,10 +38,36 @@ const KEY_FILES = [
 const MAX_FILE_CHARS = 4000;
 const MAX_CONTEXT_CHARS = 80000;
 const MAX_FILES_READ = 30;
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'out', 'coverage', '.venv', '__pycache__', '.cache', '.turbo', '.nx']);
+// 分析时跳过的重目录（目录与文件统一按路径段匹配）。fsList 已在递归时剪枝同名单
+// 目录；此处作为兜底，且对 file 条目也生效（旧实现只过滤 directory 导致 node_modules
+// 下文件全部泄漏进 tree，把 server/ 等真实文件挤出 800 行）。
+const SKIP_DIRS = new Set([
+    'node_modules', '.git', 'dist', 'build', '.next', 'out', 'coverage',
+    '.venv', '__pycache__', '.cache', '.turbo', '.nx',
+    'vendor', 'target', 'venv', '.tox', 'Pods', 'bower_components',
+    'jspm_packages', '.gradle', '.m2', 'tmp', 'logs',
+]);
 const SKIP_EXTS = new Set(['.lock', '.map', '.min.js', '.min.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.mp4', '.webm', '.zip', '.tar', '.gz', '.pdf', '.bin', '.so', '.dylib', '.exe']);
 const CONFIG_PATTERNS = [/^\.env(\.|$)/, /\.example$/, /\.sample$/, /\.template$/, /^config\.(json|ya?ml|toml|js|ts)$/, /^application\.(ya?ml|properties)$/];
 const PRIORITY_FILES = ['package.json', 'pnpm-workspace.yaml', 'lerna.json', 'nx.json', 'turbo.json', 'README.md', 'Dockerfile', 'docker-compose.yml', 'Makefile', 'index.html', 'vite.config.js', 'vite.config.ts', 'next.config.js', 'nuxt.config.js', 'svelte.config.js', 'tsconfig.json', '.agents/preview.json', 'requirements.txt', 'pyproject.toml', 'go.mod', 'Cargo.toml', 'pom.xml', 'build.gradle'];
+
+// 判断路径任意一级是否命中重目录（目录与文件通用）。
+function isSkippedPath(p) {
+    const parts = String(p || '').split('/').filter(Boolean);
+    return parts.some((seg) => SKIP_DIRS.has(seg));
+}
+
+// 文件名（basename）级高优先级：后端/前端入口、依赖清单、脚本说明等，
+// 确保 MAX_FILES_READ 名额优先覆盖这些"判断项目如何启动"的关键文件，
+// 避免被 Dockerfile/示例 README 等低价值文件占满。
+const HIGH_PRIORITY_NAMES = new Set([
+    'package.json', 'pnpm-workspace.yaml', 'lerna.json', 'nx.json', 'turbo.json',
+    'requirements.txt', 'pyproject.toml', 'go.mod', 'Cargo.toml', 'pom.xml', 'build.gradle',
+    'index.js', 'main.js', 'server.js', 'app.js', 'index.ts', 'main.ts',
+    'server.ts', 'app.ts', 'manage.py', 'app.py', 'wsgi.py', 'asgi.py',
+    'vite.config.js', 'vite.config.ts', 'next.config.js', 'nuxt.config.js',
+    'svelte.config.js', 'docker-compose.yml', 'Makefile', 'README.md',
+]);
 
 async function readFileSafe(fsAdapter, workspacePath, ref, filePath) {
     try {
@@ -59,13 +85,7 @@ async function collectProjectContext(fsAdapter, workspacePath, ref) {
     try {
         const entries = await fsAdapter.fsList(workspacePath, '.', { runtimeRef: ref, depth: 'recursive', includeHidden: false });
         treeText = entries
-            .filter((e) => {
-                if (e.type === 'directory') {
-                    const parts = e.path.split('/').filter(Boolean);
-                    return !parts.some((p) => SKIP_DIRS.has(p));
-                }
-                return true;
-            })
+            .filter((e) => !isSkippedPath(e.path))
             .map((e) => `${e.type === 'directory' ? 'dir ' : 'file'} ${e.path}`)
             .sort()
             .slice(0, 800)
@@ -74,8 +94,7 @@ async function collectProjectContext(fsAdapter, workspacePath, ref) {
             .filter((e) => e.type !== 'directory')
             .map((e) => e.path)
             .filter((p) => {
-                const parts = p.split('/').filter(Boolean);
-                if (parts.some((seg) => SKIP_DIRS.has(seg))) return false;
+                if (isSkippedPath(p)) return false;
                 const ext = p.slice(p.lastIndexOf('.')).toLowerCase();
                 if (SKIP_EXTS.has(ext)) return false;
                 return true;
@@ -91,10 +110,27 @@ async function collectProjectContext(fsAdapter, workspacePath, ref) {
         if (CONFIG_PATTERNS.some((rx) => rx.test(name))) configSet.add(p);
         if (prioritySet.has(p) || prioritySet.has(name)) configSet.add(p);
     });
-    const sortedFiles = [
-        ...[...configSet].sort(),
-        ...allFiles.filter((p) => !configSet.has(p)).sort(),
-    ].slice(0, MAX_FILES_READ);
+
+    // 读取名额优先排序（MAX_FILES_READ=30）：
+    //  1. 高优先级关键文件 —— 依赖清单/后端入口/脚本说明（basename 命中
+    //     HIGH_PRIORITY_NAMES，如 package.json、server.js、index.js、README），
+    //     确保判断"如何启动全栈"的证据不会被 Dockerfile/示例 README 挤掉；
+    //     同级内根目录（server/、根路径）优先。
+    //  2. configSet（config 文件 + PRIORITY_FILES 命中）—— 依赖、构建、环境配置。
+    //  3. 其余文件。
+    const highSet = new Set();
+    allFiles.forEach((p) => {
+        const name = p.split('/').pop() || '';
+        if (HIGH_PRIORITY_NAMES.has(name)) highSet.add(p);
+    });
+    const isRootish = (p) => {
+        const seg = String(p || '').split('/')[0];
+        return !seg || seg === 'server' || seg === 'api' || seg === 'backend' || seg === 'src';
+    };
+    const byPriority = (p) => (highSet.has(p) ? (isRootish(p) ? 0 : 1) : (configSet.has(p) ? 2 : 3));
+    const sortedFiles = allFiles
+        .sort((a, b) => byPriority(a) - byPriority(b) || a.localeCompare(b))
+        .slice(0, MAX_FILES_READ);
 
     const fileContents = [];
     let totalChars = 0;
