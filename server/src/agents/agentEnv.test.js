@@ -49,11 +49,14 @@ test('applyOpencodeGatewayEnv: registers all configured models for /model select
         'deepseek/deepseek-v4-flash',
     );
     const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT);
+    // model ids are stored without the provider prefix: opencode parses
+    // `provider/model_id` on the first `/`, so a slash inside the model id
+    // would make it resolve the wrong provider (see fix 2709ba8).
     assert.deepEqual(
         Object.keys(config.provider.gateway.models).sort(),
-        ['deepseek/deepseek-v4-flash', 'zxs/qwen-max'],
+        ['deepseek-v4-flash', 'qwen-max'],
     );
-    assert.equal(config.model, 'gateway/deepseek/deepseek-v4-flash');
+    assert.equal(config.model, 'gateway/deepseek-v4-flash');
 });
 
 test('applyOpencodeGatewayEnv: single target still works (back-compat)', () => {
@@ -62,8 +65,8 @@ test('applyOpencodeGatewayEnv: single target still works (back-compat)', () => {
         'deepseek/deepseek-v4-flash',
     );
     const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT);
-    assert.deepEqual(Object.keys(config.provider.gateway.models), ['deepseek/deepseek-v4-flash']);
-    assert.equal(config.model, 'gateway/deepseek/deepseek-v4-flash');
+    assert.deepEqual(Object.keys(config.provider.gateway.models), ['deepseek-v4-flash']);
+    assert.equal(config.model, 'gateway/deepseek-v4-flash');
 });
 
 test('applyOpencodeGatewayEnv: skips when gateway missing', () => {
