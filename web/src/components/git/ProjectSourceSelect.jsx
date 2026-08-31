@@ -279,40 +279,33 @@ export default function ProjectSourceSelect({
             {/* Import by URL (no account connection needed) */}
             <div className="h-px bg-zinc-200 my-1" />
             {urlMode ? (
-              <div className="px-3 py-2 space-y-2">
-                <input
-                  ref={urlInputRef}
-                  type="text"
-                  value={urlInput}
-                  onChange={(e) => setUrlInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') { e.preventDefault(); submitUrlImport(); }
-                    if (e.key === 'Escape') { setUrlMode(false); setUrlInput(''); setUrlError(null); }
-                  }}
-                  placeholder="https://github.com/owner/repo"
-                  autoFocus
-                  className="w-full text-sm px-2.5 py-1.5 rounded-md border border-zinc-300 outline-none focus:border-zinc-500 text-zinc-700 placeholder:text-zinc-400"
-                />
-                {urlError && (
-                  <p className="text-[11px] text-red-600">{urlError}</p>
-                )}
-                <div className="flex items-center justify-between">
-                  <button
-                    type="button"
-                    onClick={() => { setUrlMode(false); setUrlInput(''); setUrlError(null); }}
-                    className="text-[11px] text-zinc-400 hover:text-zinc-600"
-                  >
-                    {t('common:action.cancel')}
-                  </button>
+              <div className="px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={urlInputRef}
+                    type="text"
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); submitUrlImport(); }
+                      if (e.key === 'Escape') { setUrlMode(false); setUrlInput(''); setUrlError(null); }
+                    }}
+                    placeholder="https://github.com/owner/repo"
+                    autoFocus
+                    className="min-w-0 flex-1 text-sm px-2.5 py-1.5 rounded-md border border-zinc-300 outline-none focus:border-zinc-500 text-zinc-700 placeholder:text-zinc-400"
+                  />
                   <button
                     type="button"
                     onClick={submitUrlImport}
                     disabled={!urlInput.trim()}
-                    className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40"
+                    className="shrink-0 px-2.5 py-1.5 rounded-md text-xs font-medium bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40"
                   >
                     {t('git:import_repository')}
                   </button>
                 </div>
+                {urlError && (
+                  <p className="text-[11px] text-red-600 mt-1.5">{urlError}</p>
+                )}
               </div>
             ) : (
               <button

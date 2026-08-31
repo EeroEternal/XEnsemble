@@ -98,6 +98,19 @@ function resolveRepoUrl(inputUrl) {
     const raw = String(inputUrl || '').trim();
     if (!raw) return null;
 
+    // Remember the scheme the user actually supplied (if any) so the clone URL
+    // matches — intranet GitLab is HTTP-only, public github.com is HTTPS, and
+    // guessing would either fail with "Connection refused" or silently rewrite
+    // the user's input. We only fall back to https when the user didn't
+    // specify one (bare host/path input).
+    let inputScheme = null;
+    const schemeMatch = raw.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//);
+    if (schemeMatch) {
+        const s = schemeMatch[1].toLowerCase();
+        if (s === 'git+ssh') inputScheme = 'ssh';
+        else inputScheme = s;
+    }
+
     let clean = raw;
     let host = null;
     let path = null;
@@ -119,6 +132,7 @@ function resolveRepoUrl(inputUrl) {
         if (scp && !/^https?:\/\//i.test(clean)) {
             host = scp[1];
             path = scp[2];
+            if (!inputScheme) inputScheme = 'ssh';
         } else {
             // host/path form (https, plain, www)
             const slashIdx = clean.indexOf('/');
@@ -140,7 +154,11 @@ function resolveRepoUrl(inputUrl) {
         : hostname === 'gitea.com' || hostname === 'codeberg.org' ? 'gitea'
         : hostname || 'url';
 
-    const cloneUrl = `https://${hostname}/${repoPath}.git`;
+    // Scheme precedence: user-provided (http/https/ssh) > https fallback.
+    // We never silently downgrade https to http or vice-versa; that would
+    // either fail with "Connection refused" or trigger TLS warnings.
+    const cloneScheme = inputScheme || 'https';
+    const cloneUrl = `${cloneScheme}://${hostname}/${repoPath}.git`;
     const segments = repoPath.split('/').filter(Boolean);
     const repoName = segments[segments.length - 1] || 'project';
     const owner = segments.slice(0, -1).join('/') || null;
