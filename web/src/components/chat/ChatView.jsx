@@ -225,9 +225,16 @@ export default function ChatView({ sessionId, onSessionEnd }) {
               <ChatItem key={idx} item={item} />
             ))}
             {isThinking && (
-              <div className="flex items-center gap-2 text-xs text-zinc-400" role="status" aria-live="polite">
-                <Sparkles className="h-3.5 w-3.5 animate-pulse" />
-                {t('chat:thinking', { defaultValue: 'Agent is thinking…' })}
+              <div className="flex justify-start pr-2 sm:pr-12" role="status" aria-live="polite">
+                <div className="flex max-w-[80%] items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-[13.5px] text-zinc-700">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-500" />
+                  <Sparkles className="h-3.5 w-3.5 text-zinc-400" />
+                  <span className="font-medium text-zinc-700">
+                    {t('chat:agent', { defaultValue: 'Agent' })}
+                  </span>
+                  <span className="text-zinc-400">·</span>
+                  <span>{t('chat:thinking', { defaultValue: 'Agent is thinking…' })}</span>
+                </div>
               </div>
             )}
           </div>
@@ -242,10 +249,9 @@ export default function ChatView({ sessionId, onSessionEnd }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            // Grow up to 12 rows (3× the previous 4-row cap); scroll past that.
-            // Empty input still occupies the full 12-row height so the input
-            // area feels substantial.
-            rows={Math.min(12, Math.max(12, input.split('\n').length))}
+            // Default 4 rows, grows up to 4, scrolls past that. Comfortable
+            // middle ground for both short prompts and paste-of-stack-traces.
+            rows={Math.min(4, Math.max(4, input.split('\n').length))}
             placeholder={t('chat:input_placeholder', { defaultValue: 'Message the agent… (Enter to send, Shift+Enter for newline)' })}
             disabled={ended}
             autoFocus
