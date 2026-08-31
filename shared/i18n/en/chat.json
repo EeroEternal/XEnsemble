@@ -4,6 +4,7 @@
   "send": "Send",
   "stop": "Interrupt (Ctrl+C)",
   "working": "Agent is working…",
+  "thinking": "Agent is thinking…",
   "you": "You",
   "agent": "Agent",
   "tool_unknown": "Tool",

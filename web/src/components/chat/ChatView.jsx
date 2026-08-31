@@ -22,7 +22,7 @@ export default function ChatView({ sessionId, onSessionEnd }) {
   const [ended, setEnded] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
+  const [thinking, setThinking] = useState(false);
   const wsRef = useRef(null);
   const listRef = useRef(null);
   const inputRef = useRef(null);
@@ -135,8 +135,8 @@ export default function ChatView({ sessionId, onSessionEnd }) {
     if (!trimmed || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     wsRef.current.send(JSON.stringify({ type: 'input', data: `${trimmed}\n` }));
     setInput('');
-    setSending(true);
-    setTimeout(() => setSending(false), 300);
+    setThinking(true);
+    setTimeout(() => setThinking(false), 300);
   }, [input]);
 
   const stop = useCallback(() => {
@@ -182,6 +182,20 @@ export default function ChatView({ sessionId, onSessionEnd }) {
 
   const isEmpty = !loadingHistory && renderedItems.length === 0;
 
+  // While the agent is "thinking" — i.e. the user just sent something (or the
+  // agent is still mid-tool) and we haven't seen the next assistant reply yet —
+  // show a persistent thinking indicator at the bottom of the message list so
+  // users can tell the agent is busy (the terminal view's ◐ spinner isn't
+  // visible in chat mode).
+  const isThinking = useMemo(() => {
+    if (!connected || ended) return false;
+    if (thinking) return true;
+    if (renderedItems.length === 0) return false;
+    const last = renderedItems[renderedItems.length - 1];
+    if (last.kind === 'message' && last.message.role === 'user') return true;
+    if (last.kind === 'tool_call') return true;
+    return false;
+  }, [connected, ended, thinking, renderedItems]);
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
       {/* Message list */}
@@ -204,10 +218,10 @@ export default function ChatView({ sessionId, onSessionEnd }) {
             {renderedItems.map((item, idx) => (
               <ChatItem key={idx} item={item} />
             ))}
-            {sending && (
-              <div className="flex items-center gap-2 text-xs text-zinc-400">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                {t('chat:working', { defaultValue: 'Agent is working…' })}
+            {isThinking && (
+              <div className="flex items-center gap-2 text-xs text-zinc-400" role="status" aria-live="polite">
+                <Sparkles className="h-3.5 w-3.5 animate-pulse" />
+                {t('chat:thinking', { defaultValue: 'Agent is thinking…' })}
               </div>
             )}
           </div>
