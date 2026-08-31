@@ -104,14 +104,11 @@ impl GatewayState {
                 guard.file.providers.push(prov);
             }
         }
-        for binding in disk.bindings {
-            let exists = guard.file.bindings.iter().any(|b| {
-                b.service_id == binding.service_id && b.provider_name == binding.provider_name
-            });
-            if !exists {
-                guard.file.bindings.push(binding);
-            }
-        }
+        // Bindings are the routing topology: reconcile to disk (not merge).
+        // The control plane rewrites an agent's binding on disk and reloads;
+        // a pure merge would keep the stale binding in memory, so a bare model
+        // alias shared by multiple providers would keep routing to the old one.
+        guard.file.bindings = disk.bindings;
         for key in disk.api_keys {
             if !guard.file.api_keys.iter().any(|k| k.key == key.key) {
                 guard.file.api_keys.push(key);
