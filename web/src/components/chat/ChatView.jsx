@@ -304,37 +304,36 @@ function ChatBubble({ message }) {
     setTimeout(() => setCopied(false), 1500);
   };
 
+  // WeChat-style layout: user bubbles hug the right (avatar would sit on the
+  // left), agent bubbles hug the left (avatar on the right). Indents on the
+  // *opposite* side give the avatar room without stealing bubble width.
   return (
-    <div className="group flex max-w-[85%] flex-col gap-0.5">
-      <div className="flex justify-end">
-        <div
-          className={`relative flex w-full flex-col gap-1 rounded-2xl px-4 py-2.5 text-sm ${
-            isUser
-              ? 'bg-zinc-900 text-zinc-50'
-              : 'bg-zinc-100 text-zinc-900'
-          }`}
-        >
-          <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide opacity-60">
-            {isUser ? <User className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
+    <div
+      className={`group flex w-full ${isUser ? 'justify-end pl-2 sm:pl-12' : 'justify-start pr-2 sm:pr-12'}`}
+    >
+      <div className="flex max-w-[80%] flex-col gap-1">
+        <div className={`flex items-center gap-1.5 text-[11px] text-zinc-400 ${isUser ? 'justify-end' : 'justify-start'}`}>
+          {isUser ? <User className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
+          <span className="font-medium">
             {isUser ? t('chat:you', { defaultValue: 'You' }) : t('chat:agent', { defaultValue: 'Agent' })}
-            {!isUser && message.model ? (
-              <span className="normal-case tracking-normal opacity-70">· {message.model}</span>
-            ) : null}
-          </div>
-          <pre className="whitespace-pre-wrap break-words font-sans text-[13px] leading-relaxed">
-            {message.content}
-          </pre>
+          </span>
+          {!isUser && message.model ? (
+            <span className="text-zinc-400">· {message.model}</span>
+          ) : null}
         </div>
+        <pre className="whitespace-pre-wrap break-words font-sans text-[13.5px] leading-relaxed text-zinc-800">
+          {message.content}
+        </pre>
+        <button
+          type="button"
+          onClick={copyContent}
+          title={t('chat:copy', { defaultValue: 'Copy' })}
+          aria-label={t('chat:copy', { defaultValue: 'Copy' })}
+          className={`invisible mt-0.5 flex h-6 w-6 items-center justify-center self-${isUser ? 'end' : 'start'} rounded-md text-zinc-400 opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 hover:bg-zinc-200 hover:text-zinc-700 ${consoleButtonFocusClass}`}
+        >
+          {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={copyContent}
-        title={t('chat:copy', { defaultValue: 'Copy' })}
-        aria-label={t('chat:copy', { defaultValue: 'Copy' })}
-        className={`invisible ml-auto flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 hover:bg-zinc-200 hover:text-zinc-700 ${consoleButtonFocusClass}`}
-      >
-        {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-      </button>
     </div>
   );
 }
@@ -344,9 +343,11 @@ function ToolCard({ call, result }) {
   const [open, setOpen] = useState(false);
   const name = call?.tool || result?.tool || t('chat:tool_unknown', { defaultValue: 'Tool' });
   const hasDetail = Boolean(call?.content) || Boolean(result?.content);
+  // Tool cards stay in the gray box (they're structured diagnostics, not chat)
+  // and sit on the agent's left side to keep the WeChat-style left/right split.
   return (
-    <div className="flex justify-start">
-      <div className="w-full max-w-[85%] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50">
+    <div className="flex justify-start pr-2 sm:pr-12">
+      <div className="w-full max-w-[80%] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50">
         <button
           type="button"
           onClick={() => hasDetail && setOpen((o) => !o)}
