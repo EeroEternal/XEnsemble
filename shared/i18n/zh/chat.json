@@ -4,6 +4,7 @@
   "send": "发送",
   "stop": "中断 (Ctrl+C)",
   "working": "Agent 工作中…",
+  "thinking": "Agent 思考中…",
   "you": "我",
   "agent": "Agent",
   "tool_unknown": "工具",

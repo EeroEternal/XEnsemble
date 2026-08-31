@@ -14,13 +14,15 @@
   },
   "preferences": {
     "title": "偏好",
+    "display": "显示",
+    "theme_mode": "主题模式",
     "appearance": "外观",
     "theme_light": "浅色",
     "theme_dark": "深色",
     "theme_system": "跟随系统",
     "session_view": "Agent 界面风格",
-    "view_agent": "Agent 视图（终端）",
-    "view_chat": "对话视图（对话框）"
+    "view_agent": "Agent 视图",
+    "view_chat": "对话视图"
   },
   "language": {
     "label": "语言",
