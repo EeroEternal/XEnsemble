@@ -1373,24 +1373,6 @@ export default React.forwardRef(function Sessions({
                         )}
                       </button>
                     )}
-                  {!sessionPending && !sessionFailed && (
-                    <>
-                      <div className="mx-0.5 h-5 w-px bg-zinc-200" />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = viewMode === 'chat' ? 'agent' : 'chat';
-                          setViewMode(next);
-                          saveViewPref(next);
-                        }}
-                        title={viewMode === 'chat' ? t('sessions:action.show_agent_view', { defaultValue: 'Agent view' }) : t('sessions:action.show_chat_view', { defaultValue: 'Chat view' })}
-                        aria-label={viewMode === 'chat' ? t('sessions:action.show_agent_view', { defaultValue: 'Agent view' }) : t('sessions:action.show_chat_view', { defaultValue: 'Chat view' })}
-                        className={`${consoleIconButtonClass} ${viewMode === 'chat' ? 'bg-zinc-200 text-zinc-900' : ''}`}
-                      >
-                        {viewMode === 'chat' ? <TerminalSquare className="w-4 h-4" strokeWidth={1.75} /> : <MessagesSquare className="w-4 h-4" strokeWidth={1.75} />}
-                      </button>
-                    </>
-                  )}
                   {activeSession.projectId ? (
                     <>
                       <div className="mx-0.5 h-5 w-px bg-zinc-200" />
