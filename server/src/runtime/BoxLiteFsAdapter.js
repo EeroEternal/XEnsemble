@@ -2,6 +2,24 @@ const { FsAdapter, RuntimeError } = require('./interfaces');
 const BoxLiteClient = require('./BoxLiteClient');
 const { isHiddenWorkspacePath } = require('../workspace/hiddenPaths');
 
+// 递归列举时剪枝的重目录（find 用 -name 匹配 basename，任何层级都生效）：
+// 保留目录条目本身（供文件浏览器展示），但不递归进入其内容。
+// 与 LocalFsAdapter.SKIP_WALK_DIRS 保持一致，避免依赖/构建产物占满 limit，
+// 把真实项目文件挤出 1000 条上限。
+const SKIP_WALK_DIR_NAMES = [
+    'node_modules', '.git', 'dist', 'build', '.next', 'out', 'coverage',
+    '.venv', '__pycache__', '.cache', '.turbo', '.nx',
+    'vendor', 'target', 'venv', '.tox', 'Pods', 'bower_components',
+    'jspm_packages', '.gradle', '.m2', 'tmp', 'logs',
+];
+
+function buildFindPruneExpr(names) {
+    const nameExpr = names.map((n) => `-name ${JSON.stringify(n)}`).join(' -o ');
+    // 命中剪枝目录：先 printf 保留条目本身，再 -prune 停止下探；
+    // 否则正常 printf 文件/目录。
+    return `\\( -type d -a \\( ${nameExpr} \\) -printf '%y %p %s\\n' -a -prune \\) -o \\( -type f -o -type d \\) -printf '%y %p %s\\n'`;
+}
+
 function safeRel(p) {
     const s = String(p || '.').replace(/\\/g, '/').replace(/^\//, '');
     if (s.includes('..')) return '.';
@@ -23,7 +41,8 @@ class BoxLiteFsAdapter extends FsAdapter {
         const maxdepth = depth === 'single' ? 1 : 6;
         const limit = 1000;
         try {
-            const cmd = `cd ${JSON.stringify(cwd)} && find ${JSON.stringify(rel)} -maxdepth ${maxdepth} \\( -type f -o -type d \\) -printf '%y %p %s\\n' 2>/dev/null | head -${limit + 50}`;
+            const pruneExpr = buildFindPruneExpr(SKIP_WALK_DIR_NAMES);
+            const cmd = `cd ${JSON.stringify(cwd)} && find ${JSON.stringify(rel)} -maxdepth ${maxdepth} ${pruneExpr} 2>/dev/null | head -${limit + 50}`;
             const r = await this.client.execForResult(name, 'sh', ['-c', cmd], {}, cwd);
             const out = (r.stdout || '').trim();
             if (!out) return [];

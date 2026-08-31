@@ -7,6 +7,17 @@ const { buildSessionStateDirRef } = require('../session/stateDirRef');
 
 const FS_LIST_LIMIT = 1000;
 
+// 递归列举时剪枝的重目录：不返回其内容，也不递归进入。
+// node_modules/.git/dist 等依赖与构建产物条目数量巨大（可达数十万），
+// 若不剪枝会占满 FS_LIST_LIMIT，把真实项目文件（server/、package.json 等）
+// 挤出 1000 条上限，导致部署分析把全栈项目误判为纯静态站点。
+const SKIP_WALK_DIRS = new Set([
+    'node_modules', '.git', 'dist', 'build', '.next', 'out', 'coverage',
+    '.venv', '__pycache__', '.cache', '.turbo', '.nx',
+    'vendor', 'target', 'venv', '.tox', 'Pods', 'bower_components',
+    'jspm_packages', '.gradle', '.m2', 'tmp', 'logs',
+]);
+
 class LocalFsAdapter extends FsAdapter {
     /**
      * 递归列出 rootDir 下所有文件与目录。
@@ -61,7 +72,7 @@ class LocalFsAdapter extends FsAdapter {
                 try { stat = fs.lstatSync(fullPath); } catch (e) { continue; }
                 if (stat.isSymbolicLink()) continue;
                 addEntry(fullPath, stat);
-                if (stat.isDirectory()) walk(fullPath);
+                if (stat.isDirectory() && !SKIP_WALK_DIRS.has(name)) walk(fullPath);
             }
         };
         walk(target);
