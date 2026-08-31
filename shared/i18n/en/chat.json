@@ -1,0 +1,14 @@
+{
+  "empty_hint": "Ask the agent something below. Messages appear here as the agent works.",
+  "input_placeholder": "Message the agent… (Enter to send, Shift+Enter for newline)",
+  "send": "Send",
+  "stop": "Interrupt (Ctrl+C)",
+  "working": "Agent is working…",
+  "you": "You",
+  "agent": "Agent",
+  "tool_unknown": "Tool",
+  "tool_running": "running…",
+  "tool_args": "Arguments",
+  "tool_result_label": "Result",
+  "copy": "Copy"
+}

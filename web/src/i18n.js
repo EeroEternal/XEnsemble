@@ -13,6 +13,7 @@ import gitEn from '../../shared/i18n/en/git.json';
 import imagesEn from '../../shared/i18n/en/images.json';
 import deployEn from '../../shared/i18n/en/deploy.json';
 import errorsEn from '../../shared/i18n/en/errors.json';
+import chatEn from '../../shared/i18n/en/chat.json';
 
 import commonZh from '../../shared/i18n/zh/common.json';
 import authZh from '../../shared/i18n/zh/auth.json';
@@ -26,6 +27,7 @@ import gitZh from '../../shared/i18n/zh/git.json';
 import imagesZh from '../../shared/i18n/zh/images.json';
 import deployZh from '../../shared/i18n/zh/deploy.json';
 import errorsZh from '../../shared/i18n/zh/errors.json';
+import chatZh from '../../shared/i18n/zh/chat.json';
 
 const savedLocale = (() => {
   try { return localStorage.getItem('xe_locale') || 'en'; } catch { return 'en'; }
@@ -48,6 +50,7 @@ i18next
         images: imagesEn,
         deploy: deployEn,
         errors: errorsEn,
+        chat: chatEn,
       },
       zh: {
         common: commonZh,
@@ -62,6 +65,7 @@ i18next
         images: imagesZh,
         deploy: deployZh,
         errors: errorsZh,
+        chat: chatZh,
       },
     },
     lng: savedLocale,

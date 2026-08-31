@@ -6,6 +6,7 @@ const { resolveGatewayUpstreamUrl } = require('./gatewayUpstream');
 const serviceRouter = require('./serviceRouter');
 const { checkLlmRequestQuota } = require('./quota');
 const { recordEvent } = require('../events/recordEvent');
+const chatTranscript = require('./chatTranscript');
 const { assertActiveUser } = require('../auth/assertActiveUser');
 const policy = require('../auth/PolicyService');
 const { db } = require('../db/index');
@@ -20,6 +21,33 @@ const proxy = httpProxy.createProxyServer({
     xfwd: true,
     changeOrigin: true,
 });
+
+// Last recorded user prompt per session, used to dedup the chat view record
+// (agent CLIs replay the full message history on every request).
+const lastUserPromptBySession = new Map();
+// Recorded tool-call ids per session, to avoid re-recording the same tool call
+// (SSE deltas arrive fragmented; a tool_call id may span multiple chunks).
+const recordedToolCallIds = new Map();
+// Recorded tool-result call ids per session (agent replays history every turn).
+const recordedToolResultIds = new Map();
+
+function isNewToolCall(sessionId, id) {
+    if (!id) return false;
+    let set = recordedToolCallIds.get(sessionId);
+    if (!set) { set = new Set(); recordedToolCallIds.set(sessionId, set); }
+    if (set.has(id)) return false;
+    set.add(id);
+    return true;
+}
+
+function isNewToolResult(sessionId, callId) {
+    if (!callId) return false;
+    let set = recordedToolResultIds.get(sessionId);
+    if (!set) { set = new Set(); recordedToolResultIds.set(sessionId, set); }
+    if (set.has(callId)) return false;
+    set.add(callId);
+    return true;
+}
 
 proxy.on('error', (err, req, res) => {
     if (res.writeHead) {
@@ -164,7 +192,7 @@ async function resolveGatewayTarget(log) {
     };
 }
 
-function forwardToGateway(request, reply, { targetBaseUrl, gatewayKey, path }) {
+function forwardToGateway(request, reply, { targetBaseUrl, gatewayKey, path, onResponseBody }) {
     return new Promise((resolve, reject) => {
         reply.hijack();
         request.raw.url = path;
@@ -179,6 +207,31 @@ function forwardToGateway(request, reply, { targetBaseUrl, gatewayKey, path }) {
             if (req !== request.raw) return;
             statusCode = proxyRes.statusCode || null;
             proxy.off('proxyRes', onProxyRes);
+            // Tap the upstream response body (non-blocking) so the LLM proxy can
+            // record the assistant reply for the chat view. The response is
+            // piped through http-proxy to the client regardless; adding data
+            // listeners here only observes the stream.
+            if (typeof onResponseBody === 'function') {
+                const chunks = [];
+                let size = 0;
+                const MAX_CAPTURE = 2 * 1024 * 1024;
+                const onData = (chunk) => {
+                    size += chunk.length;
+                    if (size <= MAX_CAPTURE) chunks.push(chunk);
+                };
+                const onEnd = () => {
+                    proxyRes.removeListener('data', onData);
+                    proxyRes.removeListener('end', onEnd);
+                    if (statusCode >= 200 && statusCode < 300 && chunks.length) {
+                        try {
+                            const body = Buffer.concat(chunks);
+                            onResponseBody(body, proxyRes.headers['content-type'] || '');
+                        } catch (_) { /* ignore */ }
+                    }
+                };
+                proxyRes.on('data', onData);
+                proxyRes.on('end', onEnd);
+            }
         };
         proxy.on('proxyRes', onProxyRes);
 
@@ -199,6 +252,136 @@ function forwardToGateway(request, reply, { targetBaseUrl, gatewayKey, path }) {
             else resolve({ statusCode });
         });
     });
+}
+
+/**
+ * Extract the user's latest message from an OpenAI-style chat/completions body.
+ * Agent CLIs send the full conversation history on every request, so we pick
+ * the last role:'user' message (the user's actual input). Tool results are
+ * role:'tool' and reasoning messages role:'assistant', so they are skipped.
+ */
+function extractUserMessage(bodyBuffer) {
+    if (!Buffer.isBuffer(bodyBuffer) || bodyBuffer.length === 0) return null;
+    try {
+        const parsed = JSON.parse(bodyBuffer.toString('utf8'));
+        const messages = parsed?.messages;
+        if (!Array.isArray(messages)) return null;
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const m = messages[i];
+            if (!m || m.role !== 'user') continue;
+            const content = typeof m.content === 'string' ? m.content.trim() : '';
+            if (content) return content;
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Extract the assistant reply from an upstream chat/completions response body.
+ * Handles both streaming (text/event-stream SSE deltas) and non-streaming JSON.
+ */
+function extractAssistantMessage(bodyBuffer, contentType) {
+    if (!Buffer.isBuffer(bodyBuffer) || bodyBuffer.length === 0) return '';
+    const isStream = typeof contentType === 'string' && contentType.includes('text/event-stream');
+    if (isStream) {
+        const lines = bodyBuffer.toString('utf8').split('\n');
+        const parts = [];
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const data = trimmed.slice(5).trim();
+            if (data === '[DONE]') continue;
+            try {
+                const obj = JSON.parse(data);
+                const delta = obj?.choices?.[0]?.delta?.content;
+                if (typeof delta === 'string') parts.push(delta);
+            } catch (_) { /* partial line */ }
+        }
+        return parts.join('').trim();
+    }
+    try {
+        const obj = JSON.parse(bodyBuffer.toString('utf8'));
+        const content = obj?.choices?.[0]?.message?.content;
+        return typeof content === 'string' ? content.trim() : '';
+    } catch {
+        return '';
+    }
+}
+
+/**
+ * Extract tool_calls from an upstream chat/completions response body.
+ * Returns [{ id, name, args }]. Handles both streaming (SSE deltas, where the
+ * same call id spans multiple fragments that must be concatenated) and
+ * non-streaming JSON.
+ */
+function extractToolCalls(bodyBuffer, contentType) {
+    if (!Buffer.isBuffer(bodyBuffer) || bodyBuffer.length === 0) return [];
+    const isStream = typeof contentType === 'string' && contentType.includes('text/event-stream');
+    if (isStream) {
+        const byIndex = new Map(); // index -> { id, name, args }
+        const lines = bodyBuffer.toString('utf8').split('\n');
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const data = trimmed.slice(5).trim();
+            if (data === '[DONE]') continue;
+            try {
+                const obj = JSON.parse(data);
+                const deltas = obj?.choices?.[0]?.delta?.tool_calls;
+                if (!Array.isArray(deltas)) continue;
+                for (const d of deltas) {
+                    const idx = d?.index ?? 0;
+                    let acc = byIndex.get(idx) || { id: null, name: '', args: '' };
+                    if (d.id) acc.id = d.id;
+                    if (d.function?.name) acc.name += d.function.name;
+                    if (d.function?.arguments) acc.args += d.function.arguments;
+                    byIndex.set(idx, acc);
+                }
+            } catch (_) { /* partial line */ }
+        }
+        return [...byIndex.values()]
+            .filter((c) => c.name)
+            .map((c) => ({ id: c.id || null, name: c.name, args: c.args }));
+    }
+    try {
+        const obj = JSON.parse(bodyBuffer.toString('utf8'));
+        const calls = obj?.choices?.[0]?.message?.tool_calls;
+        if (!Array.isArray(calls)) return [];
+        return calls
+            .filter((c) => c?.function?.name)
+            .map((c) => ({
+                id: c.id || null,
+                name: c.function.name,
+                args: typeof c.function.arguments === 'string' ? c.function.arguments : '',
+            }));
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Extract tool_result messages from an OpenAI-style chat/completions request
+ * body. Returns [{ callId, name, content }]. Tool results are messages with
+ * role:'tool' — the agent echoes them after executing a tool call.
+ */
+function extractToolResults(bodyBuffer) {
+    if (!Buffer.isBuffer(bodyBuffer) || bodyBuffer.length === 0) return [];
+    try {
+        const parsed = JSON.parse(bodyBuffer.toString('utf8'));
+        const messages = parsed?.messages;
+        if (!Array.isArray(messages)) return [];
+        return messages
+            .filter((m) => m?.role === 'tool' && (m.tool_call_id || m.name || m.content))
+            .map((m) => ({
+                callId: m.tool_call_id || null,
+                name: typeof m.name === 'string' ? m.name : '',
+                content: typeof m.content === 'string' ? m.content : '',
+            }));
+    } catch {
+        return [];
+    }
 }
 
 async function proxyLlmRequest(request, reply) {
@@ -252,12 +435,59 @@ async function proxyLlmRequest(request, reply) {
     // actual model from the request body so the log shows what the agent
     // really selected — this is the value UniGateway routes on.
     let bodyModel = null;
+    let userPrompt = null;
     if (Buffer.isBuffer(request.body) && request.body.length > 0) {
         try {
             const parsed = JSON.parse(request.body.toString('utf8'));
             bodyModel = parsed.model || null;
         } catch { /* non-JSON body */ }
+        userPrompt = extractUserMessage(request.body);
     }
+    // Record the user's prompt for the chat view (dedup: agent CLIs replay the
+    // full history every request, so only record when it differs from the last
+    // recorded user message for this session).
+    const isChatPath = path === '/v1/chat/completions' || path === '/chat/completions'
+        || path === '/v1/messages' || path.endsWith('/chat/completions');
+    if (isChatPath && userPrompt && lastUserPromptBySession.get(claims.sid) !== userPrompt) {
+        lastUserPromptBySession.set(claims.sid, userPrompt);
+        void chatTranscript.append(claims.sid, { role: 'user', content: userPrompt });
+    }
+    // Record tool_result messages echoed in the request body (the agent sends
+    // them back after executing a tool call). Dedup by call id — the agent
+    // replays the full history on every request.
+    if (isChatPath) {
+        for (const tr of extractToolResults(request.body)) {
+            if (isNewToolResult(claims.sid, tr.callId) && tr.content) {
+                void chatTranscript.append(claims.sid, {
+                    role: 'tool_result',
+                    callId: tr.callId,
+                    tool: tr.name || null,
+                    content: tr.content,
+                });
+            }
+        }
+    }
+    const onResponseBody = (bodyBuffer, contentType) => {
+        if (!isChatPath) return;
+        const assistantText = extractAssistantMessage(bodyBuffer, contentType);
+        if (assistantText) {
+            void chatTranscript.append(claims.sid, {
+                role: 'assistant',
+                content: assistantText,
+                model: bodyModel || claims.model || null,
+            });
+        }
+        for (const tc of extractToolCalls(bodyBuffer, contentType)) {
+            if (isNewToolCall(claims.sid, tc.id)) {
+                void chatTranscript.append(claims.sid, {
+                    role: 'tool_call',
+                    callId: tc.id,
+                    tool: tc.name,
+                    content: tc.args,
+                });
+            }
+        }
+    };
     request.log.info(
         {
             sessionId: claims.sid,
@@ -281,6 +511,7 @@ async function proxyLlmRequest(request, reply) {
             targetBaseUrl: gateway.baseUrl,
             gatewayKey: agentGatewayKey,
             path,
+            onResponseBody,
         });
     } catch (err) {
         forwardError = err;
@@ -339,4 +570,8 @@ module.exports = {
     isQuotaExemptPath,
     isModelsDiscoveryPath,
     serveAgentModelsCatalog,
+    extractUserMessage,
+    extractAssistantMessage,
+    extractToolCalls,
+    extractToolResults,
 };

@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffe
 import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AgentConsole from '../components/AgentConsole';
+import ChatView from '../components/chat/ChatView';
+import { loadViewPref, saveViewPref } from '../lib/viewPrefs';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import WorkspaceShell from '../components/WorkspaceShell';
 import WorkspacePanel from '../components/WorkspacePanel';
@@ -26,6 +28,7 @@ import { usePreview, PreviewControlGroup } from '../components/PreviewPanel';
 import DeployPanel from '../components/DeployPanel';
 import {
   TerminalSquare,
+  MessagesSquare,
   Play,
   RotateCw,
   Settings2,
@@ -124,6 +127,8 @@ export default React.forwardRef(function Sessions({
   // eslint-disable-next-line no-unused-vars
   const [_error, setError] = useState(null);
   const [panelOpen, setPanelOpen] = useState(true);
+  // Agent 运行界面视图：'agent'（原生 TUI 终端，默认）| 'chat'（对话框风格）
+  const [viewMode, setViewMode] = useState(() => loadViewPref());
   const [panelWidth, setPanelWidth] = useState(() => {
     const maxW = typeof window !== 'undefined' ? Math.max(720, window.innerWidth - 240) : 800;
     return Math.min(Math.floor(maxW / 2), maxW);
@@ -1368,6 +1373,24 @@ export default React.forwardRef(function Sessions({
                         )}
                       </button>
                     )}
+                  {!sessionPending && !sessionFailed && (
+                    <>
+                      <div className="mx-0.5 h-5 w-px bg-zinc-200" />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = viewMode === 'chat' ? 'agent' : 'chat';
+                          setViewMode(next);
+                          saveViewPref(next);
+                        }}
+                        title={viewMode === 'chat' ? t('sessions:action.show_agent_view', { defaultValue: 'Agent view' }) : t('sessions:action.show_chat_view', { defaultValue: 'Chat view' })}
+                        aria-label={viewMode === 'chat' ? t('sessions:action.show_agent_view', { defaultValue: 'Agent view' }) : t('sessions:action.show_chat_view', { defaultValue: 'Chat view' })}
+                        className={`${consoleIconButtonClass} ${viewMode === 'chat' ? 'bg-zinc-200 text-zinc-900' : ''}`}
+                      >
+                        {viewMode === 'chat' ? <TerminalSquare className="w-4 h-4" strokeWidth={1.75} /> : <MessagesSquare className="w-4 h-4" strokeWidth={1.75} />}
+                      </button>
+                    </>
+                  )}
                   {activeSession.projectId ? (
                     <>
                       <div className="mx-0.5 h-5 w-px bg-zinc-200" />
@@ -1433,20 +1456,28 @@ export default React.forwardRef(function Sessions({
             ) : (
 <div ref={panelRowRef} className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden">
               <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                <div
-                  className="flex min-h-0 flex-1 flex-col overflow-hidden"
-                  style={{ backgroundColor: preset.xterm.background }}
-                >
-                  <AgentConsole
+                {viewMode === 'chat' ? (
+                  <ChatView
                     key={activeSession.sessionId}
                     sessionId={activeSession.sessionId}
-                    reconnectVersion={reconnectVersion}
                     onSessionEnd={handleSessionEnd}
-                    onSessionConnected={handleSessionConnected}
-                    sessionLive={sessionAlive || skipPendingSpinner}
-                    sessionWakeable={sessionWakeable}
                   />
-                </div>
+                ) : (
+                  <div
+                    className="flex min-h-0 flex-1 flex-col overflow-hidden"
+                    style={{ backgroundColor: preset.xterm.background }}
+                  >
+                    <AgentConsole
+                      key={activeSession.sessionId}
+                      sessionId={activeSession.sessionId}
+                      reconnectVersion={reconnectVersion}
+                      onSessionEnd={handleSessionEnd}
+                      onSessionConnected={handleSessionConnected}
+                      sessionLive={sessionAlive || skipPendingSpinner}
+                      sessionWakeable={sessionWakeable}
+                    />
+                  </div>
+                )}
                 {!panelOpen && (
                   <button
                     type="button"

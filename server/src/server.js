@@ -19,6 +19,7 @@ const repositoryEnvironment = require('./repositories/RepositoryEnvironmentServi
 const { recordEvent } = require('./events/recordEvent');
 const { registerPreviewGateway } = require('./preview/gateway');
 const { registerLlmProxy } = require('./llm/proxy');
+const chatTranscript = require('./llm/chatTranscript');
 const { issueSessionToken } = require('./llm/sessionToken');
 const agentGatewayConfig = require('./admin/AgentGatewayConfig');
 const userAdmin = require('./admin/UserAdminService');
@@ -1083,6 +1084,18 @@ fastify.get('/api/v1/sessions/:sessionId/transcript', { preValidation: [fastify.
     };
 });
 
+fastify.get('/api/v1/sessions/:sessionId/chat', { preValidation: [fastify.authenticate] }, async (request, reply) => {
+    const { sessionId } = request.params;
+    const rows = await db.select().from(schema.sessions)
+        .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
+
+    return {
+        session_id: sessionId,
+        messages: await chatTranscript.getHistory(sessionId),
+    };
+});
+
 fastify.delete('/api/v1/sessions/:sessionId', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const { sessionId } = request.params;
     const rows = await db.select().from(schema.sessions)
@@ -1887,12 +1900,14 @@ fastify.register(async function terminalWsRoutes(app) {
             let sessionId = null;
             let accessToken = null;
             let after = 0;
+            let chatOnly = false;
             try {
                 const url = new URL(req.url, 'http://localhost');
                 sessionId = url.searchParams.get('sessionId');
                 accessToken = url.searchParams.get('access_token');
                 const parsedAfter = Number(url.searchParams.get('after'));
                 after = Number.isFinite(parsedAfter) ? parsedAfter : 0;
+                chatOnly = url.searchParams.get('chat') === '1';
             } catch (_) {
                 sessionId = null;
                 accessToken = null;
@@ -1970,11 +1985,16 @@ fastify.register(async function terminalWsRoutes(app) {
                 if (payload.type === 'exit' || payload.type === 'error') {
                     try { ws.close(); } catch (_) {}
                 }
-            }, { after, sessionRecord, wakeSession });
+            }, { after, sessionRecord, wakeSession, chatOnly });
             if (!sub.ok) {
                 ws.close();
                 return;
             }
+            // Forward structured chat events (recorded by the LLM proxy) over
+            // the same terminal channel so the chat view can render them live.
+            const offChat = chatTranscript.subscribe(sessionId, (entry) => {
+                sendJson({ type: 'chat_event', data: entry });
+            });
             sendWebSocketReady(sendJson);
 
             ws.on('message', (message) => {
@@ -2005,6 +2025,7 @@ fastify.register(async function terminalWsRoutes(app) {
 
             ws.on('close', () => {
                 stopHeartbeat();
+                offChat();
                 sub.cleanup();
             });
         } catch (err) {

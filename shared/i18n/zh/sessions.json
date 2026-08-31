@@ -34,6 +34,8 @@
     "starting_session": "正在启动会话",
     "hide_side_panel": "隐藏侧边栏",
     "show_side_panel": "显示侧边栏",
+    "show_agent_view": "Agent 视图",
+    "show_chat_view": "对话视图",
     "back_to_workspaces": "返回工作空间",
     "removing": "移除中…",
     "clear_all": "全部清除",

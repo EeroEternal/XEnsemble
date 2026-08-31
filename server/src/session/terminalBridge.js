@@ -103,6 +103,7 @@ async function subscribeTerminal(sessionId, send, options = {}) {
     const { session, handle } = resolved;
     const transcriptRef = session.transcriptRef || session.streamRef;
     const after = normalizeCursor(options.after);
+    const chatOnly = options.chatOnly === true;
     let lastSentSeq = after;
     let replaying = true;
     let cleaned = false;
@@ -276,21 +277,23 @@ async function subscribeTerminal(sessionId, send, options = {}) {
         maybeFinalizeExit();
     };
 
-    const offOutput = sessionManager.subscribeOutput(sessionId, (frame) => {
-        if (cleaned) return;
-        if (replaying) {
-            pendingLiveFrames.push(frame);
-            return;
-        }
-        if (frame.seq != null && frame.seq <= lastSentSeq) {
-            return;
-        }
-        liveBatch.push(frame);
-        if (!liveBatchScheduled) {
-            liveBatchScheduled = true;
-            liveFlushTimer = setTimeout(flushLiveBatch, LIVE_FLUSH_DELAY_MS);
-        }
-    });
+    const offOutput = chatOnly
+        ? () => {}
+        : sessionManager.subscribeOutput(sessionId, (frame) => {
+            if (cleaned) return;
+            if (replaying) {
+                pendingLiveFrames.push(frame);
+                return;
+            }
+            if (frame.seq != null && frame.seq <= lastSentSeq) {
+                return;
+            }
+            liveBatch.push(frame);
+            if (!liveBatchScheduled) {
+                liveBatchScheduled = true;
+                liveFlushTimer = setTimeout(flushLiveBatch, LIVE_FLUSH_DELAY_MS);
+            }
+        });
 
     const offExit = sessionManager.onExit(sessionId, (exitCode, exitSeq) => {
         pendingExit = {
@@ -301,6 +304,15 @@ async function subscribeTerminal(sessionId, send, options = {}) {
             maybeFinalizeExit();
         }
     });
+
+    if (chatOnly) {
+        // Chat-only mode: don't replay/send terminal output; only track exit so
+        // the chat view can mark the session ended. The handle stays available
+        // for sending input (applyTerminalMessage) via the returned handle.
+        replayComplete = true;
+        replaying = false;
+        return { ok: true, cleanup, handle };
+    }
 
     replayTranscript().catch((err) => {
         maybeSend({ type: 'error', data: err?.message || 'Failed to replay terminal transcript' });

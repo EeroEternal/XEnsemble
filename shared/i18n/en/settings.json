@@ -17,7 +17,10 @@
     "appearance": "Appearance",
     "theme_light": "Light",
     "theme_dark": "Dark",
-    "theme_system": "Follow system"
+    "theme_system": "Follow system",
+    "session_view": "Agent interface",
+    "view_agent": "Agent view (terminal)",
+    "view_chat": "Chat view (dialog)"
   },
   "language": {
     "label": "Language",

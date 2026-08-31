@@ -118,6 +118,20 @@ const sessionConfigs = pgTable('session_configs', {
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 });
 
+const sessionChatMessages = pgTable('session_chat_messages', {
+  sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  seq: integer('seq').notNull(),
+  ts: bigint('ts', { mode: 'number' }).notNull(),
+  role: text('role').notNull(),
+  content: text('content').notNull(),
+  callId: text('call_id'),
+  tool: text('tool'),
+  model: text('model'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.sessionId, table.seq] }),
+  sessionIdx: index('idx_session_chat_messages_session').on(table.sessionId),
+}));
+
 const agents = pgTable('agents', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
@@ -415,6 +429,7 @@ module.exports = {
   sessions,
   sessionStreams,
   sessionConfigs,
+  sessionChatMessages,
   agents,
   runtimes,
   deployments,
