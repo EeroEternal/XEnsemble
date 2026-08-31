@@ -84,6 +84,85 @@ async function resolveRuntimeId(userId, sessionId) {
     return rows[0]?.runtimeId || null;
 }
 
+/**
+ * Parse a repository URL into { provider, cloneUrl, fullName, repoName, owner }.
+ * Works for any git host — provider is inferred from the URL host, not from
+ * a registered account, so import-by-URL needs no prior connection.
+ *
+ * - https://github.com/owner/repo(.git)
+ * - git@github.com:owner/repo.git
+ * - https://gitlab.com/group/subgroup/repo
+ * - ssh://git@gitea.com:22/owner/repo.git
+ */
+function resolveRepoUrl(inputUrl) {
+    const raw = String(inputUrl || '').trim();
+    if (!raw) return null;
+
+    let clean = raw;
+    let host = null;
+    let path = null;
+
+    // ssh://[user@]host[:port]/path  (explicit scheme)
+    if (/^ssh:\/\//i.test(clean)) {
+        const m = clean.replace(/^ssh:\/\//i, '').match(/^(?:[^@]+@)?([^/]+?)(?::\d+)?\/(.+)$/);
+        if (m) {
+            host = m[1];
+            path = m[2];
+        } else {
+            return null;
+        }
+    } else {
+        clean = clean.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '');
+        clean = clean.replace(/^git\+/, '');
+        // scp-like form: git@host:owner/repo.git
+        const scp = clean.match(/^(?:[^@/]+@)?([^/:]+):(.+)$/);
+        if (scp && !/^https?:\/\//i.test(clean)) {
+            host = scp[1];
+            path = scp[2];
+        } else {
+            // host/path form (https, plain, www)
+            const slashIdx = clean.indexOf('/');
+            if (slashIdx > 0) {
+                host = clean.slice(0, slashIdx);
+                path = clean.slice(slashIdx + 1);
+            } else {
+                return null;
+            }
+        }
+    }
+
+    const hostname = (host || '').toLowerCase().replace(/:\d+$/, '').replace(/^www\./, '');
+    const repoPath = path.replace(/\/+$/, '').replace(/\.git$/, '').replace(/\/(tree|blob|src|raw)\/.*$/, '');
+    if (!repoPath) return null;
+
+    const provider = hostname === 'github.com' ? 'github'
+        : hostname === 'gitlab.com' ? 'gitlab'
+        : hostname === 'gitea.com' || hostname === 'codeberg.org' ? 'gitea'
+        : hostname || 'url';
+
+    const cloneUrl = `https://${hostname}/${repoPath}.git`;
+    const segments = repoPath.split('/').filter(Boolean);
+    const repoName = segments[segments.length - 1] || 'project';
+    const owner = segments.slice(0, -1).join('/') || null;
+
+    return { provider, cloneUrl, fullName: repoPath, repoName, owner, hostname };
+}
+
+/**
+ * Probe the default branch of a repo by URL using `git ls-remote --symref`
+ * (no auth needed for public repos). Returns branch name or 'main'.
+ */
+async function probeDefaultBranch(repoUrl) {
+    const { hostGit } = require('../git/hostGit');
+    try {
+        const { stdout } = await hostGit(process.cwd(), ['ls-remote', '--symref', repoUrl, 'HEAD'], { timeoutMs: 30_000 });
+        const match = stdout.match(/ref: refs\/heads\/([^\s]+)\s+HEAD/);
+        return match?.[1] || 'main';
+    } catch {
+        return 'main';
+    }
+}
+
 function registerGitRoutes(fastify) {
     const connectionService = new GitConnectionService();
     const mergeRequestService = new MergeRequestService();
@@ -259,46 +338,81 @@ function registerGitRoutes(fastify) {
         const quotaCheck = await policy.checkQuota(request.user.id, 'projects', request.user.role);
         if (!quotaCheck.ok) return policy.quotaErrorReply(reply, quotaCheck);
 
+        const body = request.body || {};
+        let providerName = body.provider || 'github';
         const {
-            provider: providerName = 'github',
             repo_full_name,
+            repo_url,
             name,
             branch,
             auto_create_branch,
             work_branch_name,
-        } = request.body || {};
+        } = body;
 
-        if (!repo_full_name) {
-            return reply.code(400).send({ error: t('errors:repo_full_name_required', { defaultValue: 'repo_full_name is required' }, request.locale || 'en'), code: 'repo_full_name_required' });
-        }
-        if (!hasProvider(providerName)) {
-            return reply.code(400).send({ error: t('errors:unknown_provider', { defaultValue: 'Unknown provider: {{provider}}', provider: providerName }, request.locale || 'en'), code: 'unknown_provider' });
+        // ── URL-based import (no provider connection required) ──
+        // Parse provider/cloneUrl from the URL itself. Works for any git host
+        // (github/gitlab/gitea/other); a matching account connection is only
+        // needed later for push/PR, not for import.
+        const parsedUrl = repo_url ? resolveRepoUrl(repo_url) : null;
+        if (repo_url && !parsedUrl) {
+            return reply.code(400).send({ error: t('errors:invalid_repo_url', { defaultValue: 'Invalid repository URL' }, request.locale || 'en'), code: 'invalid_repo_url' });
         }
 
-        const projectName = String(name || repo_full_name.split('/').pop() || 'project').trim();
+        const projectName = String(name || (parsedUrl ? parsedUrl.repoName : '') || (repo_full_name || '').split('/').pop() || 'project').trim();
         if (!projectName) return reply.code(400).send({ error: t('errors:name_required', { defaultValue: 'name is required' }, request.locale || 'en'), code: 'name_required' });
+
+        if (!repo_url) {
+            if (!repo_full_name) {
+                return reply.code(400).send({ error: t('errors:repo_full_name_required', { defaultValue: 'repo_full_name is required' }, request.locale || 'en'), code: 'repo_full_name_required' });
+            }
+            if (!hasProvider(providerName)) {
+                return reply.code(400).send({ error: t('errors:unknown_provider', { defaultValue: 'Unknown provider: {{provider}}', provider: providerName }, request.locale || 'en'), code: 'unknown_provider' });
+            }
+        }
 
         let token;
         let connection;
         let repoInfo;
-        try {
-            connection = await connectionService.getConnection(request.user.id, providerName);
-            if (!connection) return reply.code(400).send({ error: t('errors:provider_account_not_connected', { defaultValue: '{{provider}} account not connected', provider: providerName }, request.locale || 'en'), code: 'provider_account_not_connected' });
-            token = await connectionService.getDecryptedToken(request.user.id, providerName);
-            const provider = getProvider(providerName);
-            const { getProviderConfig } = require('../git/GitConnectionService');
-            const config = await getProviderConfig(providerName);
-            repoInfo = await provider.getRepo(token, repo_full_name, { apiBase: config?.apiBase });
-        } catch (err) {
-            request.log.error(err);
-            if (err.message.includes('not_connected')) {
-                return reply.code(400).send({ error: t('errors:provider_account_not_connected', { defaultValue: '{{provider}} account not connected', provider: providerName }, request.locale || 'en'), code: 'provider_account_not_connected' });
+        if (parsedUrl) {
+            // URL import: no account connection needed. If a connection for the
+            // inferred provider happens to exist, use its token for the clone
+            // (helps with private repos); otherwise clone publicly.
+            const resolvedProvider = hasProvider(parsedUrl.provider) ? parsedUrl.provider : 'url';
+            try {
+                connection = await connectionService.getConnection(request.user.id, resolvedProvider).catch(() => null);
+                token = connection ? await connectionService.getDecryptedToken(request.user.id, resolvedProvider).catch(() => null) : null;
+            } catch (_) {
+                token = null;
             }
-            const isAuthError = err.code === 'token_expired' || err.status === 401;
-            if (isAuthError) {
-                return reply.code(400).send({ error: `${providerName} token 已过期或无效，请重新认证`, code: 'REAUTH_REQUIRED' });
+            const defaultBranch = branch || await probeDefaultBranch(parsedUrl.cloneUrl);
+            repoInfo = {
+                cloneUrl: parsedUrl.cloneUrl,
+                defaultBranch,
+                fullName: parsedUrl.fullName,
+                id: null,
+                name: parsedUrl.repoName,
+            };
+            providerName = resolvedProvider;
+        } else {
+            try {
+                connection = await connectionService.getConnection(request.user.id, providerName);
+                if (!connection) return reply.code(400).send({ error: t('errors:provider_account_not_connected', { defaultValue: '{{provider}} account not connected', provider: providerName }, request.locale || 'en'), code: 'provider_account_not_connected' });
+                token = await connectionService.getDecryptedToken(request.user.id, providerName);
+                const provider = getProvider(providerName);
+                const { getProviderConfig } = require('../git/GitConnectionService');
+                const config = await getProviderConfig(providerName);
+                repoInfo = await provider.getRepo(token, repo_full_name, { apiBase: config?.apiBase });
+            } catch (err) {
+                request.log.error(err);
+                if (err.message.includes('not_connected')) {
+                    return reply.code(400).send({ error: t('errors:provider_account_not_connected', { defaultValue: '{{provider}} account not connected', provider: providerName }, request.locale || 'en'), code: 'provider_account_not_connected' });
+                }
+                const isAuthError = err.code === 'token_expired' || err.status === 401;
+                if (isAuthError) {
+                    return reply.code(400).send({ error: `${providerName} token 已过期或无效，请重新认证`, code: 'REAUTH_REQUIRED' });
+                }
+                return reply.code(err.status || 500).send({ error: err.message });
             }
-            return reply.code(err.status || 500).send({ error: err.message });
         }
 
         const projectId = newId('proj');
@@ -318,7 +432,7 @@ function registerGitRoutes(fastify) {
             repoProvider: providerName,
             repoUrl: repoInfo.cloneUrl,
             repoDefaultBranch: repoInfo.defaultBranch || 'main',
-            repoTokenSecretRef: connection.id,
+            repoTokenSecretRef: connection?.id || null,
             workspaceMode: 'git',
             remoteRepoId: repoInfo.id || null,
             remoteFullName: repoInfo.fullName || repo_full_name,

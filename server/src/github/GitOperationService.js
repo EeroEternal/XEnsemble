@@ -25,11 +25,19 @@ const CONFLICT_STATUSES = new Set(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU']);
 
 async function defaultGetToken(project) {
     const provider = project.repoProvider;
-    if (!provider || provider === 'none' || provider === 'local_git') {
+    if (!provider || provider === 'none' || provider === 'local_git' || provider === 'url') {
         return undefined;
     }
     const { GitConnectionService } = require('../git/GitConnectionService');
-    return new GitConnectionService().getDecryptedToken(project.userId, provider);
+    try {
+        return await new GitConnectionService().getDecryptedToken(project.userId, provider);
+    } catch (err) {
+        // No connected account for this provider (e.g. URL import without
+        // connecting). Fall back to unauthenticated access so public repos
+        // can still be cloned; private repos will fail at clone time.
+        if (err?.message?.includes('not_connected')) return undefined;
+        throw err;
+    }
 }
 
 class GitOperationService {

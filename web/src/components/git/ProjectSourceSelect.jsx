@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, Search, Loader2, Check, GitBranch, Plus } from 'lucide-react';
+import { ChevronDown, Search, Loader2, Check, GitBranch, Plus, Link2 } from 'lucide-react';
 import { useGitProvider } from '../../hooks/useGitProvider';
 import { useToast } from '../Toast';
 import * as gitApi from '../../lib/gitApi';
@@ -15,6 +15,15 @@ const PROVIDERS = ['github', 'gitlab', 'gitea'];
 
 function repoKey(provider, fullName) {
   return `${provider}:${fullName}`;
+}
+
+/** Parse a repo name from a URL (last path segment, strip .git). */
+function repoNameFromUrl(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return null;
+  const withoutScheme = raw.replace(/^https?:\/\//i, '').replace(/^git@/, '').replace(/^ssh:\/\//i, '');
+  const path = withoutScheme.split(/[/:]/).filter(Boolean).pop() || '';
+  return path.replace(/\.git$/, '') || null;
 }
 
 export default function ProjectSourceSelect({
@@ -34,6 +43,10 @@ export default function ProjectSourceSelect({
   const [oauthConfigured, setOauthConfigured] = useState({});
   const [reposByProvider, setReposByProvider] = useState({});
   const [loadingRepos, setLoadingRepos] = useState({});
+  const [urlMode, setUrlMode] = useState(false);
+  const [urlInput, setUrlInput] = useState('');
+  const [urlError, setUrlError] = useState(null);
+  const urlInputRef = useRef(null);
   const rootRef = useRef(null);
 
   // OAuth-configured status (per provider) - controls whether connect is allowed.
@@ -117,6 +130,33 @@ export default function ProjectSourceSelect({
   const handleSelectRepo = (repo) => {
     onImported?.(repo);
     setOpen(false);
+  };
+
+  const submitUrlImport = () => {
+    const url = urlInput.trim();
+    if (!url) {
+      setUrlError(t('git:url_required', { defaultValue: 'Repository URL is required' }));
+      return;
+    }
+    const name = repoNameFromUrl(url);
+    if (!name) {
+      setUrlError(t('git:invalid_repo_url', { defaultValue: 'Invalid repository URL' }));
+      return;
+    }
+    setUrlError(null);
+    // Record the URL selection with the same flat repo shape as
+    // handleSelectRepo. handleRepoImported wraps it as { name, repo }, and
+    // handleLaunchFromModal reads repo.repo_url to build the import payload.
+    onImported?.({
+      provider: 'url',
+      repo_url: url,
+      name,
+      full_name: name,
+      default_branch: 'main',
+    });
+    setOpen(false);
+    setUrlMode(false);
+    setUrlInput('');
   };
 
   const handleConnect = async (provider) => {
@@ -235,6 +275,55 @@ export default function ProjectSourceSelect({
                 </button>
               );
             })}
+
+            {/* Import by URL (no account connection needed) */}
+            <div className="h-px bg-zinc-200 my-1" />
+            {urlMode ? (
+              <div className="px-3 py-2 space-y-2">
+                <input
+                  ref={urlInputRef}
+                  type="text"
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); submitUrlImport(); }
+                    if (e.key === 'Escape') { setUrlMode(false); setUrlInput(''); setUrlError(null); }
+                  }}
+                  placeholder="https://github.com/owner/repo"
+                  autoFocus
+                  className="w-full text-sm px-2.5 py-1.5 rounded-md border border-zinc-300 outline-none focus:border-zinc-500 text-zinc-700 placeholder:text-zinc-400"
+                />
+                {urlError && (
+                  <p className="text-[11px] text-red-600">{urlError}</p>
+                )}
+                <div className="flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => { setUrlMode(false); setUrlInput(''); setUrlError(null); }}
+                    className="text-[11px] text-zinc-400 hover:text-zinc-600"
+                  >
+                    {t('common:action.cancel')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitUrlImport}
+                    disabled={!urlInput.trim()}
+                    className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40"
+                  >
+                    {t('git:import_repository')}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setUrlMode(true); setUrlError(null); requestAnimationFrame(() => urlInputRef.current?.focus()); }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+              >
+                <Link2 className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
+                <span className="flex-1 truncate">{t('git:import_by_url', { defaultValue: 'Import by URL' })}</span>
+              </button>
+            )}
           </div>
         </div>
       )}

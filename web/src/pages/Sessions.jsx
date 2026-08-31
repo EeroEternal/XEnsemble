@@ -607,14 +607,23 @@ export default React.forwardRef(function Sessions({
       onLaunchPanelClose?.();
       let creationFailed = false;
       try {
-        const result = await gitApi.importRepo({
-          provider: repo.provider,
-          repo_full_name: repo.full_name,
-          name: repo.name,
-          branch: repo.default_branch,
-          auto_create_branch: true,
-          work_branch_name: generateWorkBranchName(repo.full_name),
-        });
+        const importPayload = repo.repo_url
+          ? {
+              repo_url: repo.repo_url,
+              name: repo.name,
+              branch: repo.default_branch,
+              auto_create_branch: true,
+              work_branch_name: generateWorkBranchName(repo.name || 'repo'),
+            }
+          : {
+              provider: repo.provider,
+              repo_full_name: repo.full_name,
+              name: repo.name,
+              branch: repo.default_branch,
+              auto_create_branch: true,
+              work_branch_name: generateWorkBranchName(repo.full_name),
+            };
+        const result = await gitApi.importRepo(importPayload);
         // Switch to the new workspace immediately
         switchWorkspace(result.id);
         setProjects((prev) => {

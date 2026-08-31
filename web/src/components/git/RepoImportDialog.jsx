@@ -98,6 +98,14 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
   const [importedProjectId, setImportedProjectId] = useState(null);
   const [cloneStatus, setCloneStatus] = useState(null);
   const [cloneError, setCloneError] = useState(null);
+  // URL-only import (no provider connection required)
+  const [urlOnly, setUrlOnly] = useState(false);
+  const [urlOnlyInput, setUrlOnlyInput] = useState('');
+  const [urlOnlyName, setUrlOnlyName] = useState('');
+  const [urlOnlyBranch, setUrlOnlyBranch] = useState('');
+  const [urlOnlyImporting, setUrlOnlyImporting] = useState(false);
+  const [urlOnlyError, setUrlOnlyError] = useState(null);
+  const urlOnlyInputRef = useRef(null);
 
   const selectedRepo = useMemo(
     () => repos.find((r) => r.full_name === selectedFullName) || null,
@@ -124,6 +132,12 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
     setPatConnecting(false);
     setPatError(null);
     setPatSectionOpen(false);
+    setUrlOnly(false);
+    setUrlOnlyInput('');
+    setUrlOnlyName('');
+    setUrlOnlyBranch('');
+    setUrlOnlyImporting(false);
+    setUrlOnlyError(null);
   };
 
   const handleConnectPat = async () => {
@@ -279,6 +293,30 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
     }
   };
 
+  const handleImportByUrl = async () => {
+    const url = urlOnlyInput.trim();
+    if (!url) {
+      setUrlOnlyError('Repository URL is required');
+      return;
+    }
+    setUrlOnlyImporting(true);
+    setUrlOnlyError(null);
+    try {
+      const result = await gitApi.importRepo({
+        repo_url: url,
+        name: urlOnlyName.trim() || undefined,
+        branch: urlOnlyBranch.trim() || undefined,
+        auto_create_branch: false,
+      });
+      setImportedProjectId(result.id);
+      setCloneStatus(result.status || 'cloning');
+      showToast('success', 'Import started. Cloning repository…');
+    } catch (err) {
+      setUrlOnlyError(err.message || 'Import failed. Please check the repository URL.');
+      setUrlOnlyImporting(false);
+    }
+  };
+
   const canImport = Boolean(
     selectedFullName && name.trim() && branch.trim() && (!autoCreateBranch || workBranchName.trim()),
   );
@@ -311,6 +349,74 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
 
   if (!open && !inline) return null;
 
+  const urlOnlyForm = (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className={textSecondary}>
+          {t('git:import_by_url_hint', { defaultValue: 'Paste any git repository URL. No account connection needed.' })}
+        </p>
+        <button
+          type="button"
+          onClick={() => { setUrlOnly(false); setUrlOnlyError(null); }}
+          className="text-xs text-zinc-500 hover:text-zinc-900"
+        >
+          {connection ? t('git:back_to_browse', { defaultValue: 'Back' }) : t('git:back_to_connect', { defaultValue: 'Connect account' })}
+        </button>
+      </div>
+      <div>
+        <FormLabel htmlFor="url-only-repo">{t('git:repository_url', { defaultValue: 'Repository URL' })}</FormLabel>
+        <Input
+          ref={urlOnlyInputRef}
+          id="url-only-repo"
+          value={urlOnlyInput}
+          onChange={(e) => setUrlOnlyInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !urlOnlyImporting) handleImportByUrl(); }}
+          placeholder="https://github.com/owner/repo"
+          className="mt-1.5 font-mono"
+          disabled={urlOnlyImporting}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <FormLabel htmlFor="url-only-name">{t('git:project_name', { defaultValue: 'Project name' })}</FormLabel>
+          <Input
+            id="url-only-name"
+            value={urlOnlyName}
+            onChange={(e) => setUrlOnlyName(e.target.value)}
+            placeholder={t('git:optional_placeholder', { defaultValue: 'optional' })}
+            className="mt-1.5"
+          />
+        </div>
+        <div>
+          <FormLabel htmlFor="url-only-branch">{t('git:base_branch', { defaultValue: 'Base branch' })}</FormLabel>
+          <Input
+            id="url-only-branch"
+            value={urlOnlyBranch}
+            onChange={(e) => setUrlOnlyBranch(e.target.value)}
+            placeholder="main"
+            className="mt-1.5"
+          />
+        </div>
+      </div>
+      {urlOnlyError && (
+        <div className="flex items-center gap-1.5 text-xs text-red-600">
+          <AlertCircle className="h-3 w-3 shrink-0" />
+          {urlOnlyError}
+        </div>
+      )}
+      {importedProjectId && (
+        <div className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm ${cloneStatus === 'failed' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
+          {cloneStatus === 'failed' ? (
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          ) : (
+            <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+          )}
+          {cloneError || t('git:cloning_repository')}
+        </div>
+      )}
+    </div>
+  );
+
   const dialogBody = (
     <>
       {providerButtonsVisible && (
@@ -342,45 +448,66 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
 
       {!connection ? (
         <div className="space-y-4">
-          {oauthAlertMessage && (
-            <GitOAuthAlert message={oauthAlertMessage} provider={provider} />
-          )}
-          {patSectionOpen ? (
-            <div className="space-y-3">
-              {patSection}
-            </div>
-          ) : (
+          {urlOnly ? urlOnlyForm : (
             <>
-              <p className={textSecondary}>
-                {oauthNotConfigured
-                  ? t('git:oauth_admin_required', { label: providerLabel })
-                  : t('git:connect_account_hint', { label: providerLabel })}
-              </p>
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={connect}
-                  disabled={connectionLoading || oauthNotConfigured}
-                  className={`flex-1 flex flex-col items-center gap-1.5 px-4 py-3 rounded-lg border-2 transition-colors ${consoleButtonFocusClass} ${
-                    oauthNotConfigured
-                      ? 'border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed'
-                      : 'border-zinc-200 hover:border-zinc-900 hover:bg-zinc-50'
-                  }`}
-                >
-                  <GitBranch className="h-5 w-5" />
-                  <span className="text-sm font-medium">{t('git:connect_to', { label: providerLabel })}</span>
-                  <span className="text-[11px] text-zinc-400">{t('git:via_oauth')}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPatSectionOpen(true)}
-                  className={`flex-1 flex flex-col items-center gap-1.5 px-4 py-3 rounded-lg border-2 border-zinc-200 hover:border-zinc-900 hover:bg-zinc-50 transition-colors ${consoleButtonFocusClass}`}
-                >
-                  <Link2 className="h-5 w-5" />
-                  <span className="text-sm font-medium">{t('git:personal_access_token')}</span>
-                  <span className="text-[11px] text-zinc-400">{t('git:via_pat')}</span>
-                </button>
-              </div>
+              {oauthAlertMessage && (
+                <GitOAuthAlert message={oauthAlertMessage} provider={provider} />
+              )}
+              {patSectionOpen ? (
+                <div className="space-y-3">
+                  {patSection}
+                </div>
+              ) : (
+                <>
+                  <p className={textSecondary}>
+                    {oauthNotConfigured
+                      ? t('git:oauth_admin_required', { label: providerLabel })
+                      : t('git:connect_account_hint', { label: providerLabel })}
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={connect}
+                      disabled={connectionLoading || oauthNotConfigured}
+                      className={`flex-1 flex flex-col items-center gap-1.5 px-4 py-3 rounded-lg border-2 transition-colors ${consoleButtonFocusClass} ${
+                        oauthNotConfigured
+                          ? 'border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed'
+                          : 'border-zinc-200 hover:border-zinc-900 hover:bg-zinc-50'
+                      }`}
+                    >
+                      <GitBranch className="h-5 w-5" />
+                      <span className="text-sm font-medium">{t('git:connect_to', { label: providerLabel })}</span>
+                      <span className="text-[11px] text-zinc-400">{t('git:via_oauth')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPatSectionOpen(true)}
+                      className={`flex-1 flex flex-col items-center gap-1.5 px-4 py-3 rounded-lg border-2 border-zinc-200 hover:border-zinc-900 hover:bg-zinc-50 transition-colors ${consoleButtonFocusClass}`}
+                    >
+                      <Link2 className="h-5 w-5" />
+                      <span className="text-sm font-medium">{t('git:personal_access_token')}</span>
+                      <span className="text-[11px] text-zinc-400">{t('git:via_pat')}</span>
+                    </button>
+                  </div>
+                  <div className="relative flex items-center gap-3 py-1">
+                    <div className="h-px flex-1 bg-zinc-200" />
+                    <span className="text-[10px] uppercase tracking-wider text-zinc-400">{t('git:or_import_by_url', { defaultValue: 'or import by URL' })}</span>
+                    <div className="h-px flex-1 bg-zinc-200" />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUrlOnly(true);
+                      setUrlOnlyError(null);
+                      requestAnimationFrame(() => urlOnlyInputRef.current?.focus());
+                    }}
+                    className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 border-dashed border-zinc-300 hover:border-zinc-900 hover:bg-zinc-50 transition-colors text-sm font-medium text-zinc-600 hover:text-zinc-900 ${consoleButtonFocusClass}`}
+                  >
+                    <Link2 className="h-4 w-4" />
+                    {t('git:import_by_url', { defaultValue: 'Import by URL' })}
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>
@@ -409,7 +536,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
             <button
               type="button"
               onClick={() => switchMode('browse')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${mode === 'browse' ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'}`}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${mode === 'browse' && !urlOnly ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'}`}
             >
               <Search className="h-3 w-3" />
               {t('git:browse')}
@@ -417,14 +544,24 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
             <button
               type="button"
               onClick={() => switchMode('url')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${mode === 'url' ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'}`}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${mode === 'url' && !urlOnly ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'}`}
             >
               <Link2 className="h-3 w-3" />
               {t('git:paste_url')}
             </button>
+            <button
+              type="button"
+              onClick={() => { setUrlOnly(true); setMode('browse'); setUrlOnlyError(null); requestAnimationFrame(() => urlOnlyInputRef.current?.focus()); }}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${urlOnly ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'}`}
+            >
+              <Link2 className="h-3 w-3" />
+              {t('git:import_by_url', { defaultValue: 'Import by URL' })}
+            </button>
           </div>
 
-          {mode === 'url' ? (
+          {urlOnly ? (
+            urlOnlyForm
+          ) : mode === 'url' ? (
             <div className="space-y-2">
               <div>
                 <FormLabel htmlFor="repo-url">{t('git:repository_url', { defaultValue: 'Repository URL' })}</FormLabel>
@@ -597,6 +734,21 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
               {t('git:connecting')}
             </>
           ) : t('git:connect')}
+        </Button>
+      )}
+      {urlOnly && !connection && (
+        <Button
+          type="button"
+          size="sm"
+          disabled={urlOnlyImporting || !urlOnlyInput.trim() || Boolean(importedProjectId && cloneStatus !== 'failed')}
+          onClick={handleImportByUrl}
+        >
+          {urlOnlyImporting ? (
+            <>
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              {t('git:importing')}
+            </>
+          ) : t('git:import_repository')}
         </Button>
       )}
       {connection && mode === 'url' && !selectedRepo && (
