@@ -481,6 +481,15 @@ function AgentConsole({
           replayDoneRef.current = false;
           let writeBuffer = '';
           let pendingSeq = null;
+          // Number of terminal.write() calls not yet rendered by xterm. Used as
+          // backpressure: when xterm is slower than the WS output rate, the
+          // pending count grows; we then delay the next flush so the terminal
+          // can drain its internal parse/render queue instead of unboundedly
+          // accumulating (which froze the UI thread under sustained high
+          // throughput, e.g. qwen streaming). timer semantics stay
+          // "if (writeRafId === null)" (no clear+restart) so a steady stream
+          // never reschedules forever without flushing.
+          let pendingWrites = 0;
           // Track whether the terminal is currently in alternate screen mode.
           // Initialized from xterm.js's actual buffer state (handles idle replay
           // that may have left the terminal in alt screen).
@@ -742,7 +751,9 @@ function AgentConsole({
             if (processed.trim()) dismissGuide();
             const buf = terminal.buffer.active;
             const atBottom = buf.baseY + terminal.rows >= buf.length;
+            pendingWrites++;
             terminal.write(processed, () => {
+              pendingWrites = Math.max(0, pendingWrites - 1);
               if (!replayDone && !disposed) { replayDone = true; replayDoneRef.current = true; hideOverlay(); }
               if (atBottom && !disposed) terminal.scrollToBottom();
             });
@@ -791,7 +802,11 @@ function AgentConsole({
               if (msg.seq != null) pendingSeq = msg.seq;
               writeBuffer += msg.data;
               if (writeRafId === null) {
-                writeRafId = setTimeout(flushWriteBuffer, 16);
+                // Backpressure: lengthen the flush interval when xterm is
+                // still rendering earlier writes (pendingWrites > 0), giving
+                // it time to drain. Never clear+restart an active timer.
+                const delay = pendingWrites > 4 ? 64 : pendingWrites > 1 ? 32 : 16;
+                writeRafId = setTimeout(flushWriteBuffer, delay);
               }
               return;
             }

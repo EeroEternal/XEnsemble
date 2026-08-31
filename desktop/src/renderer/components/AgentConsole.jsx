@@ -444,6 +444,14 @@ function AgentConsole({
           replayDoneRef.current = false;
           let writeBuffer = '';
           let pendingSeq = null;
+          // Backpressure: count terminal.write() calls not yet rendered by
+          // xterm. When the WS output rate exceeds xterm's render capacity the
+          // count grows; we then delay the next flush so xterm can drain its
+          // internal parse/render queue instead of unboundedly accumulating
+          // (which froze the UI thread under sustained high throughput, e.g.
+          // qwen streaming). Never clear+restart an active timer/rAF so a
+          // steady stream always flushes.
+          let pendingWrites = 0;
           // Track whether the terminal is currently in alternate screen mode.
           // Initialized from xterm.js's actual buffer state (handles idle replay
           // that may have left the terminal in alt screen).
@@ -704,7 +712,9 @@ function AgentConsole({
           function writeTerminalData(processed) {
             const buf = terminal.buffer.active;
             const atBottom = buf.baseY + terminal.rows >= buf.length;
+            pendingWrites++;
             terminal.write(processed, () => {
+              pendingWrites = Math.max(0, pendingWrites - 1);
               if (!replayDone && !disposed) { replayDone = true; replayDoneRef.current = true; hideOverlay(); }
               if (atBottom && !disposed) terminal.scrollToBottom();
             });
@@ -752,7 +762,16 @@ function AgentConsole({
               if (msg.seq != null) pendingSeq = msg.seq;
               writeBuffer += msg.data;
               if (writeRafId === null) {
-                writeRafId = requestAnimationFrame(flushWriteBuffer);
+                // Backpressure: rAF for the idle/fast case, setTimeout with a
+                // longer delay when xterm is still rendering earlier writes
+                // (pendingWrites > 0), letting it drain instead of
+                // accumulating. Never clear+restart an active timer.
+                if (pendingWrites > 0) {
+                  const delay = pendingWrites > 4 ? 64 : pendingWrites > 1 ? 32 : 16;
+                  writeRafId = setTimeout(flushWriteBuffer, delay);
+                } else {
+                  writeRafId = requestAnimationFrame(flushWriteBuffer);
+                }
               }
               return;
             }
