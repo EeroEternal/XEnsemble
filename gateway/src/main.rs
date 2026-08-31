@@ -375,7 +375,12 @@ fn strip_model_discovery_prefix(raw: &str) -> &str {
 }
 
 /// Resolve the routing hint for a raw model string.
-/// - `provider/model` → the explicit provider hint.
+/// - `provider/model` → the explicit provider hint, but only when that provider
+///   is currently bound to the service. A stale prefix from a long-lived agent
+///   session (e.g. opencode /model still holding `volcengine-zxs2/...` after the
+///   agent's binding switched back to tokenhub-zxs) must not force routing to a
+///   provider the agent no longer uses; in that case fall back to the bound
+///   provider whose alias matches the model part.
 /// - a bare model alias (e.g. `deepseek-v4-flash`) → the bound provider whose
 ///   `model_mapping` / `default_model` matches the alias, so agents can send
 ///   plain model names without a provider prefix. Without this, the hint is fed
@@ -383,13 +388,27 @@ fn strip_model_discovery_prefix(raw: &str) -> &str {
 ///   fails with `no provider matches target '<model>'`.
 async fn resolve_provider_hint(state: &AppState, service_id: &str, raw_model: &str) -> String {
     let trimmed = raw_model.trim();
-    if let Some((provider, _model)) = trimmed.split_once('/') {
+    let models = state.gateway.list_service_models(service_id).await;
+    if let Some((provider, model_part)) = trimmed.split_once('/') {
         let provider = provider.trim();
+        let model_part = model_part.trim();
         if !provider.is_empty() {
-            return provider.to_string();
+            // Only honor the explicit prefix when that provider is bound.
+            if models.iter().any(|m| m.owned_by.eq_ignore_ascii_case(provider)) {
+                return provider.to_string();
+            }
+            // Stale/unbound prefix: fall back to the bound provider matching
+            // the model part.
+            if !model_part.is_empty() {
+                for model in &models {
+                    if model.alias == model_part {
+                        return model.owned_by.clone();
+                    }
+                }
+            }
         }
     }
-    for model in state.gateway.list_service_models(service_id).await {
+    for model in models {
         if model.alias == trimmed {
             return model.owned_by;
         }

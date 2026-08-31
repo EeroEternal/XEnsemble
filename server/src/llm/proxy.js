@@ -97,6 +97,14 @@ async function serveAgentModelsCatalog(claims, reply) {
     if (models.length === 0) return false;
     const provider = (cfg?.provider ?? '').trim();
     const isClaudeCode = claims.aid === 'claude-code';
+    // opencode registers its gateway models under bare ids (no provider prefix,
+    // see ensureGatewayConfig/applyOpencodeGatewayEnv). If /v1/models returned
+    // `provider/model` ids here, opencode would pick up an id like
+    // `volcengine-zxs2/deepseek-v4-flash-ga-260731` and keep sending that
+    // prefixed id even after the agent's binding switches back to another
+    // provider, which force-routes to the stale provider. Offer bare ids so
+    // opencode always sends the model name alone and routing follows binding.
+    const isOpencode = claims.aid === 'opencode';
     // Return a combined Anthropic+OpenAI format: claude-code validates the
     // Anthropic shape (type/display_name/created_at), while OpenAI-compatible
     // clients read object/created/owned_by. Including all fields satisfies both.
@@ -107,12 +115,12 @@ async function serveAgentModelsCatalog(claims, reply) {
         // target with `anthropic.` so every configured model is offered in
         // /model; the gateway strips the prefix back off before routing to the
         // real provider/model.
-        const id = isClaudeCode ? `anthropic.${rawId}` : rawId;
+        const id = isClaudeCode ? `anthropic.${rawId}` : isOpencode ? m : rawId;
         return {
             id,
             type: 'model',
             object: 'model',
-            display_name: rawId,
+            display_name: isOpencode ? m : rawId,
             created: 0,
             created_at: '2025-01-01T00:00:00Z',
             owned_by: provider || 'xensemble',
