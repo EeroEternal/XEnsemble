@@ -523,18 +523,32 @@ function AgentConsole({
             let startRow = Math.max(0, vsCursorY - upCount);
             const prefix = data.slice(0, dataOffset + cursorUpMatch[0].length);
             const rest = data.slice(dataOffset + cursorUpMatch[0].length);
-            // If rest contains cursor-down (\x1b[<n>B), the row-diffing path
-            // can't correctly track vsCursorY: the content moves the cursor
-            // back down after the update (e.g. codebuddy spinner:
-            // \x1b[6A\x1b[2K<spinner>\x1b[6B).  vsCursorY would be set to
-            // startRow but the actual cursor is at startRow+6, causing
-            // subsequent updates to write to wrong rows (spinner frames
-            // accumulate instead of overwriting).  Return raw data to let
-            // xterm.js handle the cursor movement natively.
-            if (/\x1b\[\d*B/.test(rest)) {
+            // Detect cursor-down usage.  There are two distinct cases:
+            //  1. "qwen-style" full-screen redraw: \x1b[<n>A + repeated
+            //     \x1b[2K<content>\x1b[1B ... — each \x1b[1B simply advances
+            //     one row down while redrawing the whole screen (TUI agents
+            //     like qwen redraw every line this way).  Here \x1b[1B is a
+            //     row separator, safe to diff against vsScreen.
+            //  2. "codebuddy-style" cursor jump (spinner): \x1b[6A\x1b[2K
+            //     <spinner>\x1b[6B — the cursor jumps DOWN by 6 after the
+            //     update; vsCursorY cannot track that, so raw passthrough is
+            //     required (otherwise spinner frames accumulate instead of
+            //     overwriting).
+            // Distinguish by counting: case 1 uses \x1b[1B exactly once per
+            // \x1b[2K line (interleaved redraw), case 2 uses a single \x1b[nB
+            // (n>1 or a lone cursor jump) after the update.  Treat repeated
+            // \x1b[2K...\x1b[1B pairs as a row-by-row redraw; anything else
+            // with a cursor-down keeps the old raw passthrough.
+            const downJumps = rest.match(/\x1b\[(\d*)B/g) || [];
+            const isRowRedraw = downJumps.length > 1
+              && downJumps.every((j) => j === '\x1b[1B')
+              && (rest.match(/\x1b\[2K/g) || []).length >= downJumps.length;
+            if (downJumps.length > 0 && !isRowRedraw) {
               return data;
             }
-            const segments = rest.match(/\x1b\[2K[^\r\n]*/g);
+            // Split rows on \x1b[2K, stripping a trailing \x1b[1B separator
+            // from each row so the raw content is clean for the vsScreen diff.
+            const segments = rest.split(/\x1b\[2K/).slice(1);
             if (!segments || segments.length === 0) {
               vsCursorY = startRow;
               return data;
@@ -544,7 +558,7 @@ function AgentConsole({
             let anyChanged = false;
             for (const seg of segments) {
               if (currentRow >= vsRows) break;
-              const raw = seg.slice(4);
+              const raw = seg.replace(/\x1b\[1B$/, '').replace(/\x1b\[1B(?=\x1b\[2K)/, '');
               const plain = vsStripAnsi(raw);
               if (vsScreen[currentRow] !== plain) {
                 output += `\x1b[${currentRow + 1};1H\x1b[2K${raw}\r\n`;
