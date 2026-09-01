@@ -174,6 +174,11 @@ async function proxyPreviewRequest(request, reply) {
         reply.hijack();
         request.raw.url = path;
         request.raw.headers.host = 'localhost';
+        // X-Preview-Origin 是宿主 nginx 打在预览入口的内部标记，仅宿主网关消费。
+        // 转发进隧道前必须剥离，否则被 preview 的应用（如 xensemble 自身）内置的
+        // 同名网关会误读该头，在自己的空 preview registry 里路由 → 返回 503
+        // "Preview not found"，导致 preview 页面永远打不开。
+        delete request.raw.headers['x-preview-origin'];
         proxy.web(
             request.raw,
             reply.raw,
@@ -264,6 +269,8 @@ async function registerPreviewGateway(fastify) {
             await new Promise((resolve, reject) => {
                 reply.hijack();
                 request.raw.headers.host = 'localhost';
+                // 剥离宿主内部标记头，避免泄漏给被 preview 的应用（其内置同名网关会误路由）
+                delete request.raw.headers['x-preview-origin'];
                 proxy.web(request.raw, reply.raw, { target, changeOrigin: false }, (err) => (err ? reject(err) : resolve()));
             });
             return;
@@ -286,6 +293,7 @@ async function registerPreviewGateway(fastify) {
         await new Promise((resolve, reject) => {
             reply.hijack();
             request.raw.headers.host = 'localhost';
+            delete request.raw.headers['x-preview-origin'];
             proxy.web(request.raw, reply.raw, { target, changeOrigin: false }, (err) => (err ? reject(err) : resolve()));
         });
     });
@@ -322,6 +330,7 @@ async function registerPreviewGateway(fastify) {
             const target = `http://127.0.0.1:${resolved.entry.port}`;
             req.url = stripPreviewPrefix(req.url, deploymentId);
             req.headers.host = 'localhost';
+            delete req.headers['x-preview-origin'];
             proxy.ws(req, socket, head, { target, changeOrigin: false }, (err) => {
                 if (err) socket.destroy();
             });
