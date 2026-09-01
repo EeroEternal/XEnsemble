@@ -68,6 +68,10 @@ const {
     stop: stopConversationAutoSummarizer,
 } = require('./session/conversationAutoSummarizer');
 const { startScheduler, stopScheduler } = require('./scheduler');
+const {
+    start: startSkillPipelineHook,
+    stop: stopSkillPipelineHook,
+} = require('./skills/skillPipeline');
 const { createIdleHibernateMonitor, stopSession, waitForAgentExit } = require('./session/idleHibernate');
 const { terminateDetachedSessionProcess } = require('./session/sessionTermination');
 const {
@@ -2881,6 +2885,9 @@ async function startServer() {
     // 必须在 recoverRunningSessions 之前启动，以便恢复出来的会话也被接管。
     startConversationAutoSummarizer();
 
+    // P3 技能提炼 exit 钩子：会话退出时 L1 评分入池（SKILL_EXTRACT_ENABLED=false 时 no-op）。
+    startSkillPipelineHook();
+
     // P2 定时调度器：conversation-summarize job（PG 乐观锁，多实例安全）。
     // SCHEDULER_ENABLED=false 时 startScheduler 内部 no-op。
     try {
@@ -2953,6 +2960,7 @@ async function startServer() {
     fastify.addHook('onClose', async () => {
         idleHibernateMonitor.stop();
         stopConversationAutoSummarizer();
+        stopSkillPipelineHook();
         await stopScheduler();
         await gracefulShutdownSessions({
             db,

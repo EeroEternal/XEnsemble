@@ -88,6 +88,11 @@ function createJobs() {
             intervalMs: Number(process.env.CONVERSATION_SUMMARY_INTERVAL_MS) || DEFAULT_INTERVAL_MS,
             run: (ctx) => runConversationSummarize(ctx),
         },
+        {
+            name: 'skill-pipeline',
+            intervalMs: Number(process.env.SKILL_PIPELINE_INTERVAL_MS) || require('../skills/skillPipeline').DEFAULT_INTERVAL_MS,
+            run: (ctx) => require('../skills/skillPipeline').runPipeline({ log: ctx?.log || console }),
+        },
     ];
 }
 

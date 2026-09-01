@@ -56,6 +56,7 @@
   "install_private": "Copy as Private Skill",
   "install_loading": "Copying…",
   "install_done": "Copied to My Skills",
+  "install_failed": "Failed to install skill",
   "report": "Report",
   "open_detail": "Open skill detail",
   "installs": "{{count}} installs",
@@ -74,5 +75,11 @@
   "detail_not_found": "Skill not found.",
   "load_more": "Load more",
   "prev_page": "Previous page",
-  "next_page": "Next page"
+  "next_page": "Next page",
+  "unread_drafts": "{{count}} new draft skill(s)",
+  "extract_from_session": "Extract as Skill",
+  "extract_from_session_loading": "Extracting…",
+  "extract_from_session_done": "Skill draft created.",
+  "extract_failed": "Failed to extract skill.",
+  "go_to_my_skills": "Open My Skills"
 }

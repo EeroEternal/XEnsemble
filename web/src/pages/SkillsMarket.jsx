@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Sparkles, Search, Download, User, Clock, Eye, X, Loader2, Flag,
@@ -7,7 +8,9 @@ import {
 import { apiFetch } from '../lib/api';
 import SelectMenu from '../components/SelectMenu';
 import Button from '../components/Button';
+import { useToast } from '../components/Toast';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
+import { getSkillDescription } from '../lib/skillFormat';
 import {
   consoleButtonFocusClass,
   consoleEmptyStateClass,
@@ -23,6 +26,16 @@ const CATEGORY_ICONS = {
   convention: ShieldCheck,
   devops: Cloud,
   codegen: Puzzle,
+};
+
+// 分类配色（图标底色 / 徽章）——丰富卡片视觉层次
+const CATEGORY_TINTS = {
+  database: 'bg-blue-50 text-blue-700',
+  workflow: 'bg-violet-50 text-violet-700',
+  debug: 'bg-orange-50 text-orange-700',
+  convention: 'bg-emerald-50 text-emerald-700',
+  devops: 'bg-cyan-50 text-cyan-700',
+  codegen: 'bg-pink-50 text-pink-700',
 };
 
 const CATEGORY_OPTIONS = [
@@ -43,15 +56,18 @@ const SORT_OPTIONS = [
 
 function SkillIcon({ category }) {
   const Icon = CATEGORY_ICONS[category] || Sparkles;
+  const tint = CATEGORY_TINTS[category] || 'bg-zinc-100 text-zinc-700';
   return (
-    <div className="w-9 h-9 rounded-md bg-zinc-100 flex items-center justify-center">
-      <Icon className="w-5 h-5 text-zinc-700" strokeWidth={1.75} />
+    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${tint}`}>
+      <Icon className="w-5 h-5" strokeWidth={1.75} />
     </div>
   );
 }
 
 export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden }) {
   const { t } = useTranslation();
+  const { showToast } = useToast();
+  const navigate = useNavigate();
 
   const [category, setCategory] = useState('');
   const [sort, setSort] = useState('hot');
@@ -62,6 +78,7 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
+  const [installingId, setInstallingId] = useState(null);
   const requestIdRef = useRef(0);
 
   useEffect(() => {
@@ -98,6 +115,22 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
 
   useEffect(() => { void load(); }, [load]);
 
+  // 卡片内快速安装：直接复制为私有 skill，完成后刷新列表
+  const quickInstall = useCallback(async (skill) => {
+    if (installingId) return;
+    setInstallingId(skill.id);
+    try {
+      const res = await apiFetch(`/api/v1/skills/market/${encodeURIComponent(skill.id)}/install`, { method: 'POST' });
+      if (!res.ok) throw new Error('install_failed');
+      showToast('success', t('skills:install_done', { defaultValue: 'Copied to My Skills' }));
+      void load();
+    } catch {
+      showToast('error', t('skills:install_failed', { defaultValue: 'Failed to install skill' }));
+    } finally {
+      setInstallingId(null);
+    }
+  }, [installingId, load, showToast, t]);
+
   const categoryLabel = (v) => {
     const opt = CATEGORY_OPTIONS.find((o) => o.value === v);
     return opt ? t(`skills:${opt.labelKey}`) : '';
@@ -122,7 +155,7 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
             <h1 className="text-2xl font-bold tracking-tight text-zinc-900">{t('skills:title')}</h1>
             <p className="mt-1 text-sm text-zinc-500">{t('skills:subtitle')}</p>
           </div>
-          <Button size="md" className="shrink-0" onClick={() => { window.location.hash = '#/skills/mine'; }}>
+          <Button size="md" className="shrink-0" onClick={() => navigate('/skills/mine')}>
             <Sparkles className="w-4 h-4" />
             {t('skills:publish')}
           </Button>
@@ -172,12 +205,14 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {data.items.map((s) => {
               const isMine = s.isMine;
+              const description = getSkillDescription(s.content, 120);
+              const tint = CATEGORY_TINTS[s.category] || 'bg-zinc-100 text-zinc-700';
               return (
                 <div
                   key={s.id}
-                  className="bg-surface border border-zinc-200 rounded-lg shadow-sm p-4 flex flex-col gap-3 hover:border-zinc-300 transition"
+                  className="group bg-surface border border-zinc-200 rounded-xl p-4 flex flex-col gap-3 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md hover:border-zinc-300"
                 >
-                  <div className="flex items-start justify-between">
+                  <div className="flex items-start justify-between gap-2">
                     <SkillIcon category={s.category} />
                     <div className="flex items-center gap-1.5">
                       {isMine && (
@@ -186,15 +221,17 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
                         </span>
                       )}
                       {s.category && (
-                        <span className="text-[10px] font-medium text-zinc-500 bg-zinc-100 rounded-full px-2 py-0.5">
+                        <span className={`text-[10px] font-medium rounded-full px-2 py-0.5 ${tint}`}>
                           {categoryLabel(s.category)}
                         </span>
                       )}
                     </div>
                   </div>
-                  <div>
-                    <h3 className="font-semibold text-sm text-zinc-900 truncate">{s.title}</h3>
-                    <p className="text-xs text-zinc-500 mt-1 leading-relaxed line-clamp-2">{s.content}</p>
+                  <div className="min-h-[52px]">
+                    <h3 className="font-semibold text-sm text-zinc-900 leading-snug group-hover:text-zinc-950">{s.title}</h3>
+                    {description ? (
+                      <p className="text-xs text-zinc-500 mt-1 leading-relaxed line-clamp-2">{description}</p>
+                    ) : null}
                   </div>
                   {s.tags?.length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
@@ -203,19 +240,31 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
                       ))}
                     </div>
                   )}
-                  <div className="flex items-center justify-between mt-auto pt-2 border-t border-zinc-100">
+                  <div className="flex items-center justify-between gap-2 mt-auto pt-2 border-t border-zinc-100">
                     <div className="flex items-center gap-2 text-[11px] text-zinc-500">
                       <span className="inline-flex items-center gap-1"><Download className="w-3 h-3" /> {s.installCount ?? 0}</span>
                       <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" /> {formatRelativeTime(s.publishedAt)}</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedId(s.id)}
-                      className={`inline-flex items-center gap-1 text-[11px] font-medium text-zinc-700 border border-zinc-300 rounded-md px-2.5 py-1 hover:bg-zinc-50 ${consoleButtonFocusClass}`}
-                    >
-                      <Eye className="w-3 h-3" />
-                      {t('skills:preview')}
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedId(s.id)}
+                        className={`inline-flex items-center gap-1 text-[11px] font-medium text-zinc-700 border border-zinc-300 rounded-md px-2.5 py-1 hover:bg-zinc-50 ${consoleButtonFocusClass}`}
+                      >
+                        <Eye className="w-3 h-3" />
+                        {t('skills:preview')}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isMine || installingId === s.id}
+                        title={t('skills:install')}
+                        onClick={() => quickInstall(s)}
+                        className={`inline-flex items-center gap-1 text-[11px] font-medium text-white bg-zinc-900 rounded-md px-2.5 py-1 hover:bg-zinc-800 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`}
+                      >
+                        {installingId === s.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Copy className="w-3 h-3" />}
+                        {installingId === s.id ? t('skills:install_loading', { defaultValue: 'Copying…' }) : t('skills:install')}
+                      </button>
+                    </div>
                   </div>
                 </div>
               );

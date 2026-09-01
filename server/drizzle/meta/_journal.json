@@ -127,6 +127,13 @@
       "when": 1788000000000,
       "tag": "0017_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788100000000,
+      "tag": "0018_skills_pipeline",
+      "breakpoints": true
     }
   ]
 }

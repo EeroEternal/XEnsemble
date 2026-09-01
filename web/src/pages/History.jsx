@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Search, RotateCcw, Bot, Folder, Clock, FileText, ChevronLeft, ChevronRight,
-  ChevronDown, Lightbulb, User, RefreshCw, Loader2, X, ChevronsDown, Wrench,
+  ChevronDown, Lightbulb, User, RefreshCw, Loader2, X, ChevronsDown, Wrench, Sparkles,
 } from 'lucide-react';
 import { apiFetch, getAccessToken } from '../lib/api';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
+import { useToast } from '../components/Toast';
 import SelectMenu from '../components/SelectMenu';
 import MarkdownView from '../components/Markdown';
+import { extractSkillFromSession } from '../lib/skillsApi';
 import {
   consoleButtonFocusClass,
   consoleEmptyStateClass,
@@ -161,10 +163,12 @@ function TurnBubble({ turn, isUser }) {
  */
 function ConversationDrawer({ session, onClose }) {
   const { t } = useTranslation();
+  const { showToast } = useToast();
   const [view, setView] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [extracting, setExtracting] = useState(false);
   const [error, setError] = useState(null);
   const [decisionsOpen, setDecisionsOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
@@ -291,6 +295,39 @@ function ConversationDrawer({ session, onClose }) {
     </button>
   );
 
+  // P3: 从当前会话手动提炼 skill（US-3，直跳 L4）。成功提示并跳转我的技能页。
+  const extractSkill = useCallback(async () => {
+    if (extracting) return;
+    setExtracting(true);
+    setError(null);
+    try {
+      await extractSkillFromSession(sessionId);
+      showToast('success', t('skills:extract_from_session_done', { defaultValue: 'Skill draft created.' }));
+      window.dispatchEvent(new CustomEvent('xensemble:skills_changed'));
+    } catch (err) {
+      setError(t('skills:extract_failed', { defaultValue: 'Failed to extract skill.' }));
+      // eslint-disable-next-line no-console
+      console.error('[skill] extract failed', err);
+    } finally {
+      setExtracting(false);
+    }
+  }, [extracting, sessionId, showToast, t]);
+
+  const extractBtn = (
+    <button
+      type="button"
+      onClick={extractSkill}
+      disabled={extracting}
+      title={t('skills:extract_from_session', { defaultValue: 'Extract as Skill' })}
+      className={`inline-flex h-7 items-center gap-2 rounded-md border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-50 ${consoleButtonFocusClass}`}
+    >
+      {extracting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+      {extracting
+        ? t('skills:extract_from_session_loading', { defaultValue: 'Extracting…' })
+        : t('skills:extract_from_session', { defaultValue: 'Extract as Skill' })}
+    </button>
+  );
+
   const title = session.title?.trim() || t('sessions:history.untitled', { defaultValue: 'Untitled session' });
   const summary = view?.summary || {};
   const overview = summary.overview;
@@ -368,6 +405,7 @@ function ConversationDrawer({ session, onClose }) {
                 </p>
                 <div className="flex items-center gap-3">
                   {error && <span className="text-xs text-red-600">{error}</span>}
+                  {extractBtn}
                   {refreshBtn}
                 </div>
               </div>

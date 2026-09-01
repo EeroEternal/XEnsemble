@@ -11,13 +11,15 @@ import PageHeader from '../components/PageHeader';
 import RowActionsMenu from '../components/RowActionsMenu';
 import SelectMenu from '../components/SelectMenu';
 import StatusBadge from '../components/StatusBadge';
-import { ConsoleDialogShell } from '../components/ConsoleDialog';
+import { ConsoleDialogShell, ConsoleStructuredDialogHeader, ConsoleStructuredDialogBody, ConsoleStructuredDialogFooter } from '../components/ConsoleDialog';
+import { confirm } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 import {
   consoleAdminPageClass,
   consoleAdminTableScrollClass,
   consoleAdminTableShellClass,
   consoleIconButtonClass,
+  consoleStructuredDialogPanelClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
   consoleTableHeadRowClass,
@@ -58,6 +60,13 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
   }, [statusFilter, searchQuery]);
 
   useEffect(() => { void fetchSkills(); }, [fetchSkills]);
+
+  // P3: 提炼/其他页面创建技能后自动刷新本列表
+  useEffect(() => {
+    const onSkillsChanged = () => void fetchSkills({ silent: true });
+    window.addEventListener('xensemble:skills_changed', onSkillsChanged);
+    return () => window.removeEventListener('xensemble:skills_changed', onSkillsChanged);
+  }, [fetchSkills]);
 
   const openCreate = () => {
     setForm(emptyForm);
@@ -120,6 +129,19 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
     t('skills:toast_action_failed', { defaultValue: 'Action failed.' }),
   );
 
+  // 删除前二次确认（对齐 ConfirmDialog 规范）
+  const handleDelete = async (skill) => {
+    const ok = await confirm({
+      title: t('common:dialog.confirm_delete', { name: skill.title, defaultValue: `Delete "${skill.title}"?` }),
+      message: t('common:dialog.cannot_undo', { defaultValue: 'This action cannot be undone.' }),
+      confirmLabel: t('common:action.delete'),
+      cancelLabel: t('common:action.cancel'),
+      variant: 'danger',
+    });
+    if (!ok) return;
+    await act(() => deleteSkill(skill.id), t('skills:toast_deleted', { defaultValue: 'Skill deleted.' }), t('skills:toast_action_failed', { defaultValue: 'Action failed.' }));
+  };
+
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return skills;
@@ -134,7 +156,7 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
   ];
 
   return (
-    <div className={`${consoleAdminPageClass} ${className}`} aria-hidden={ariaHidden}>
+    <div className={`${consoleAdminPageClass} px-4 sm:px-6 lg:px-8 py-6 ${className}`} aria-hidden={ariaHidden}>
       <PageHeader title={t('skills:my_skills')} />
 
       <div className="flex items-center justify-between gap-3">
@@ -210,11 +232,11 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
                         label={t('skills:actions_for', { title: s.title, defaultValue: 'Actions for skill' })}
                         items={[
                           { icon: Pencil, label: t('common:action.edit'), onClick: () => openEdit(s) },
-                          s.status === 'draft' && { icon: CheckCircle, label: t('skills:action.activate', { defaultValue: 'Activate' }), onClick: () => act(() => changeStatus(s.id, 'activate'), t('skills:toast.updated', { defaultValue: 'Done.' })) },
-                          s.status === 'active' && { icon: Archive, label: t('skills:action.archive', { defaultValue: 'Archive' }), onClick: () => act(() => changeStatus(s.id, 'archive'), t('skills:toast.updated', { defaultValue: 'Done.' })) },
-                          s.status === 'archived' && { icon: Play, label: t('skills:action.restore', { defaultValue: 'Restore' }), onClick: () => act(() => changeStatus(s.id, 'restore'), t('skills:toast.updated', { defaultValue: 'Done.' })) },
-                          { icon: s.visibility === 'public' ? ArrowDownToLine : UploadCloud, label: t(s.visibility === 'public' ? 'skills:action.unpublish' : 'skills:action.publish', { defaultValue: 'Toggle market' }), onClick: () => togglePublish(s) },
-                          { icon: Trash2, label: t('common:action.delete'), danger: true, onClick: () => act(() => deleteSkill(s.id), t('skills:toast.deleted', { defaultValue: 'Skill deleted.' })) },
+                          s.status === 'draft' && { icon: CheckCircle, label: t('skills:action_activate', { defaultValue: 'Activate' }), onClick: () => act(() => changeStatus(s.id, 'activate'), t('skills:toast_updated', { defaultValue: 'Done.' })) },
+                          s.status === 'active' && { icon: Archive, label: t('skills:action_archive', { defaultValue: 'Archive' }), onClick: () => act(() => changeStatus(s.id, 'archive'), t('skills:toast_updated', { defaultValue: 'Done.' })) },
+                          s.status === 'archived' && { icon: Play, label: t('skills:action_restore', { defaultValue: 'Restore' }), onClick: () => act(() => changeStatus(s.id, 'restore'), t('skills:toast_updated', { defaultValue: 'Done.' })) },
+                          { icon: s.visibility === 'public' ? ArrowDownToLine : UploadCloud, label: t(s.visibility === 'public' ? 'skills:action_unpublish' : 'skills:action_publish', { defaultValue: 'Toggle market' }), onClick: () => togglePublish(s) },
+                          { icon: Trash2, label: t('common:action.delete'), danger: true, onClick: () => handleDelete(s) },
                         ].filter(Boolean)}
                       />
                     </td>
@@ -228,19 +250,13 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
 
       {dialogMode && (
         <ConsoleDialogShell
-          title={t(dialogMode === 'create' ? 'skills:create' : 'skills:edit', { defaultValue: dialogMode === 'create' ? 'New Skill' : 'Edit Skill' })}
           onClose={closeDialog}
-          footer={
-            <>
-              <Button variant="ghost" onClick={closeDialog}>{t('common:action.cancel')}</Button>
-              <Button onClick={save} disabled={saving}>
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                {t('common:action.save')}
-              </Button>
-            </>
-          }
+          panelClassName={consoleStructuredDialogPanelClass}
         >
-          <div className="space-y-4">
+          <ConsoleStructuredDialogHeader
+            title={t(dialogMode === 'create' ? 'skills:create' : 'skills:edit', { defaultValue: dialogMode === 'create' ? 'New Skill' : 'Edit Skill' })}
+          />
+          <ConsoleStructuredDialogBody>
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field.title', { defaultValue: 'Title' })}</label>
               <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
@@ -276,7 +292,14 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
                 className="w-full bg-surface border border-zinc-300 rounded-md px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-colors font-mono"
               />
             </div>
-          </div>
+          </ConsoleStructuredDialogBody>
+          <ConsoleStructuredDialogFooter>
+            <Button variant="ghost" onClick={closeDialog}>{t('common:action.cancel')}</Button>
+            <Button onClick={save} disabled={saving}>
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {t('common:action.save')}
+            </Button>
+          </ConsoleStructuredDialogFooter>
         </ConsoleDialogShell>
       )}
     </div>

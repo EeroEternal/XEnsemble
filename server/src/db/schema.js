@@ -100,9 +100,10 @@ const sessions = pgTable('sessions', {
   titleManual: boolean('title_manual').default(false),
   customImageId: text('custom_image_id'),
   provisioningError: text('provisioning_error'),
+  // 0018: P3 技能提炼——该会话已被漏斗处理过（extracted/rejected/expired 均算），防重复入池
+  skillExtractedAt: bigint('skill_extracted_at', { mode: 'number' }),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
-
 const sessionStreams = pgTable('session_streams', {
   sessionId: text('session_id').primaryKey().references(() => sessions.id, { onDelete: 'cascade' }),
   headSeq: integer('head_seq').notNull().default(0),
@@ -277,6 +278,27 @@ const skills = pgTable('skills', {
 }, (table) => ({
   userStatusIdx: index('idx_skills_user_status').on(table.userId, table.status),
   marketIdx: index('idx_skills_market').on(table.visibility, table.status, table.publishedAt),
+}));
+
+// 0018: 技能提炼候选池（P3 漏斗 L1-L4 中间产物）
+// stage: scored | clustered | classified | extracted | rejected | expired
+// signals: { correctionCount, filesTouched, successExit, turnCount, userMarked }
+const skillCandidates = pgTable('skill_candidates', {
+  sessionId: text('session_id').primaryKey().references(() => sessions.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+  score: integer('score').notNull(),
+  signals: jsonb('signals').notNull().default({}),
+  topicFingerprint: text('topic_fingerprint'),
+  clusterId: text('cluster_id'),
+  clusterSize: integer('cluster_size').notNull().default(1),
+  stage: text('stage').notNull().default('scored'),
+  rejectedReason: text('rejected_reason'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+}, (table) => ({
+  stageIdx: index('idx_candidates_stage').on(table.stage),
+  clusterIdx: index('idx_candidates_cluster').on(table.clusterId),
 }));
 
 const devEnvironmentProfiles = pgTable('dev_environment_profiles', {
@@ -493,6 +515,7 @@ module.exports = {
   sessionConversations,
   schedulerJobs,
   skills,
+  skillCandidates,
   agents,
   runtimes,
   deployments,

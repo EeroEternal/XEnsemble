@@ -56,6 +56,7 @@
   "install_private": "复制为私有 Skill",
   "install_loading": "复制中…",
   "install_done": "已复制到「我的 Skills」",
+  "install_failed": "技能安装失败",
   "report": "举报",
   "open_detail": "打开技能详情",
   "installs": "{{count}} 次安装",
@@ -74,5 +75,11 @@
   "detail_not_found": "技能不存在。",
   "load_more": "加载更多",
   "prev_page": "上一页",
-  "next_page": "下一页"
+  "next_page": "下一页",
+  "unread_drafts": "{{count}} 个新草稿技能",
+  "extract_from_session": "提炼为 Skill",
+  "extract_from_session_loading": "提炼中…",
+  "extract_from_session_done": "技能草稿已创建。",
+  "extract_failed": "技能提炼失败。",
+  "go_to_my_skills": "打开我的技能"
 }

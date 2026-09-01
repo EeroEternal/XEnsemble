@@ -84,3 +84,33 @@ export async function unpublishSkill(id) {
   if (!res.ok) throw new Error('Failed to unpublish skill');
   return res.json();
 }
+
+/**
+ * 从会话手动提炼 skill（US-3，直跳 L4）。
+ * @param {string} sessionId
+ * @returns {Promise<object>} skill 全量
+ */
+export async function extractSkillFromSession(sessionId) {
+  const res = await apiFetch('/api/v1/skills/from-session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  });
+  if (!res.ok) throw new Error('Failed to extract skill from session');
+  return res.json();
+}
+
+/** auto draft 未读数 */
+export async function getDraftsUnreadCount() {
+  const res = await apiFetch('/api/v1/skills/drafts/unread-count');
+  if (!res.ok) throw new Error('Failed to load drafts unread count');
+  const data = await res.json();
+  return Number(data?.count ?? 0);
+}
+
+/** 标记 auto draft 已读 */
+export async function markDraftsSeen() {
+  const res = await apiFetch('/api/v1/skills/drafts/mark-seen', { method: 'POST' });
+  if (!res.ok && res.status !== 204) throw new Error('Failed to mark drafts seen');
+  return { ok: true };
+}

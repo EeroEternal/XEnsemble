@@ -133,6 +133,48 @@ function registerSkillRoutes(fastify) {
             return sendPublicError(reply, err, 'Failed to unpublish skill', 500, request.locale || 'en');
         }
     });
+
+    // 从会话手动提炼（US-3，跳过 L1-L3 直达 L4）
+    fastify.post('/api/v1/skills/from-session', { preValidation: authPre }, async (request, reply) => {
+        try {
+            const { sessionId } = request.body || {};
+            if (!sessionId) {
+                return reply.code(400).send({
+                    code: 'skill_validation_failed',
+                    error: t('errors:required_field_missing', {}, request.locale || 'en'),
+                });
+            }
+            const pipeline = require('../skills/skillPipeline');
+            const skill = await pipeline.extractFromSession(sessionId, {
+                userId: request.user.id,
+                log: request.log,
+            });
+            return reply.code(201).send(skill);
+        } catch (err) {
+            return sendPublicError(reply, err, 'Failed to extract skill from session', 500, request.locale || 'en');
+        }
+    });
+
+    // auto draft 未读数（FR-4.5）
+    fastify.get('/api/v1/skills/drafts/unread-count', { preValidation: authPre }, async (request, reply) => {
+        try {
+            const lastSeenAt = await skillService.getDraftsLastSeenAt(request.user.id);
+            const count = await skillService.countUnseenAutoDrafts(request.user.id, lastSeenAt);
+            return { count };
+        } catch (err) {
+            return sendPublicError(reply, err, 'Failed to get drafts unread count', 500, request.locale || 'en');
+        }
+    });
+
+    // 标记 auto draft 已读（进入 Skills 页时调用）
+    fastify.post('/api/v1/skills/drafts/mark-seen', { preValidation: authPre }, async (request, reply) => {
+        try {
+            await skillService.markDraftsSeen(request.user.id);
+            return reply.code(204).send();
+        } catch (err) {
+            return sendPublicError(reply, err, 'Failed to mark drafts seen', 500, request.locale || 'en');
+        }
+    });
 }
 
 module.exports = { registerSkillRoutes };

@@ -381,6 +381,51 @@ async function countByStatus(userId) {
     return rows.reduce((acc, r) => { acc[r.status] = Number(r.count); return acc; }, {});
 }
 
+/**
+ * 统计 auto draft 未读数（FR-4.5）：
+ * status='draft' AND source='auto' AND created_at > lastSeenAt。
+ * @param {string} userId
+ * @param {number|null} lastSeenAt 用户偏好里的最近查看时间；null → 全部 auto draft 计数
+ * @returns {Promise<number>}
+ */
+async function countUnseenAutoDrafts(userId, lastSeenAt) {
+    const conditions = [
+        eq(schema.skills.userId, userId),
+        eq(schema.skills.status, 'draft'),
+        eq(schema.skills.source, 'auto'),
+    ];
+    if (lastSeenAt != null) {
+        conditions.push(sql`${schema.skills.createdAt} > ${lastSeenAt}`);
+    }
+    const rows = await db
+        .select({ count: sql`count(*)::int` })
+        .from(schema.skills)
+        .where(and(...conditions));
+    return Number(rows[0]?.count ?? 0);
+}
+
+/**
+ * 读取用户偏好里的 drafts 最近查看时间（key=skills_drafts_last_seen_at）。
+ * @param {string} userId
+ * @returns {Promise<number|null>}
+ */
+async function getDraftsLastSeenAt(userId) {
+    const prefs = require('../admin/UserPreferences');
+    const all = await prefs.getPreferences(userId).catch(() => ({}));
+    const raw = all.skills_drafts_last_seen_at;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * 写入 drafts 最近查看时间（key=skills_drafts_last_seen_at）。
+ * @param {string} userId
+ */
+async function markDraftsSeen(userId) {
+    const prefs = require('../admin/UserPreferences');
+    await prefs.setPreference(userId, 'skills_drafts_last_seen_at', Date.now());
+}
+
 module.exports = {
     CATEGORIES,
     createSkill,
@@ -394,4 +439,7 @@ module.exports = {
     listMarket,
     installSkill,
     countByStatus,
+    countUnseenAutoDrafts,
+    getDraftsLastSeenAt,
+    markDraftsSeen,
 };

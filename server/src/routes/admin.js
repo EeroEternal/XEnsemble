@@ -538,6 +538,44 @@ function registerAdminRoutes(fastify) {
         return { jobs: await getSchedulerStatus() };
     });
 
+    // 提炼漏斗统计（P3，04-API规格 §3.2）
+    fastify.get('/api/v1/admin/skills/pipeline', { preValidation: adminPre }, async (request, reply) => {
+        try {
+            const skillPipeline = require('../skills/skillPipeline');
+            const candidates = await db.select().from(schema.skillCandidates);
+            const byStage = candidates.reduce((acc, c) => {
+                acc[c.stage] = (acc[c.stage] || 0) + 1;
+                return acc;
+            }, {});
+            const clusterCounts = {};
+            for (const c of candidates) {
+                if (c.clusterId && c.clusterSize >= 2) {
+                    clusterCounts[c.clusterId] = c.clusterSize;
+                }
+            }
+            const statusRows = await db
+                .select({ status: schema.skills.status, count: sql`count(*)::int` })
+                .from(schema.skills)
+                .groupBy(schema.skills.status);
+            const skillsByStatus = statusRows.reduce((acc, r) => { acc[r.status] = Number(r.count); return acc; }, {});
+            return {
+                funnel: {
+                    candidatesTotal: candidates.length,
+                    byStage,
+                    clusters: Object.entries(clusterCounts).map(([clusterId, size]) => ({ clusterId, size })),
+                    skillsByStatus,
+                },
+                config: {
+                    minScore: skillPipeline.MIN_SCORE || require('../skills/skillScorer').MIN_SCORE,
+                    singletonMinScore: require('../skills/skillScorer').SINGLETON_MIN_SCORE,
+                    enabled: skillPipeline.isEnabled(),
+                },
+            };
+        } catch (err) {
+            return sendPublicError(reply, err, 'Failed to get skill pipeline stats', 500, request.locale || 'en');
+        }
+    });
+
     // 手动触发 job（P2，调试用）
     fastify.post('/api/v1/admin/scheduler/:jobName/run', { preValidation: adminPre }, async (request, reply) => {
         const { triggerJob } = require('../scheduler');
