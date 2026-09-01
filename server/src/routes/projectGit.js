@@ -83,11 +83,51 @@ async function generateAIDescription(project, gitOperationService, type, opts = 
 
     const truncated = diff.slice(0, 8000);
     const locale = opts.locale || 'en';
+    // Conventional Commit format: <type>(<scope>): <subject>\n\n<body>
+    // We ask the model for the full message (subject + blank line + body) so
+    // future readers can see *why* a change was made, not just *what* lines
+    // moved. Scope and body are encouraged, not required for trivial changes.
     const prompts = locale === 'zh' ? {
-        commit: '你是一个 commit message 生成器。根据 git diff，用中文输出简洁的 conventional commit 消息（如 "feat: 添加登录表单"）。只输出消息本身，不要引号、markdown 或解释。',
+        commit: [
+          '你是一个 commit message 生成器。',
+          '根据给定的 git diff 输出一个 conventional commit 消息，全部内容必须用中文编写（包括 type 之后的主题句、scope、body 列表项）。',
+          '格式严格如下：',
+          '  - 第一行: <type>(<scope>): <subject>，type 必须是 feat/fix/refactor/style/docs/chore/test 之一，scope 是受影响的模块名（可选），subject 不超过 50 个汉字，祈使句',
+          '  - 空行',
+          '  - 接下来若干行 body：详细说明改动的动机、关键变更点、影响范围，每行不超过 72 个汉字，用 - 开头作为列表项',
+          '  - 重要的：必须解释 *为什么* 改（不只说改了什么），例如：用户报告的 bug、性能瓶颈、架构缺陷、需求来源',
+          '  - 对于明显的重构或新功能，列出 2-4 个变更要点',
+          '示例：',
+          '  feat(gateway): 删除网关提供商时添加确认提示',
+          '',
+          '  - 防止误删导致现有 session 鉴权失败',
+          '  - 复用项目里已有的 ConfirmDialog 组件，variant=danger',
+          '  - 通过 i18n key 提供中英文',
+          '',
+          '只输出 commit message 本身，不要引号、不要 markdown 代码块、不要解释。',
+        ].join('\n'),
         pr: '你是一个 pull request 生成器。根据 git diff，用中文输出一个包含 "title" 和 "body" 字段的 JSON 对象。title 和 body 都用中文编写；title 是简洁的 conventional commit 风格摘要（如 "feat: 添加登录表单"，用中文描述改动内容）。body 是关于改了什么以及为什么的简短中文描述，用 markdown 列表格式。只输出有效 JSON，不要 markdown 代码块或解释。',
     } : {
-        commit: 'You are a commit message generator. Given a git diff, output a concise conventional commit message (e.g. "feat: add login form"). Respond with the message only, no quotes, no markdown, no explanation.',
+        commit: [
+          'You are a commit message generator.',
+          'Respond entirely in English. The subject, scope, and every body line must be in English, even if the surrounding UI is in another language.',
+          'Given a git diff, output a conventional commit message in this exact format:',
+          '  - First line: <type>(<scope>): <subject> — type must be one of feat/fix/refactor/style/docs/chore/test; scope is the affected module (optional); subject is imperative mood, no period, ≤ 50 chars',
+          '  - Blank line',
+          '  - Body: 2-5 bullet points (each ≤ 72 chars, starting with "-") explaining',
+          '    * what changed (the visible diff)',
+          '    * *why* it changed — root cause, user-reported bug, performance, design tradeoff, requirement',
+          '    * any side effects, follow-ups, or risk',
+          '  - For trivial one-line fixes a body is optional; for everything else include at least a one-line "why"',
+          'Example:',
+          '  feat(gateway): require confirmation when deleting a provider',
+          '',
+          '  - Prevents accidental deletes that would break auth for live sessions',
+          '  - Reuses the existing ConfirmDialog component with variant=danger',
+          '  - Title and message are routed through the existing i18n keys',
+          '',
+          'Respond with the commit message only. No quotes, no markdown code fences, no preamble.',
+        ].join('\n'),
         pr: 'You are a pull request generator. Given a git diff, output a JSON object with "title" and "body" fields. The title should be a concise conventional commit style summary. The body should be a brief description of what changed and why, in markdown bullet points. Respond with valid JSON only, no markdown code blocks, no explanation.',
     };
     const res = await fetch(apiUrl, {
@@ -99,7 +139,9 @@ async function generateAIDescription(project, gitOperationService, type, opts = 
                 { role: 'system', content: prompts[type] || prompts.commit },
                 { role: 'user', content: truncated },
             ],
-            max_tokens: 2000,
+            // Allow more tokens for subject + blank + 2-5 bullet body. Previous
+            // 200 covered single-line messages but truncated multi-line bodies.
+            max_tokens: type === 'pr' ? 2000 : 800,
             temperature: 0.4,
         }),
     });
@@ -132,8 +174,15 @@ async function generateAIDescription(project, gitOperationService, type, opts = 
         };
     }
 
+    // Commit message: preserve newlines from the model so the body renders
+    // properly. Strip outer quotes if the model wrapped the whole message.
     return {
-        message: content.replace(/^["'`]|["'`]$/g, '').replace(/\s+/g, ' ').trim(),
+        message: content
+            .replace(/^["'`]|["'`]$/g, '')
+            .split('\n')
+            .map((l) => l.replace(/[ \t]+$/g, ''))
+            .join('\n')
+            .trim(),
     };
 }
 
