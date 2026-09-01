@@ -236,25 +236,55 @@ async function registerPreviewGateway(fastify) {
         let deploymentId = null;
         const referer = request.headers.referer || request.headers.origin || '';
         const m = referer.match(/\/preview\/([^/?#]+)/);
+        // 本实例 preview 专用端口（PREVIEW_PUBLIC_URL）由 nginx 打上 X-Preview-Origin: 1
+        // 标记。只有真正经过本实例 8099 入口的请求才带此头 —— 其它厂商/机器上同端口的
+        // 公共服务不经过本 nginx，不会带此头，因此绝不会被误路由到 preview。
+        // host 匹配仅作辅助（nginx $host 可能不带端口，故用 hostname 比较），
+        // 真正决定「强制 preview」的是标记头，保证 preview 流量绝不落入宿主后端。
+        const isPreviewOrigin = request.headers['x-preview-origin'] === '1';
         const previewHost = process.env.PREVIEW_PUBLIC_URL
             ? process.env.PREVIEW_PUBLIC_URL.replace(/^https?:\/\//, '').replace(/\/+$/, '')
             : '';
-        const isPreviewPort = !!previewHost && request.headers.host === previewHost;
+        const previewHostname = previewHost ? previewHost.split(':')[0] : '';
+        const reqHostname = String(request.headers.host || '').split(':')[0];
+        const isPreviewPort = !!previewHostname && reqHostname === previewHostname;
+        if (isPreviewOrigin) {
+            // 强制 preview：referer 命中 /preview/<id>/ 用该部署，否则用最新 running 部署。
+            if (m) {
+                deploymentId = m[1];
+            } else {
+                deploymentId = await findLatestRunningPreview();
+            }
+            // 找不到可路由的 preview：明确报错，绝不落宿主控制面。
+            if (!deploymentId) {
+                return reply.code(503).send({ error: 'Preview not found', code: 'preview_not_found' });
+            }
+            const entry = previewRegistry.get(deploymentId);
+            if (!entry) {
+                console.error(`[gateway] onRequest NO ENTRY url=${request.url} dep=${deploymentId} ref=${String(referer).slice(0, 80)} registry=${previewRegistry.listIds().join(',')}`);
+                return reply.code(503).send({ error: 'Preview not running', code: 'preview_not_running' });
+            }
+            const target = `http://127.0.0.1:${entry.port}`;
+            await new Promise((resolve, reject) => {
+                reply.hijack();
+                request.raw.headers.host = 'localhost';
+                proxy.web(request.raw, reply.raw, { target, changeOrigin: false }, (err) => (err ? reject(err) : resolve()));
+            });
+            return;
+        }
+        // 非 preview 标记：宿主控制台（8088 等），只按 referer 转发 preview 页面产生的
+        // 无前缀请求（SPA 绝对路由）；找不到时保持原有 fall through 行为，不影响宿主。
         if (m) {
             deploymentId = m[1];
         } else if (isPreviewPort) {
-            // 预览专用端口：SPA 绝对路由产生的无前缀请求（/login、/api/...）默认路由到最新部署。
             deploymentId = await findLatestRunningPreview();
         }
         if (!deploymentId) {
-            // 预览专用端口上的无前缀请求若无法路由，返回 404，绝不落入宿主控制台（8088）。
-            if (isPreviewPort) return reply.code(404).send({ error: 'Preview not found' });
             return;
         }
         const entry = previewRegistry.get(deploymentId);
         if (!entry) {
             console.error(`[gateway] onRequest NO ENTRY url=${request.url} dep=${deploymentId} ref=${String(referer).slice(0, 80)} registry=${previewRegistry.listIds().join(',')}`);
-            if (isPreviewPort) return reply.code(404).send({ error: 'Preview not running' });
             return;
         }
         const target = `http://127.0.0.1:${entry.port}`;
@@ -276,10 +306,17 @@ async function registerPreviewGateway(fastify) {
 
     fastify.server.on('upgrade', async (req, socket, head) => {
         try {
-            const match = req.url?.match(/^\/preview\/([^/?]+)/);
-            if (!match) return;
+            // 有明确 /preview/<id>/ 前缀 → 走该部署；否则若来自 preview 端口（nginx 打标）
+            // 则强制路由到最新 running 部署，绝不落到宿主。
+            let deploymentId = null;
+            const m = req.url?.match(/^\/preview\/([^/?]+)/);
+            if (m) {
+                deploymentId = m[1];
+            } else if (req.headers['x-preview-origin'] === '1') {
+                deploymentId = await findLatestRunningPreview();
+            }
+            if (!deploymentId) return;
 
-            const deploymentId = match[1];
             const resolved = await resolveDeployment(req, deploymentId);
             if (resolved.error) {
                 socket.write(`HTTP/1.1 ${resolved.status} ${resolved.error}\r\n\r\n`);
