@@ -2,7 +2,7 @@
   "empty_hint": "Ask the agent something below. Messages appear here as the agent works.",
   "input_placeholder": "Message the agent… (Enter to send, Shift+Enter for newline)",
   "send": "Send",
-  "stop": "Interrupt (Ctrl+C)",
+  "stop": "Stop current task (Esc twice)",
   "working": "Agent is working…",
   "thinking": "Agent is thinking…",
   "you": "You",

@@ -2,7 +2,7 @@
   "empty_hint": "在下方输入消息，agent 工作过程中的对话会显示在这里。",
   "input_placeholder": "给 agent 发送消息…（Enter 发送，Shift+Enter 换行）",
   "send": "发送",
-  "stop": "中断 (Ctrl+C)",
+  "stop": "停止当前任务（连按两次 Esc）",
   "working": "Agent 工作中…",
   "thinking": "Agent 思考中…",
   "you": "我",

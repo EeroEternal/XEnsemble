@@ -123,11 +123,36 @@ export default function ChatView({ sessionId, onSessionEnd }) {
     };
   }, [sessionId, loadHistory]);
 
+  const [scrollMetrics, setScrollMetrics] = useState({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 });
+  const [scrollbarHover, setScrollbarHover] = useState(false);
+  const [scrollbarDrag, setScrollbarDrag] = useState(false);
+  const scrollbarTrackRef = useRef(null);
+
   // Auto-scroll to bottom on new messages.
   useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, loadingHistory]);
+
+  // Track the message list's scroll geometry so the custom scrollbar thumb
+  // can size and position itself proportionally.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return undefined;
+    const update = () => setScrollMetrics({
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    });
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    if (ro) ro.observe(el);
+    return () => {
+      el.removeEventListener('scroll', update);
+      if (ro) ro.disconnect();
+    };
+  }, [loadingHistory]);
 
   const send = useCallback((text) => {
     const raw = text != null ? text : input;
@@ -146,8 +171,14 @@ export default function ChatView({ sessionId, onSessionEnd }) {
   }, [input]);
 
   const stop = useCallback(() => {
+    // Two ESC presses — matches the agent-view terminal's "Esc twice to abort
+    // the current operation" convention (Claude/Kimi/Qwen TUI). Sends two
+    // distinct frames so the TUI sees them as two presses, not one double-byte
+    // escape sequence. This aborts the in-flight task without killing the
+    // whole session the way Ctrl-C (\x03) would.
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'input', data: '\x03' }));
+      wsRef.current.send(JSON.stringify({ type: 'input', data: '\x1b' }));
+      wsRef.current.send(JSON.stringify({ type: 'input', data: '\x1b' }));
     }
   }, []);
 
@@ -205,7 +236,7 @@ export default function ChatView({ sessionId, onSessionEnd }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
       {/* Message list */}
-      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto console-scroll-hidden">
+      <div ref={listRef} className="relative min-h-0 flex-1 overflow-y-auto console-scroll-hidden">
         {loadingHistory ? (
           <div className="flex h-full items-center justify-center text-zinc-400">
             <Loader2 className="h-5 w-5 animate-spin" />
@@ -220,7 +251,7 @@ export default function ChatView({ sessionId, onSessionEnd }) {
             </p>
           </div>
         ) : (
-          <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-4">
+          <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-4 pb-2">
             {renderedItems.map((item, idx) => (
               <ChatItem key={idx} item={item} />
             ))}
@@ -239,6 +270,52 @@ export default function ChatView({ sessionId, onSessionEnd }) {
             )}
           </div>
         )}
+
+        {/* Custom overlay scrollbar — hidden by default, revealed on hover/drag. */}
+        {(() => {
+          const { scrollTop, scrollHeight, clientHeight } = scrollMetrics;
+          const trackH = clientHeight;
+          const ratio = scrollHeight > clientHeight ? clientHeight / scrollHeight : 0;
+          const thumbH = Math.max(24, ratio * trackH);
+          const maxScroll = Math.max(1, scrollHeight - clientHeight);
+          const thumbTop = (scrollTop / maxScroll) * (trackH - thumbH);
+          const visible = scrollHeight > clientHeight + 1 && (scrollbarHover || scrollbarDrag);
+          return (
+            <div
+              ref={scrollbarTrackRef}
+              onMouseEnter={() => setScrollbarHover(true)}
+              onMouseLeave={() => { if (!scrollbarDrag) setScrollbarHover(false); }}
+              className="absolute right-0 top-0 z-10 h-full w-3 cursor-pointer"
+              aria-hidden="true"
+            >
+              {visible ? (
+                <div
+                  className="absolute right-1 w-1.5 rounded-full bg-zinc-400/80 hover:bg-zinc-500 transition-colors"
+                  style={{ top: thumbTop, height: thumbH }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setScrollbarDrag(true);
+                    const startY = e.clientY;
+                    const startTop = scrollTop;
+                    const onMove = (ev) => {
+                      const dy = ev.clientY - startY;
+                      const next = startTop + (dy / (trackH - thumbH)) * maxScroll;
+                      if (listRef.current) listRef.current.scrollTop = Math.max(0, Math.min(maxScroll, next));
+                    };
+                    const onUp = () => {
+                      setScrollbarDrag(false);
+                      setScrollbarHover(false);
+                      window.removeEventListener('mousemove', onMove);
+                      window.removeEventListener('mouseup', onUp);
+                    };
+                    window.addEventListener('mousemove', onMove);
+                    window.addEventListener('mouseup', onUp);
+                  }}
+                />
+              ) : null}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Input */}
