@@ -1,4 +1,29 @@
 const WebSocket = require('ws');
+const fs = require('fs');
+
+// 宿主控制面在 preview 就绪后写入沙箱的 blink 代理配置（BLINK_API_URL + BLINK_AUTH_TOKEN）。
+// 沙箱后端进程通常在 preview 就绪前就已启动，无法用环境变量注入，改为每次请求前读该文件。
+const BLINK_ENV_FILES = [
+    '/workspace/server/.blink.env',
+    '/workspace/.blink.env',
+];
+
+function readBlinkEnvFile() {
+    for (const file of BLINK_ENV_FILES) {
+        try {
+            const text = fs.readFileSync(file, 'utf8');
+            const out = {};
+            for (const line of text.split('\n')) {
+                const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+                if (m) out[m[1]] = m[2].trim();
+            }
+            return out;
+        } catch {
+            /* try next */
+        }
+    }
+    return {};
+}
 
 function completeUtf8Length(buf) {
     if (buf.length === 0) return 0;
@@ -53,7 +78,44 @@ function decodeExecutionFrame(buf, seqFramed = true) {
 
 class BoxLiteClient {
     constructor() {
-        this.base = (process.env.BLINK_API_URL || 'http://127.0.0.1:8787').replace(/\/$/, '');
+        // 优先读环境变量；未设置时回退到部署注入的 .blink.env 文件（宿主控制面在 preview 就绪后写入，
+        // 使沙箱后端无需重启即可经宿主反向代理访问 blink-server，保持 boxlite 隔离）。
+        const fileEnv = readBlinkEnvFile();
+        this._base = (process.env.BLINK_API_URL || fileEnv.BLINK_API_URL || 'http://127.0.0.1:8787').replace(/\/$/, '');
+        // 经宿主控制面反向代理访问 blink-server 时，附带 scoped token 供网关鉴权。
+        // 宿主直连（无代理）时该变量为空，不附加任何头。
+        this.authToken = (process.env.BLINK_AUTH_TOKEN || fileEnv.BLINK_AUTH_TOKEN || '').trim();
+    }
+
+    // base 用 getter 懒解析：沙箱后端进程在 preview 就绪前就已启动（.blink.env 尚未写入），
+    // 每次拼 URL 前读一次文件，确保进程启动后才注入的代理配置能生效，无需重启后端。
+    get base() {
+        this._refreshFromFile();
+        return this._base;
+    }
+
+    set base(value) {
+        this._base = value;
+    }
+
+    // 懒刷新：环境变量未配置时，重读 .blink.env（文件在进程启动后才由宿主写入）。
+    // 带 1s 缓存，避免宿主每次 blink 请求都同步读两个不存在的文件（宿主无 .blink.env）。
+    _refreshFromFile() {
+        if (process.env.BLINK_API_URL && process.env.BLINK_AUTH_TOKEN) return;
+        const now = Date.now();
+        if (this._lastFileReadAt && now - this._lastFileReadAt < 1000) return;
+        this._lastFileReadAt = now;
+        const fileEnv = readBlinkEnvFile();
+        if (!process.env.BLINK_API_URL && fileEnv.BLINK_API_URL) {
+            this._base = String(fileEnv.BLINK_API_URL).replace(/\/$/, '');
+        }
+        if (!process.env.BLINK_AUTH_TOKEN && fileEnv.BLINK_AUTH_TOKEN) {
+            this.authToken = String(fileEnv.BLINK_AUTH_TOKEN).trim();
+        }
+    }
+
+    _authHeaders() {
+        return this.authToken ? { 'x-blink-token': this.authToken } : {};
     }
 
     /**
@@ -65,10 +127,15 @@ class BoxLiteClient {
      * openSession uses 60s to allow for VM boot + init.
      */
     async _fetch(url, options = {}, timeoutMs = 35000) {
+        this._refreshFromFile();
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
         try {
-            const res = await fetch(url, { ...options, signal: controller.signal });
+            const res = await fetch(url, {
+                ...options,
+                headers: { ...this._authHeaders(), ...(options.headers || {}) },
+                signal: controller.signal,
+            });
             return res;
         } catch (err) {
             if (err.name === 'AbortError') {
@@ -100,9 +167,10 @@ class BoxLiteClient {
     }
 
     createExecutionAttachWebSocket(sessionName, execId, options = {}) {
+        this._refreshFromFile();
         const attachUrl = this.buildExecutionAttachUrl(sessionName, execId, options);
         const wsUrl = this.base.replace(/^http/, 'ws') + attachUrl;
-        return new WebSocket(wsUrl);
+        return new WebSocket(wsUrl, this.authToken ? { headers: this._authHeaders() } : undefined);
     }
 
     createExecutionAttachWebSocketFromStreamRef(streamRef, options = {}) {
@@ -202,8 +270,9 @@ class BoxLiteClient {
     }
 
     createAttachWebSocket(attachUrl) {
+        this._refreshFromFile();
         const wsUrl = this.base.replace(/^http/, 'ws') + attachUrl;
-        return new WebSocket(wsUrl);
+        return new WebSocket(wsUrl, this.authToken ? { headers: this._authHeaders() } : undefined);
     }
 
     async execForResult(sessionName, command, args = [], env = {}, workingDir = null, options = {}) {

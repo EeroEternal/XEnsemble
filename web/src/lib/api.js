@@ -8,9 +8,15 @@ export function getApiBase() {
 export function getWsBase() {
   const env = import.meta.env.VITE_API_BASE?.trim();
   if (env) {
-    const u = new URL(env);
-    const proto = u.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${u.host}`;
+    // live 预览：VITE_API_BASE 是相对路径 /preview/<id>，基于当前页面 origin 构造 ws 地址，
+    // 让 WS 也带上 /preview/<id> 前缀，经网关+隧道反代到沙箱后端（否则连到宿主 8089 而失败）。
+    if (/^https?:\/\//i.test(env)) {
+      const u = new URL(env);
+      const proto = u.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${proto}//${u.host}`;
+    }
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}${env.replace(/\/+$/, '')}`;
   }
   if (import.meta.env.PROD) {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';

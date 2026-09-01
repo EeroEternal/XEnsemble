@@ -76,7 +76,9 @@
     "copied": "访问地址已复制",
     "copy_failed": "复制失败，请手动复制",
     "deploying": "正在部署预览…",
-    "loading": "加载中…"
+    "loading": "加载中…",
+    "live": "实时",
+    "refresh": "刷新"
   },
   "status": {
     "pending": "等待中",

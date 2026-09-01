@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   XCircle,
   ExternalLink,
+  RotateCw,
 } from 'lucide-react';
 import { usePreview } from './PreviewPanel';
 import { consoleButtonFocusClass } from '@/lib/consoleTokens';
@@ -37,8 +38,11 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo 
   const [embedError, setEmbedError] = useState('');
   const [showDetails, setShowDetails] = useState(false);
   const [copied, setCopied] = useState(false);
+  // live 模式刷新：full reload（iframe 重新加载）即可看到最新源码内容
+  const [frameKey, setFrameKey] = useState(0);
 
   const deployment = preview.deployment;
+  const isLive = deployment?.mode === 'live';
 
   useEffect(() => {
     let cancelled = false;
@@ -88,6 +92,22 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo 
           <span className="truncate text-xs text-[#5F6368] font-mono">
             {previewUrl}
           </span>
+          {isLive && (
+            <span className="shrink-0 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600">
+              {t('deploy:preview.live')}
+            </span>
+          )}
+          {isLive && (
+            <button
+              type="button"
+              onClick={() => setFrameKey((k) => k + 1)}
+              className={`ml-1 flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-900 shrink-0 ${consoleButtonFocusClass}`}
+              title={t('deploy:preview.refresh')}
+            >
+              <RotateCw className="w-3 h-3" />
+              {t('deploy:preview.refresh')}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setShowDetails((v) => !v)}
@@ -162,6 +182,7 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo 
           </div>
         ) : embedUrl ? (
           <iframe
+            key={frameKey}
             title={t('workspace:tabs.preview')}
             src={embedUrl}
             className="h-full w-full border-0 bg-surface"

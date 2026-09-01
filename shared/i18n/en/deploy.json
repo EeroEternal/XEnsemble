@@ -76,7 +76,9 @@
     "copied": "Access URL copied",
     "copy_failed": "Copy failed, please copy manually",
     "deploying": "Deploying preview…",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "live": "Live",
+    "refresh": "Refresh"
   },
   "status": {
     "pending": "pending",

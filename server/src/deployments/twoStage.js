@@ -16,6 +16,8 @@ const { ensureProjectRuntime } = require('../runtime/RuntimeService');
 const { analyzeProjectDeploy, collectProjectContext } = require('./analyzeDeploy');
 const { analyzeProjectVerify } = require('./analyzeVerify');
 const { createTunnel, stopTunnel } = require('../preview/tunnelServer');
+const { signBlinkToken } = require('../preview/blinkToken');
+const { resolveControlPlanePublicUrlSync } = require('../llm/publicUrl');
 const deploymentService = require('./DeploymentService');
 const workspace = require('../workspace');
 const { registerDeploy, unregisterDeploy, isAborted, countByUser, listProjectIdsByUser, listByUser } = require('./activeDeploys');
@@ -274,12 +276,41 @@ async function savePlanCache(projectId, plan) {
 
 function detectProjectType(hostWorkspacePath) {
     if (!hostWorkspacePath) {
-        return { type: 'unknown', defaultPort: 3000, installCmd: null, buildCmd: null, startCmd: null };
+        return { type: 'unknown', defaultPort: 3000, installCmd: null, buildCmd: null, startCmd: null, devKind: null, devDir: '.' };
     }
     const fs = require('fs');
     const path = require('path');
     const has = (n) => { try { return fs.existsSync(path.join(hostWorkspacePath, n)); } catch { return false; } };
     const readJson = (n) => { try { return JSON.parse(fs.readFileSync(path.join(hostWorkspacePath, n), 'utf8')); } catch { return null; } };
+
+    // 探测 monorepo 子前端（web/frontend/client/app），返回 { devKind, dir } 或 null。
+    // 子目录优先级：vite > next > nuxt > 有 dev script 的 npm 项目。
+    const detectSubDev = () => {
+        const dirs = ['web', 'frontend', 'client', 'app'];
+        for (const d of dirs) {
+            if (!has(path.join(d, 'package.json'))) continue;
+            const p = readJson(path.join(d, 'package.json')) || {};
+            const deps = { ...(p.dependencies || {}), ...(p.devDependencies || {}) };
+            const scripts = p.scripts || {};
+            if (deps.vite) return { devKind: 'vite', dir: d };
+            if (deps.next) return { devKind: 'next', dir: d };
+            if (deps.nuxt) return { devKind: 'nuxt', dir: d };
+            if (scripts.dev) return { devKind: 'npm', dir: d };
+        }
+        return null;
+    };
+
+    // 判定 package.json 的 dev server 框架类型（仅 vite / next / nuxt；dev script 的 npm 不在此判，
+    // 因为 monorepo 根 dev 常是 concurrently/electron 聚合，不是 web 前端，优先级应低于子前端探测）。
+    const devKindOf = (pkg) => {
+        if (!pkg) return null;
+        const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+        if (deps.vite) return 'vite';
+        if (deps.next) return 'next';
+        if (deps.nuxt) return 'nuxt';
+        return null;
+    };
+
     if (has('package.json')) {
         const pkg = readJson('package.json') || {};
         const scripts = pkg.scripts || {};
@@ -287,27 +318,37 @@ function detectProjectType(hostWorkspacePath) {
         const installCmd = `${pm} install --no-audit --no-fund`;
         const buildCmd = scripts.build ? `${pm} run build` : null;
         const startCmd = scripts.start ? `${pm} run start` : (scripts.dev ? `${pm} run dev` : null);
+        const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
         let defaultPort = 3000;
-        if (pkg.dependencies?.next || pkg.dependencies?.nuxt) defaultPort = 3000;
-        else if (pkg.dependencies?.vite) defaultPort = 5173;
-        return { type: 'node', defaultPort, installCmd, buildCmd, startCmd };
+        if (deps.next || deps.nuxt) defaultPort = 3000;
+        else if (deps.vite) defaultPort = 5173;
+        // live 判定：根 vite/next/nuxt 优先；否则探测子前端（monorepo 根 dev 常是 concurrently/electron
+        // 聚合，不是 web 前端）；都没有才用根 dev script 兜底（CRA/webpack 单应用）。
+        let devKind = devKindOf(pkg);
+        let devDir = '.';
+        if (!devKind) {
+            const sub = detectSubDev();
+            if (sub) { devKind = sub.devKind; devDir = sub.dir; defaultPort = sub.devKind === 'vite' ? 5173 : 3000; }
+            else if (scripts.dev) { devKind = 'npm'; devDir = '.'; }
+        }
+        return { type: 'node', defaultPort, installCmd, buildCmd, startCmd, devKind, devDir };
     }
     if (has('requirements.txt')) {
-        return { type: 'python', defaultPort: 8000, installCmd: 'pip install -r requirements.txt', buildCmd: null, startCmd: 'python3 -m http.server 8000 --bind 0.0.0.0' };
+        return { type: 'python', defaultPort: 8000, installCmd: 'pip install -r requirements.txt', buildCmd: null, startCmd: 'python3 -m http.server 8000 --bind 0.0.0.0', devKind: null, devDir: '.' };
     }
     if (has('pyproject.toml')) {
-        return { type: 'python', defaultPort: 8000, installCmd: 'pip install -e .', buildCmd: null, startCmd: 'python3 -m http.server 8000 --bind 0.0.0.0' };
+        return { type: 'python', defaultPort: 8000, installCmd: 'pip install -e .', buildCmd: null, startCmd: 'python3 -m http.server 8000 --bind 0.0.0.0', devKind: null, devDir: '.' };
     }
     if (has('go.mod')) {
-        return { type: 'go', defaultPort: 8080, installCmd: 'go mod download', buildCmd: 'go build ./...', startCmd: 'go run .' };
+        return { type: 'go', defaultPort: 8080, installCmd: 'go mod download', buildCmd: 'go build ./...', startCmd: 'go run .', devKind: null, devDir: '.' };
     }
     if (has('Cargo.toml')) {
-        return { type: 'rust', defaultPort: 8080, installCmd: 'cargo fetch', buildCmd: 'cargo build --release', startCmd: 'cargo run --release' };
+        return { type: 'rust', defaultPort: 8080, installCmd: 'cargo fetch', buildCmd: 'cargo build --release', startCmd: 'cargo run --release', devKind: null, devDir: '.' };
     }
     if (has('index.html')) {
-        return { type: 'static', defaultPort: 8000, installCmd: null, buildCmd: null, startCmd: 'python3 -m http.server 8000 --bind 0.0.0.0' };
+        return { type: 'static', defaultPort: 8000, installCmd: null, buildCmd: null, startCmd: 'python3 -m http.server 8000 --bind 0.0.0.0', devKind: null, devDir: '.' };
     }
-    return { type: 'unknown', defaultPort: 3000, installCmd: null, buildCmd: null, startCmd: null };
+    return { type: 'unknown', defaultPort: 3000, installCmd: null, buildCmd: null, startCmd: null, devKind: null, devDir: '.' };
 }
 
 // 在沙箱内探测一个空闲端口（避免 verify 残留进程占用默认端口导致聚合 EADDRINUSE）。
@@ -318,6 +359,203 @@ async function getGuestFreePort(runtimeRef) {
         const p = Number((r.stdout || '').trim().split('\n')[0]);
         return p > 0 && p < 65535 ? p : 0;
     } catch { return 0; }
+}
+
+// 实时预览（live 模式）：在 guest 内常驻启动 dev server（HMR / 文件感知），
+// 改文件后刷新即可见，无需重新 build。尽力而为：起不来返回 ok:false，由调用方回退静态 serve。
+async function startLiveDevServer({ runtimeRef, workspacePath, devKind, devDir, defaultPort, base, onLog }) {
+    const runtime = getRuntime();
+    const livePort = (await getGuestFreePort(runtimeRef)) || Number(defaultPort) || 5173;
+    const targetDir = devDir || '.';
+    const startLog = '/tmp/live-dev.log';
+    // vite 用显式 --port + --strictPort（export PORT 对 vite 无效，默认 5173 常被沙箱占位服务占用），
+    // 并用 --base 让 vite 生成的所有资源/模块路径都带 /preview/<id>/ 前缀（否则绝对路径脱离前缀→白屏）；
+    // VITE_API_BASE=/preview/<id>/ 让 dev 前端用带前缀的相对路径 /preview/<id>/api/...，经网关+隧道
+    // 反代到沙箱后端（前后端都可用）。注意不能设成 /：那会让 API 丢前缀、直接打到宿主 8089 而 401。
+    // next/nuxt 用各自 dev 命令；CRA/webpack 等通用 npm 项目用 PORT 环境变量。
+    const baseArg = base ? ` --base ${base}` : '';
+    const apiBaseArg = base ? `VITE_API_BASE=${base}` : '';
+    let startCmd;
+    if (devKind === 'vite') {
+        startCmd = `cd ${targetDir} && ${apiBaseArg} npx vite --host 0.0.0.0 --port ${livePort} --strictPort${baseArg}`;
+    } else if (devKind === 'next') {
+        startCmd = `cd ${targetDir} && PORT=${livePort} npx next dev -H 0.0.0.0 -p ${livePort}`;
+    } else if (devKind === 'nuxt') {
+        startCmd = `cd ${targetDir} && PORT=${livePort} HOST=0.0.0.0 npx nuxt dev --port ${livePort}`;
+    } else {
+        startCmd = `cd ${targetDir} && PORT=${livePort} BROWSER=none npm run dev`;
+    }
+    try {
+        await runtime.exec.exec('sh', ['-c', `(setsid nohup sh -c '${startCmd}' > ${startLog} 2>&1 &) && echo started`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+    } catch (e) {
+        if (onLog) onLog(`live dev server spawn failed: ${e.message}`);
+        return { ok: false, reason: e.message };
+    }
+    // 轮询探测 livePort，最多等 40s（vite 冷启动 + dep 预构建可能 10~30s）
+    let code = '';
+    for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        try {
+            const probe = await runtime.exec.exec(
+                'sh', ['-c', `curl -s -m 3 -o /dev/null -w "%{http_code}" http://127.0.0.1:${livePort}/`], {},
+                { runtimeRef, cwd: workspacePath, timeoutMs: 8000 },
+            );
+            code = String(probe.stdout || '').trim();
+            if (/^[23]\d\d$/.test(code)) break;
+        } catch { /* keep waiting */ }
+    }
+    if (!/^[23]\d\d$/.test(code)) {
+        const log = await runtime.exec.exec('sh', ['-c', `tail -n 30 ${startLog} 2>/dev/null`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 8000 });
+        if (onLog) onLog(`live dev server not ready on :${livePort} (http ${code || '000'}) log=${String(log.stdout || '').slice(0, 400)}`);
+        return { ok: false, reason: `live dev server not ready (http ${code || '000'})` };
+    }
+    if (onLog) onLog(`live dev server ready on :${livePort} (${devKind})`);
+    return { ok: true, port: livePort };
+}
+
+// live 模式聚合代理：/api/* → 后端；其它 → vite dev server（实时预览，前后端都可用）。
+// base 传给代理，转发 vite 请求时补回 /preview/<id>/ 前缀（vite 配了该 base，不带会 302 死循环）。
+async function startViteAggregateProxy({ runtimeRef, workspacePath, devPort, backendPort, listenPort, base, onLog }) {
+    const runtime = getRuntime();
+    let proxyPath = null;
+    try {
+        const script = require('fs').readFileSync(path.join(__dirname, '../preview/previewProxyServer.js'), 'utf8');
+        await runtime.fs.fsWrite(workspacePath, '.agents/previewProxyServer.cjs', script, { runtimeRef });
+        proxyPath = '.agents/previewProxyServer.cjs';
+    } catch (e) {
+        if (onLog) onLog(`write live proxy script failed: ${e.message}`);
+        return false;
+    }
+    try {
+        await runtime.exec.spawn(
+            'node',
+            [proxyPath, '--live', String(devPort), String(backendPort), String(listenPort), base || ''],
+            { HOME: process.env.HOME || '/root', PATH: process.env.PATH || '/usr/bin:/bin' },
+            { runtimeRef, cwd: workspacePath },
+        );
+    } catch (e) {
+        if (onLog) onLog(`spawn live proxy failed: ${e.message}`);
+        return false;
+    }
+    for (let i = 0; i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 600));
+        try {
+            const check = await runtime.exec.exec(
+                'sh', ['-c', `curl -s -m 2 -o /dev/null -w "%{http_code}" http://127.0.0.1:${listenPort}/`],
+                {},
+                { runtimeRef, cwd: workspacePath, timeoutMs: 8000 },
+            );
+            if (String(check.stdout || '').startsWith('2')) return true;
+        } catch { /* retry */ }
+    }
+    if (onLog) onLog(`live aggregate proxy did not come up on :${listenPort}`);
+    return false;
+}
+
+// 将宿主编译好的 unigateway 二进制注入沙箱，使被部署应用的「网关」功能可用。
+// 背景：被部署的 xensemble 后端启动时会自动拉起 unigateway（GatewaySettings auto_start 默认 true），
+// 但只在默认路径 /workspace/gateway/target/release/xensemble-unigateway 存在二进制时才能成功；
+// 沙箱部署时 verify 只 build 前端+起后端，不会编译 Rust 网关，导致「配网关」打不开。
+// 11MB 二进制无法用单条 fsWrite（base64 单参数超过 argv 上限），故分块 gzip+base64 传输。
+async function injectGatewayBinary(runtimeRef, workspacePath, onLog) {
+    const runtime = getRuntime();
+    const hostBinary = path.join(__dirname, '../../../gateway/target/release/xensemble-unigateway');
+    let bin;
+    try {
+        bin = require('fs').readFileSync(hostBinary);
+    } catch {
+        if (onLog) onLog(`gateway binary not found at ${hostBinary}, skip injection`);
+        return false;
+    }
+    const target = '/workspace/gateway/target/release/xensemble-unigateway';
+    const tmpB64 = '/tmp/ug.b64.gz';
+    const zlib = require('zlib');
+    const b64 = zlib.gzipSync(bin, { level: 9 }).toString('base64');
+    const CHUNK = 120000; // 低于 Linux 单参数上限 128KB，留安全余量
+    try {
+        await runtime.exec.exec('sh', ['-c', `: > ${tmpB64}`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 10000 });
+        for (let i = 0; i < b64.length; i += CHUNK) {
+            const piece = b64.slice(i, i + CHUNK);
+            await runtime.exec.exec('sh', ['-c', `printf '%s' "$1" >> "$2"`, 'sh', piece, tmpB64], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 });
+        }
+        await runtime.exec.exec(
+            'sh',
+            ['-c', `mkdir -p "$(dirname '${target}')" && base64 -d ${tmpB64} | gzip -d > ${target} && chmod +x ${target} && rm -f ${tmpB64}`],
+            {},
+            { runtimeRef, cwd: workspacePath, timeoutMs: 60000 },
+        );
+    } catch (e) {
+        if (onLog) onLog(`gateway binary injection failed: ${e.message}`);
+        return false;
+    }
+    if (onLog) onLog(`gateway binary injected to ${target}`);
+    return true;
+}
+
+// 注入 blink 反向代理配置：写入沙箱 /workspace/server/.blink.env，
+// 使被部署应用（xensemble 自身）经 /preview/<id>/__blink 访问宿主 blink-server，
+// 从而在预览里创建 boxlite 隔离的 agent session（沙箱 guest 无 KVM，无法自身起 blink）。
+async function injectBlinkEnv(runtimeRef, workspacePath, deploymentId, blinkApiUrl, blinkToken, onLog) {
+    const runtime = getRuntime();
+    const content = `BLINK_API_URL=${blinkApiUrl}\nBLINK_AUTH_TOKEN=${blinkToken}\n`;
+    try {
+        await runtime.fs.fsWrite(workspacePath, 'server/.blink.env', content, { runtimeRef });
+        if (onLog) onLog(`blink env injected: BLINK_API_URL=${blinkApiUrl}`);
+        return true;
+    } catch (e) {
+        if (onLog) onLog(`blink env injection failed: ${e.message}`);
+        return false;
+    }
+}
+
+// 在沙箱内起 blink 转发器：监听 127.0.0.1:8787，转发到宿主 /preview/<id>/__blink 并注入 token。
+// 被部署的 xensemble 后端可能是旧代码（无 token 头、无 .blink.env 支持），默认连 127.0.0.1:8787；
+// 转发器让旧代码无需感知代理与鉴权即可经宿主 blink 创建 boxlite session。
+async function startBlinkForwarder(runtimeRef, workspacePath, blinkApiUrl, blinkToken, onLog) {
+    const runtime = getRuntime();
+    try {
+        const script = require('fs').readFileSync(path.join(__dirname, '../preview/blinkForwarder.cjs'), 'utf8');
+        await runtime.fs.fsWrite(workspacePath, '.agents/blinkForwarder.cjs', script, { runtimeRef });
+    } catch (e) {
+        if (onLog) onLog(`write blink forwarder failed: ${e.message}`);
+        return false;
+    }
+    try {
+        // 先清理旧转发器（重新部署时残留，占着 8787 端口）；沙箱 guest 无 pkill，用 fuser 按端口杀。
+        await runtime.exec.exec('sh', ['-c', 'fuser -k 8787/tcp 2>/dev/null; sleep 1; true'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => {});
+        // 用 spawn 起转发器（与 previewProxyServer 一致）：exec 方式起的 detached 进程会随 exec 会话
+        // WS 关闭被 blink 清理，导致转发器在部署后悄悄挂掉（表现为创建 workspace 时 exec 超时）。
+        await runtime.exec.spawn(
+            'node',
+            ['.agents/blinkForwarder.cjs'],
+            {
+                BLINK_UPSTREAM: blinkApiUrl,
+                BLINK_TOKEN: blinkToken,
+                HOME: process.env.HOME || '/root',
+                PATH: process.env.PATH || '/usr/bin:/bin',
+            },
+            { runtimeRef, cwd: workspacePath },
+        );
+    } catch (e) {
+        if (onLog) onLog(`spawn blink forwarder failed: ${e.message}`);
+        return false;
+    }
+    // 等转发器就绪：对 8787 发起健康探测（转发到宿主 __blink/api/health，gateway 返回 blink health 200）。
+    for (let i = 0; i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 600));
+        try {
+            const chk = await runtime.exec.exec(
+                'sh', ['-c', 'curl -s -m 3 -o /dev/null -w "%{http_code}" http://127.0.0.1:8787/api/health'],
+                {}, { runtimeRef, cwd: workspacePath, timeoutMs: 8000 },
+            );
+            if (String(chk.stdout || '').startsWith('2')) {
+                if (onLog) onLog(`blink forwarder ready on 127.0.0.1:8787 -> ${blinkApiUrl}`);
+                return true;
+            }
+        } catch { /* retry */ }
+    }
+    if (onLog) onLog('blink forwarder did not come up on 127.0.0.1:8787');
+    return false;
 }
 
 // 依赖缓存检测：node_modules 存在且比 lockfile 新，说明上次安装的依赖仍匹配当前 lockfile，
@@ -380,14 +618,22 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
     if (!needs) return { ready: false };
 
     try {
-        await runtime.exec.exec('sh', ['-c', `
+        // base 镜像可能未装 PostgreSQL（Debian bookworm 默认无）→ 先 apt 安装。
+        // 幂等：已装则跳过，避免重复 update/install 浪费时间。
+        const install = `
             pkill -9 apt-get 2>/dev/null; pkill -9 dpkg 2>/dev/null; sleep 1
             rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock
+            if ! command -v pg_isready >/dev/null 2>&1 && ! ls /etc/postgresql/*/main 2>/dev/null | grep -q .; then
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq 2>/dev/null || true
+              apt-get install -y -qq postgresql postgresql-contrib 2>&1 | tail -5
+            fi
             (service postgresql start 2>/dev/null || pg_ctlcluster $(ls /etc/postgresql 2>/dev/null | head -1) main start 2>/dev/null) || true
-        `], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
-        // 等 PG 真正就绪（最多 15s），避免「启动命令返回了但 PG 还没监听」导致 agent 误判 dbReady=false
+        `;
+        await runtime.exec.exec('sh', ['-c', install], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 240000 });
+        // 等 PG 真正就绪（最多 30s，apt 安装后首次启动可能偏慢）
         let pgReady = false;
-        for (let i = 0; i < 15; i++) {
+        for (let i = 0; i < 30; i++) {
             await new Promise((r) => setTimeout(r, 1000));
             try {
                 const chk = await runtime.exec.exec('sh', ['-c', 'pg_isready -q 2>/dev/null && echo UP || echo DOWN'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 8000 });
@@ -395,7 +641,7 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
             } catch { /* retry */ }
         }
         if (!pgReady) {
-            console.error('[twoStage] postgres start failed: pg_isready not UP after 15s (fallback to agent)');
+            console.error('[twoStage] postgres start failed: pg_isready not UP after 30s (fallback to agent)');
             return { ready: false };
         }
         console.error('[twoStage] postgres provisioned and ready (pg_isready UP)');
@@ -424,6 +670,147 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
         }
     }
     return { ready: true };
+}
+
+// 沙箱内确保 PostgreSQL 可用：base 镜像（Debian bookworm）默认无 PG，需 apt 安装后启动；
+// 幂等：已装/已启动/已建库则跳过。返回 { ok }，供 verify agent 与 xensemble 后端拉起共用。
+async function ensureSandboxPostgres(runtimeRef, workspacePath, { user, pass, db } = {}) {
+    const runtime = getRuntime();
+    const u = user || 'xensemble';
+    const p = pass || u;
+    const d = db || 'xensemble';
+    try {
+        const install = `
+            pkill -9 apt-get 2>/dev/null; pkill -9 dpkg 2>/dev/null; sleep 1
+            rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock
+            if ! command -v pg_isready >/dev/null 2>&1 && ! ls /etc/postgresql/*/main 2>/dev/null | grep -q .; then
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq 2>/dev/null || true
+              apt-get install -y -qq postgresql postgresql-contrib 2>&1 | tail -5
+            fi
+            (service postgresql start 2>/dev/null || pg_ctlcluster $(ls /etc/postgresql 2>/dev/null | head -1) main start 2>/dev/null) || true
+        `;
+        await runtime.exec.exec('sh', ['-c', install], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 240000 });
+        let ready = false;
+        for (let i = 0; i < 30; i++) {
+            await new Promise((r) => setTimeout(r, 1000));
+            try {
+                const chk = await runtime.exec.exec('sh', ['-c', 'pg_isready -q 2>/dev/null && echo UP || echo DOWN'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 8000 });
+                if (String(chk.stdout || '').trim() === 'UP') { ready = true; break; }
+            } catch { /* retry */ }
+        }
+        if (!ready) return { ok: false, reason: 'postgres not UP after 30s' };
+        const pqPass = String(p).replace(/'/g, "''");
+        const create = `
+            su postgres -c "psql -tAc \\"SELECT 1 FROM pg_roles WHERE rolname='${u}'\\"" 2>/dev/null | grep -q 1 \\
+              || su postgres -c "psql -c \\"CREATE USER ${u} WITH PASSWORD '${pqPass}'\\""
+            su postgres -c "psql -tAc \\"SELECT 1 FROM pg_database WHERE datname='${d}'\\"" 2>/dev/null | grep -q 1 \\
+              || su postgres -c "createdb -O ${u} ${d}"
+        `;
+        await runtime.exec.exec('sh', ['-c', create], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
+        return { ok: true };
+    } catch (e) {
+        return { ok: false, reason: e.message };
+    }
+}
+
+// 探测指定 guest 端口是否为 xensemble 后端（/api/v1/llm/health 返回 JSON，而非静态 HTML/404）。
+async function probeBackendApi(runtimeRef, workspacePath, port) {
+    const runtime = getRuntime();
+    try {
+        const r = await runtime.exec.exec(
+            'sh', ['-c', `curl -s -m 3 http://127.0.0.1:${port}/api/v1/llm/health 2>/dev/null | head -c 300`],
+            {}, { runtimeRef, cwd: workspacePath, timeoutMs: 8000 },
+        );
+        // 必须是 JSON（以 { 或 [ 开头），排除静态服务器 404 的 HTML（<!DOCTYPE / <html，含 CSS 大括号 { 会误判）。
+        const body = String(r.stdout || '').trim();
+        return /^[{[]/.test(body) && !/^<!doctype/i.test(body) && !/^<html/i.test(body);
+    } catch { return false; }
+}
+
+// 确定性拉起嵌套的 xensemble 后端：verify agent 常只 serve 前端 dist（web/dist）而漏起后端，
+// 登录/注册 API 无人响应。此处系统侧强制：
+//   - 若 verify.appPort 已是可用后端（/api 健康检查返回 JSON）则复用；
+//   - 否则确保沙箱 PG（安装+启动+建库）→ db:migrate → node src/server.js（后端同时 serve
+//     web/dist 前端与 /api，单端口全栈），轮询到健康。
+// 返回实际后端端口（作为 tunnel 目标），保证登录/注册/API 全部可用。
+// previewPublicUrl（如 http://IP:8099/preview/dep_x/）：注入后端 CONTROL_PLANE_PUBLIC_URL /
+// ALLOWED_ORIGINS，使嵌套后端生成的预览/网关 URL 落在宿主预览端口，且前端 CORS 放行。
+async function ensureXensembleBackend({ runtimeRef, workspacePath, preferredPort, previewPublicUrl, onLog }) {
+    const runtime = getRuntime();
+    // 1) 复用已就绪后端（verify 可能已起过，探测健康 API）
+    const candidates = [...new Set([preferredPort, 3888, 3000, 8000, 8080].filter((x) => Number(x) > 0))];
+    for (const p of candidates) {
+        if (await probeBackendApi(runtimeRef, workspacePath, p)) {
+            if (onLog) onLog(`reuse existing nested backend on :${p}`);
+            return { ok: true, port: p };
+        }
+    }
+    // 2) 确保 PG（幂等安装 + 启动 + 建库）
+    const pg = await ensureSandboxPostgres(runtimeRef, workspacePath, { user: 'xensemble', pass: 'xensemble', db: 'xensemble' });
+    if (!pg.ok) {
+        if (onLog) onLog(`sandbox postgres provision failed: ${pg.reason}`);
+        return { ok: false, reason: `postgres provision failed: ${pg.reason}` };
+    }
+    // 3) 读 server/.env（DATABASE_URL 等），spawn 后端时注入；无 .env 时用默认
+    let envExtra = {};
+    try {
+        const envText = await runtime.fs.fsRead(workspacePath, 'server/.env', { runtimeRef, encoding: 'utf8' });
+        for (const line of String(envText || '').split('\n')) {
+            const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+            if (m) envExtra[m[1]] = m[2].trim().replace(/^['"]|['"]$/g, '');
+        }
+    } catch { /* no .env, use defaults */ }
+    // 4) 构造运行环境（含 .env 的 DATABASE_URL 等），db:migrate 与后端 spawn 共用
+    const backendPort = (await getGuestFreePort(runtimeRef)) || 3888;
+    // 嵌套后端须指向宿主预览端口：CONTROL_PLANE_PUBLIC_URL 决定其生成的 preview/LLM 网关 URL，
+    // ALLOWED_ORIGINS 需放行宿主预览端口（浏览器经 8099 访问，CORS 校验源）。覆盖 .env 里的
+    // 127.0.0.1:3888（对嵌套部署无效），避免嵌套后端内部链接落到不可达地址。
+    const previewUrl = String(previewPublicUrl || '').replace(/\/+$/, '');
+    // 浏览器访问的是预览端口宿主（origin = scheme://host，无路径），CORS 需放行该 origin。
+    let previewOrigin = '';
+    try { previewOrigin = previewUrl ? new URL(previewUrl).origin : ''; } catch { /* ignore */ }
+    const spawnEnv = {
+        ...envExtra,
+        PORT: String(backendPort),
+        NODE_ENV: 'production',
+        // 生产模式后端默认不自动迁移；嵌套部署无外部 migrate 步骤，强制后端启动时执行迁移。
+        RUN_DB_MIGRATE: '1',
+        // 嵌套 .env 的 UNIGATEWAY_ADMIN_TOKEN 常为占位符，production 启动会抛错退出；
+        // 注入真实 token（优先宿主值，缺失时随机生成），保证嵌套后端能拉起 unigateway。
+        UNIGATEWAY_ADMIN_TOKEN: envExtra.UNIGATEWAY_ADMIN_TOKEN
+            && envExtra.UNIGATEWAY_ADMIN_TOKEN !== 'change-me-to-a-long-random-admin-token'
+            ? envExtra.UNIGATEWAY_ADMIN_TOKEN
+            : (process.env.UNIGATEWAY_ADMIN_TOKEN || crypto.randomBytes(32).toString('hex')),
+        ...(previewUrl ? {
+            CONTROL_PLANE_PUBLIC_URL: previewUrl,
+            ALLOWED_ORIGINS: [previewOrigin, previewUrl, 'http://localhost:3888', 'http://127.0.0.1:3888'].filter(Boolean).join(','),
+        } : {}),
+        HOME: process.env.HOME || '/root',
+        PATH: process.env.PATH || '/usr/bin:/bin',
+    };
+    // db:migrate（幂等；失败不阻断，后端 RUN_DB_MIGRATE=1 启动时会再试）
+    try {
+        await runtime.exec.exec('sh', ['-c', 'cd server && npm run db:migrate'], spawnEnv, { runtimeRef, cwd: workspacePath, timeoutMs: 240000 });
+    } catch (e) {
+        if (onLog) onLog(`nested db:migrate failed (continuing): ${e.message}`);
+    }
+    try {
+        await runtime.exec.spawn('node', ['src/server.js'], spawnEnv, { runtimeRef, cwd: `${workspacePath}/server` });
+    } catch (e) {
+        if (onLog) onLog(`nested backend spawn failed: ${e.message}`);
+        return { ok: false, reason: `backend spawn failed: ${e.message}` };
+    }
+    // 6) 轮询健康检查（后端冷启动 + 建表，最多 60s）
+    for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        if (await probeBackendApi(runtimeRef, workspacePath, backendPort)) {
+            if (onLog) onLog(`nested xensemble backend ready on :${backendPort}`);
+            return { ok: true, port: backendPort };
+        }
+    }
+    if (onLog) onLog(`nested backend did not become healthy on :${backendPort}`);
+    return { ok: false, reason: `backend not healthy on :${backendPort}` };
 }
 
 // 部署通过后，系统侧在沙箱内保持前后端服务，并起一个"单端口聚合服务器"
@@ -794,6 +1181,9 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
     // 必须用 workspace.projectDir(userId, projectId) 计算真实的 host 路径。
     const hostPath = (hostWs && fs.existsSync(hostWs)) ? hostWs : workspace.projectDir(project.userId, project.id);
     repairHostWorkspaceOwnership(hostPath);
+    // 被部署应用是否为 xensemble 自身（存在 server/src/gateway）：决定是否注入 unigateway 二进制
+    // 与 blink 反向代理配置（预览里配网关 + 创建 boxlite session 均依赖）。
+    const isXensemble = fs.existsSync(path.join(hostPath, 'server/src/gateway'));
 
     // 断点续修：resume=true 时优先复用上次保存的 plan + 对话，跳过阶段 1 重新分析。
     let plan = null;
@@ -874,6 +1264,11 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         depsCached = await detectDepsCached(ref, wsPath);
         // 系统侧预启动 PostgreSQL（检测到需要时），避免 verify agent 用 su/runuser/sudo 试错
         const dbProvision = await provisionPostgresIfNeeded(ref, wsPath, plan);
+        // 注入 unigateway 二进制：仅对被部署应用是 xensemble 类（server/src/gateway 存在）时执行，
+        // 使后端能自动拉起网关，预览里「配网关」可用。非此类项目跳过（避免无谓的 11MB 传输）。
+        if (isXensemble) {
+            await injectGatewayBinary(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
+        }
         plan = { ...plan, context: { tree, depsCached, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, successRun: plan._successRun || null } };
         delete plan._successRun;
         // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）。
@@ -963,14 +1358,76 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         // 用 verify 探测到的真实应用端口（agent 可能在非默认端口上 serve），兜底回退 defaultPort。
         let port = verify?.appPort || detected.defaultPort || 3000;
         let served = null;
+        let mode = 'static';
+        const previewLog = (m) => console.error(`[twoStage] ${m}`);
         console.error(`[twoStage] preview: verify.ok=${verify.ok} verify.appPort=${verify?.appPort ?? 'null'} -> using port ${port}`);
-        // verify 已通过健康检查且有 appPort：verify serve 的就是完整应用（自包含，如 deepseek 的
-        // bin.js web、fastapi 的 uvicorn 都是 serve 前端+后端）。tunnel 前先套一层"改写反代"：
-        // 保留完整应用（含 /plugins、后端 API），只把 HTML 里的绝对资源路径改写为相对路径，
-        // 适配 /preview/<id>/ 子路径，避免 /assets、/api 泄漏到宿主源（否则 401 / MIME text-html）。
-        // 若改写反代起不来（端口竞争等）再退化为直接 tunnel verify 端口。
-        // 仅当 verify 无 appPort（纯静态或 verify 未真正起服务）时才用聚合 serve dist 兜底。
-        if (verify?.appPort) {
+
+        // xensemble 自身嵌套部署：verify agent 常只 serve 前端 dist（web/dist）而漏起后端，
+        // 登录/注册 API 无人响应。系统侧确定性拉起后端（PG + db:migrate + node src/server.js）。
+        // 成功后保留其端口供下方 live 聚合代理的 /api 反代使用（不再强制 mode=static，
+        // 让 xensemble 也能走 vite dev server 实时预览；live 失败才回退到后端单端口全栈）。
+        let xensBackend = null;
+        if (isXensemble) {
+            // 后端生成的预览 URL 落宿主预览端口（PREVIEW_PUBLIC_URL + deploymentId），
+            // 未配置 preview 端口时回退控制面 URL 的 /preview/<id> 路径（与 createTunnel 一致）。
+            const previewBase = (process.env.PREVIEW_PUBLIC_URL || '').trim()
+                || resolveControlPlanePublicUrlSync();
+            const previewPublicUrl = `${previewBase.replace(/\/+$/, '')}/preview/${deploymentId}/`;
+            const be = await ensureXensembleBackend({
+                runtimeRef: ref, workspacePath: wsPath,
+                preferredPort: verify?.appPort || detected.defaultPort || 0,
+                previewPublicUrl,
+                onLog: previewLog,
+            });
+            if (be.ok) {
+                xensBackend = be;
+                console.error(`[twoStage] preview: xensemble backend ensured on :${be.port}`);
+            } else {
+                console.error(`[twoStage] preview: xensemble backend ensure failed (${be.reason}); falling back to verify port`);
+            }
+        }
+
+        // 实时预览（live 模式）：项目有 dev server（vite/next/nuxt/npm）时，优先起常驻 dev server，
+        // 改文件后 iframe 刷新即可见，无需重新 build。起不来回退到下面的静态/反代逻辑。
+        if (detected.devKind) {
+            // 清理上一轮部署残留的 live 进程（vite/聚合代理），避免端口污染导致 appPort 误判
+            await runtime.exec.exec('sh', ['-c', 'pkill -f previewProxyServer 2>/dev/null; pkill -f "vite --host" 2>/dev/null; pkill -f "npx vite" 2>/dev/null; pkill -f "next dev" 2>/dev/null; pkill -f "nuxt dev" 2>/dev/null; sleep 1; true'], {}, { runtimeRef: ref, cwd: wsPath, timeoutMs: 15000 }).catch(() => {});
+            const live = await startLiveDevServer({
+                runtimeRef: ref, workspacePath: wsPath,
+                devKind: detected.devKind, devDir: detected.devDir || '.', defaultPort: detected.defaultPort,
+                base: `/preview/${deploymentId}/`,
+                onLog: previewLog,
+            });
+            if (live.ok) {
+                const aggPort = (await getGuestFreePort(ref)) || 0;
+                // /api 反代目标：优先用系统侧拉起的真实后端端口（xensBackend），
+                // 否则用 verify.appPort（可能是静态 serve 误报，但不阻塞 live 前端展示）。
+                const backendForApi = xensBackend?.port || verify?.appPort || 0;
+                const aggOk = aggPort ? await startViteAggregateProxy({
+                    runtimeRef: ref, workspacePath: wsPath,
+                    devPort: live.port, backendPort: backendForApi, listenPort: aggPort,
+                    base: `/preview/${deploymentId}/`,
+                    onLog: previewLog,
+                }) : false;
+                if (aggOk) {
+                    port = aggPort;
+                    mode = 'live';
+                    console.error(`[twoStage] preview: LIVE dev server on :${live.port} -> aggregate :${aggPort} (mode=live, backend=:${backendForApi || 'none'})`);
+                } else {
+                    console.error(`[twoStage] preview: LIVE aggregate proxy failed, falling back to static`);
+                }
+            }
+        }
+
+        // 非 live 模式：
+        // 1) xensemble 且 live 失败 → 直接用系统侧拉起的真实后端端口（单端口全栈，serve web/dist + /api）
+        // 2) verify 有 appPort → 套"改写反代"保留完整应用（verify serve 的就是完整应用）
+        // 3) 其余（纯静态）→ 聚合 serve dist 兜底
+        if (mode !== 'live' && xensBackend) {
+            port = xensBackend.port;
+            served = { ok: true };
+            console.error(`[twoStage] preview: xensemble live 未启用，回退后端单端口全栈 :${port} (mode=static)`);
+        } else if (mode !== 'live' && verify?.appPort) {
             const proxyPort = (await getGuestFreePort(ref)) || 0;
             if (proxyPort) {
                 const proxyOk = await startRewriteProxy({
@@ -987,7 +1444,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             } else {
                 console.error(`[twoStage] preview: no free guest port for rewrite proxy, tunneling verify port ${verify.appPort} directly`);
             }
-        } else {
+        } else if (mode !== 'live') {
             served = await ensureFrontendServed({ runtimeRef: ref, workspacePath: wsPath, port, onLog: (m) => console.error(`[twoStage] ${m}`) });
             if (served.ok) port = served.port;
             console.error(`[twoStage] preview: verify had NO appPort, fell back to aggregate serve port ${port}`);
@@ -995,10 +1452,19 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         const tunnel = await createTunnel({ deploymentId, workspacePath: wsPath, runtimeRef: ref, vmPort: port, projectId: project.id });
         await db.insert(schema.deployments).values({
             id: deploymentId, userId, projectId: project.id, sessionId: sessionId || null, runtimeId,
-            kind: 'preview', status: 'running', revision: 'live',
+            kind: 'preview', status: 'running', revision: 'live', mode,
             publicUrl: tunnel.publicUrl, internalRef: tunnel.internalRef,
             expiresAt: now + PREVIEW_TTL_MS, createdAt: now, updatedAt: now, createdBy: userId,
         });
+        // 注入 blink 反向代理配置（仅 xensemble 自身部署）：沙箱后端据此经 /preview/<id>/__blink
+        // 访问宿主 blink-server，在预览里创建 boxlite 隔离的 agent session。
+        // 同时起本地转发器（监听 8787），兼容旧版被部署代码（无 token 头/.blink.env 支持）。
+        if (isXensemble) {
+            const blinkApiUrl = `${tunnel.publicUrl.replace(/\/+$/, '')}/__blink`;
+            const blinkToken = signBlinkToken(deploymentId, now + PREVIEW_TTL_MS);
+            await injectBlinkEnv(ref, wsPath, deploymentId, blinkApiUrl, blinkToken, (m) => console.error(`[twoStage] ${m}`));
+            await startBlinkForwarder(ref, wsPath, blinkApiUrl, blinkToken, (m) => console.error(`[twoStage] ${m}`));
+        }
         // The verify agent already started the app in the background (guest) and health-checked it,
         // so we do NOT re-launch the serve command here — re-running it would hit a port conflict.
         const previewToken = await deploymentService.issuePreviewToken(deploymentId);

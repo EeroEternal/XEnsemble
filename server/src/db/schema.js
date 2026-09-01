@@ -204,6 +204,8 @@ const deployments = pgTable('deployments', {
   internalRef: text('internal_ref'),
   previewTokenHash: text('preview_token_hash'),
   revision: text('revision'),
+  // preview 运行模式：'live'（常驻 dev server 实时预览）| 'static'（构建产物静态 serve）
+  mode: text('mode').notNull().default('static'),
   expiresAt: bigint('expires_at', { mode: 'number' }),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),

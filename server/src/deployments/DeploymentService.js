@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { eq, and, desc } = require('drizzle-orm');
+const { eq, and, desc, inArray } = require('drizzle-orm');
 const { db } = require('../db/index');
 const schema = require('../db/schema');
 const { getRuntime } = require('../runtime/registry');
@@ -61,6 +61,7 @@ function formatDeployment(row) {
         public_url: row.publicUrl,
         internal_ref: row.internalRef,
         revision: row.revision,
+        mode: row.mode,
         expires_at: row.expiresAt,
         created_at: row.createdAt,
         updated_at: row.updatedAt,
@@ -233,6 +234,26 @@ async function stopPreview(userId, deployment) {
         updatedAt: now,
         stoppedBy: userId,
     }).where(eq(schema.deployments.id, deployment.id));
+
+    // 状态对齐：一键部署（twoStage）会为同一 project+session 同时写入 kind='deploy'（进度）与
+    // kind='preview'（隧道）两条记录。停止其中一条时，另一条若仍是 running 会永久卡在运行态
+    // （前端误判"部署中"，且并发配额把残留记录算作占用）。这里把同 project+session 的所有
+    // running/building 记录一并标记 stopped，保证右上角状态与实际隧道一致。
+    try {
+        const conds = [
+            eq(schema.deployments.userId, userId),
+            eq(schema.deployments.projectId, deployment.projectId),
+            inArray(schema.deployments.status, ['running', 'building']),
+        ];
+        if (deployment.sessionId) conds.push(eq(schema.deployments.sessionId, deployment.sessionId));
+        await db.update(schema.deployments).set({
+            status: 'stopped',
+            updatedAt: now,
+            stoppedBy: userId,
+        }).where(and(...conds));
+    } catch (e) {
+        console.error('[deployment] failed to sync sibling deployment statuses:', e.message);
+    }
 
     await recordEvent({
         userId,
