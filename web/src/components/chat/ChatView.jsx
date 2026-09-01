@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Loader2, SendHorizonal, Square, User, Sparkles, Wrench, ChevronRight, Copy, Check, AlertCircle,
+  Loader2, SendHorizonal, Square, User, Sparkles, Wrench, ChevronRight, Copy, Check, AlertCircle, Info, X,
 } from 'lucide-react';
 import { apiFetch, getAccessToken, getWsUrl } from '../../lib/api';
 import { consoleInputClass, consoleButtonFocusClass } from '../../lib/consoleTokens';
@@ -163,6 +163,8 @@ export default function ChatView({ sessionId, onSessionEnd }) {
   const [scrollMetrics, setScrollMetrics] = useState({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 });
   const [scrollbarHover, setScrollbarHover] = useState(false);
   const [scrollbarDrag, setScrollbarDrag] = useState(false);
+  // TUI command limitation notice — dismissable per session.
+  const [tuiHintDismissed, setTuiHintDismissed] = useState(false);
   // Timestamp (ms) of the last "stop" click. While set and no new chat_event
   // has arrived since, we treat the agent as idle so the thinking marker
   // disappears (Esc-twice aborts the current task; the session itself is
@@ -387,6 +389,32 @@ export default function ChatView({ sessionId, onSessionEnd }) {
           );
         })()}
       </div>
+
+      {/* TUI command limitation notice. The chat view sends each textarea
+          submission as a single agent prompt, so it can't drive TUI slash
+          commands like /model or /vim that need an interactive sub-menu
+          (arrow-key selection etc.). Tell the user to switch to the agent
+          view for those. */}
+      {!tuiHintDismissed && (
+        <div className="border-t border-zinc-200 bg-amber-50/60 px-4 py-2">
+          <div className="mx-auto flex max-w-3xl items-start gap-2 text-[12px] text-amber-900">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+            <p className="flex-1 leading-relaxed">
+              {t('chat:tui_command_hint', {
+                defaultValue: 'TUI commands like /model and /vim aren\'t supported here — switch to the Agent view to use them.',
+              })}
+            </p>
+            <button
+              type="button"
+              onClick={() => setTuiHintDismissed(true)}
+              aria-label={t('common:action.dismiss', { defaultValue: 'Dismiss' })}
+              className="shrink-0 rounded p-0.5 text-amber-700 hover:bg-amber-100 hover:text-amber-900"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Input */}
       <div className="border-t border-zinc-200 bg-surface px-4 py-3">
