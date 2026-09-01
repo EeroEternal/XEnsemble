@@ -42,6 +42,8 @@ const DEFAULT_AGENTS = [
         cmd: 'claude',
         args: [],
         env_required: ['ANTHROPIC_API_KEY'],
+        // P4：技能注入目标文件（仅 claude-code 用 CLAUDE.md，其余默认 AGENTS.md）
+        instructionFile: 'CLAUDE.md',
         resume: {
             level: 'L2',
             stateEnv: 'CLAUDE_CONFIG_DIR',
@@ -476,4 +478,15 @@ const DEFAULT_AGENTS = [
     },
 ];
 
-module.exports = { DEFAULT_AGENTS };
+/**
+ * P4：解析某 agent 的技能注入目标指令文件。
+ * 仅 claude-code 声明 CLAUDE.md；未声明默认 AGENTS.md；自定义 agent → AGENTS.md。
+ * @param {string} agentId
+ * @returns {string} 'CLAUDE.md' | 'AGENTS.md'
+ */
+function getInstructionFile(agentId) {
+    const agent = DEFAULT_AGENTS.find((a) => a.id === agentId);
+    return agent?.instructionFile || 'AGENTS.md';
+}
+
+module.exports = { DEFAULT_AGENTS, getInstructionFile };

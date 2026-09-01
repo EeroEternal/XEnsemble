@@ -72,6 +72,7 @@ const {
     start: startSkillPipelineHook,
     stop: stopSkillPipelineHook,
 } = require('./skills/skillPipeline');
+const { injectForSession: injectSkillsForSession, isEnabled: skillInjectEnabled } = require('./skills/skillInjector');
 const { createIdleHibernateMonitor, stopSession, waitForAgentExit } = require('./session/idleHibernate');
 const { terminateDetachedSessionProcess } = require('./session/sessionTermination');
 const {
@@ -1854,6 +1855,27 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
             resolved.env = applyCustomEnv(resolved.env, userSessionConfig.customEnv, {
                 blockedKeys: authMode === 'gateway' ? GATEWAY_MANAGED_ENV_KEYS : [],
             });
+        }
+
+        // P4：spawn 前把 active skills 注入 workspace 指令文件（AGENTS.md / CLAUDE.md）。
+        // 失败仅 log，不阻断 spawn。workspace 目录由 workspace.js 在控制面本地创建
+        // （Local/BoxLite 均可见），故用默认本地 fs 适配器直写。
+        if (skillInjectEnabled()) {
+            try {
+                const injectResult = await injectSkillsForSession({
+                    userId: request.user.id,
+                    projectId: project_id,
+                    agentId: agentMeta.id,
+                    workspacePath,
+                });
+                if (injectResult.injected) {
+                    fastify.log.info(
+                        `[skills] injected ${injectResult.count} skill(s) into ${injectResult.instructionFile} for ${agentMeta.id} (session ${sessionId})`,
+                    );
+                }
+            } catch (err) {
+                fastify.log.warn({ err, sessionId }, '[skills] inject-for-session failed (non-fatal)');
+            }
         }
 
         try {

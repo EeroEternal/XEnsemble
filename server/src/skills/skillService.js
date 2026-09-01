@@ -81,6 +81,17 @@ function requireOwner(skill, userId) {
     }
 }
 
+/**
+ * T4.4：skill 状态/内容/删除变更后，对无 running session 的项目重渲染指令文件。
+ * 懒加载 skillInjector（避免循环依赖）；SKILL_INJECT_ENABLED=false 时 injector 内部 no-op。
+ */
+async function reRenderAfterSkillChange(userId, projectId) {
+    try {
+        const { reRenderForSkillChange } = require('./skillInjector');
+        await reRenderForSkillChange({ userId, projectId: projectId || null });
+    } catch (_) { /* 重渲染失败不影响主操作 */ }
+}
+
 function validateCreate({ title, content }) {
     const trimmedTitle = String(title ?? '').trim();
     const trimmedContent = String(content ?? '').trim();
@@ -207,10 +218,16 @@ async function updateSkill(userId, skillId, patch = {}) {
     if (patch.projectId !== undefined) next.projectId = patch.projectId || null;
     next.updatedAt = Date.now();
 
+    const oldProjectId = skill.projectId || null;
     await db.update(schema.skills)
         .set(next)
         .where(and(eq(schema.skills.id, skillId), eq(schema.skills.userId, userId)));
-    return getSkill(userId, skillId);
+
+    // T4.4：内容/作用域变更后重渲染指令文件（无 running session 的项目）
+    const newSkill = await getSkill(userId, skillId);
+    await reRenderAfterSkillChange(userId, oldProjectId);
+    await reRenderAfterSkillChange(userId, newSkill.projectId || null);
+    return newSkill;
 }
 
 /**
@@ -231,6 +248,9 @@ async function changeStatus(userId, skillId, action) {
     await db.update(schema.skills)
         .set({ status: nextStatus, updatedAt: Date.now() })
         .where(and(eq(schema.skills.id, skillId), eq(schema.skills.userId, userId)));
+
+    // T4.4：activate/archive/restore 后重渲染（归档 → 无 active 时标记段被移除）
+    await reRenderAfterSkillChange(userId, skill.projectId || null);
     return getSkill(userId, skillId);
 }
 
@@ -242,6 +262,9 @@ async function deleteSkill(userId, skillId) {
     requireOwner(skill, userId);
     await db.delete(schema.skills)
         .where(and(eq(schema.skills.id, skillId), eq(schema.skills.userId, userId)));
+
+    // T4.4：删除后若该作用域无 active skill，重渲染会移除注入段
+    await reRenderAfterSkillChange(userId, skill.projectId || null);
     return { ok: true };
 }
 
