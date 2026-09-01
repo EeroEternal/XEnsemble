@@ -54,6 +54,16 @@ function readJsonSafe(filePath) {
 
 /**
  * Idempotent: ensure `.agents/preview.json` (and starter index.html) exist for new workspaces.
+ *
+ * @deprecated The workspace bootstrap path no longer calls this function.
+ * `.agents/preview.json` is now written by the two-stage auto-deploy
+ * pipeline (server/src/deployments/twoStage.js) once a successful
+ * start command is resolved, which is the only signal that a project
+ * can actually be previewed. The function is retained only because
+ * (a) the manual `ensure-preview` API and (b) the LocalPreviewAdapter
+ * can still consume a hand-written contract for low-level recovery
+ * cases; both paths are slated to be replaced by the deploy pipeline
+ * in a follow-up change.
  */
 function ensurePreviewContractFile(workspacePath) {
     const existingWorkspaceFiles = fs.existsSync(workspacePath)
@@ -73,6 +83,12 @@ function ensurePreviewContractFile(workspacePath) {
 
 /**
  * Parse preview contract: `.agents/preview.json` > package.json scripts.
+ *
+ * @deprecated Prefer server/src/deployments/detectStack.js for new code.
+ * This function is still used by LocalPreviewAdapter and the manual
+ * ensure-preview path; both are slated to be replaced by the two-stage
+ * deploy pipeline.
+ *
  * @returns {{ shell: string, port: number }}
  */
 function resolvePreviewContract(workspacePath) {

@@ -34,14 +34,18 @@ describe('agentBootstrap', () => {
         await ctx.teardown();
     });
 
-    it('seeds setup script, AGENTS.md, and preview contract', () => {
+    it('seeds setup script, AGENTS.md, and resume; does not seed preview.json (handled by two-stage deploy)', () => {
         const ws = path.join(tmpDir, 'seed');
         fs.mkdirSync(ws, { recursive: true });
         seedAgentWorkspaceFiles(ws);
         assert.ok(fs.existsSync(path.join(ws, '.agents', 'setup')));
         assert.ok(fs.existsSync(path.join(ws, '.agents', 'resume')));
         assert.ok(fs.existsSync(path.join(ws, '.agents', 'AGENTS.md')));
-        assert.ok(fs.existsSync(path.join(ws, '.agents', 'preview.json')));
+        // .agents/preview.json is intentionally NOT seeded at workspace
+        // bootstrap; it is the output of a successful two-stage deploy.
+        assert.ok(!fs.existsSync(path.join(ws, '.agents', 'preview.json')));
+        // Starter index.html still ships for an empty workspace so the
+        // preview iframe isn't completely blank.
         assert.ok(fs.existsSync(path.join(ws, 'index.html')));
     });
 

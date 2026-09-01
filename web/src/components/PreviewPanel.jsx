@@ -110,19 +110,28 @@ export function usePreview(projectId, token, sessionId) {
   const deployPreview = async () => {
     setLoading(true);
     try {
+      // The server-side /preview endpoint now runs the two-stage auto-deploy
+      // pipeline (stage A analyses, stage B builds+starts, verify probes
+      // the listening port). On success the pipeline also writes a
+      // `kind: 'preview'` row to the `deployments` table, so the panel
+      // picks it up on its next poll, and the response carries
+      // { public_url, preview_token, deploymentId } for instant window open.
       const res = await apiFetch(withSessionId(`/api/v1/projects/${encodeURIComponent(projectId)}/preview`), {
         method: 'POST',
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t('deploy:error.preview_deploy_failed'));
-      setDeployment(data);
-      if (data.status === 'running' && data.public_url) {
+      if (data.public_url) {
         const url = data.preview_token
           ? `${data.public_url}${data.public_url.includes('?') ? '&' : '?'}preview_token=${encodeURIComponent(data.preview_token)}`
-          : null;
-        if (url && !openPreviewWindow(url, previewWindowRef)) {
+          : data.public_url;
+        if (!openPreviewWindow(url, previewWindowRef)) {
           showToast('error', t('deploy:action.popups_preview_running'));
         }
+        // Pull the latest deployment row so the status badge / stop button
+        // are populated. The two-stage pipeline persists it asynchronously
+        // after returning, so a single refresh is enough in the common case.
+        loadDeployments();
       }
     } catch (e) {
       showToast('error', e.message);

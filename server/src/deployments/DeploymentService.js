@@ -280,7 +280,17 @@ async function remove(userId, deploymentId) {
         ));
 }
 
-/** 创建 preview deployment 并立即 start（Console 一键部署）。 */
+/**
+ * 创建 preview deployment 并立即 start（Console 一键部署）。
+ *
+ * NOTE: this path runs the legacy LocalPreviewAdapter (npx serve / package.json dev
+ * script). It is kept as the internal helper used by `ensurePreview` for
+ * preview-health recovery and reconnection; the user-facing "Open Preview"
+ * button now goes through POST /api/v1/projects/:id/preview → two-stage
+ * auto-deploy (see server.js:2432), which produces a real working preview
+ * for monorepos and go/python/etc projects that the legacy path could
+ * not handle. New code should prefer the two-stage endpoint.
+ */
 async function deployAndStartPreview(userId, project, opts = {}) {
     const dep = await createPreview(userId, project, opts);
     const row = await getForUser(userId, dep.id);

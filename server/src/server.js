@@ -52,7 +52,7 @@ const { registerAuthRoutes } = require('./routes/auth');
 const { registerAdminRoutes } = require('./routes/admin');
 const { registerUserRoutes } = require('./routes/user');
 const { registerWorkspaceRoutes } = require('./routes/workspace');
-const { registerAutoDeployRoutes } = require('./deployments/twoStage');
+const { registerAutoDeployRoutes, runAutoTwoStageDeploy } = require('./deployments/twoStage');
 const { registerTerminalHttpRoutes } = require('./routes/terminalHttp');
 const { registerGitHubRoutes } = require('./routes/github');
 const { registerGitRoutes } = require('./routes/git');
@@ -2447,14 +2447,33 @@ fastify.post('/api/v1/projects/:projectId/preview', { preValidation: [fastify.au
     if (!previewQuota.ok) return policy.quotaErrorReply(reply, previewQuota);
 
     try {
-        const sessionId = request.query?.session_id || request.body?.session_id;
-        let opts = {};
-        if (sessionId) {
-            const rtId = await resolveRuntimeIdFromSession(request.user.id, sessionId);
-            if (rtId) opts = { runtimeId: rtId };
+        // "Open Preview" runs the two-stage auto-deploy pipeline synchronously
+        // (no SSE): stage A analyses the project, stage B builds/starts the
+        // app, verify probes the listening port. On success the response
+        // carries previewUrl + previewToken, matching what PreviewPanel
+        // already expects (data.public_url + data.preview_token).
+        const result = await runAutoTwoStageDeploy({
+            projectId: request.params.projectId,
+            userId: request.user.id,
+            role: request.user.role,
+            getProjectForUser,
+            resume: false,
+            sessionId: request.query?.session_id || request.body?.session_id,
+        });
+        if (!result?.ok) {
+            const code = result?.statusCode || 503;
+            return reply.code(code).send({
+                error: result?.error || 'Preview deploy failed',
+                code: result?.errorCode || 'preview_deploy_failed',
+            });
         }
-        const dep = await deploymentService.deployAndStartPreview(request.user.id, project, opts);
-        return reply.code(201).send(dep);
+        return reply.code(201).send({
+            ok: true,
+            public_url: result.previewUrl,
+            deploymentId: result.deploymentId,
+            preview_token: result.previewToken,
+            elapsed_ms: result.elapsedMs,
+        });
     } catch (err) {
         const code = err instanceof RuntimeError ? err.statusCode : 503;
         const { message } = sanitizePublicError(err, 'Preview deploy failed');

@@ -275,15 +275,33 @@ async function savePlanCache(projectId, plan) {
 }
 
 function detectProjectType(hostWorkspacePath) {
-    if (!hostWorkspacePath) {
-        return { type: 'unknown', defaultPort: 3000, installCmd: null, buildCmd: null, startCmd: null, devKind: null, devDir: '.' };
+    // Delegated to the shared detectStack module; this wrapper preserves
+    // the twoStage-specific `devKind` / `devDir` fields (used by
+    // startLiveDevServer to pick a sub-directory for monorepo frontends).
+    const { detectStack } = require('./detectStack');
+    const stack = detectStack(hostWorkspacePath);
+    if (!hostWorkspacePath || !stack || stack.type === 'unknown') {
+        return {
+            type: stack?.type || 'unknown',
+            defaultPort: stack?.defaultPort || 3000,
+            installCmd: stack?.installCmd || null,
+            buildCmd: stack?.buildCmd || null,
+            startCmd: stack?.startCmd || null,
+            devKind: null,
+            devDir: '.',
+        };
     }
+    return enrichWithDevKind(stack, hostWorkspacePath);
+}
+
+function enrichWithDevKind(stack, hostWorkspacePath) {
     const fs = require('fs');
     const path = require('path');
     const has = (n) => { try { return fs.existsSync(path.join(hostWorkspacePath, n)); } catch { return false; } };
     const readJson = (n) => { try { return JSON.parse(fs.readFileSync(path.join(hostWorkspacePath, n), 'utf8')); } catch { return null; } };
 
-    // 探测 monorepo 子前端（web/frontend/client/app），返回 { devKind, dir } 或 null。
+    // live 模式专用：探测 monorepo 子前端（web/frontend/client/app），
+    // 因为 monorepo 根 dev 常是 concurrently/electron 聚合，不是 web 前端。
     // 子目录优先级：vite > next > nuxt > 有 dev script 的 npm 项目。
     const detectSubDev = () => {
         const dirs = ['web', 'frontend', 'client', 'app'];
@@ -299,56 +317,23 @@ function detectProjectType(hostWorkspacePath) {
         }
         return null;
     };
-
-    // 判定 package.json 的 dev server 框架类型（仅 vite / next / nuxt；dev script 的 npm 不在此判，
-    // 因为 monorepo 根 dev 常是 concurrently/electron 聚合，不是 web 前端，优先级应低于子前端探测）。
-    const devKindOf = (pkg) => {
-        if (!pkg) return null;
-        const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-        if (deps.vite) return 'vite';
-        if (deps.next) return 'next';
-        if (deps.nuxt) return 'nuxt';
-        return null;
+    // devKind 仅在根目录能直接启动 dev server 时（vite/next/nuxt）赋值；
+    // dev script 兜底留给 startLiveDevServer 自己根据 devKind==='npm' 走 PORT。
+    let devKind = stack.framework;
+    let devDir = '.';
+    if (stack.type === 'monorepo' || !devKind) {
+        const sub = detectSubDev();
+        if (sub) { devKind = sub.devKind; devDir = sub.dir; }
+    }
+    return {
+        type: stack.type,
+        defaultPort: stack.defaultPort,
+        installCmd: stack.installCmd,
+        buildCmd: stack.buildCmd,
+        startCmd: stack.startCmd,
+        devKind,
+        devDir,
     };
-
-    if (has('package.json')) {
-        const pkg = readJson('package.json') || {};
-        const scripts = pkg.scripts || {};
-        const pm = has('pnpm-lock.yaml') ? 'pnpm' : has('yarn.lock') ? 'yarn' : has('bun.lockb') ? 'bun' : 'npm';
-        const installCmd = `${pm} install --no-audit --no-fund`;
-        const buildCmd = scripts.build ? `${pm} run build` : null;
-        const startCmd = scripts.start ? `${pm} run start` : (scripts.dev ? `${pm} run dev` : null);
-        const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-        let defaultPort = 3000;
-        if (deps.next || deps.nuxt) defaultPort = 3000;
-        else if (deps.vite) defaultPort = 5173;
-        // live 判定：根 vite/next/nuxt 优先；否则探测子前端（monorepo 根 dev 常是 concurrently/electron
-        // 聚合，不是 web 前端）；都没有才用根 dev script 兜底（CRA/webpack 单应用）。
-        let devKind = devKindOf(pkg);
-        let devDir = '.';
-        if (!devKind) {
-            const sub = detectSubDev();
-            if (sub) { devKind = sub.devKind; devDir = sub.dir; defaultPort = sub.devKind === 'vite' ? 5173 : 3000; }
-            else if (scripts.dev) { devKind = 'npm'; devDir = '.'; }
-        }
-        return { type: 'node', defaultPort, installCmd, buildCmd, startCmd, devKind, devDir };
-    }
-    if (has('requirements.txt')) {
-        return { type: 'python', defaultPort: 8000, installCmd: 'pip install -r requirements.txt', buildCmd: null, startCmd: 'python3 -m http.server 8000 --bind 0.0.0.0', devKind: null, devDir: '.' };
-    }
-    if (has('pyproject.toml')) {
-        return { type: 'python', defaultPort: 8000, installCmd: 'pip install -e .', buildCmd: null, startCmd: 'python3 -m http.server 8000 --bind 0.0.0.0', devKind: null, devDir: '.' };
-    }
-    if (has('go.mod')) {
-        return { type: 'go', defaultPort: 8080, installCmd: 'go mod download', buildCmd: 'go build ./...', startCmd: 'go run .', devKind: null, devDir: '.' };
-    }
-    if (has('Cargo.toml')) {
-        return { type: 'rust', defaultPort: 8080, installCmd: 'cargo fetch', buildCmd: 'cargo build --release', startCmd: 'cargo run --release', devKind: null, devDir: '.' };
-    }
-    if (has('index.html')) {
-        return { type: 'static', defaultPort: 8000, installCmd: null, buildCmd: null, startCmd: 'python3 -m http.server 8000 --bind 0.0.0.0', devKind: null, devDir: '.' };
-    }
-    return { type: 'unknown', defaultPort: 3000, installCmd: null, buildCmd: null, startCmd: null, devKind: null, devDir: '.' };
 }
 
 // 在沙箱内探测一个空闲端口（避免 verify 残留进程占用默认端口导致聚合 EADDRINUSE）。

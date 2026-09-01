@@ -3,7 +3,6 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
-const { ensurePreviewContractFile } = require('../runtime/previewContract');
 const repositoryEnvironment = require('../repositories/RepositoryEnvironmentService');
 
 const execFileAsync = promisify(execFile);
@@ -15,6 +14,40 @@ const AGENTS_MD_FILE = 'AGENTS.md';
 const AGENTS_MD_VERSION = 2;
 const SETUP_TIMEOUT_MS = Number(process.env.AGENT_SETUP_TIMEOUT_MS || 600000);
 const LOG_TAIL_MAX = 8000;
+
+const DEFAULT_INDEX_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Preview</title>
+</head>
+<body>
+  <h1>Workspace ready</h1>
+  <p>Edit files here, or run the two-stage deploy from the UI to bring up the full app stack.</p>
+  <script>
+  (function () {
+    var params = new URLSearchParams(window.location.search);
+    var token = params.get('preview_token');
+    if (!token) return;
+    function post(level, args) {
+      fetch('__dev/console', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Preview-Token': token },
+        body: JSON.stringify({ level: level, message: args.map(String).join(' ') })
+      }).catch(function () {});
+    }
+    ['log', 'warn', 'error', 'info'].forEach(function (m) {
+      var orig = console[m].bind(console);
+      console[m] = function () {
+        post(m, Array.prototype.slice.call(arguments));
+        orig.apply(console, arguments);
+      };
+    });
+  })();
+  </script>
+</body>
+</html>
+`;
 
 const DEFAULT_SETUP_SCRIPT = `#!/usr/bin/env bash
 set -euo pipefail
@@ -55,7 +88,12 @@ This directory is managed by XEnsemble. Agents should not guess ports, login, se
 
 - Idempotent ensure: \`POST /api/v1/projects/:id/agents/ensure-preview\`
 - Ports and URLs: \`.agents/ports.json\`
-- Configure \`.agents/preview.json\` or use package.json \`dev\` / \`start\` / \`preview\` script
+- Preview is delivered via the two-stage auto-deploy pipeline. The
+  resolved start command is written to \`.agents/preview.json\` only
+  after a successful deploy — there is no fallback \`npx serve\` stub.
+  If you need a hand-written contract, write \`.agents/preview.json\`
+  with \`{ command, args, port }\` and the LocalPreviewAdapter will use
+  it as the lowest-priority override.
 
 ## Logs
 
@@ -157,8 +195,24 @@ function seedAgentWorkspaceFiles(workspacePath) {
 
     const { seedResumeScript } = require('./agentResumeHook');
     seedResumeScript(workspacePath);
+    // .agents/preview.json is NOT seeded here. Preview startup goes through
+    // the two-stage auto-deploy pipeline (detectStack → LLM analysis →
+    // start command), and writes the resolved contract as a side effect
+    // of a successful deploy. Seeding an npx-serve fallback would mask
+    // real project layout and produce a broken preview for monorepos.
 
-    ensurePreviewContractFile(workspacePath);
+    // Seed a starter index.html for empty workspaces so the preview
+    // iframe isn't completely blank before the user has written any code.
+    // Previously this lived in ensurePreviewContractFile(); moved here
+    // because we no longer call that from bootstrap.
+    const indexPath = path.join(workspacePath, 'index.html');
+    if (!fs.existsSync(indexPath)) {
+        const existingFiles = fs.readdirSync(workspacePath)
+            .filter((n) => ![AGENTS_DIR, '.xensemble', '.git', '.gitignore'].includes(n));
+        if (existingFiles.length === 0) {
+            fs.writeFileSync(indexPath, DEFAULT_INDEX_HTML, 'utf8');
+        }
+    }
 }
 
 function shouldRunSetup(workspacePath, { force = false } = {}) {
