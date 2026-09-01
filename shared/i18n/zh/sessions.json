@@ -104,6 +104,7 @@
   "conversation": {
     "refresh": "刷新",
     "refreshing": "刷新中…",
+    "summary": "对话摘要",
     "overview": "概览",
     "key_decisions": "关键决策",
     "files_touched": "涉及文件",
@@ -116,7 +117,10 @@
     "load_failed": "加载对话失败",
     "refresh_failed": "刷新对话失败",
     "refresh_in_progress": "刷新正在进行中",
-    "llm_not_configured": "未配置 LLM 分析密钥"
+    "llm_not_configured": "未配置 LLM 分析密钥",
+    "close": "关闭",
+    "load_more": "显示更多 {{count}} 轮",
+    "showing_groups": "显示 {{shown}} / 共 {{total}} 组对话"
   },
   "history": {
     "view_all": "查看全部历史",
@@ -136,7 +140,8 @@
     "exit_code": "退出码 {{code}}",
     "total": "{{total}} 个会话",
     "prev": "上一页",
-    "next": "下一页"
+    "next": "下一页",
+    "open_detail": "查看对话"
   },
   "guide": {
     "title": "告诉 Agent 你想构建什么",

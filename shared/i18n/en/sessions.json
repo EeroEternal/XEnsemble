@@ -104,6 +104,7 @@
   "conversation": {
     "refresh": "Refresh",
     "refreshing": "Refreshing…",
+    "summary": "Conversation summary",
     "overview": "Overview",
     "key_decisions": "Key decisions",
     "files_touched": "Files touched",
@@ -116,7 +117,10 @@
     "load_failed": "Failed to load conversation",
     "refresh_failed": "Failed to refresh conversation",
     "refresh_in_progress": "Refresh already in progress",
-    "llm_not_configured": "LLM analysis is not configured"
+    "llm_not_configured": "LLM analysis is not configured",
+    "close": "Close",
+    "load_more": "Show {{count}} more turns",
+    "showing_groups": "Showing {{shown}} of {{total}} exchanges"
   },
   "history": {
     "view_all": "View all history",
@@ -136,7 +140,8 @@
     "exit_code": "exit {{code}}",
     "total": "{{total}} sessions",
     "prev": "Previous page",
-    "next": "Next page"
+    "next": "Next page",
+    "open_detail": "Open conversation"
   },
   "guide": {
     "title": "Tell the agent what to build",

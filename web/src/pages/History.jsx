@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Search, RotateCcw, Bot, Folder, Clock, FileText, ChevronLeft, ChevronRight,
-  ChevronDown, Lightbulb, User, RefreshCw, Loader2,
+  ChevronDown, Lightbulb, User, RefreshCw, Loader2, X, ChevronsDown,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
@@ -12,9 +12,11 @@ import {
   consoleEmptyStateClass,
   consoleToolbarInputClass,
   consoleStatusBadgeClass,
+  consoleIconButtonClass,
 } from '../lib/consoleTokens';
 
 const PAGE_SIZE = 20;
+const GROUPS_PER_BATCH = 10;
 
 const STATUS_OPTIONS = [
   { value: '', labelKey: 'all' },
@@ -39,11 +41,61 @@ function statusDotClass(status) {
 }
 
 /**
- * Inline distilled-conversation summary shown when a history row is expanded.
- * Fetches GET .../conversation and renders overview / key decisions / files /
- * distilled turns, with a manual Refresh (POST .../conversation/refresh).
+ * Group flat turns into exchanges: each user turn opens a group, and the
+ * assistant turns that follow it belong to that group. A leading assistant
+ * turn with no preceding user turn forms its own group.
  */
-function ConversationDetail({ sessionId }) {
+function groupTurns(turns) {
+  const groups = [];
+  let current = null;
+  for (const turn of turns) {
+    if (turn.role === 'user') {
+      current = { user: turn, replies: [] };
+      groups.push(current);
+    } else if (current) {
+      current.replies.push(turn);
+    } else {
+      current = { user: null, replies: [turn] };
+      groups.push(current);
+    }
+  }
+  return groups;
+}
+
+function TurnBubble({ turn, isUser }) {
+  const { t } = useTranslation();
+  const text = turn.summary ?? turn.text ?? '';
+  const tools = Array.isArray(turn.tools) ? turn.tools : [];
+  return (
+    <div className={`flex w-full flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}>
+      <div className={`flex items-center gap-1 text-[10px] font-medium ${isUser ? 'text-zinc-500' : 'text-zinc-400'}`}>
+        {isUser ? <User className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
+        {isUser
+          ? t('sessions:conversation.you', { defaultValue: 'You' })
+          : t('sessions:conversation.agent', { defaultValue: 'Agent' })}
+      </div>
+      <div className={`max-w-[85%] rounded-xl px-4 py-2.5 text-sm leading-relaxed ${isUser ? 'border border-zinc-200 bg-zinc-50 text-zinc-800' : 'text-zinc-800'}`}>
+        <p className="whitespace-pre-wrap break-words">{text}</p>
+      </div>
+      {tools.length > 0 && (
+        <div className={`flex flex-wrap gap-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
+          {tools.map((tool, j) => (
+            <span key={j} className="rounded bg-zinc-200/60 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500">
+              {tool}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Right-side drawer showing one session's conversation detail.
+ * Fetches GET .../conversation, groups turns by user question, renders
+ * summary + grouped turns with a "load more" reveal.
+ */
+function ConversationDrawer({ session, onClose }) {
   const { t } = useTranslation();
   const [view, setView] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -52,15 +104,18 @@ function ConversationDetail({ sessionId }) {
   const [error, setError] = useState(null);
   const [decisionsOpen, setDecisionsOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
+  const [visibleGroups, setVisibleGroups] = useState(GROUPS_PER_BATCH);
+  const [mounted, setMounted] = useState(false);
+  const sessionId = session.id;
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setView(null);
     try {
       const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/conversation`);
       if (res.status === 404) {
         setNotFound(true);
-        setView(null);
         return;
       }
       if (!res.ok) {
@@ -78,6 +133,21 @@ function ConversationDetail({ sessionId }) {
   }, [sessionId, t]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    setVisibleGroups(GROUPS_PER_BATCH);
+  }, [sessionId]);
+
+  // Mount animation + Escape to close.
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setMounted(true));
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
 
   const refresh = useCallback(async () => {
     if (refreshing) return;
@@ -123,137 +193,172 @@ function ConversationDetail({ sessionId }) {
     </button>
   );
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center gap-2 border-t border-zinc-100 px-4 py-6 text-zinc-400">
-        <Loader2 className="h-4 w-4 animate-spin" />
-      </div>
-    );
-  }
-
-  if (notFound || !view) {
-    return (
-      <div className="flex flex-col items-start gap-3 border-t border-zinc-100 px-4 py-4">
-        <p className="text-sm font-medium text-zinc-700">
-          {t('sessions:conversation.empty_title', { defaultValue: 'No conversation yet' })}
-        </p>
-        <p className="text-xs text-zinc-400">
-          {t('sessions:conversation.empty_hint', { defaultValue: 'Run the agent for a few turns, then refresh to generate a summary.' })}
-        </p>
-        <div className="flex items-center gap-3">
-          {refreshBtn}
-          {error && <span className="text-xs text-red-600">{error}</span>}
-        </div>
-      </div>
-    );
-  }
-
-  const summary = view.summary || {};
+  const title = session.title?.trim() || t('sessions:history.untitled', { defaultValue: 'Untitled session' });
+  const summary = view?.summary || {};
   const overview = summary.overview;
   const keyDecisions = Array.isArray(summary.keyDecisions) ? summary.keyDecisions : [];
   const filesTouched = Array.isArray(summary.filesTouched) ? summary.filesTouched : [];
   const summaryTurns = Array.isArray(summary.turns) ? summary.turns : [];
-  const rawTurns = Array.isArray(view.turns) ? view.turns : [];
+  const rawTurns = Array.isArray(view?.turns) ? view.turns : [];
   // A+B: turns come live from the structured chat transcript (view.turns);
   // legacy summary.turns kept only as a fallback for old rows.
   const turns = rawTurns.length > 0 ? rawTurns : summaryTurns;
+  const groups = useMemo(() => groupTurns(turns), [turns]);
+  const shownGroups = groups.slice(0, visibleGroups);
+  const remaining = groups.length - visibleGroups;
 
   return (
-    <div className="flex flex-col gap-3 border-t border-zinc-100 bg-zinc-50/60 px-4 py-4">
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
-          {t('sessions:conversation.summary', { defaultValue: 'Conversation summary' })}
-        </p>
-        <div className="flex items-center gap-3">
-          {error && <span className="text-xs text-red-600">{error}</span>}
-          {refreshBtn}
-        </div>
-      </div>
-
-      {overview && (
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
-            {t('sessions:conversation.overview', { defaultValue: 'Overview' })}
-          </p>
-          <p className="mt-1 text-sm text-zinc-700">{overview}</p>
-        </div>
-      )}
-
-      {keyDecisions.length > 0 && (
-        <div>
-          <button
-            type="button"
-            onClick={() => setDecisionsOpen((v) => !v)}
-            className={`flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-zinc-400 hover:text-zinc-600 ${consoleButtonFocusClass}`}
-          >
-            {decisionsOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-            <Lightbulb className="h-3.5 w-3.5" />
-            {t('sessions:conversation.key_decisions', { defaultValue: 'Key decisions' })}
-          </button>
-          {decisionsOpen && (
-            <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm text-zinc-700">
-              {keyDecisions.map((d, i) => <li key={i}>{d}</li>)}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {filesTouched.length > 0 && (
-        <div>
-          <button
-            type="button"
-            onClick={() => setFilesOpen((v) => !v)}
-            className={`flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-zinc-400 hover:text-zinc-600 ${consoleButtonFocusClass}`}
-          >
-            {filesOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-            <FileText className="h-3.5 w-3.5" />
-            {t('sessions:conversation.files_touched', { defaultValue: 'Files touched' })}
-          </button>
-          {filesOpen && (
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {filesTouched.map((f, i) => (
-                <span key={i} className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono text-xs text-zinc-700">
-                  {f}
+    <div className="fixed inset-0 z-[120]" role="dialog" aria-modal="true" aria-label={title}>
+      <div
+        className={`absolute inset-0 bg-black/40 transition-opacity duration-200 ${mounted ? 'opacity-100' : 'opacity-0'}`}
+        onClick={onClose}
+      />
+      <div className={`absolute right-0 top-0 flex h-full w-full max-w-[720px] flex-col border-l border-zinc-200 bg-surface shadow-2xl transition-transform duration-200 ${mounted ? 'translate-x-0' : 'translate-x-full'}`}>
+        {/* Header */}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3">
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold text-zinc-900">{title}</h2>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-zinc-500">
+              <span className="inline-flex items-center gap-1">
+                <Bot className="h-3 w-3" strokeWidth={1.75} />
+                {session.agentId}
+              </span>
+              {session.projectName && (
+                <span className="inline-flex items-center gap-1">
+                  <Folder className="h-3 w-3" strokeWidth={1.75} />
+                  {session.projectName}
                 </span>
-              ))}
+              )}
+              <span>{formatRelativeTime(session.createdAt)}</span>
             </div>
-          )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className={consoleIconButtonClass}
+            aria-label={t('sessions:conversation.close', { defaultValue: 'Close' })}
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-      )}
 
-      {turns.length > 0 && (
-        <div className="flex flex-col gap-2">
-          {turns.map((turn, i) => {
-            const isUser = turn.role === 'user';
-            const text = turn.summary ?? turn.text ?? '';
-            const tools = Array.isArray(turn.tools) ? turn.tools : [];
-            return (
-              <div key={i} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-                <div className={`flex max-w-[85%] flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}>
-                  <div className={`flex items-center gap-1 text-[10px] font-medium ${isUser ? 'text-zinc-500' : 'text-zinc-400'}`}>
-                    {isUser ? <User className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
-                    {isUser
-                      ? t('sessions:conversation.you', { defaultValue: 'You' })
-                      : t('sessions:conversation.agent', { defaultValue: 'Agent' })}
-                  </div>
-                  <div className={`rounded-lg px-3 py-1.5 text-sm ${isUser ? 'bg-zinc-100 text-zinc-900' : 'bg-white text-zinc-900'}`}>
-                    <p className="whitespace-pre-wrap">{text}</p>
-                  </div>
-                  {tools.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {tools.map((tool, j) => (
-                        <span key={j} className="rounded bg-zinc-200/60 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500">
-                          {tool}
+        {/* Body */}
+        <div className="min-h-0 flex-1 overflow-y-auto console-scroll-hidden px-4 py-4">
+          {loading ? (
+            <div className="flex h-full items-center justify-center gap-2 text-zinc-400">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : (notFound || !view) ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+              <p className="text-sm font-medium text-zinc-700">
+                {t('sessions:conversation.empty_title', { defaultValue: 'No conversation yet' })}
+              </p>
+              <p className="max-w-xs text-xs text-zinc-400">
+                {t('sessions:conversation.empty_hint', { defaultValue: 'Run the agent for a few turns, then refresh to generate a summary.' })}
+              </p>
+              <div className="flex items-center gap-3">
+                {refreshBtn}
+                {error && <span className="text-xs text-red-600">{error}</span>}
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4">
+              {/* Summary toolbar */}
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                  {t('sessions:conversation.summary', { defaultValue: 'Conversation summary' })}
+                </p>
+                <div className="flex items-center gap-3">
+                  {error && <span className="text-xs text-red-600">{error}</span>}
+                  {refreshBtn}
+                </div>
+              </div>
+
+              {overview && (
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                    {t('sessions:conversation.overview', { defaultValue: 'Overview' })}
+                  </p>
+                  <p className="mt-1 text-sm text-zinc-700">{overview}</p>
+                </div>
+              )}
+
+              {keyDecisions.length > 0 && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setDecisionsOpen((v) => !v)}
+                    className={`flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-zinc-400 hover:text-zinc-600 ${consoleButtonFocusClass}`}
+                  >
+                    {decisionsOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                    <Lightbulb className="h-3.5 w-3.5" />
+                    {t('sessions:conversation.key_decisions', { defaultValue: 'Key decisions' })}
+                  </button>
+                  {decisionsOpen && (
+                    <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm text-zinc-700">
+                      {keyDecisions.map((d, i) => <li key={i}>{d}</li>)}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {filesTouched.length > 0 && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setFilesOpen((v) => !v)}
+                    className={`flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-zinc-400 hover:text-zinc-600 ${consoleButtonFocusClass}`}
+                  >
+                    {filesOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                    <FileText className="h-3.5 w-3.5" />
+                    {t('sessions:conversation.files_touched', { defaultValue: 'Files touched' })}
+                  </button>
+                  {filesOpen && (
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {filesTouched.map((f, i) => (
+                        <span key={i} className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono text-xs text-zinc-700">
+                          {f}
                         </span>
                       ))}
                     </div>
                   )}
                 </div>
-              </div>
-            );
-          })}
+              )}
+
+              {/* Grouped turns */}
+              {groups.length > 0 ? (
+                <div className="flex flex-col gap-4">
+                  {groups.length > GROUPS_PER_BATCH && (
+                    <p className="text-[11px] text-zinc-400">
+                      {t('sessions:conversation.showing_groups', { shown: shownGroups.length, total: groups.length, defaultValue: 'Showing {{shown}} of {{total}} exchanges' })}
+                    </p>
+                  )}
+                  {shownGroups.map((g, i) => (
+                    <div key={i} className="flex flex-col gap-2 border-l-2 border-zinc-200 pl-3">
+                      {g.user && <TurnBubble turn={g.user} isUser />}
+                      {g.replies.map((r, j) => <TurnBubble key={j} turn={r} isUser={false} />)}
+                    </div>
+                  ))}
+                  {remaining > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setVisibleGroups((v) => v + GROUPS_PER_BATCH)}
+                      className={`inline-flex items-center justify-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 ${consoleButtonFocusClass}`}
+                    >
+                      <ChevronsDown className="h-3.5 w-3.5" strokeWidth={1.75} />
+                      {t('sessions:conversation.load_more', { count: Math.min(GROUPS_PER_BATCH, remaining), defaultValue: 'Show {{count}} more turns' })}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-zinc-400">
+                  {t('sessions:conversation.empty_title', { defaultValue: 'No conversation yet' })}
+                </p>
+              )}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -270,7 +375,7 @@ export default function History({ agents, projects, className = '', 'aria-hidden
   const [data, setData] = useState({ items: [], total: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [expandedId, setExpandedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
   const requestIdRef = useRef(0);
 
   // Debounce title search (300ms).
@@ -347,6 +452,8 @@ export default function History({ agents, projects, className = '', 'aria-hidden
     return t(`sessions:history.status_${opt.labelKey}`, { defaultValue: opt.labelKey });
   };
 
+  const selectedSession = data.items.find((s) => s.id === selectedId) || null;
+
   return (
     <div className={`flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-surface ${className}`} aria-hidden={ariaHidden}>
       {/* Filter bar */}
@@ -418,17 +525,16 @@ export default function History({ agents, projects, className = '', 'aria-hidden
               const stats = s.stats;
               const duration = formatDuration(stats?.durationMs);
               const title = s.title?.trim();
-              const expanded = expandedId === s.id;
               return (
                 <div
                   key={s.id}
-                  className={`rounded-lg border bg-surface transition-colors ${expanded ? 'border-zinc-300' : 'border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50'} ${isExited ? 'opacity-60 hover:opacity-100' : ''}`}
+                  className={`rounded-lg border bg-surface transition-colors ${selectedId === s.id ? 'border-zinc-300' : 'border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50'} ${isExited ? 'opacity-60 hover:opacity-100' : ''}`}
                 >
                   <button
                     type="button"
-                    onClick={() => setExpandedId(expanded ? null : s.id)}
-                    aria-expanded={expanded}
+                    onClick={() => setSelectedId(s.id)}
                     className={`flex w-full items-center gap-3 px-4 py-3 text-left ${consoleButtonFocusClass}`}
+                    aria-label={t('sessions:history.open_detail', { defaultValue: 'Open conversation' })}
                   >
                     <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${statusDotClass(s.status)}`} />
                     <div className="min-w-0 flex-1">
@@ -473,10 +579,9 @@ export default function History({ agents, projects, className = '', 'aria-hidden
                         <div className="text-xs text-zinc-400">{formatRelativeTime(s.createdAt)}</div>
                         <div className="mt-0.5 text-xs text-zinc-500">{statusLabel(s.status)}</div>
                       </div>
-                      <ChevronDown className={`h-4 w-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+                      <ChevronRight className="h-4 w-4 text-zinc-400" />
                     </div>
                   </button>
-                  {expanded && <ConversationDetail sessionId={s.id} />}
                 </div>
               );
             })}
@@ -512,6 +617,10 @@ export default function History({ agents, projects, className = '', 'aria-hidden
             </button>
           </div>
         </div>
+      )}
+
+      {selectedSession && (
+        <ConversationDrawer session={selectedSession} onClose={() => setSelectedId(null)} />
       )}
     </div>
   );
