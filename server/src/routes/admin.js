@@ -531,6 +531,29 @@ function registerAdminRoutes(fastify) {
         fastify.post(`${prefix}/builds/:buildId/retry`, { preValidation: adminPre }, retryAgentImageBuild);
         fastify.delete(`${prefix}/builds/:buildId`, { preValidation: adminPre }, deleteAgentImageBuild);
     }
+
+    // Scheduler 状态（P2）
+    fastify.get('/api/v1/admin/scheduler/status', { preValidation: adminPre }, async () => {
+        const { getSchedulerStatus } = require('../scheduler');
+        return { jobs: await getSchedulerStatus() };
+    });
+
+    // 手动触发 job（P2，调试用）
+    fastify.post('/api/v1/admin/scheduler/:jobName/run', { preValidation: adminPre }, async (request, reply) => {
+        const { triggerJob } = require('../scheduler');
+        const jobName = String(request.params.jobName);
+        const result = await triggerJob(jobName);
+        if (result === false) {
+            return reply.code(404).send({ code: 'scheduler_job_not_found' });
+        }
+        if (result === 'locked') {
+            return reply.code(409).send({ code: 'scheduler_locked' });
+        }
+        if (result === 'error') {
+            return reply.code(500).send({ code: 'scheduler_job_failed' });
+        }
+        return reply.code(202).send({ ok: true, jobName });
+    });
 }
 
 module.exports = { registerAdminRoutes };

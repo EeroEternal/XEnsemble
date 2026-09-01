@@ -150,6 +150,17 @@ const sessionChatMessages = pgTable('session_chat_messages', {
   sessionIdx: index('idx_session_chat_messages_session').on(table.sessionId),
 }));
 
+// 0016: 进程内调度器的 Job 注册表（PG 乐观锁，多实例安全）
+const schedulerJobs = pgTable('scheduler_jobs', {
+  jobName: text('job_name').primaryKey(),
+  lockedBy: text('locked_by'),
+  lockedAt: bigint('locked_at', { mode: 'number' }),
+  lastRunAt: bigint('last_run_at', { mode: 'number' }),
+  lastStatus: text('last_status'),
+  lastError: text('last_error'),
+  nextRunAt: bigint('next_run_at', { mode: 'number' }).notNull().default(0),
+});
+
 const agents = pgTable('agents', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
@@ -449,6 +460,7 @@ module.exports = {
   sessionConfigs,
   sessionChatMessages,
   sessionConversations,
+  schedulerJobs,
   agents,
   runtimes,
   deployments,

@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Search, RotateCcw, Bot, Folder, Clock, FileText, ChevronLeft, ChevronRight,
-  ChevronDown, Lightbulb, User, RefreshCw, Loader2, X, ChevronsDown,
+  ChevronDown, Lightbulb, User, RefreshCw, Loader2, X, ChevronsDown, Wrench,
 } from 'lucide-react';
-import { apiFetch } from '../lib/api';
+import { apiFetch, getAccessToken } from '../lib/api';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
 import SelectMenu from '../components/SelectMenu';
+import MarkdownView from '../components/Markdown';
 import {
   consoleButtonFocusClass,
   consoleEmptyStateClass,
@@ -62,6 +63,63 @@ function groupTurns(turns) {
   return groups;
 }
 
+function ToolCard({ tool }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const name = tool.tool || 'tool';
+  const args = tool.args;
+  const result = tool.result;
+  const hasDetail = Boolean(args) || Boolean(result);
+  return (
+    <div className="w-full max-w-[85%] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50">
+      <button
+        type="button"
+        onClick={() => hasDetail && setOpen((o) => !o)}
+        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-zinc-700 ${hasDetail ? 'cursor-pointer hover:bg-zinc-100' : 'cursor-default'} ${consoleButtonFocusClass}`}
+      >
+        <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-zinc-400 transition-transform ${open ? 'rotate-90' : ''}`} />
+        <Wrench className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+        <span className="truncate font-medium">{name}</span>
+      </button>
+      {open && (
+        <div className="space-y-2 border-t border-zinc-200 px-3 py-2">
+          {args ? (
+            <div>
+              <div className="mb-0.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+                {t('sessions:conversation.tool_args', { defaultValue: 'Arguments' })}
+              </div>
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-zinc-100 p-2 font-mono text-[12px] text-zinc-700">
+                {formatArgs(args)}
+              </pre>
+            </div>
+          ) : null}
+          {result ? (
+            <div>
+              <div className="mb-0.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+                {t('sessions:conversation.tool_result_label', { defaultValue: 'Result' })}
+              </div>
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-zinc-100 p-2 font-mono text-[12px] text-zinc-700">
+                {result}
+              </pre>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Pretty-print tool-call argument JSON when possible.
+function formatArgs(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) return raw || '';
+  try {
+    const parsed = JSON.parse(raw);
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return raw;
+  }
+}
+
 function TurnBubble({ turn, isUser }) {
   const { t } = useTranslation();
   const text = turn.summary ?? turn.text ?? '';
@@ -74,15 +132,21 @@ function TurnBubble({ turn, isUser }) {
           ? t('sessions:conversation.you', { defaultValue: 'You' })
           : t('sessions:conversation.agent', { defaultValue: 'Agent' })}
       </div>
-      <div className={`max-w-[85%] rounded-xl px-4 py-2.5 text-sm leading-relaxed ${isUser ? 'border border-zinc-200 bg-zinc-50 text-zinc-800' : 'text-zinc-800'}`}>
-        <p className="whitespace-pre-wrap break-words">{text}</p>
-      </div>
+      {text && (
+        <div className={`max-w-[85%] rounded-xl px-4 py-2.5 text-sm leading-relaxed ${isUser ? 'border border-zinc-200 bg-zinc-50 text-zinc-800' : 'text-zinc-800'}`}>
+          <MarkdownView>{text}</MarkdownView>
+        </div>
+      )}
       {tools.length > 0 && (
-        <div className={`flex flex-wrap gap-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
+        <div className={`flex w-full flex-col gap-1.5 ${isUser ? 'items-end' : 'items-start'}`}>
           {tools.map((tool, j) => (
-            <span key={j} className="rounded bg-zinc-200/60 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500">
-              {tool}
-            </span>
+            typeof tool === 'string'
+              ? (
+                <span key={j} className="rounded bg-zinc-200/60 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500">
+                  {tool}
+                </span>
+              )
+              : <ToolCard key={j} tool={tool} />
           ))}
         </div>
       )}
@@ -133,6 +197,40 @@ function ConversationDrawer({ session, onClose }) {
   }, [sessionId, t]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Live updates: re-fetch when the backend broadcasts a summary update for
+  // this session (P2 Scheduler / manual refresh). Silent, no toast.
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return;
+    let es = null;
+    let closed = false;
+    let reconnectTimer = null;
+    const base = import.meta.env.VITE_API_BASE_URL
+      || (typeof window !== 'undefined' ? window.location.origin : '');
+    const connect = () => {
+      const token = getAccessToken();
+      es = new EventSource(`${base}/api/v1/events?access_token=${encodeURIComponent(token || '')}`);
+      es.addEventListener('message', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.type === 'session_conversation_updated' && data.sessionId === sessionId) {
+            void load();
+          }
+        } catch { /* ignore invalid data */ }
+      });
+      es.addEventListener('error', () => {
+        es?.close();
+        if (closed) return;
+        reconnectTimer = setTimeout(connect, 3000);
+      });
+    };
+    connect();
+    return () => {
+      closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      es?.close();
+    };
+  }, [sessionId, load]);
 
   useEffect(() => {
     setVisibleGroups(GROUPS_PER_BATCH);

@@ -66,6 +66,7 @@ const {
     start: startConversationAutoSummarizer,
     stop: stopConversationAutoSummarizer,
 } = require('./session/conversationAutoSummarizer');
+const { startScheduler, stopScheduler } = require('./scheduler');
 const { createIdleHibernateMonitor, stopSession, waitForAgentExit } = require('./session/idleHibernate');
 const { terminateDetachedSessionProcess } = require('./session/sessionTermination');
 const {
@@ -2815,6 +2816,15 @@ async function startServer() {
     // 必须在 recoverRunningSessions 之前启动，以便恢复出来的会话也被接管。
     startConversationAutoSummarizer();
 
+    // P2 定时调度器：conversation-summarize job（PG 乐观锁，多实例安全）。
+    // SCHEDULER_ENABLED=false 时 startScheduler 内部 no-op。
+    try {
+        await startScheduler({ db });
+        fastify.log.info('[scheduler] started');
+    } catch (err) {
+        fastify.log.warn(err, '[scheduler] failed to start');
+    }
+
     try {
         const recovery = await recoverRunningSessions({
             db,
@@ -2878,6 +2888,7 @@ async function startServer() {
     fastify.addHook('onClose', async () => {
         idleHibernateMonitor.stop();
         stopConversationAutoSummarizer();
+        await stopScheduler();
         await gracefulShutdownSessions({
             db,
             schema,

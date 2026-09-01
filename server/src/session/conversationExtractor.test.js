@@ -75,11 +75,11 @@ test('extractFromTranscript respects afterSeq cursor', () => {
     assert.equal(turns[0].text, 'second');
 });
 
-test('extractFromChat maps user/assistant/tool_call and skips tool_result', () => {
+test('extractFromChat attaches tool_call/tool_result to assistant turn as structured entries', () => {
     const history = [
         { seq: 1, ts: 1000, role: 'user', content: 'fix the login bug' },
-        { seq: 2, ts: 1100, role: 'tool_call', tool: 'Edit', content: '{"path":"auth.js"}' },
-        { seq: 3, ts: 1200, role: 'tool_result', tool: 'Edit', content: 'ok' },
+        { seq: 2, ts: 1100, role: 'tool_call', callId: 'c1', tool: 'Edit', content: '{"path":"auth.js"}' },
+        { seq: 3, ts: 1200, role: 'tool_result', callId: 'c1', tool: 'Edit', content: 'ok' },
         { seq: 4, ts: 1300, role: 'assistant', content: 'Done, edited auth.js' },
     ];
     const { source, turns, headSeq } = extractor.extractFromChat(history);
@@ -89,8 +89,35 @@ test('extractFromChat maps user/assistant/tool_call and skips tool_result', () =
     assert.equal(turns[0].role, 'user');
     assert.equal(turns[0].text, 'fix the login bug');
     assert.equal(turns[1].role, 'assistant');
-    assert.deepEqual(turns[1].tools, ['Edit']);
+    assert.equal(turns[1].text, '');
+    assert.deepEqual(turns[1].tools, [
+        { tool: 'Edit', args: '{"path":"auth.js"}', callId: 'c1', result: 'ok' },
+    ]);
     assert.equal(turns[2].text, 'Done, edited auth.js');
+});
+
+test('extractFromChat creates a tool-only assistant turn and pairs result by callId', () => {
+    const history = [
+        { seq: 1, ts: 1000, role: 'user', content: 'go' },
+        { seq: 2, ts: 1100, role: 'tool_call', callId: 'a', tool: 'Read', content: '{"filePath":"/workspace"}' },
+        { seq: 3, ts: 1200, role: 'tool_call', callId: 'b', tool: 'Bash', content: '{"command":"ls"}' },
+        { seq: 4, ts: 1300, role: 'tool_result', callId: 'b', tool: 'Bash', content: 'src/' },
+        { seq: 5, ts: 1400, role: 'tool_result', callId: 'a', tool: 'Read', content: '...file...' },
+        { seq: 6, ts: 1500, role: 'assistant', content: 'I inspected the workspace' },
+    ];
+    const { turns } = extractor.extractFromChat(history);
+    assert.equal(turns.length, 3);
+    const toolTurn = turns[1];
+    assert.equal(toolTurn.role, 'assistant');
+    assert.equal(toolTurn.text, '');
+    assert.equal(toolTurn.tools.length, 2);
+    assert.equal(toolTurn.tools[0].tool, 'Read');
+    assert.equal(toolTurn.tools[0].result, '...file...');
+    assert.equal(toolTurn.tools[1].tool, 'Bash');
+    assert.equal(toolTurn.tools[1].result, 'src/');
+    // Results pair back even when the result order differs from the call order.
+    assert.deepEqual(toolTurn.tools[0].args, '{"filePath":"/workspace"}');
+    assert.deepEqual(toolTurn.tools[1].args, '{"command":"ls"}');
 });
 
 test('extractFromChat respects afterSeq cursor', () => {

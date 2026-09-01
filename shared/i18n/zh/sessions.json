@@ -120,7 +120,9 @@
     "llm_not_configured": "未配置 LLM 分析密钥",
     "close": "关闭",
     "load_more": "显示更多 {{count}} 轮",
-    "showing_groups": "显示 {{shown}} / 共 {{total}} 组对话"
+    "showing_groups": "显示 {{shown}} / 共 {{total}} 组对话",
+    "tool_args": "参数",
+    "tool_result_label": "结果"
   },
   "history": {
     "view_all": "查看全部历史",

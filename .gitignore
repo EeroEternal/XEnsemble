@@ -24,3 +24,6 @@ skills-lock.json
 
 # XEnsemble platform metadata - do not commit
 .xensemble/
+
+# local backup of untracked one-off files
+.xensemble-backup/

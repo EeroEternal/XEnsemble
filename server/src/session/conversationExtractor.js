@@ -48,26 +48,62 @@ function chatHeadSeq(history) {
 function extractFromChat(history, afterSeq = 0) {
     const cursor = Number(afterSeq) || 0;
     const turns = [];
+    // The assistant turn currently being aggregated. Tool calls attach here;
+    // tool results pair back to their tool entry via callId.
+    let pendingAssistant = null;
+    const callMap = new Map(); // callId -> tool entry, for tool_result pairing
+
+    const pushAssistantTurn = (ts) => {
+        const turn = { role: 'assistant', ts, text: '', tools: [] };
+        turns.push(turn);
+        pendingAssistant = turn;
+        return turn;
+    };
+
     for (const e of history || []) {
         if (!e || typeof e !== 'object') continue;
         const seq = Number(e.seq);
         if (Number.isFinite(seq) && seq <= cursor) continue;
         const role = e.role;
         const raw = typeof e.content === 'string' ? e.content : '';
-        if (role === 'user' || role === 'assistant') {
+        if (role === 'user') {
+            pendingAssistant = null;
             const text = raw.trim();
             if (!text) continue;
             const t = truncateMiddle(text, TURN_MAX_BYTES);
             turns.push({ role, ts: Number.isFinite(e.ts) ? e.ts : null, text: t.text, truncated: t.truncated });
-        } else if (role === 'tool_call') {
+        } else if (role === 'assistant') {
             const text = raw.trim();
-            const t = truncateMiddle(text || e.tool || 'tool call', TURN_MAX_BYTES);
-            const turn = { role: 'assistant', ts: Number.isFinite(e.ts) ? e.ts : null, text: t.text, truncated: t.truncated };
-            if (e.tool) turn.tools = [e.tool];
-            turns.push(turn);
+            const t = truncateMiddle(text, TURN_MAX_BYTES);
+            const turn = pushAssistantTurn(Number.isFinite(e.ts) ? e.ts : null);
+            turn.text = t.text;
+            turn.truncated = t.truncated;
+        } else if (role === 'tool_call') {
+            // Attach the call to the current assistant turn (create one if the
+            // agent tool-called before emitting any text). Structured entry lets
+            // the UI render a collapsible tool card with args + paired result.
+            if (!pendingAssistant) pushAssistantTurn(Number.isFinite(e.ts) ? e.ts : null);
+            const args = truncateMiddle(raw, TURN_MAX_BYTES);
+            const entry = { tool: e.tool || 'tool', args: args.text };
+            if (args.truncated) entry.argsTruncated = true;
+            if (e.callId != null) {
+                entry.callId = e.callId;
+                callMap.set(e.callId, entry);
+            }
+            pendingAssistant.tools.push(entry);
+        } else if (role === 'tool_result') {
+            const entry = e.callId != null ? callMap.get(e.callId) : null;
+            if (entry) {
+                const res = truncateMiddle(raw, TURN_MAX_BYTES);
+                entry.result = res.text;
+                if (res.truncated) entry.resultTruncated = true;
+            }
         }
     }
-    return { source: 'chat', turns: capTurns(turns), headSeq: chatHeadSeq(history) };
+
+    // Drop assistant turns that carry neither text nor any tool call.
+    const cleaned = turns.filter((t) => !(t.role === 'assistant' && !t.text && (!t.tools || t.tools.length === 0)));
+    return { source: 'chat', turns: capTurns(cleaned), headSeq: chatHeadSeq(history) };
 }
 
 // ---------------------------------------------------------------------------

@@ -43,7 +43,9 @@ const OUTPUT_SPEC = [
 function renderTurns(turns) {
     return turns
         .map((t, i) => {
-            const tools = t.tools && t.tools.length ? ` [tools: ${t.tools.join(', ')}]` : '';
+            const tools = t.tools && t.tools.length
+                ? ` [tools: ${t.tools.map((x) => (typeof x === 'string' ? x : x.tool || 'tool')).join(', ')}]`
+                : '';
             return `#${i + 1} ${t.role}${tools}: ${t.text}`;
         })
         .join('\n');
