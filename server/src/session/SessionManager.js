@@ -19,6 +19,7 @@ const MAX_OUTPUT_LISTENERS = Number(process.env.SESSION_MAX_OUTPUT_LISTENERS) ||
 class SessionManager {
     constructor() {
         this.sessions = new Map();
+        this.sessionCreatedListeners = new Set();
     }
 
     createSession(sessionId, handle, agentId, options = {}) {
@@ -113,6 +114,9 @@ class SessionManager {
         });
 
         this.sessions.set(sessionId, session);
+        for (const listener of [...this.sessionCreatedListeners]) {
+            try { listener(session); } catch (_) { /* ignore */ }
+        }
         return session;
     }
 
@@ -147,6 +151,11 @@ class SessionManager {
         if (session.outputListeners.size >= MAX_OUTPUT_LISTENERS) return () => {};
         session.outputListeners.add(listener);
         return () => session.outputListeners.delete(listener);
+    }
+
+    onSessionCreated(listener) {
+        this.sessionCreatedListeners.add(listener);
+        return () => this.sessionCreatedListeners.delete(listener);
     }
 
     touchActivity(sessionId, kind = 'activity', at = Date.now()) {

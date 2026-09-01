@@ -12,6 +12,7 @@ import {
   ChevronDown,
   PanelLeftClose,
   PanelLeft,
+  List,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { useToast } from './Toast';
@@ -208,6 +209,7 @@ export default function AppSidebar({
   user,
   onOpenSettings,
   onLogout,
+  onOpenHistory,
   minimal = false,
 }) {
   const { t } = useTranslation();
@@ -520,6 +522,16 @@ export default function AppSidebar({
               className="min-w-0 flex-1 bg-transparent text-[13px] text-zinc-700 placeholder:text-zinc-400 outline-none"
             />
           </label>
+          {onOpenHistory && (
+            <button
+              type="button"
+              onClick={onOpenHistory}
+              className={`${sidebarNavItemClass}`}
+            >
+              <List className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+              {t('sessions:history.view_all', { defaultValue: 'View all history' })}
+            </button>
+          )}
         </div>
       </div>
 

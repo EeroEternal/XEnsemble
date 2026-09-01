@@ -1,24 +1,13 @@
 const { eq } = require('drizzle-orm');
 const { db } = require('../db');
 const schema = require('../db/schema');
+const { stripAnsi } = require('./terminalText');
+const llm = require('../llm/analyzeClient');
 
 const MAX_HISTORY_CHARS = 4000;
 const MAX_TITLE_LENGTH = 40;
 
-function getLlmConfig() {
-    return {
-        apiKey: process.env.LLM_ANALYZE_API_KEY,
-        apiUrl: process.env.LLM_ANALYZE_API_URL || 'https://api.deepseek.com/chat/completions',
-        model: process.env.LLM_ANALYZE_MODEL || 'deepseek-chat',
-    };
-}
-
 const STARTUP_KEYWORDS = /\b(welcome|config|setup|initializ|loading|checking|ready|starting|booting|installing|verifying|preparing|configur)\b/i;
-
-function stripAnsi(input) {
-    // eslint-disable-next-line no-control-regex
-    return input.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-}
 
 function filterStartupNoise(text) {
     const lines = text.split('\n');
@@ -42,8 +31,7 @@ function sanitizeTitle(raw) {
 }
 
 async function fetchSummary(history, agentName) {
-    const { apiKey, apiUrl, model } = getLlmConfig();
-    if (!apiKey) return null;
+    if (!llm.isConfigured()) return null;
 
     const prompt = [
         'You are a concise session title generator.',
@@ -52,32 +40,13 @@ async function fetchSummary(history, agentName) {
         'Respond with the title text only, no quotes, no markdown, no explanation.',
     ].join(' ');
 
-    const body = {
-        model,
-        messages: [
-            { role: 'system', content: prompt },
-            { role: 'user', content: history },
-        ],
-        max_tokens: 60,
-        temperature: 0.6,
-    };
-
-    const res = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(body),
+    const content = await llm.chat({
+        system: prompt,
+        user: history,
+        // 推理模型（如 GLM-5）的思维链会占用输出 token，60 会被思维链耗尽导致 content 为空，
+        // 因此给足余量；sanitizeTitle 最终仍截断到 MAX_TITLE_LENGTH。
+        options: { maxTokens: 512, temperature: 0.6 },
     });
-
-    if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`Title LLM API error ${res.status}: ${text}`);
-    }
-
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content;
     return sanitizeTitle(content);
 }
 

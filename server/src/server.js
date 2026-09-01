@@ -62,6 +62,10 @@ const { registerCustomImageRoutes } = require('./routes/customImages');
 const { LocalGitService } = require('./git/LocalGitService');
 const { applyTerminalMessage, subscribeTerminal } = require('./session/terminalBridge');
 const { resumeSession, registerSessionLifecycle } = require('./session/resumeSession');
+const {
+    start: startConversationAutoSummarizer,
+    stop: stopConversationAutoSummarizer,
+} = require('./session/conversationAutoSummarizer');
 const { createIdleHibernateMonitor, stopSession, waitForAgentExit } = require('./session/idleHibernate');
 const { terminateDetachedSessionProcess } = require('./session/sessionTermination');
 const {
@@ -933,18 +937,23 @@ fastify.get('/api/v1/projects/:projectId/repository/file', {
 // The inline implementations below were removed to eliminate duplication.
 
 // Sessions - list
-fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async (request, reply) => {
-    const result = await db.execute(sql`
-        SELECT s.id, s.project_id, s.agent_id, s.status, s.recoverable,
-               s.custom_image_id, s.title, s.title_manual, s.created_at,
-               p.name AS project_name,
-               s.provisioning_error
-        FROM sessions s
-        LEFT JOIN projects p ON p.id = s.project_id
-        WHERE s.user_id = ${request.user.id}
-    `);
-    const rawRows = result.rows || result;
-    return rawRows.map((row) => ({
+function conversationStats(turns, summary) {
+    if (turns == null) return null;
+    const list = Array.isArray(turns) ? turns : [];
+    let filesTouched = 0;
+    if (Array.isArray(summary?.filesTouched)) filesTouched = summary.filesTouched.length;
+    const timestamps = list
+        .map((t) => (t && typeof t.ts === 'number' && Number.isFinite(t.ts) ? t.ts : null))
+        .filter((ts) => ts != null);
+    let durationMs = null;
+    if (timestamps.length >= 2) {
+        durationMs = Math.max(0, Math.max(...timestamps) - Math.min(...timestamps));
+    }
+    return { turnCount: list.length, filesTouched, durationMs };
+}
+
+function mapSessionRow(row) {
+    return {
         id: row.id,
         projectId: row.project_id,
         agentId: row.agent_id,
@@ -960,7 +969,88 @@ fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async
         titleManual: Boolean(row.title_manual),
         createdAt: Number(row.created_at),
         updatedAt: null,
-    }));
+    };
+}
+
+const SESSION_LIST_SORT_WHITELIST = {
+    'created_at:desc': 's.created_at DESC, s.id DESC',
+    'created_at:asc': 's.created_at ASC, s.id ASC',
+};
+
+fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async (request, reply) => {
+    const query = request.query || {};
+    const hasQuery = ['status', 'agentId', 'projectId', 'q', 'page', 'pageSize', 'sort', 'withStats']
+        .some((key) => query[key] !== undefined && query[key] !== '');
+
+    // Backward-compatible fast path: no query params → existing response shape.
+    if (!hasQuery) {
+        const result = await db.execute(sql`
+            SELECT s.id, s.project_id, s.agent_id, s.status, s.recoverable,
+                   s.custom_image_id, s.title, s.title_manual, s.created_at,
+                   p.name AS project_name,
+                   s.provisioning_error
+            FROM sessions s
+            LEFT JOIN projects p ON p.id = s.project_id
+            WHERE s.user_id = ${request.user.id}
+        `);
+        const rawRows = result.rows || result;
+        return rawRows.map(mapSessionRow);
+    }
+
+    const withStats = query.withStats === 'true' || query.withStats === '1';
+    const page = Math.max(1, Number.parseInt(query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number.parseInt(query.pageSize, 10) || 20));
+    const sortKey = String(query.sort || 'created_at:desc');
+    const orderBy = SESSION_LIST_SORT_WHITELIST[sortKey] || SESSION_LIST_SORT_WHITELIST['created_at:desc'];
+
+    const filters = [];
+    if (query.status) filters.push(sql`s.status = ${String(query.status)}`);
+    if (query.agentId) filters.push(sql`s.agent_id = ${String(query.agentId)}`);
+    if (query.projectId) filters.push(sql`s.project_id = ${String(query.projectId)}`);
+    if (query.q) {
+        const escaped = String(query.q).replace(/[\\%_]/g, (m) => `\\${m}`);
+        filters.push(sql`(s.title ILIKE ${`%${escaped}%`} OR s.agent_id ILIKE ${`%${escaped}%`})`);
+    }
+    const whereClause = sql`WHERE s.user_id = ${request.user.id}${filters.length ? sql` AND ${sql.join(filters, sql` AND `)}` : sql``}`;
+
+    const statsSelect = withStats
+        ? sql`, sc.turns AS conversation_turns, sc.summary AS conversation_summary`
+        : sql``;
+    const statsJoin = withStats
+        ? sql`LEFT JOIN session_conversations sc ON sc.session_id = s.id`
+        : sql``;
+
+    const listResult = await db.execute(sql`
+        SELECT s.id, s.project_id, s.agent_id, s.status, s.recoverable,
+               s.custom_image_id, s.title, s.title_manual, s.created_at,
+               p.name AS project_name, s.provisioning_error
+               ${statsSelect}
+        FROM sessions s
+        LEFT JOIN projects p ON p.id = s.project_id
+        ${statsJoin}
+        ${whereClause}
+        ORDER BY ${sql.raw(orderBy)}
+        LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
+    `);
+    const countResult = await db.execute(sql`
+        SELECT COUNT(*)::int AS total
+        FROM sessions s
+        ${whereClause}
+    `);
+
+    const rows = listResult.rows || listResult;
+    const total = Number(countResult.rows?.[0]?.total ?? countResult[0]?.total ?? 0);
+
+    const items = rows.map((row) => {
+        const item = mapSessionRow(row);
+        item.exitCode = sessionManager.getSession(row.id)?.exitCode ?? null;
+        if (withStats) {
+            item.stats = conversationStats(row.conversation_turns, row.conversation_summary);
+        }
+        return item;
+    });
+
+    return { items, total, page, pageSize };
 });
 
 // Rename a session — sets titleManual=true so AI auto-naming never overwrites it.
@@ -987,6 +1077,55 @@ fastify.patch('/api/v1/sessions/:sessionId/title', { preValidation: [fastify.aut
     } catch (_) {}
 
     return { ok: true, sessionId, title, titleManual: true };
+});
+
+const conversationRefreshInFlight = new Map();
+
+fastify.get('/api/v1/sessions/:sessionId/conversation', { preValidation: [fastify.authenticate, fastify.requireActive] }, async (request, reply) => {
+    const { sessionId } = request.params;
+    const rows = await db.select().from(schema.sessions)
+        .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
+
+    const { getConversation } = require('./session/conversationSummaryService');
+    const view = await getConversation(sessionId);
+    if (!view) return reply.code(404).send({ code: 'conversation_not_found' });
+    return view;
+});
+
+fastify.post('/api/v1/sessions/:sessionId/conversation/refresh', { preValidation: [fastify.authenticate, fastify.requireActive] }, async (request, reply) => {
+    const { sessionId } = request.params;
+    const rows = await db.select().from(schema.sessions)
+        .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
+
+    if (conversationRefreshInFlight.has(sessionId)) {
+        return reply.code(409).send({ code: 'refresh_in_progress' });
+    }
+
+    const { summarizeSession } = require('./session/conversationSummaryService');
+    const { LlmRequestError } = require('./llm/analyzeClient');
+
+    const promise = summarizeSession(sessionId, { force: true })
+        .catch((err) => {
+            if (err?.code === 'llm_not_configured') {
+                return reply.code(503).send({ code: 'llm_not_configured' });
+            }
+            if (err instanceof LlmRequestError || err?.code === 'llm_request_failed') {
+                return reply.code(502).send({ code: 'llm_request_failed' });
+            }
+            if (err?.code === 'no_content') {
+                return reply.code(422).send({ code: 'no_content' });
+            }
+            request.log.error(err, '[conversation] refresh failed');
+            return reply.code(500).send({ error: 'Failed to refresh conversation summary' });
+        })
+        .finally(() => {
+            conversationRefreshInFlight.delete(sessionId);
+        });
+
+    conversationRefreshInFlight.set(sessionId, promise);
+    return promise;
 });
 
 fastify.post('/api/v1/sessions/:sessionId/stop', { preValidation: [fastify.authenticate] }, async (request, reply) => {
@@ -2671,6 +2810,11 @@ async function startServer() {
     const { resolvePort } = require('./config/defaultPort');
     const port = resolvePort();
 
+    // 对话摘要（A+B）：挂到 SessionManager 会话创建上，仅会话退出时触发一次摘要；
+    // 轮次实时读结构化聊天记录，不调用 LLM。
+    // 必须在 recoverRunningSessions 之前启动，以便恢复出来的会话也被接管。
+    startConversationAutoSummarizer();
+
     try {
         const recovery = await recoverRunningSessions({
             db,
@@ -2733,6 +2877,7 @@ async function startServer() {
     idleHibernateMonitor.start();
     fastify.addHook('onClose', async () => {
         idleHibernateMonitor.stop();
+        stopConversationAutoSummarizer();
         await gracefulShutdownSessions({
             db,
             schema,

@@ -118,6 +118,24 @@ const sessionConfigs = pgTable('session_configs', {
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 });
 
+// 0015: 会话对话摘要与轮次缓存（A+B），供历史会话页使用
+const sessionConversations = pgTable('session_conversations', {
+  sessionId: text('session_id').primaryKey().references(() => sessions.id, { onDelete: 'cascade' }),
+  // LLM 生成的摘要字段（turns 不再由 LLM 生成，改为实时读 chat transcript）
+  summary: jsonb('summary').notNull().default({}),
+  // 最近 100 个 ConversationTurn 原文缓存（chat transcript 缺失时的兜底）
+  turns: jsonb('turns').notNull().default([]),
+  // 增量游标：chat 源为消息 seq，transcript 源为帧 seq
+  lastSummarizedSeq: integer('last_summarized_seq').notNull().default(0),
+  // 提取来源：chat（LLM 代理结构化聊天记录）| state_dir（agent 原生 JSONL）| transcript（终端流清洗）
+  source: text('source').notNull().default('transcript'),
+  lastError: text('last_error'),
+  // 连续 LLM 失败计数
+  errorCount: integer('error_count').notNull().default(0),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+});
+
+// 0014: LLM 代理层捕获的会话聊天消息（chatTranscript 写入，结构化原文）
 const sessionChatMessages = pgTable('session_chat_messages', {
   sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
   seq: integer('seq').notNull(),
@@ -430,6 +448,7 @@ module.exports = {
   sessionStreams,
   sessionConfigs,
   sessionChatMessages,
+  sessionConversations,
   agents,
   runtimes,
   deployments,

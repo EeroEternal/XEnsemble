@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { ArrowLeft } from 'lucide-react';
 import Login from './pages/Login';
 import Sessions from './pages/Sessions';
+import History from './pages/History';
 import AgentsAdmin from './pages/AgentsAdmin';
 import ImagesManager from './pages/ImagesManager';
 import UsersAdmin from './pages/UsersAdmin';
@@ -62,6 +63,7 @@ function AuthenticatedLayout({
   }, [location.pathname]);
 
   const isSessions = location.pathname === '/sessions';
+  const isHistory = location.pathname === '/history';
   const isAgentsAdmin = location.pathname === '/admin/agents';
   const isUsersAdmin = location.pathname === '/admin/users';
   const isGatewayAdmin = location.pathname === '/admin/gateway';
@@ -132,6 +134,7 @@ function AuthenticatedLayout({
         user={user}
         onOpenSettings={() => navigate('/settings')}
         onLogout={logout}
+        onOpenHistory={() => navigate('/history')}
       />
       )}
       <main
@@ -160,6 +163,15 @@ function AuthenticatedLayout({
             (isSessions || launchPanelOpen) ? 'relative z-20' : offRouteClass,
           )}
           aria-hidden={!isSessions && !launchPanelOpen}
+        />
+        <History
+          agents={agents}
+          projects={projects}
+          className={cn(
+            'flex h-full min-h-0 flex-1 flex-col',
+            isHistory ? 'relative z-20' : offRouteClass,
+          )}
+          aria-hidden={!isHistory}
         />
         {user?.role === 'admin' && isAgentsAdmin && (
             <div
@@ -373,6 +385,7 @@ function App() {
               }
             >
               <Route path="/sessions" element={null} />
+              <Route path="/history" element={null} />
               <Route path="/settings" element={null} />
               <Route
                 path="/custom-images"

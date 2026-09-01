@@ -147,6 +147,10 @@ Desktop Client 或 Self-Hosted Server 使用 **Local Runtime Provider**，Agent/
 | `auth/hooks.js` | `authenticate` 校验 Access Token；新增 `requireActive`、`requireAdmin`。 |
 | `runtime/*` | 保留接口；按 Local Process、BoxLite Sandbox、K8s Production 三层实现 Provider；所有具体执行面假设严格限制在对应 Provider 内。 |
 | `session/SessionManager.js` | 仍只保存 bridge handle；scrollback 事实来源为 Runtime 侧（本地可由 sidecar/文件缓存实现）。 |
+| `session/conversationExtractor.js` | 三级数据源对话提取：优先 LLM 代理结构化聊天记录（`session_chat_messages`），其次 Agent 原生 state 目录 JSONL（L2 Agent），兜底 transcript 帧（全 Agent 通用）；产出 `ConversationTurn[]`。 |
+| `session/conversationSummaryService.js` | A+B 会话摘要：A 轮次零 LLM 实时读结构化聊天记录；B 概览/关键决策/涉及文件仅会话退出或手动刷新时调一次 LLM；`session_conversations` 读写，LLM 失败仍保留轮次。 |
+| `session/conversationAutoSummarizer.js` | 挂载 SessionManager，会话退出时触发一次摘要；进行中不调用 LLM。 |
+| `llm/analyzeClient.js` | 统一 LLM 分析客户端（title / conversation summary 共用），内置超时与 JSON 容错解析。 |
 | `deployments/DeploymentService.js` | 状态机不变；revision 必须指向真实 `gitSha` / `snapshotId` / `checkpointId`。 |
 | `llm/*` | 保留 session token 反代；移除全局 rebind 锁，改为 per-agent gateway key 或 header 路由。 |
 | `gateway/*` | UniGateway 作为本地进程或外部上游；admin token 强制配置。 |
