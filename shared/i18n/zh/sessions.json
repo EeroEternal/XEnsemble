@@ -122,7 +122,9 @@
     "load_more": "显示更多 {{count}} 轮",
     "showing_groups": "显示 {{shown}} / 共 {{total}} 组对话",
     "tool_args": "参数",
-    "tool_result_label": "结果"
+    "tool_result_label": "结果",
+    "copy_code": "复制代码",
+    "copied": "已复制"
   },
   "history": {
     "view_all": "查看全部历史",

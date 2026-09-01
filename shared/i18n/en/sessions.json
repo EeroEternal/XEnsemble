@@ -122,7 +122,9 @@
     "load_more": "Show {{count}} more turns",
     "showing_groups": "Showing {{shown}} of {{total}} exchanges",
     "tool_args": "Arguments",
-    "tool_result_label": "Result"
+    "tool_result_label": "Result",
+    "copy_code": "Copy code",
+    "copied": "Copied"
   },
   "history": {
     "view_all": "View all history",

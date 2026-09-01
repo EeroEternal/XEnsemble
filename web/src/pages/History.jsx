@@ -306,7 +306,6 @@ function ConversationDrawer({ session, onClose }) {
       window.dispatchEvent(new CustomEvent('xensemble:skills_changed'));
     } catch (err) {
       setError(t('skills:extract_failed', { defaultValue: 'Failed to extract skill.' }));
-      // eslint-disable-next-line no-console
       console.error('[skill] extract failed', err);
     } finally {
       setExtracting(false);
