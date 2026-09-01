@@ -14,6 +14,7 @@ import {
   ConsoleStructuredDialogHeader,
 } from '../ConsoleDialog';
 import { useToast } from '../Toast';
+import { confirm } from '../ConfirmDialog';
 import {
   consoleCardClass,
   consoleIconButtonClass,
@@ -839,11 +840,18 @@ export default function GatewaySettingsPanel() {
   };
 
   const handleDelete = async (name) => {
+    const ok = await confirm({
+      title: t('gateway:settings.delete_provider_title', { defaultValue: 'Delete provider' }),
+      message: t('gateway:settings.delete_provider_confirm', { name, defaultValue: `Delete provider "${name}"? Existing sessions using this provider will fail to authorize.` }),
+      confirmLabel: t('common:action.delete'),
+      variant: 'danger',
+    });
+    if (!ok) return;
     setDeleting(name);
     try {
       const res = await apiFetch(`/api/v1/admin/gateway/providers/${encodeURIComponent(name)}`, {
         method: 'DELETE',
-        
+
       });
       const data = await res.json();
       if (!res.ok || data.success === false) {
