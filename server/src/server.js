@@ -2312,10 +2312,20 @@ fastify.register(async function workspaceTerminalWsRoutes(app) {
                                 gid: process.env.RUNTIME_GID,
                             },
                         );
+                        req.log.info({ shellCmd }, '[workspace-shell] spawn ok');
                         shell = WorkspaceShellManager.create(shellId, handle);
                         break;
                     } catch (err) {
                         lastErr = err;
+                        req.log.warn(
+                            {
+                                shellCmd,
+                                errName: err?.name,
+                                errMessage: err?.message,
+                                errStack: err?.stack,
+                            },
+                            '[workspace-shell] spawn attempt failed',
+                        );
                         if (!(err instanceof AgentSpawnError)) {
                             break;
                         }
