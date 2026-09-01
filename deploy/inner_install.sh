@@ -256,6 +256,9 @@ server {
     location / {
         proxy_pass http://xensemble_backend;
         proxy_http_version 1.1;
+        # 标记：本请求来自 preview 专用端口。后端网关据此强制路由到 preview
+        # 隧道，绝不落入宿主控制台。只有经过本 preview 入口的请求才带此头。
+        proxy_set_header X-Preview-Origin 1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
