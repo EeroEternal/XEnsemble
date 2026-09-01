@@ -222,10 +222,12 @@ async function assertAppIsServed({ runtimeRef, workspacePath, preferredPort }) {
     } catch { /* ss unavailable */ }
     if (!listenPorts.length) {
         try {
-            // /proc/net/tcp: st=0A 是 LISTEN；local_address 端口为十六进制（如 0F30 = 3888）。
+            // /proc/net/tcp + /proc/net/tcp6: st=0A 是 LISTEN；local_address 端口为十六进制
+            // （如 0F30 = 3888）。必须同时读 IPv4 与 IPv6 表——serve 等进程常绑定 IPv6 通配
+            // 地址 ::（只出现在 /proc/net/tcp6），只看 IPv4 会漏掉真实应用端口。
             const r = await runtime.exec.exec(
                 'sh',
-                ['-c', 'awk \'function h2d(h,i,c,v,r){r=0;for(i=1;i<=length(h);i++){c=tolower(substr(h,i,1));v=(c~/[0-9]/)?c:index("abcdef",c)+9;r=r*16+v;}return r;} NR>1 && $4=="0A" {split($2,a,":"); print h2d(a[2])}\' /proc/net/tcp 2>/dev/null | sort -un | head -60'],
+                ['-c', 'awk \'function h2d(h,i,c,v,r){r=0;for(i=1;i<=length(h);i++){c=tolower(substr(h,i,1));v=(c~/[0-9]/)?c:index("abcdef",c)+9;r=r*16+v;}return r;} NR>1 && $4=="0A" {split($2,a,":"); print h2d(a[2])}\' /proc/net/tcp /proc/net/tcp6 2>/dev/null | sort -un | head -60'],
                 {},
                 { runtimeRef, cwd: workspacePath, timeoutMs: 10000 },
             );
