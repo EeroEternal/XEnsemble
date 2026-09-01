@@ -61,6 +61,7 @@
     "unsaved_changes": "Unsaved changes",
     "saved": "Saved.",
     "unpushed": "unpushed",
+    "unpushed_title": "{{count}} committed but not pushed",
     "binary_file": "Binary file, cannot display text diff",
     "content_truncated": "Content too large, truncated",
     "no_author": "No author identity set"

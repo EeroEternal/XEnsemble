@@ -93,6 +93,10 @@ export default function ChatView({ sessionId, onSessionEnd }) {
             knownSeqsRef.current.add(entry.seq);
           }
           setMessages((prev) => [...prev, entry]);
+          // Track the most recent activity so post-stop spinner logic can tell
+          // "agent has gone quiet since my Esc" apart from "agent just shipped
+          // a new tool result and is still working".
+          setLastEventAt(Date.now());
           return;
         }
         if (msg.type === 'exit') {
@@ -126,6 +130,12 @@ export default function ChatView({ sessionId, onSessionEnd }) {
   const [scrollMetrics, setScrollMetrics] = useState({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 });
   const [scrollbarHover, setScrollbarHover] = useState(false);
   const [scrollbarDrag, setScrollbarDrag] = useState(false);
+  // Timestamp (ms) of the last "stop" click. While set and no new chat_event
+  // has arrived since, we treat the agent as idle so the thinking marker
+  // disappears (Esc-twice aborts the current task; the session itself is
+  // still alive, so ended stays false).
+  const stopAtRef = useRef(0);
+  const [lastEventAt, setLastEventAt] = useState(0);
   const scrollbarTrackRef = useRef(null);
 
   // Auto-scroll to bottom on new messages.
@@ -179,6 +189,10 @@ export default function ChatView({ sessionId, onSessionEnd }) {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'input', data: '\x1b' }));
       wsRef.current.send(JSON.stringify({ type: 'input', data: '\x1b' }));
+      // Mark the stop moment so the thinking spinner drops right away (the
+      // session is still alive, so `ended` won't flip and isThinking would
+      // otherwise linger on the last tool/user event).
+      stopAtRef.current = Date.now();
     }
   }, []);
 
@@ -229,10 +243,18 @@ export default function ChatView({ sessionId, onSessionEnd }) {
     if (sending) return true;
     if (renderedItems.length === 0) return false;
     const last = renderedItems[renderedItems.length - 1];
-    if (last.kind === 'message' && last.message.role === 'user') return true;
-    if (last.kind === 'tool_call') return true;
-    return false;
-  }, [connected, ended, sending, renderedItems]);
+    // Once the agent gives a final assistant reply, it's between turns —
+    // hide the spinner. Anything else (user prompt just sent, tool call
+    // awaiting its result, tool result just came back while the LLM
+    // decides the next step) means the agent is still busy.
+    if (last.kind === 'message' && last.message.role === 'assistant') return false;
+    // Esc-twice abort: agent session is alive but the user just stopped the
+    // current task. Suppress the spinner for a short grace window so the
+    // chat visibly settles; any new chat_event clears the grace window.
+    if (stopAtRef.current && Date.now() - stopAtRef.current < 1500) return false;
+    if (lastEventAt && stopAtRef.current && lastEventAt >= stopAtRef.current) return false;
+    return true;
+  }, [connected, ended, sending, renderedItems, lastEventAt]);
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
       {/* Message list */}

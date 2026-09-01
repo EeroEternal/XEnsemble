@@ -512,7 +512,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-1.5 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           {(gitChanges?.ahead > 0) && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-[11px] font-medium text-amber-700" title={`${gitChanges.ahead} committed but not pushed`}>
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-[11px] font-medium text-amber-700" title={t('workspace:label.unpushed_title', { count: gitChanges.ahead })}>
               <Upload className="h-3 w-3" />
               {gitChanges.ahead} {t('workspace:label.unpushed')}
             </span>

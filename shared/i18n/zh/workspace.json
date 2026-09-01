@@ -61,6 +61,7 @@
     "unsaved_changes": "未保存的更改",
     "saved": "已保存。",
     "unpushed": "未推送",
+    "unpushed_title": "{{count}} 个提交未推送",
     "binary_file": "二进制文件，无法显示文本差异",
     "content_truncated": "内容过大，已截断",
     "no_author": "未设置作者信息"
