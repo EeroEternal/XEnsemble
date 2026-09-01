@@ -239,8 +239,10 @@ async function loadPlanCache(projectId, fingerprint) {
         if (!Array.isArray(plan.steps) || !plan.steps.length) return null;
         if (Date.now() - Number(row.updatedAt || 0) > PLAN_CACHE_TTL_MS) return null; // 过期兜底
         // 指纹不匹配 → 项目内容已变，缓存作废（比 TTL 更精确的失效判断）。
-        // 无 fingerprint 的旧格式缓存也一并作废，让下次保存带上指纹（渐进升级）。
-        if (fingerprint && plan.context?.fingerprint !== fingerprint) {
+        // 无 fingerprint 的旧格式缓存也一律作废，让下次保存带上指纹（渐进升级）。
+        // 注意不能用 `fingerprint &&` 短路：fingerprint 为 null 时旧缓存会永不过期，
+        // 导致改了 analyze 逻辑后二次部署仍复用旧静态计划（boxlite 下 hostWs 可能 undefined）。
+        if (!plan.context?.fingerprint || plan.context?.fingerprint !== fingerprint) {
             console.error(`[twoStage] plan cache stale (fingerprint ${plan.context?.fingerprint ? 'changed' : 'missing'}), re-analyzing`);
             return null;
         }
@@ -815,7 +817,9 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
 
     // 先查跨次部署的计划缓存：命中则跳过 opencode/LLM 探索分析（二次部署省 1~4 分钟）。
     // 用项目内容指纹做失效判断：内容变了即使 TTL 内也会重新分析。
-    let planFingerprint = computeProjectFingerprint(hostWs, wsPath);
+    // 用真实 host 路径（hostPath）而非 hostWs/wsPath —— boxlite 下 hostWs 可能 undefined、
+    // wsPath 是沙箱内路径（宿主上不存在），会导致 fingerprint 恒为 null、缓存永不失效。
+    let planFingerprint = computeProjectFingerprint(hostPath, wsPath);
     if (!plan) {
         const cached = await loadPlanCache(project.id, planFingerprint);
         if (cached) {

@@ -225,9 +225,16 @@ export default function ChatView({ sessionId, onSessionEnd }) {
               <ChatItem key={idx} item={item} />
             ))}
             {isThinking && (
-              <div className="flex items-center gap-2 text-xs text-zinc-400" role="status" aria-live="polite">
-                <Sparkles className="h-3.5 w-3.5 animate-pulse" />
-                {t('chat:thinking', { defaultValue: 'Agent is thinking…' })}
+              <div className="flex justify-start pr-2 sm:pr-12" role="status" aria-live="polite">
+                <div className="flex max-w-[80%] items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-[13.5px] text-zinc-700">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-500" />
+                  <Sparkles className="h-3.5 w-3.5 text-zinc-400" />
+                  <span className="font-medium text-zinc-700">
+                    {t('chat:agent', { defaultValue: 'Agent' })}
+                  </span>
+                  <span className="text-zinc-400">·</span>
+                  <span>{t('chat:thinking', { defaultValue: 'Agent is thinking…' })}</span>
+                </div>
               </div>
             )}
           </div>
@@ -242,7 +249,9 @@ export default function ChatView({ sessionId, onSessionEnd }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            rows={Math.min(4, Math.max(1, input.split('\n').length))}
+            // Default 4 rows, grows up to 4, scrolls past that. Comfortable
+            // middle ground for both short prompts and paste-of-stack-traces.
+            rows={Math.min(4, Math.max(4, input.split('\n').length))}
             placeholder={t('chat:input_placeholder', { defaultValue: 'Message the agent… (Enter to send, Shift+Enter for newline)' })}
             disabled={ended}
             autoFocus
@@ -304,37 +313,40 @@ function ChatBubble({ message }) {
     setTimeout(() => setCopied(false), 1500);
   };
 
+  // WeChat-style layout: user bubbles hug the right (avatar would sit on the
+  // left), agent bubbles hug the left (avatar on the right). Indents on the
+  // *opposite* side give the avatar room without stealing bubble width.
   return (
-    <div className="group flex max-w-[85%] flex-col gap-0.5">
-      <div className="flex justify-end">
-        <div
-          className={`relative flex w-full flex-col gap-1 rounded-2xl px-4 py-2.5 text-sm ${
-            isUser
-              ? 'bg-zinc-900 text-zinc-50'
-              : 'bg-zinc-100 text-zinc-900'
-          }`}
-        >
-          <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide opacity-60">
-            {isUser ? <User className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
+    <div
+      className={`group flex w-full ${isUser ? 'justify-end pl-2 sm:pl-12' : 'justify-start pr-2 sm:pr-12'}`}
+    >
+      <div className="flex max-w-[80%] flex-col gap-1">
+        <div className={`flex items-center gap-1.5 text-[11px] text-zinc-400 ${isUser ? 'justify-end' : 'justify-start'}`}>
+          {isUser ? <User className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
+          <span className="font-medium">
             {isUser ? t('chat:you', { defaultValue: 'You' }) : t('chat:agent', { defaultValue: 'Agent' })}
-            {!isUser && message.model ? (
-              <span className="normal-case tracking-normal opacity-70">· {message.model}</span>
-            ) : null}
-          </div>
-          <pre className="whitespace-pre-wrap break-words font-sans text-[13px] leading-relaxed">
-            {message.content}
-          </pre>
+          </span>
+          {!isUser && message.model ? (
+            <span className="text-zinc-400">· {message.model}</span>
+          ) : null}
         </div>
+        <pre className={`whitespace-pre-wrap break-words font-sans text-[13.5px] leading-relaxed ${
+          isUser
+            ? 'bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-zinc-800'
+            : 'text-zinc-800'
+        }`}>
+          {message.content}
+        </pre>
+        <button
+          type="button"
+          onClick={copyContent}
+          title={t('chat:copy', { defaultValue: 'Copy' })}
+          aria-label={t('chat:copy', { defaultValue: 'Copy' })}
+          className={`invisible mt-0.5 flex h-6 w-6 items-center justify-center self-${isUser ? 'end' : 'start'} rounded-md text-zinc-400 opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 hover:bg-zinc-200 hover:text-zinc-700 ${consoleButtonFocusClass}`}
+        >
+          {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={copyContent}
-        title={t('chat:copy', { defaultValue: 'Copy' })}
-        aria-label={t('chat:copy', { defaultValue: 'Copy' })}
-        className={`invisible ml-auto flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 hover:bg-zinc-200 hover:text-zinc-700 ${consoleButtonFocusClass}`}
-      >
-        {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-      </button>
     </div>
   );
 }
@@ -344,9 +356,11 @@ function ToolCard({ call, result }) {
   const [open, setOpen] = useState(false);
   const name = call?.tool || result?.tool || t('chat:tool_unknown', { defaultValue: 'Tool' });
   const hasDetail = Boolean(call?.content) || Boolean(result?.content);
+  // Tool cards stay in the gray box (they're structured diagnostics, not chat)
+  // and sit on the agent's left side to keep the WeChat-style left/right split.
   return (
-    <div className="flex justify-start">
-      <div className="w-full max-w-[85%] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50">
+    <div className="flex justify-start pr-2 sm:pr-12">
+      <div className="w-full max-w-[80%] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50">
         <button
           type="button"
           onClick={() => hasDetail && setOpen((o) => !o)}
