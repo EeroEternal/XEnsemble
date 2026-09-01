@@ -22,6 +22,8 @@
   "field_category": "分类",
   "field_tags": "标签",
   "field_content": "内容（Markdown）",
+  "tags_placeholder": "drizzle, postgres, migration",
+  "content_placeholder": "## 适用场景&#10;...&#10;## 步骤&#10;1. ...&#10;## 注意&#10;- ...",
   "action_activate": "启用",
   "action_archive": "归档",
   "action_restore": "恢复",

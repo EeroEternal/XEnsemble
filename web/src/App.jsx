@@ -165,9 +165,13 @@ function AuthenticatedLayout({
           onLaunchPanelClose={() => setLaunchPanelOpen(false)}
           className={cn(
             'flex h-full min-h-0 flex-1 flex-col',
-            (isSessions || launchPanelOpen) ? 'relative z-20' : offRouteClass,
+            // Only the sessions route occupies layout. The launch modal portals
+            // to document.body, so opening New Session from History/Skills must
+            // NOT bring the Sessions page into the flex flow (would split the
+            // screen 50/50 with the current page).
+            isSessions ? 'relative z-20' : offRouteClass,
           )}
-          aria-hidden={!isSessions && !launchPanelOpen}
+          aria-hidden={!isSessions}
         />
         <History
           agents={agents}

@@ -22,6 +22,8 @@
   "field_category": "Category",
   "field_tags": "Tags",
   "field_content": "Content (markdown)",
+  "tags_placeholder": "drizzle, postgres, migration",
+  "content_placeholder": "## When to use&#10;...&#10;## Steps&#10;1. ...&#10;## Notes&#10;- ...",
   "action_activate": "Activate",
   "action_archive": "Archive",
   "action_restore": "Restore",

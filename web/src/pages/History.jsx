@@ -286,7 +286,7 @@ function ConversationDrawer({ session, onClose }) {
       type="button"
       onClick={refresh}
       disabled={refreshing}
-      className={`inline-flex h-7 items-center gap-2 rounded-md border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-50 ${consoleButtonFocusClass}`}
+      className={`inline-flex h-7 items-center gap-2 rounded-md border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 dark:hover:text-zinc-100 ${consoleButtonFocusClass}`}
     >
       {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
       {refreshing
@@ -318,7 +318,7 @@ function ConversationDrawer({ session, onClose }) {
       onClick={extractSkill}
       disabled={extracting}
       title={t('skills:extract_from_session', { defaultValue: 'Extract as Skill' })}
-      className={`inline-flex h-7 items-center gap-2 rounded-md border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-50 ${consoleButtonFocusClass}`}
+      className={`inline-flex h-7 items-center gap-2 rounded-md border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 dark:hover:text-zinc-100 ${consoleButtonFocusClass}`}
     >
       {extracting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
       {extracting
@@ -349,27 +349,27 @@ function ConversationDrawer({ session, onClose }) {
       />
       <div className={`absolute right-0 top-0 flex h-full w-full max-w-[720px] flex-col border-l border-zinc-200 bg-surface shadow-2xl transition-transform duration-200 ${mounted ? 'translate-x-0' : 'translate-x-full'}`}>
         {/* Header */}
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3">
-          <div className="min-w-0">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-zinc-200 px-4 py-3">
+          <div className="min-w-0 flex-1">
             <h2 className="truncate text-sm font-semibold text-zinc-900">{title}</h2>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-zinc-500">
-              <span className="inline-flex items-center gap-1">
-                <Bot className="h-3 w-3" strokeWidth={1.75} />
-                {session.agentId}
+              <span className="inline-flex min-w-0 items-center gap-1">
+                <Bot className="h-3 w-3 shrink-0" strokeWidth={1.75} />
+                <span className="truncate">{session.agentId}</span>
               </span>
               {session.projectName && (
-                <span className="inline-flex items-center gap-1">
-                  <Folder className="h-3 w-3" strokeWidth={1.75} />
-                  {session.projectName}
+                <span className="inline-flex min-w-0 items-center gap-1">
+                  <Folder className="h-3 w-3 shrink-0" strokeWidth={1.75} />
+                  <span className="truncate">{session.projectName}</span>
                 </span>
               )}
-              <span>{formatRelativeTime(session.createdAt)}</span>
+              <span className="shrink-0">{formatRelativeTime(session.createdAt)}</span>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className={consoleIconButtonClass}
+            className={`${consoleIconButtonClass} shrink-0`}
             aria-label={t('sessions:conversation.close', { defaultValue: 'Close' })}
           >
             <X className="h-4 w-4" />

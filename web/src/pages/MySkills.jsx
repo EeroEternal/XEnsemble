@@ -280,7 +280,7 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
             </div>
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field.tags', { defaultValue: 'Tags' })}</label>
-              <Input value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} placeholder="drizzle, postgres, migration" />
+              <Input value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} placeholder={t('skills:tags_placeholder', { defaultValue: 'drizzle, postgres, migration' })} />
             </div>
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field.content', { defaultValue: 'Content (markdown)' })}</label>
@@ -288,7 +288,7 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
                 value={form.content}
                 onChange={(e) => setForm({ ...form, content: e.target.value })}
                 rows={8}
-                placeholder="## 适用场景&#10;...&#10;## 步骤&#10;1. ...&#10;## 注意&#10;- ..."
+                placeholder={t('skills:content_placeholder')}
                 className="w-full bg-surface border border-zinc-300 rounded-md px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-colors font-mono"
               />
             </div>
