@@ -297,6 +297,21 @@ test('generateByokConfig qwen-code: generates settings.json when customApiKey fi
     const parsed = JSON.parse(configFiles[0].content);
     assert.equal(parsed.env.CUSTOM_API_KEY, 'sk-custom');
     assert.equal(parsed.modelProviders['custom'][0].envKey, 'CUSTOM_API_KEY');
+    // generationConfig.contextWindowSize must be written to override qwen's
+    // internal DEFAULT_TOKEN_LIMIT=200000 fallback; default 1048576.
+    assert.equal(parsed.modelProviders['custom'][0].generationConfig.contextWindowSize, 1048576);
+});
+
+test('generateByokConfig qwen-code: respects custom max_context_size', () => {
+    const { configFiles } = generateByokConfig('qwen-code', {
+        DASHSCOPE_API_KEY: 'sk-dash',
+        customApiKey: 'sk-custom',
+        baseUrl: 'https://api.deepseek.com/v1',
+        model: 'deepseek-chat',
+        max_context_size: 131072,
+    });
+    const parsed = JSON.parse(configFiles[0].content);
+    assert.equal(parsed.modelProviders['custom'][0].generationConfig.contextWindowSize, 131072);
 });
 
 // ── generateByokConfig: pi ──
@@ -346,6 +361,19 @@ test('generateByokConfig hermes: generates YAML', () => {
     assert.ok(content.includes('api_key: sk-ds'));
     assert.ok(content.includes('api_mode: openai'));
     assert.ok(content.includes('model: deepseek-chat'));
+    // context_length written so hermes doesn't fall back to its hardcoded 200K default
+    assert.ok(content.includes('context_length: 1048576'));
+});
+
+test('generateByokConfig hermes: respects custom max_context_size', () => {
+    const { configFiles } = generateByokConfig('hermes', {
+        api_key: 'sk-ds',
+        base_url: 'https://api.deepseek.com/v1',
+        model: 'deepseek-chat',
+        max_context_size: 131072,
+    });
+    const content = configFiles[0].content;
+    assert.ok(content.includes('context_length: 131072'));
 });
 
 // ── generateByokConfig: openclaw ──
@@ -417,6 +445,39 @@ test('generateByokConfig codebuddy: no config when apiKey empty', () => {
     const { env, configFiles } = generateByokConfig('codebuddy', { apiKey: '' });
     assert.deepEqual(env, {});
     assert.equal(configFiles.length, 0);
+});
+
+test('generateByokConfig codebuddy: writes maxInputTokens + autoCompactWindow', () => {
+    const { configFiles } = generateByokConfig('codebuddy', {
+        apiKey: 'sk-test',
+        baseUrl: 'https://api.openai.com/v1/chat/completions',
+        model: 'claude-sonnet-4-5',
+    });
+    const modelsJson = configFiles.find((f) => f.path.endsWith('models.json'));
+    const parsed = JSON.parse(modelsJson.content);
+    // maxInputTokens is the context window field; default 1048576 here
+    assert.equal(parsed[0].maxInputTokens, 1048576);
+    const settingsJson = configFiles.find((f) => f.path.endsWith('settings.json'));
+    const settings = JSON.parse(settingsJson.content);
+    assert.equal(settings.autoCompactEnabled, true);
+    // 1M stays 1M (within codebuddy's [100k, 1M] clamp)
+    assert.equal(settings.autoCompactWindow, 1000000);
+});
+
+test('generateByokConfig codebuddy: clamps autoCompactWindow to [100k, 1M]', () => {
+    const { configFiles } = generateByokConfig('codebuddy', {
+        apiKey: 'sk-test',
+        baseUrl: 'https://api.openai.com/v1/chat/completions',
+        model: 'gpt-4o',
+        max_context_size: 64000, // below codebuddy's 100k floor
+    });
+    const modelsJson = configFiles.find((f) => f.path.endsWith('models.json'));
+    const parsed = JSON.parse(modelsJson.content);
+    // models.json stores the real value; settings.json is the clamped one
+    assert.equal(parsed[0].maxInputTokens, 64000);
+    const settingsJson = configFiles.find((f) => f.path.endsWith('settings.json'));
+    const settings = JSON.parse(settingsJson.content);
+    assert.equal(settings.autoCompactWindow, 100000);
 });
 
 // ── generateByokConfig: cursor ──

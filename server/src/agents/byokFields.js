@@ -79,6 +79,7 @@ const BYOK_FIELDS = {
             { key: 'customApiKey', label: 'Custom Provider Key', tooltip: '自定义 Provider 的 API 密钥（选填，填了则使用自定义 Provider 而非 DashScope）', type: 'secret', defaultValue: '', required: false },
             { key: 'baseUrl', label: 'Custom Base URL', tooltip: '自定义 Provider API 基础地址（选填，配合 customApiKey 使用）', type: 'string', defaultValue: '', required: false },
             { key: 'model', label: 'Custom Model', tooltip: '自定义模型 ID（选填，配合 customApiKey 使用）', type: 'string', defaultValue: '', required: false },
+            { key: 'max_context_size', label: 'Max Context Size', tooltip: '自定义模型的上下文窗口（token 数；填了则写入 generationConfig.contextWindowSize，覆盖 qwen 内置 200K 兜底）', type: 'number', defaultValue: 1048576, required: false },
         ],
     },
     'minimax-cli': {
@@ -110,6 +111,7 @@ const BYOK_FIELDS = {
             { key: 'base_url', label: 'Base URL', tooltip: 'API 基础地址', type: 'string', defaultValue: 'https://api.openai.com/v1', required: false },
             { key: 'model', label: 'Model', tooltip: '模型 ID', type: 'string', defaultValue: 'gpt-4o', required: false },
             { key: 'api_mode', label: 'API Mode', tooltip: 'API 协议模式', type: 'string', defaultValue: 'openai', required: false },
+            { key: 'max_context_size', label: 'Max Context Size', tooltip: '模型的上下文窗口（token 数；填了则写入 model.context_length）', type: 'number', defaultValue: 1048576, required: false },
         ],
     },
     'openclaw': {
@@ -135,6 +137,7 @@ const BYOK_FIELDS = {
             { key: 'apiKey', label: 'API Key', tooltip: 'LLM Provider API 密钥', type: 'secret', defaultValue: '', required: true },
             { key: 'baseUrl', label: 'Base URL', tooltip: 'API 基础地址（需包含 /v1/chat/completions 路径）', type: 'string', defaultValue: 'https://api.openai.com/v1/chat/completions', required: false },
             { key: 'model', label: 'Model', tooltip: '模型 ID', type: 'string', defaultValue: 'gpt-4o', required: false },
+            { key: 'max_context_size', label: 'Max Context Size', tooltip: '模型的上下文窗口（token 数；填了则写入 models.json 的 maxInputTokens）', type: 'number', defaultValue: 1048576, required: false },
         ],
     },
     'cursor': {
@@ -451,6 +454,7 @@ function generateQwenCode(values) {
     const customApiKey = str(values.customApiKey);
     const baseUrl = str(values.baseUrl) || 'https://api.openai.com/v1';
     const model = str(values.model) || 'gpt-4o';
+    const maxContextSize = Number(values.max_context_size) || 1048576;
 
     if (dashscopeKey) env.DASHSCOPE_API_KEY = dashscopeKey;
 
@@ -470,6 +474,7 @@ function generateQwenCode(values) {
                         id: model,
                         baseUrl: baseUrl,
                         envKey: 'CUSTOM_API_KEY',
+                        generationConfig: { contextWindowSize: maxContextSize },
                     },
                 ],
             },
@@ -536,6 +541,7 @@ function generateHermes(values) {
     const baseUrl = str(values.base_url) || 'https://api.openai.com/v1';
     const model = str(values.model) || 'gpt-4o';
     const apiMode = str(values.api_mode) || 'openai';
+    const maxContextSize = Number(values.max_context_size) || 1048576;
 
     if (apiKey) {
         const providerName = 'auto';
@@ -543,6 +549,7 @@ function generateHermes(values) {
             'model:',
             `  model: ${model}`,
             `  provider: ${providerName}`,
+            `  context_length: ${maxContextSize}`,
             '',
             'providers:',
             `  ${providerName}:`,
@@ -551,6 +558,7 @@ function generateHermes(values) {
             `    api_key: ${apiKey}`,
             `    api_mode: ${apiMode}`,
             `    model: ${model}`,
+            `    context_length: ${maxContextSize}`,
         ].join('\n');
         configFiles.push({ path: '${STATE_DIR}/config.yaml', content: yaml });
     }
@@ -626,6 +634,7 @@ function generateCodebuddy(values) {
     const apiKey = str(values.apiKey);
     const baseUrl = str(values.baseUrl) || 'https://api.openai.com/v1/chat/completions';
     const model = str(values.model) || 'gpt-4o';
+    const maxInputTokens = Number(values.max_context_size) || 1048576;
 
     if (apiKey) {
         env.CODEBUDDY_API_KEY = apiKey;
@@ -638,12 +647,15 @@ function generateCodebuddy(values) {
                 vendor: 'custom',
                 apiKey: apiKey,
                 url: baseUrl,
+                maxInputTokens: maxInputTokens,
                 maxOutputTokens: 8192,
             }], null, 2),
         });
         configFiles.push({
             path: `${configDir}/settings.json`,
             content: JSON.stringify({
+                autoCompactEnabled: true,
+                autoCompactWindow: Math.max(100000, Math.min(1000000, maxInputTokens)),
                 trustAll: true,
                 trustedDirectories: ['/workspace', '/tmp'],
             }, null, 2),

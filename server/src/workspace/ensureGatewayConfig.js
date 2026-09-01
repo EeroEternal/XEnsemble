@@ -42,6 +42,7 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                             id: t,
                             baseUrl: `${routerUrl}/v1`,
                             envKey: 'OPENAI_API_KEY',
+                            generationConfig: { contextWindowSize: guessContextLength(t) },
                         })),
                     },
                     providerProtocol: { gateway: 'openai' },
@@ -50,6 +51,10 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             };
 
         case 'droid':
+            // Factory Droid uses compactionTokenLimit (and per-model overrides
+            // compactionTokenLimitPerModel) as the context-window knob. The
+            // threshold that triggers auto-compaction. guessContextLength feeds
+            // both a per-model map (best effort) and a generic fallback.
             return {
                 dirPath: `${stateDirPath}/.factory`,
                 filePath: `${stateDirPath}/.factory/settings.json`,
@@ -61,6 +66,10 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                         baseUrl: `${routerUrl}/v1`,
                         apiKey: sessionToken,
                     })),
+                    compactionTokenLimit: Math.max(...targets.map((t) => guessContextLength(t))),
+                    compactionTokenLimitPerModel: Object.fromEntries(
+                        targets.map((t) => [t, guessContextLength(t)]),
+                    ),
                 }, null, 2),
             };
 
@@ -82,6 +91,7 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                             models: targets.map((t) => ({
                                 model: t,
                                 displayName: t,
+                                contextWindow: guessContextLength(t),
                                 maxOutputTokens: 8192,
                             })),
                         },
@@ -107,7 +117,11 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                                 baseUrl: `${routerUrl}/v1`,
                                 apiKey: sessionToken,
                                 api: 'openai-completions',
-                                models: targets.map((t) => ({ id: t, name: t })),
+                                models: targets.map((t) => ({
+                                    id: t,
+                                    name: t,
+                                    contextWindow: guessContextLength(t),
+                                })),
                             },
                         },
                     },
@@ -134,7 +148,11 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                             baseUrl: `${routerUrl}/v1`,
                             api: 'openai-completions',
                             apiKey: sessionToken,
-                            models: targets.map((t) => ({ id: t, name: t })),
+                            models: targets.map((t) => ({
+                                id: t,
+                                name: t,
+                                contextWindow: guessContextLength(t),
+                            })),
                         },
                     },
                 }, null, 2),
@@ -146,6 +164,9 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             // cline requests go to api.openai.com and reject the session token.
             // The provider `models` record enumerates selectable models so /model
             // offers every configured gateway model (not just the default).
+            // contextWindow is written per the cline UI "Context Window size" field;
+            // the exact JSON key isn't fully documented, but writing a camelCase
+            // variant is the closest match and harmless if ignored.
             return {
                 dirPath: `${stateDirPath}/settings`,
                 filePath: `${stateDirPath}/settings/providers.json`,
@@ -157,7 +178,7 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                             settings: {
                                 provider: 'openai-compatible',
                                 model: def,
-                                models: Object.fromEntries(targets.map((t) => [t, { id: t }])),
+                                models: Object.fromEntries(targets.map((t) => [t, { id: t, contextWindow: guessContextLength(t) }])),
                                 baseUrl: `${routerUrl}/v1`,
                                 apiKey: sessionToken,
                             },
@@ -197,6 +218,12 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             // /chat/completions path. trustAll/trustedDirectories avoid the
             // interactive "trust this folder?" prompt (CodeBuddy treats /tmp,
             // /root and $HOME as dangerous).
+            //
+            // The context window is `maxInputTokens` (NOT `maxOutputTokens`),
+            // per CodeBuddy's official models.json schema. The settings.json
+            // we also write here carries autoCompactWindow so the compaction
+            // threshold matches the model's real context (clamped by CodeBuddy
+            // to [100k, 1M] regardless).
             const configDir = stateDirPath || '$HOME/.codebuddy';
             return {
                 dirPath: configDir,
@@ -207,12 +234,21 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                     vendor: 'custom',
                     apiKey: sessionToken,
                     url: `${routerUrl}/v1/chat/completions`,
+                    maxInputTokens: guessContextLength(t),
                     maxOutputTokens: 8192,
                 })), null, 2),
                 extraFiles: [{
                     dirPath: configDir,
                     filePath: `${configDir}/settings.json`,
                     content: JSON.stringify({
+                        autoCompactEnabled: true,
+                        // codebuddy clamps autoCompactWindow to [100k, 1M], so
+                        // writing the model's actual context here just lets it
+                        // reach the upper bound for known 1M models.
+                        autoCompactWindow: Math.max(
+                            100000,
+                            Math.min(1000000, ...targets.map((t) => guessContextLength(t))),
+                        ),
                         trustAll: true,
                         trustedDirectories: ['/workspace', '/tmp'],
                     }, null, 2),
@@ -279,6 +315,10 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             // _resolve_openrouter_runtime only honours cfg_base_url when
             // cfg_provider is empty or "auto". With provider: "openrouter",
             // the env var OPENROUTER_BASE_URL would win instead.
+            //
+            // model.context_length and model.max_tokens are the official knobs for
+            // the model metadata (see minimax mmx-cli Hermes schema). Each per-provider
+            // model entry also accepts context_length so providers can override it.
             return {
                 dirPath: stateDirPath,
                 filePath: `${stateDirPath}/config.yaml`,
@@ -288,6 +328,18 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                     '  provider: "auto"',
                     `  base_url: "${routerUrl}/v1"`,
                     `  api_key: "${sessionToken}"`,
+                    `  context_length: ${guessContextLength(def)}`,
+                    `  max_tokens: 8192`,
+                    'providers:',
+                    '  auto:',
+                    '    base_url: "' + routerUrl + '/v1"',
+                    '    api_key: "' + sessionToken + '"',
+                    '    models:',
+                    ...targets.map((t) => `      "${t}":`),
+                    ...targets.map((t) => [
+                        '        id: "' + t + '"',
+                        `        context_length: ${guessContextLength(t)}`,
+                    ].join('\n')),
                 ].join('\n') + '\n',
             };
 
@@ -295,7 +347,14 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             const ocModels = {};
             for (const t of targets) {
                 const modelId = t.includes('/') ? t.split('/').slice(1).join('/') : t;
-                ocModels[modelId] = { name: modelId };
+                ocModels[modelId] = {
+                    name: modelId,
+                    // limit.context overrides the context window that opencode
+                    // would otherwise pull from Models.dev; the latter is often
+                    // missing for newly-released / long-tail models, which is
+                    // why we set it from guessContextLength() instead.
+                    limit: { context: guessContextLength(t), output: 8192 },
+                };
             }
             const defId = def.includes('/') ? def.split('/').slice(1).join('/') : def;
             return {

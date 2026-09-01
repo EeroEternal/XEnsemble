@@ -175,3 +175,133 @@ test('buildGatewayConfigSpec: kimi-code single target (back-compat) registers on
     assert.match(toml, /\[models\.gateway-0\][\s\S]*model = "zxs_deepseek\/deepseek-v4-flash"/);
     assert.doesNotMatch(toml, /\[models\.gateway-1\]/);
 });
+
+test('buildGatewayConfigSpec: qwen-code writes generationConfig.contextWindowSize to override 200K fallback', () => {
+    const spec = buildGatewayConfigSpec('qwen-code', ctx);
+    assert.ok(spec, 'spec must not be null for qwen-code');
+    const content = JSON.parse(spec.content);
+    assert.equal(content.modelProviders.gateway.length, 1);
+    // guessContextLength('zxs_deepseek/deepseek-v4-flash') -> 1048576 (deepseek-v4 prefix in MODEL_CONTEXT_LENGTHS)
+    assert.equal(content.modelProviders.gateway[0].id, 'zxs_deepseek/deepseek-v4-flash');
+    assert.equal(content.modelProviders.gateway[0].generationConfig.contextWindowSize, 1048576);
+});
+
+test('buildGatewayConfigSpec: qwen-code with unknown model falls back to 1M default', () => {
+    const spec = buildGatewayConfigSpec('qwen-code', { ...ctx, modelTarget: 'openrouter-zxs2/nvidia/nemotron-3-ultra-550b-a55b:free' });
+    const content = JSON.parse(spec.content);
+    assert.equal(content.modelProviders.gateway[0].generationConfig.contextWindowSize, 1048576);
+});
+
+test('buildGatewayConfigSpec: qwen-code with multi-targets writes contextWindowSize per model', () => {
+    const spec = buildGatewayConfigSpec('qwen-code', {
+        ...ctx,
+        modelTargets: ['zxs_deepseek/deepseek-v4-flash', 'anthropic/claude-sonnet-4.5'],
+        defaultTarget: 'anthropic/claude-sonnet-4.5',
+    });
+    const content = JSON.parse(spec.content);
+    assert.equal(content.modelProviders.gateway.length, 2);
+    assert.equal(content.modelProviders.gateway[0].generationConfig.contextWindowSize, 1048576);
+    assert.equal(content.modelProviders.gateway[1].generationConfig.contextWindowSize, 200000);
+    assert.equal(content.model.name, 'anthropic/claude-sonnet-4.5');
+});
+
+test('buildGatewayConfigSpec: pi writes contextWindow per model (camelCase)', () => {
+    const spec = buildGatewayConfigSpec('pi', ctx);
+    const content = JSON.parse(spec.content);
+    const models = content.providers.gateway.models;
+    // deepseek-v4 prefix → 1048576
+    assert.equal(models[0].contextWindow, 1048576);
+    assert.equal(models[0].id, 'zxs_deepseek/deepseek-v4-flash');
+});
+
+test('buildGatewayConfigSpec: openclaw writes contextWindow per model', () => {
+    const spec = buildGatewayConfigSpec('openclaw', ctx);
+    const content = JSON.parse(spec.content);
+    const models = content.models.providers.gateway.models;
+    assert.equal(models[0].contextWindow, 1048576);
+});
+
+test('buildGatewayConfigSpec: qoder writes contextWindow per model', () => {
+    const spec = buildGatewayConfigSpec('qoder', ctx);
+    const content = JSON.parse(spec.content);
+    const models = content.providers.gateway.models;
+    assert.equal(models[0].contextWindow, 1048576);
+    assert.equal(models[0].maxOutputTokens, 8192);
+});
+
+test('buildGatewayConfigSpec: cline writes contextWindow per model (best-effort)', () => {
+    const spec = buildGatewayConfigSpec('cline', ctx);
+    const content = JSON.parse(spec.content);
+    const openaiCompat = content.providers['openai-compatible'].settings;
+    const modelId = 'zxs_deepseek/deepseek-v4-flash';
+    assert.equal(openaiCompat.models[modelId].id, modelId);
+    assert.equal(openaiCompat.models[modelId].contextWindow, 1048576);
+});
+
+test('buildGatewayConfigSpec: openclaw with multi-targets respects per-model context', () => {
+    const spec = buildGatewayConfigSpec('openclaw', {
+        ...ctx,
+        modelTargets: ['anthropic/claude-sonnet-4.5', 'openrouter-zxs2/nvidia/nemotron-3-ultra-550b-a55b:free'],
+        defaultTarget: 'openrouter-zxs2/nvidia/nemotron-3-ultra-550b-a55b:free',
+    });
+    const content = JSON.parse(spec.content);
+    const models = content.models.providers.gateway.models;
+    assert.equal(models[0].contextWindow, 200000);
+    assert.equal(models[1].contextWindow, 1048576);
+});
+
+test('buildGatewayConfigSpec: opencode writes limit.context per model (official schema)', () => {
+    const spec = buildGatewayConfigSpec('opencode', ctx);
+    const content = JSON.parse(spec.content);
+    const models = content.provider.gateway.models;
+    // deepseek-v4 prefix → 1048576
+    assert.equal(models['deepseek-v4-flash'].limit.context, 1048576);
+    assert.equal(models['deepseek-v4-flash'].limit.output, 8192);
+    // the model key is the bare id (no provider prefix) so opencode's
+    // provider/model_id parser resolves to our `gateway` provider.
+    assert.equal(content.model, 'gateway/deepseek-v4-flash');
+});
+
+test('buildGatewayConfigSpec: opencode with unknown model falls back to 1M', () => {
+    const spec = buildGatewayConfigSpec('opencode', {
+        ...ctx,
+        modelTarget: 'openrouter-zxs2/nvidia/nemotron-3-ultra-550b-a55b:free',
+    });
+    const content = JSON.parse(spec.content);
+    const models = content.provider.gateway.models;
+    // Models.dev lacks this long-tail model entirely; without our override
+    // opencode treats it as having 0-token context. Write 1M via guessContextLength.
+    assert.equal(models['nvidia/nemotron-3-ultra-550b-a55b:free'].limit.context, 1048576);
+});
+
+test('buildGatewayConfigSpec: droid writes compactionTokenLimit + per-model map', () => {
+    const spec = buildGatewayConfigSpec('droid', ctx);
+    const content = JSON.parse(spec.content);
+    // generic fallback = max of all targets
+    assert.equal(content.compactionTokenLimit, 1048576);
+    // per-model map
+    assert.equal(content.compactionTokenLimitPerModel['zxs_deepseek/deepseek-v4-flash'], 1048576);
+    // customModels entry still emitted (the model itself)
+    assert.equal(content.customModels[0].model, 'zxs_deepseek/deepseek-v4-flash');
+});
+
+test('buildGatewayConfigSpec: hermes writes model.context_length + provider.models context_length', () => {
+    const spec = buildGatewayConfigSpec('hermes', ctx);
+    // YAML output, parse loosely
+    assert.match(spec.content, /context_length: 1048576/);
+    assert.match(spec.content, /model:\s*\n\s*default:/);
+    assert.match(spec.content, /providers:\s*\n\s*auto:\s*\n\s*base_url:/);
+    assert.match(spec.content, /models:\s*\n\s{6}"zxs_deepseek\/deepseek-v4-flash":\s*\n\s{8}id:/);
+    assert.match(spec.content, /max_tokens: 8192/);
+});
+
+test('buildGatewayConfigSpec: codebuddy writes maxInputTokens + autoCompactWindow in settings.json', () => {
+    const spec = buildGatewayConfigSpec('codebuddy', ctx);
+    const models = JSON.parse(spec.content);
+    assert.equal(models[0].maxInputTokens, 1048576);
+    assert.equal(models[0].maxOutputTokens, 8192);
+    const settings = JSON.parse(spec.extraFiles[0].content);
+    assert.equal(settings.autoCompactEnabled, true);
+    // codebuddy clamps autoCompactWindow to [100k, 1M]; 1M stays 1M
+    assert.equal(settings.autoCompactWindow, 1000000);
+});
