@@ -5,6 +5,8 @@ import { ArrowLeft } from 'lucide-react';
 import Login from './pages/Login';
 import Sessions from './pages/Sessions';
 import History from './pages/History';
+import SkillsMarket from './pages/SkillsMarket';
+import MySkills from './pages/MySkills';
 import AgentsAdmin from './pages/AgentsAdmin';
 import ImagesManager from './pages/ImagesManager';
 import UsersAdmin from './pages/UsersAdmin';
@@ -64,6 +66,8 @@ function AuthenticatedLayout({
 
   const isSessions = location.pathname === '/sessions';
   const isHistory = location.pathname === '/history';
+  const isSkillsMarket = location.pathname === '/skills';
+  const isMySkills = location.pathname === '/skills/mine';
   const isAgentsAdmin = location.pathname === '/admin/agents';
   const isUsersAdmin = location.pathname === '/admin/users';
   const isGatewayAdmin = location.pathname === '/admin/gateway';
@@ -135,6 +139,7 @@ function AuthenticatedLayout({
         onOpenSettings={() => navigate('/settings')}
         onLogout={logout}
         onOpenHistory={() => navigate('/history')}
+        onOpenSkills={() => navigate('/skills')}
       />
       )}
       <main
@@ -172,6 +177,20 @@ function AuthenticatedLayout({
             isHistory ? 'relative z-20' : offRouteClass,
           )}
           aria-hidden={!isHistory}
+        />
+        <SkillsMarket
+          className={cn(
+            'flex h-full min-h-0 flex-1 flex-col',
+            isSkillsMarket ? 'relative z-20' : offRouteClass,
+          )}
+          aria-hidden={!isSkillsMarket}
+        />
+        <MySkills
+          className={cn(
+            'flex h-full min-h-0 flex-1 flex-col',
+            isMySkills ? 'relative z-20' : offRouteClass,
+          )}
+          aria-hidden={!isMySkills}
         />
         {user?.role === 'admin' && isAgentsAdmin && (
             <div
@@ -386,6 +405,8 @@ function App() {
             >
               <Route path="/sessions" element={null} />
               <Route path="/history" element={null} />
+              <Route path="/skills" element={null} />
+              <Route path="/skills/mine" element={null} />
               <Route path="/settings" element={null} />
               <Route
                 path="/custom-images"

@@ -18,6 +18,7 @@ const NAMESPACES = [
   'git',
   'images',
   'deploy',
+  'skills',
   'errors',
 ];
 

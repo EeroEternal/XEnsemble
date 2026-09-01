@@ -59,6 +59,7 @@ const { registerGitRoutes } = require('./routes/git');
 const { registerProjectGitRoutes } = require('./routes/projectGit');
 const { registerGitHubAppRoutes } = require('./routes/githubApp');
 const { registerCustomImageRoutes } = require('./routes/customImages');
+const { registerSkillRoutes } = require('./routes/skills');
 const { LocalGitService } = require('./git/LocalGitService');
 const { applyTerminalMessage, subscribeTerminal } = require('./session/terminalBridge');
 const { resumeSession, registerSessionLifecycle } = require('./session/resumeSession');
@@ -199,6 +200,7 @@ registerGitRoutes(fastify);
 registerProjectGitRoutes(fastify);
 registerGitHubAppRoutes(fastify);
 registerCustomImageRoutes(fastify);
+registerSkillRoutes(fastify);
 
 // -- API Routes --
 

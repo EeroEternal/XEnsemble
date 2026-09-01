@@ -120,6 +120,13 @@
       "when": 1787900000000,
       "tag": "0016_scheduler_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788000000000,
+      "tag": "0017_skills",
+      "breakpoints": true
     }
   ]
 }

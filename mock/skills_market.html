@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XEnsemble - Skills 市场（真实 UI 规范原型）</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+    body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+    .console-scroll-hidden { scrollbar-width: none; -ms-overflow-style: none; }
+    .console-scroll-hidden::-webkit-scrollbar { display: none; }
+    button:focus, button:focus-visible { outline: none; box-shadow: none; }
+  </style>
+</head>
+<body class="bg-background text-foreground antialiased h-screen overflow-hidden">
+
+  <!-- ================= 控制台外壳（对齐 App.jsx：左侧 AppSidebar + 右侧主区） ================= -->
+  <div class="flex h-full">
+
+    <!-- ===== LEFT SIDEBAR（仿 AppSidebar，浅色） ===== -->
+    <aside class="w-60 shrink-0 border-r border-zinc-200 bg-white flex flex-col min-h-0">
+      <!-- Brand -->
+      <div class="flex items-center gap-2 h-14 shrink-0 px-4 border-b border-zinc-100">
+        <div class="flex items-center gap-2 font-semibold tracking-wide text-sm text-zinc-900">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#18181b" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18"/><path d="M3 12h18"/></svg>
+          <span>XEnsemble</span>
+        </div>
+      </div>
+
+      <!-- Nav -->
+      <nav class="flex-1 min-h-0 overflow-y-auto px-2 py-3 space-y-0.5 text-sm">
+        <a href="#" class="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900">
+          <i data-lucide="container" class="w-4 h-4 text-zinc-400"></i> 会话控制台
+        </a>
+        <a href="#" class="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900">
+          <i data-lucide="clock" class="w-4 h-4 text-zinc-400"></i> 历史会话
+        </a>
+        <!-- Skills 市场入口（当前高亮 + 未读徽章，对齐 FR-4.5） -->
+        <a href="#" class="flex items-center gap-2.5 px-2.5 py-2 rounded-md bg-zinc-100 text-zinc-900">
+          <i data-lucide="sparkles" class="w-4 h-4 text-zinc-900"></i> Skills 市场
+          <span class="ml-auto inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-zinc-900 text-zinc-50">3</span>
+        </a>
+        <a href="#" class="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900">
+          <i data-lucide="package" class="w-4 h-4 text-zinc-400"></i> 我的 Skills
+        </a>
+      </nav>
+
+      <!-- Bottom -->
+      <div class="shrink-0 border-t border-zinc-100 p-2 space-y-0.5 text-sm">
+        <button class="flex w-full items-center gap-2.5 px-2.5 py-2 rounded-md text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900">
+          <i data-lucide="settings-2" class="w-4 h-4 text-zinc-400"></i> 设置
+        </button>
+        <button class="flex w-full items-center gap-2.5 px-2.5 py-2 rounded-md text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900">
+          <i data-lucide="log-out" class="w-4 h-4 text-zinc-400"></i> 退出登录
+        </button>
+      </div>
+    </aside>
+
+    <!-- ===== MAIN ===== -->
+    <div class="flex-1 min-w-0 flex flex-col min-h-0">
+
+      <!-- Page header（仿 PageHeader 组件） -->
+      <div class="shrink-0 px-6 pt-5 pb-1">
+        <div class="flex items-center justify-between">
+          <div>
+            <h1 class="text-2xl font-bold tracking-tight text-zinc-900">Skills 市场</h1>
+            <p class="text-sm text-zinc-500 mt-1">浏览团队沉淀的可复用技能，一键复制为你的私有 Skill。</p>
+          </div>
+          <button class="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md bg-zinc-900 text-zinc-50 text-sm font-medium hover:bg-zinc-800 transition-colors focus:outline-none">
+            <i data-lucide="upload-cloud" class="w-4 h-4"></i> 发布 Skill
+          </button>
+        </div>
+      </div>
+
+      <!-- 筛选工具条（对齐 UsersAdmin / History：SelectMenu + 搜索 + 操作） -->
+      <div class="shrink-0 px-6 py-3 flex flex-wrap items-center gap-2">
+        <!-- SelectMenu 风格：分类（按钮 + 下拉面板，非原生 select） -->
+        <div class="relative inline-block" id="cat-select">
+          <button onclick="toggleDropdown('cat-select','cat-menu')" class="inline-flex items-center justify-between gap-6 h-9 min-h-9 rounded-md border border-zinc-300 bg-surface px-3 py-1.5 text-sm text-zinc-900 hover:bg-zinc-50 focus:outline-none">
+            <span class="flex items-center gap-2"><i data-lucide="layout-grid" class="w-3.5 h-3.5 text-zinc-400"></i><span id="cat-label">全部分类</span></span>
+            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-zinc-400"></i>
+          </button>
+          <div id="cat-menu" class="hidden absolute left-0 top-full mt-1 w-48 rounded-lg border border-zinc-200 bg-white shadow-sm py-1 z-30">
+            <button onclick="pickCat(this,'全部分类','cat-label')" class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">全部分类</button>
+            <button onclick="pickCat(this,'工作流','cat-label')" class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">工作流</button>
+            <button onclick="pickCat(this,'项目约定','cat-label')" class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">项目约定</button>
+            <button onclick="pickCat(this,'排障方案','cat-label')" class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">排障方案</button>
+            <button onclick="pickCat(this,'数据库','cat-label')" class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">数据库</button>
+            <button onclick="pickCat(this,'部署/DevOps','cat-label')" class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">部署/DevOps</button>
+          </div>
+        </div>
+
+        <!-- SelectMenu 风格：来源（市场 / 我发布的 / 已安装） -->
+        <div class="relative inline-block" id="src-select">
+          <button onclick="toggleDropdown('src-select','src-menu')" class="inline-flex items-center justify-between gap-6 h-9 min-h-9 rounded-md border border-zinc-300 bg-surface px-3 py-1.5 text-sm text-zinc-900 hover:bg-zinc-50 focus:outline-none">
+            <span class="flex items-center gap-2"><i data-lucide="store" class="w-3.5 h-3.5 text-zinc-400"></i><span id="src-label">市场全部</span></span>
+            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-zinc-400"></i>
+          </button>
+          <div id="src-menu" class="hidden absolute left-0 top-full mt-1 w-44 rounded-lg border border-zinc-200 bg-white shadow-sm py-1 z-30">
+            <button onclick="pickCat(this,'市场全部','src-label')" class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">市场全部</button>
+            <button onclick="pickCat(this,'我发布的','src-label')" class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">我发布的</button>
+            <button onclick="pickCat(this,'已安装','src-label')" class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">已安装</button>
+          </div>
+        </div>
+
+        <!-- 排序：分段控件 -->
+        <div class="flex items-center bg-zinc-100 rounded-md p-0.5">
+          <button class="px-2.5 py-1 text-xs font-medium rounded-md bg-white text-zinc-900 shadow-sm">热门</button>
+          <button class="px-2.5 py-1 text-xs font-medium rounded-md text-zinc-500 hover:text-zinc-900">最新</button>
+          <button class="px-2.5 py-1 text-xs font-medium rounded-md text-zinc-500 hover:text-zinc-900">安装最多</button>
+        </div>
+
+        <div class="relative flex-1 min-w-40 max-w-sm ml-auto">
+          <i data-lucide="search" class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400 pointer-events-none"></i>
+          <input type="text" placeholder="搜索技能、标签、适用场景…" class="w-full bg-surface border border-zinc-300 rounded-md pl-8 pr-3 h-9 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-colors">
+        </div>
+      </div>
+
+      <!-- 结果统计 -->
+      <div class="shrink-0 px-6 pb-1 text-xs text-zinc-500">共 24 个技能 · 展示 6 个</div>
+
+      <!-- 卡片网格（consoleCardClass 风格） -->
+      <div class="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+
+          <!-- CARD 1 -->
+          <div class="bg-surface border border-zinc-200 rounded-lg shadow-sm p-4 flex flex-col gap-3 hover:border-zinc-300 transition">
+            <div class="flex items-start justify-between">
+              <div class="w-9 h-9 rounded-md bg-zinc-100 flex items-center justify-center">
+                <i data-lucide="database" class="w-4.5 h-4.5 w-5 h-5 text-zinc-700"></i>
+              </div>
+              <span class="text-[10px] font-medium text-zinc-500 bg-zinc-100 rounded-full px-2 py-0.5">数据库</span>
+            </div>
+            <div>
+              <h3 class="font-semibold text-sm text-zinc-900">跑通 PostgreSQL 迁移</h3>
+              <p class="text-xs text-zinc-500 mt-1 leading-relaxed">drizzle-kit 生成、_journal 对齐、CASCADE 外键、幂等重跑检查的标准流程。</p>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">drizzle</span>
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">postgres</span>
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">migration</span>
+            </div>
+            <div class="flex items-center justify-between mt-auto pt-2 border-t border-zinc-100">
+              <div class="flex items-center gap-2 text-[11px] text-zinc-500">
+                <span class="flex items-center gap-1"><i data-lucide="download" class="w-3 h-3"></i> 128</span>
+                <span class="flex items-center gap-1"><i data-lucide="user" class="w-3 h-3"></i> 周涛</span>
+              </div>
+              <button onclick="openDrawer()" class="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-700 border border-zinc-300 rounded-md px-2.5 py-1 hover:bg-zinc-50 focus:outline-none">
+                <i data-lucide="eye" class="w-3 h-3"></i> 预览
+              </button>
+            </div>
+          </div>
+
+          <!-- CARD 2 -->
+          <div class="bg-surface border border-zinc-200 rounded-lg shadow-sm p-4 flex flex-col gap-3 hover:border-zinc-300 transition">
+            <div class="flex items-start justify-between">
+              <div class="w-9 h-9 rounded-md bg-zinc-100 flex items-center justify-center">
+                <i data-lucide="git-branch" class="w-5 h-5 text-zinc-700"></i>
+              </div>
+              <span class="text-[10px] font-medium text-zinc-500 bg-zinc-100 rounded-full px-2 py-0.5">工作流</span>
+            </div>
+            <div>
+              <h3 class="font-semibold text-sm text-zinc-900">Git 提交流程规范</h3>
+              <p class="text-xs text-zinc-500 mt-1 leading-relaxed">commit 信息规范、MR 描述模板、lint 前置检查的完整提交流程约定。</p>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">git</span>
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">convention</span>
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">mr</span>
+            </div>
+            <div class="flex items-center justify-between mt-auto pt-2 border-t border-zinc-100">
+              <div class="flex items-center gap-2 text-[11px] text-zinc-500">
+                <span class="flex items-center gap-1"><i data-lucide="download" class="w-3 h-3"></i> 86</span>
+                <span class="flex items-center gap-1"><i data-lucide="user" class="w-3 h-3"></i> 林晓</span>
+              </div>
+              <button onclick="openDrawer()" class="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-700 border border-zinc-300 rounded-md px-2.5 py-1 hover:bg-zinc-50 focus:outline-none">
+                <i data-lucide="eye" class="w-3 h-3"></i> 预览
+              </button>
+            </div>
+          </div>
+
+          <!-- CARD 3 -->
+          <div class="bg-surface border border-zinc-200 rounded-lg shadow-sm p-4 flex flex-col gap-3 hover:border-zinc-300 transition">
+            <div class="flex items-start justify-between">
+              <div class="w-9 h-9 rounded-md bg-zinc-100 flex items-center justify-center">
+                <i data-lucide="bug" class="w-5 h-5 text-zinc-700"></i>
+              </div>
+              <span class="text-[10px] font-medium text-zinc-500 bg-zinc-100 rounded-full px-2 py-0.5">排障方案</span>
+            </div>
+            <div>
+              <h3 class="font-semibold text-sm text-zinc-900">Node 连接池泄漏排查</h3>
+              <p class="text-xs text-zinc-500 mt-1 leading-relaxed">通过 pg_stat_activity 定位泄漏、事务未提交检测、pool max 调优的完整排障。</p>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">node</span>
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">pg</span>
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">debug</span>
+            </div>
+            <div class="flex items-center justify-between mt-auto pt-2 border-t border-zinc-100">
+              <div class="flex items-center gap-2 text-[11px] text-zinc-500">
+                <span class="flex items-center gap-1"><i data-lucide="download" class="w-3 h-3"></i> 52</span>
+                <span class="flex items-center gap-1"><i data-lucide="user" class="w-3 h-3"></i> 王强</span>
+              </div>
+              <button onclick="openDrawer()" class="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-700 border border-zinc-300 rounded-md px-2.5 py-1 hover:bg-zinc-50 focus:outline-none">
+                <i data-lucide="eye" class="w-3 h-3"></i> 预览
+              </button>
+            </div>
+          </div>
+
+          <!-- CARD 4（我发布的） -->
+          <div class="bg-surface border border-zinc-300 rounded-lg shadow-sm p-4 flex flex-col gap-3 hover:border-zinc-400 transition">
+            <div class="flex items-start justify-between">
+              <div class="w-9 h-9 rounded-md bg-zinc-100 flex items-center justify-center">
+                <i data-lucide="puzzle" class="w-5 h-5 text-zinc-700"></i>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] font-medium text-emerald-700 bg-emerald-50 rounded-full px-2 py-0.5">我发布的</span>
+                <span class="text-[10px] font-medium text-zinc-500 bg-zinc-100 rounded-full px-2 py-0.5">代码生成</span>
+              </div>
+            </div>
+            <div>
+              <h3 class="font-semibold text-sm text-zinc-900">React 组件脚手架约定</h3>
+              <p class="text-xs text-zinc-500 mt-1 leading-relaxed">组件目录结构、Hook 命名、导出规范与 Story 文件的生成模板。</p>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">react</span>
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">typescript</span>
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">scaffold</span>
+            </div>
+            <div class="flex items-center justify-between mt-auto pt-2 border-t border-zinc-100">
+              <div class="flex items-center gap-2 text-[11px] text-zinc-500">
+                <span class="flex items-center gap-1"><i data-lucide="download" class="w-3 h-3"></i> 41</span>
+                <span class="flex items-center gap-1"><i data-lucide="user" class="w-3 h-3"></i> 我</span>
+              </div>
+              <button onclick="openDrawer()" class="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-700 border border-zinc-300 rounded-md px-2.5 py-1 hover:bg-zinc-50 focus:outline-none">
+                <i data-lucide="chart-line" class="w-3 h-3"></i> 统计
+              </button>
+            </div>
+          </div>
+
+          <!-- CARD 5 -->
+          <div class="bg-surface border border-zinc-200 rounded-lg shadow-sm p-4 flex flex-col gap-3 hover:border-zinc-300 transition">
+            <div class="flex items-start justify-between">
+              <div class="w-9 h-9 rounded-md bg-zinc-100 flex items-center justify-center">
+                <i data-lucide="shield-check" class="w-5 h-5 text-zinc-700"></i>
+              </div>
+              <span class="text-[10px] font-medium text-zinc-500 bg-zinc-100 rounded-full px-2 py-0.5">项目约定</span>
+            </div>
+            <div>
+              <h3 class="font-semibold text-sm text-zinc-900">敏感信息处理规范</h3>
+              <p class="text-xs text-zinc-500 mt-1 leading-relaxed">密钥注入、日志脱敏、.env 管理与提交前扫描的约定。</p>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">security</span>
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">secrets</span>
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">env</span>
+            </div>
+            <div class="flex items-center justify-between mt-auto pt-2 border-t border-zinc-100">
+              <div class="flex items-center gap-2 text-[11px] text-zinc-500">
+                <span class="flex items-center gap-1"><i data-lucide="download" class="w-3 h-3"></i> 19</span>
+                <span class="flex items-center gap-1"><i data-lucide="user" class="w-3 h-3"></i> 安全组</span>
+              </div>
+              <button onclick="openDrawer()" class="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-700 border border-zinc-300 rounded-md px-2.5 py-1 hover:bg-zinc-50 focus:outline-none">
+                <i data-lucide="eye" class="w-3 h-3"></i> 预览
+              </button>
+            </div>
+          </div>
+
+          <!-- CARD 6 -->
+          <div class="bg-surface border border-zinc-200 rounded-lg shadow-sm p-4 flex flex-col gap-3 hover:border-zinc-300 transition">
+            <div class="flex items-start justify-between">
+              <div class="w-9 h-9 rounded-md bg-zinc-100 flex items-center justify-center">
+                <i data-lucide="cloud" class="w-5 h-5 text-zinc-700"></i>
+              </div>
+              <span class="text-[10px] font-medium text-zinc-500 bg-zinc-100 rounded-full px-2 py-0.5">部署/DevOps</span>
+            </div>
+            <div>
+              <h3 class="font-semibold text-sm text-zinc-900">BoxLite 镜像打包规范</h3>
+              <p class="text-xs text-zinc-500 mt-1 leading-relaxed">agent 镜像分层、依赖缓存、seccomp 配置的打包约定，减少冷启动时间。</p>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">docker</span>
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">boxlite</span>
+              <span class="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">image</span>
+            </div>
+            <div class="flex items-center justify-between mt-auto pt-2 border-t border-zinc-100">
+              <div class="flex items-center gap-2 text-[11px] text-zinc-500">
+                <span class="flex items-center gap-1"><i data-lucide="download" class="w-3 h-3"></i> 34</span>
+                <span class="flex items-center gap-1"><i data-lucide="user" class="w-3 h-3"></i> 陈默</span>
+              </div>
+              <button onclick="openDrawer()" class="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-700 border border-zinc-300 rounded-md px-2.5 py-1 hover:bg-zinc-50 focus:outline-none">
+                <i data-lucide="eye" class="w-3 h-3"></i> 预览
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="flex items-center justify-between border-t border-zinc-200 mt-4 pt-3 pb-2">
+          <span class="text-xs text-zinc-500">共 24 个技能</span>
+          <div class="flex items-center gap-2">
+            <button class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 hover:bg-zinc-100 disabled:opacity-40 disabled:pointer-events-none focus:outline-none"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+            <span class="text-xs text-zinc-500">1 / 4</span>
+            <button class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 hover:bg-zinc-100 focus:outline-none"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 右侧详情抽屉（对齐 History ConversationDrawer：720px、遮罩、border-l） ===== -->
+  <div id="drawer-backdrop" class="hidden fixed inset-0 z-[120]" onclick="closeDrawer()">
+    <div class="absolute inset-0 bg-black/40"></div>
+  </div>
+  <aside id="drawer" class="fixed right-0 top-0 z-[121] flex h-full w-full max-w-[720px] flex-col border-l border-zinc-200 bg-surface shadow-2xl translate-x-full transition-transform duration-200">
+    <!-- header -->
+    <div class="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3">
+      <div class="min-w-0">
+        <h2 class="truncate text-sm font-semibold text-zinc-900">跑通 PostgreSQL 迁移</h2>
+        <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-zinc-500">
+          <span class="inline-flex items-center gap-1"><i data-lucide="user" class="w-3 h-3"></i> 周涛</span>
+          <span class="inline-flex items-center gap-1"><i data-lucide="download" class="w-3 h-3"></i> 128 次安装</span>
+          <span class="inline-flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> 3 天前更新</span>
+        </div>
+      </div>
+      <button onclick="closeDrawer()" class="inline-flex items-center justify-center rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none"><i data-lucide="x" class="w-4 h-4"></i></button>
+    </div>
+
+    <!-- body -->
+    <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div class="flex items-center gap-3 text-[11px] text-zinc-600 bg-zinc-50 border border-zinc-200 rounded-lg p-3">
+        <span class="inline-flex items-center gap-1"><i data-lucide="layers" class="w-3.5 h-3.5"></i> 来自 3 个相似会话</span>
+        <span class="inline-flex items-center gap-1"><i data-lucide="check-circle" class="w-3.5 h-3.5"></i> 成功退出</span>
+        <span class="inline-flex items-center gap-1"><i data-lucide="file-edit" class="w-3.5 h-3.5"></i> 4 个文件</span>
+      </div>
+
+      <div>
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">适用场景</div>
+        <p class="text-sm text-zinc-700 leading-relaxed">需要为任何 Node/TS 项目新增或修改数据库迁移时使用。涵盖 drizzle-kit 与手写 SQL 两种路径。</p>
+      </div>
+
+      <div>
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">步骤</div>
+        <ol class="text-sm text-zinc-700 space-y-1.5 list-decimal list-inside leading-relaxed">
+          <li>确认现有 journal 最大 idx 与迁移目录</li>
+          <li>用 drizzle-kit generate 或手写 SQL 生成新迁移</li>
+          <li>更新 schema.js 定义并同步 _journal.json</li>
+          <li>运行 db:migrate 并验证幂等重跑</li>
+        </ol>
+      </div>
+
+      <div>
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">注意事项</div>
+        <p class="text-sm text-amber-700 leading-relaxed">CASCADE 外键需与目标表引用一致；PlanetScale 等托管库无 CREATE SCHEMA 权限时需走公共表追踪。</p>
+      </div>
+
+      <div class="border border-zinc-200 rounded-lg p-3 bg-zinc-50">
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">注入段预览</div>
+        <pre class="text-xs text-zinc-600 leading-relaxed whitespace-pre-wrap font-mono">&lt;!-- xe-skills:start --&gt;
+## 跑通 PostgreSQL 迁移
+drizzle-kit generate 或手写 SQL，更新 schema.js 与 _journal.json，
+运行 db:migrate 并验证幂等。CASCADE 外键对齐引用表。
+&lt;!-- xe-skills:end --&gt;</pre>
+      </div>
+    </div>
+
+    <!-- footer -->
+    <div class="shrink-0 border-t border-zinc-200 px-4 py-3 flex items-center gap-2">
+      <button onclick="installSkill(this)" class="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-zinc-900 text-zinc-50 text-sm font-medium h-9 hover:bg-zinc-800 transition-colors focus:outline-none">
+        <i data-lucide="copy" class="w-4 h-4"></i> 复制为私有 Skill
+      </button>
+      <button class="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 text-zinc-700 text-sm font-medium h-9 px-3 hover:bg-zinc-50 focus:outline-none">
+        <i data-lucide="flag" class="w-4 h-4"></i> 举报
+      </button>
+    </div>
+  </aside>
+
+  <script>
+    lucide.createIcons();
+
+    function toggleDropdown(selId, menuId) {
+      var m = document.getElementById(menuId);
+      var isHidden = m.classList.contains('hidden');
+      document.querySelectorAll('[id$="-menu"]').forEach(function (el) { el.classList.add('hidden'); });
+      if (isHidden) m.classList.remove('hidden');
+    }
+    function pickCat(btn, label, labelId) {
+      document.getElementById(labelId).textContent = label;
+      document.querySelectorAll('[id$="-menu"]').forEach(function (el) { el.classList.add('hidden'); });
+    }
+    function openDrawer() {
+      document.getElementById('drawer-backdrop').classList.remove('hidden');
+      document.getElementById('drawer').classList.remove('translate-x-full');
+      lucide.createIcons();
+    }
+    function closeDrawer() {
+      document.getElementById('drawer-backdrop').classList.add('hidden');
+      document.getElementById('drawer').classList.add('translate-x-full');
+    }
+    // 模拟异步 loading 态（对齐异步按钮规范）
+    function installSkill(btn) {
+      btn.disabled = true;
+      btn.classList.add('opacity-60', 'pointer-events-none');
+      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> 复制中…';
+      lucide.createIcons();
+      setTimeout(function () {
+        btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> 已复制到「我的 Skills」';
+        btn.disabled = false;
+        btn.classList.remove('opacity-60', 'pointer-events-none');
+        lucide.createIcons();
+      }, 1200);
+    }
+  </script>
+</body>
+</html>

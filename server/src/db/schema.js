@@ -3,6 +3,7 @@ const {
   text,
   integer,
   bigint,
+  real,
   boolean,
   jsonb,
   unique,
@@ -248,6 +249,36 @@ const events = pgTable('events', {
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
+// 0017: Skills（私有技能 + 市场发布/安装）
+// status: draft | active | archived；source: auto | manual | installed
+// visibility: private | public；published_at 非空即视为"已在市场"
+const skills = pgTable('skills', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id').references(() => sessions.id, { onDelete: 'set null' }),
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  tags: jsonb('tags').notNull().default([]),
+  status: text('status').notNull().default('draft'),
+  source: text('source').notNull().default('auto'),
+  confidence: real('confidence'),
+  duplicateOf: text('duplicate_of'),
+  clusterSize: integer('cluster_size').notNull().default(1),
+  signals: jsonb('signals'),
+  usageCount: integer('usage_count').notNull().default(0),
+  visibility: text('visibility').notNull().default('private'),
+  publishedAt: bigint('published_at', { mode: 'number' }),
+  installCount: integer('install_count').notNull().default(0),
+  category: text('category'),
+  forkedFrom: text('forked_from'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+}, (table) => ({
+  userStatusIdx: index('idx_skills_user_status').on(table.userId, table.status),
+  marketIdx: index('idx_skills_market').on(table.visibility, table.status, table.publishedAt),
+}));
+
 const devEnvironmentProfiles = pgTable('dev_environment_profiles', {
   id: text('id').primaryKey(),
   projectId: text('project_id').notNull().references(() => projects.id),
@@ -461,6 +492,7 @@ module.exports = {
   sessionChatMessages,
   sessionConversations,
   schedulerJobs,
+  skills,
   agents,
   runtimes,
   deployments,

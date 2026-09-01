@@ -13,6 +13,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   List,
+  Sparkles,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { useToast } from './Toast';
@@ -210,6 +211,7 @@ export default function AppSidebar({
   onOpenSettings,
   onLogout,
   onOpenHistory,
+  onOpenSkills,
   minimal = false,
 }) {
   const { t } = useTranslation();
@@ -530,6 +532,16 @@ export default function AppSidebar({
             >
               <List className="w-4 h-4 shrink-0" strokeWidth={1.75} />
               {t('sessions:history.view_all', { defaultValue: 'View all history' })}
+            </button>
+          )}
+          {onOpenSkills && (
+            <button
+              type="button"
+              onClick={onOpenSkills}
+              className={`${sidebarNavItemClass}`}
+            >
+              <Sparkles className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+              {t('skills:title', { defaultValue: 'Skills Marketplace' })}
             </button>
           )}
         </div>

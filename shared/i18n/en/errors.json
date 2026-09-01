@@ -69,5 +69,8 @@
   "registration_requires_invite": "Registration requires an invite.",
   "cannot_suspend_last_admin": "Cannot suspend the last active administrator",
   "unknown_agent": "Unknown agent: {{agents}}",
-  "username_password_required": "username and password are required"
+  "username_password_required": "username and password are required",
+  "skill_not_found": "Skill not found",
+  "skill_validation_failed": "Skill validation failed: {{message}}",
+  "skill_invalid_transition": "Invalid skill status transition"
 }

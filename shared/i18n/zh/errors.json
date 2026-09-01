@@ -69,5 +69,8 @@
   "registration_requires_invite": "注册需要邀请码。",
   "cannot_suspend_last_admin": "无法封禁最后一个活跃的管理员",
   "unknown_agent": "未知的 Agent: {{agents}}",
-  "username_password_required": "用户名和密码为必填项"
+  "username_password_required": "用户名和密码为必填项",
+  "skill_not_found": "技能不存在",
+  "skill_validation_failed": "技能校验失败: {{message}}",
+  "skill_invalid_transition": "非法的技能状态变更"
 }
