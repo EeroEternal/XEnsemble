@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Loader2, SendHorizonal, Square, User, Sparkles, Wrench, ChevronRight, Copy, Check,
+  Loader2, SendHorizonal, Square, User, Sparkles, Wrench, ChevronRight, Copy, Check, AlertCircle,
 } from 'lucide-react';
 import { apiFetch, getAccessToken, getWsUrl } from '../../lib/api';
 import { consoleInputClass, consoleButtonFocusClass } from '../../lib/consoleTokens';
@@ -60,11 +60,16 @@ export default function ChatView({ sessionId, onSessionEnd }) {
   }, [sessionId, mergeHistory]);
 
   // Connect WS, then stream chat events. On reconnect, re-fetch history to
-  // backfill anything emitted while we were disconnected.
+  // backfill anything emitted while we disconnected.
   useEffect(() => {
     let disposed = false;
     let ws = null;
     let reconnectTimer = null;
+    // After two failed connect attempts in a row, the session is almost
+    // certainly gone (server restart, session reclaimed, etc.) — the agent
+    // view shows "session is not active"; mark the chat view as ended too so
+    // the thinking spinner clears and we stop hammering the server.
+    let failedConnects = 0;
 
     const connect = () => {
       if (disposed) return;
@@ -72,10 +77,16 @@ export default function ChatView({ sessionId, onSessionEnd }) {
       // chat=1 tells the server to skip terminal output replay/subscription —
       // the chat view only needs chat_event + the ability to send input.
       const url = `${getWsUrl(sessionId, token, 0)}&chat=1`;
-      ws = new WebSocket(url);
+      try {
+        ws = new WebSocket(url);
+      } catch (_) {
+        scheduleReconnect();
+        return;
+      }
       wsRef.current = ws;
 
       ws.onopen = () => {
+        failedConnects = 0;
         setConnected(true);
         // Backfill anything that happened while disconnected.
         void loadHistory();
@@ -93,9 +104,6 @@ export default function ChatView({ sessionId, onSessionEnd }) {
             knownSeqsRef.current.add(entry.seq);
           }
           setMessages((prev) => [...prev, entry]);
-          // Track the most recent activity so post-stop spinner logic can tell
-          // "agent has gone quiet since my Esc" apart from "agent just shipped
-          // a new tool result and is still working".
           setLastEventAt(Date.now());
           return;
         }
@@ -103,19 +111,44 @@ export default function ChatView({ sessionId, onSessionEnd }) {
           setEnded(true);
           endedRef.current = true;
           onSessionEndRef.current?.(sessionId);
+          return;
         }
         if (msg.type === 'error') {
           setConnected(false);
+          // "Session not found or not active" / "Session not active" come
+          // straight from the WS close handshake on server restart. Treat
+          // the session as done — the agent view is showing the same error.
+          const data = typeof msg.data === 'string' ? msg.data : '';
+          if (/not\s*active|not\s*found|invalid|expired/i.test(data)) {
+            setEnded(true);
+            endedRef.current = true;
+            onSessionEndRef.current?.(sessionId);
+          }
         }
+      };
+
+      ws.onerror = () => {
+        // onclose will follow; let it own the reconnect logic.
       };
 
       ws.onclose = () => {
         if (disposed) return;
         setConnected(false);
-        if (!endedRef.current) {
-          reconnectTimer = setTimeout(connect, 2000);
+        if (endedRef.current) return;
+        failedConnects += 1;
+        if (failedConnects >= 2) {
+          setEnded(true);
+          endedRef.current = true;
+          onSessionEndRef.current?.(sessionId);
+          return;
         }
+        scheduleReconnect();
       };
+    };
+
+    const scheduleReconnect = () => {
+      if (disposed) return;
+      reconnectTimer = setTimeout(connect, 2000);
     };
 
     connect();
@@ -290,6 +323,18 @@ export default function ChatView({ sessionId, onSessionEnd }) {
                 </div>
               </div>
             )}
+            {ended && !isThinking && (
+              <div className="flex justify-start pr-2 sm:pr-12" role="status">
+                <div className="flex max-w-[80%] items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-[13.5px] text-amber-800">
+                  <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                  <span className="font-medium">
+                    {t('chat:session_ended', { defaultValue: 'Session ended' })}
+                  </span>
+                  <span className="text-amber-700">·</span>
+                  <span>{t('chat:session_ended_hint', { defaultValue: 'The agent is no longer running. Start a new session to continue.' })}</span>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -297,22 +342,23 @@ export default function ChatView({ sessionId, onSessionEnd }) {
         {(() => {
           const { scrollTop, scrollHeight, clientHeight } = scrollMetrics;
           const trackH = clientHeight;
-          const ratio = scrollHeight > clientHeight ? clientHeight / scrollHeight : 0;
-          const thumbH = Math.max(24, ratio * trackH);
+          const overflow = scrollHeight > clientHeight + 1;
+          const ratio = overflow ? clientHeight / scrollHeight : 0;
+          const thumbH = overflow ? Math.max(32, ratio * trackH) : 36;
           const maxScroll = Math.max(1, scrollHeight - clientHeight);
-          const thumbTop = (scrollTop / maxScroll) * (trackH - thumbH);
-          const visible = scrollHeight > clientHeight + 1 && (scrollbarHover || scrollbarDrag);
+          const thumbTop = overflow ? (scrollTop / maxScroll) * (trackH - thumbH) : (trackH - thumbH) / 2;
+          const showThumb = scrollbarHover || scrollbarDrag;
           return (
             <div
               ref={scrollbarTrackRef}
               onMouseEnter={() => setScrollbarHover(true)}
               onMouseLeave={() => { if (!scrollbarDrag) setScrollbarHover(false); }}
-              className="absolute right-0 top-0 z-10 h-full w-3 cursor-pointer"
+              className="absolute right-0 top-0 z-10 h-full w-5"
               aria-hidden="true"
             >
-              {visible ? (
+              {showThumb ? (
                 <div
-                  className="absolute right-1 w-1.5 rounded-full bg-zinc-400/80 hover:bg-zinc-500 transition-colors"
+                  className="absolute right-2 w-1.5 rounded-full bg-zinc-300/80 hover:bg-zinc-500 transition-colors cursor-grab"
                   style={{ top: thumbTop, height: thumbH }}
                   onMouseDown={(e) => {
                     e.preventDefault();
@@ -321,7 +367,9 @@ export default function ChatView({ sessionId, onSessionEnd }) {
                     const startTop = scrollTop;
                     const onMove = (ev) => {
                       const dy = ev.clientY - startY;
-                      const next = startTop + (dy / (trackH - thumbH)) * maxScroll;
+                      const next = overflow
+                        ? startTop + (dy / (trackH - thumbH)) * maxScroll
+                        : startTop + dy;
                       if (listRef.current) listRef.current.scrollTop = Math.max(0, Math.min(maxScroll, next));
                     };
                     const onUp = () => {

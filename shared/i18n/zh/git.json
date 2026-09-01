@@ -200,6 +200,7 @@
   "work_branch_name": "工作分支名称",
   "oauth_not_configured_title": "OAuth 未配置",
   "import_repository": "导入仓库",
+  "import_url_confirm": "确认",
   "select_file": "选择文件",
   "search_files": "搜索文件...",
   "search_repositories": "搜索仓库…",

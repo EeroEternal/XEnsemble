@@ -5,6 +5,8 @@
   "stop": "Stop current task (Esc twice)",
   "working": "Agent is working…",
   "thinking": "Agent is thinking…",
+  "session_ended": "Session ended",
+  "session_ended_hint": "The agent is no longer running. Start a new session to continue.",
   "you": "You",
   "agent": "Agent",
   "tool_unknown": "Tool",

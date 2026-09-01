@@ -300,7 +300,7 @@ export default function ProjectSourceSelect({
                     disabled={!urlInput.trim()}
                     className="shrink-0 px-2.5 py-1.5 rounded-md text-xs font-medium bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40"
                   >
-                    {t('git:import_repository')}
+                    {t('git:import_url_confirm', { defaultValue: 'Confirm' })}
                   </button>
                 </div>
                 {urlError && (

@@ -201,6 +201,7 @@
   "work_branch_name": "Work branch name",
   "oauth_not_configured_title": "OAuth not configured",
   "import_repository": "Import Repository",
+  "import_url_confirm": "Confirm",
   "select_file": "Select file",
   "search_files": "Search files...",
   "search_repositories": "Search repositories…",

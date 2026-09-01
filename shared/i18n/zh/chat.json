@@ -5,6 +5,8 @@
   "stop": "停止当前任务（连按两次 Esc）",
   "working": "Agent 工作中…",
   "thinking": "Agent 思考中…",
+  "session_ended": "会话已结束",
+  "session_ended_hint": "Agent 不再运行，请新建会话继续。",
   "you": "我",
   "agent": "Agent",
   "tool_unknown": "工具",

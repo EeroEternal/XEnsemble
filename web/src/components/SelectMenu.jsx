@@ -269,7 +269,10 @@ export default function SelectMenu({
             'relative w-full text-left pr-9 hover:bg-zinc-50 disabled:opacity-50 disabled:cursor-not-allowed',
           )}
         >
-          <span className={selected ? 'text-zinc-900' : 'text-zinc-400'}>
+          <span
+            className={`block truncate ${selected ? 'text-zinc-900' : 'text-zinc-400'}`}
+            title={selected?.label ?? effectivePlaceholder ?? undefined}
+          >
             {selected?.label ?? effectivePlaceholder}
           </span>
           <ChevronDown
