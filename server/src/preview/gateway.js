@@ -239,15 +239,11 @@ async function registerPreviewGateway(fastify) {
         // 本实例 preview 专用端口（PREVIEW_PUBLIC_URL）由 nginx 打上 X-Preview-Origin: 1
         // 标记。只有真正经过本实例 8099 入口的请求才带此头 —— 其它厂商/机器上同端口的
         // 公共服务不经过本 nginx，不会带此头，因此绝不会被误路由到 preview。
-        // host 匹配仅作辅助（nginx $host 可能不带端口，故用 hostname 比较），
-        // 真正决定「强制 preview」的是标记头，保证 preview 流量绝不落入宿主后端。
+        // 注意：不能靠 Host/hostname 判断「是否 preview 端口」—— nginx 用
+        // `proxy_set_header Host $host` 转发，$host 不含端口，8088 与 8099 的
+        // hostname 相同，用 hostname 判断会把宿主控制台(8088)误判为 preview。
+        // 所以「强制 preview」唯一以标记头为准；无标记头请求一律视为宿主侧。
         const isPreviewOrigin = request.headers['x-preview-origin'] === '1';
-        const previewHost = process.env.PREVIEW_PUBLIC_URL
-            ? process.env.PREVIEW_PUBLIC_URL.replace(/^https?:\/\//, '').replace(/\/+$/, '')
-            : '';
-        const previewHostname = previewHost ? previewHost.split(':')[0] : '';
-        const reqHostname = String(request.headers.host || '').split(':')[0];
-        const isPreviewPort = !!previewHostname && reqHostname === previewHostname;
         if (isPreviewOrigin) {
             // 强制 preview：referer 命中 /preview/<id>/ 用该部署，否则用最新 running 部署。
             if (m) {
@@ -272,12 +268,11 @@ async function registerPreviewGateway(fastify) {
             });
             return;
         }
-        // 非 preview 标记：宿主控制台（8088 等），只按 referer 转发 preview 页面产生的
-        // 无前缀请求（SPA 绝对路由）；找不到时保持原有 fall through 行为，不影响宿主。
+        // 非 preview 标记（宿主控制台 8088 等）：仅当 referer 明确来自某个 preview 页面
+        // （SPA 绝对路由产生的无前缀请求）时转发到该 preview；否则一律走宿主，绝不用
+        // hostname/host 猜测 preview 端口（会误伤宿主）。
         if (m) {
             deploymentId = m[1];
-        } else if (isPreviewPort) {
-            deploymentId = await findLatestRunningPreview();
         }
         if (!deploymentId) {
             return;
