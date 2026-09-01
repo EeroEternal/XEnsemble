@@ -2726,6 +2726,68 @@ fastify.post('/api/v1/workspace/move', { preValidation: [fastify.authenticate, f
     }
 });
 
+/**
+ * Idempotent first-run admin bootstrap. Mirrors `scripts/manage-user.js
+ * create-admin` but runs in-process so the preview / dev server comes up with
+ * a usable admin without an out-of-band SSH step.
+ *
+ * Behaviour:
+ *   - INITIAL_ADMIN_BOOTSTRAP=0 (or unset with intent to disable) skips entirely.
+ *   - If any active admin already exists, no-op (existing password preserved).
+ *   - Otherwise insert a new admin user with the given username / password.
+ *
+ * Defaults to admin / admin so the first deploy is loggable immediately;
+ * operators should change the password (or set INITIAL_ADMIN_BOOTSTRAP=0 once
+ * a real admin exists) before exposing the service.
+ */
+async function bootstrapInitialAdmin(db) {
+    if (String(process.env.INITIAL_ADMIN_BOOTSTRAP ?? '1') !== '1') return;
+    const username = String(process.env.INITIAL_ADMIN_USERNAME ?? 'admin');
+    const password = String(process.env.INITIAL_ADMIN_PASSWORD ?? 'admin');
+    if (!username || !password) return;
+
+    const { eq, and, sql } = require('drizzle-orm');
+    const schema = require('./db/schema');
+    const auth = require('./auth');
+    const platformSettings = require('./admin/PlatformSettings');
+
+    // No-op if any active admin already exists; otherwise creating a duplicate
+    // here would clobber operator-set credentials on every restart.
+    const adminRows = await db
+        .select({ count: sql`count(*)` })
+        .from(schema.users)
+        .where(and(eq(schema.users.role, 'admin'), eq(schema.users.status, 'active')));
+    if (Number(adminRows[0]?.count ?? 0) > 0) return;
+
+    const userId = `usr_${require('crypto').randomBytes(6).toString('hex')}`;
+    const now = Date.now();
+    const defaults = await platformSettings.getDefaultUserQuota();
+
+    await db.insert(schema.users).values({
+        id: userId,
+        username,
+        passwordHash: auth.hashPassword(password),
+        role: 'admin',
+        status: 'active',
+        createdAt: now,
+        updatedAt: now,
+    });
+    await db.insert(schema.userQuotas).values({
+        userId,
+        maxProjects: defaults.max_projects ?? 5,
+        maxSessions: defaults.max_sessions ?? 20,
+        maxPreviews: defaults.max_previews ?? 1,
+        maxRuntimes: defaults.max_runtimes ?? 1,
+        resourceTier: defaults.resource_tier ?? 'basic',
+        updatedAt: now,
+    });
+
+    fastify.log.warn(
+        `Bootstrap admin "${username}" created with default password. ` +
+        'Set INITIAL_ADMIN_PASSWORD (or change it via the admin console) before exposing this instance.',
+    );
+}
+
 async function startServer() {
     fastify.setErrorHandler((err, request, reply) => {
         request.log.error(err);
@@ -2743,6 +2805,7 @@ async function startServer() {
         await runMigrations(db);
     }
     await seedIfNeeded(db);
+    await bootstrapInitialAdmin(db);
 
     unigateway.installShutdownHooks(fastify.log);
     const gatewaySettings = require('./admin/GatewaySettings');
