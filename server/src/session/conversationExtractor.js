@@ -20,6 +20,9 @@ const EXTRACTOR_VERSION = '1';
 const MAX_TURNS = 100;
 const ASSISTANT_GAP_MS = 2000;
 const USER_GAP_MS = 3000;
+// TUI 终端（opencode/Claude Code 等）会对每个按键毫秒级回显一个 out 帧；
+// 距上次用户输入 < ECHO_GAP_MS 的 out 视为回显，跳过，避免把逐键输入拆成碎片。
+const ECHO_GAP_MS = 500;
 const TURN_MAX_BYTES = 8192;
 
 // ---------------------------------------------------------------------------
@@ -124,6 +127,10 @@ function extractFromTranscript(transcriptStore, streamRef, afterSeq = 0) {
     let current = null; // pending assistant turn being aggregated
     let pendingUser = null; // pending user turn being coalesced from keystroke-level in frames
 
+    // 用户提交信号：回车/换行/Ctrl-C。TUI 终端的 in 帧逐键到达，
+    // 只有遇到提交字符或长时间停顿才结束一个 user turn。
+    const SUBMIT_RE = /[\r\n\u0003]/;
+
     const flushAssistant = () => {
         if (!current) return;
         const cleaned = cleanTerminalText(current.text);
@@ -148,7 +155,7 @@ function extractFromTranscript(transcriptStore, streamRef, afterSeq = 0) {
         if (frame.kind === 'in') {
             // Terminal input arrives per keystroke (or per IME commit), so
             // consecutive `in` frames coalesce into one user turn until the
-            // agent outputs or the user pauses past USER_GAP_MS.
+            // user submits (Enter/Ctrl-C) or pauses past USER_GAP_MS.
             flushAssistant();
             const raw = typeof frame.data === 'string' ? frame.data : '';
             if (!raw) continue;
@@ -160,9 +167,20 @@ function extractFromTranscript(transcriptStore, streamRef, afterSeq = 0) {
             }
             pendingUser.text += raw;
             pendingUser.lastTs = frame.ts;
+            // Enter/Ctrl-C 提交 → 结束当前 user turn（剔除尾部提交字符）
+            if (SUBMIT_RE.test(raw)) {
+                pendingUser.text = pendingUser.text.replace(/[\r\n\u0003]+$/, '');
+                flushUser();
+            }
             continue;
         }
         if (frame.kind === 'out' && typeof frame.data === 'string') {
+            // TUI 终端会对每个按键回显一个 out 帧（含 \r 重绘）。用户输入活跃期
+            // （距上次 in 未超过 USER_GAP_MS）的 out 视为回显，跳过，避免把
+            // 逐键输入拆成碎片。
+            if (pendingUser && frame.ts - pendingUser.lastTs <= USER_GAP_MS) {
+                continue;
+            }
             flushUser();
             const ts = frame.ts;
             if (current && ts - current.lastTs > ASSISTANT_GAP_MS) {

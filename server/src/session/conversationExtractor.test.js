@@ -11,10 +11,10 @@ function fakeTranscriptStore(frames) {
 
 test('extractFromTranscript splits turns on in frames and aggregates out frames', () => {
     const store = fakeTranscriptStore([
-        { seq: 1, ts: 1000, kind: 'in', data: 'fix the login bug' },
+        { seq: 1, ts: 1000, kind: 'in', data: 'fix the login bug\n' },
         { seq: 2, ts: 1500, kind: 'out', data: 'Looking at auth.js\n' },
         { seq: 3, ts: 1600, kind: 'out', data: 'Found the issue\n' },
-        { seq: 4, ts: 5000, kind: 'in', data: 'what was it?' },
+        { seq: 4, ts: 5000, kind: 'in', data: 'what was it?\n' },
         { seq: 5, ts: 5500, kind: 'out', data: 'A missing await\n' },
     ]);
     const { source, turns } = extractor.extractFromTranscript(store, 's1');
@@ -31,7 +31,7 @@ test('extractFromTranscript splits turns on in frames and aggregates out frames'
 
 test('extractFromTranscript aggregates assistant output on 2s gap', () => {
     const store = fakeTranscriptStore([
-        { seq: 1, ts: 1000, kind: 'in', data: 'go' },
+        { seq: 1, ts: 1000, kind: 'in', data: 'go\n' },
         { seq: 2, ts: 1100, kind: 'out', data: 'part one\n' },
         // gap > 2s → new assistant turn
         { seq: 3, ts: 4200, kind: 'out', data: 'part two\n' },
@@ -44,7 +44,7 @@ test('extractFromTranscript aggregates assistant output on 2s gap', () => {
 
 test('extractFromTranscript strips ANSI and collapses redraw lines', () => {
     const store = fakeTranscriptStore([
-        { seq: 1, ts: 1000, kind: 'in', data: 'run tests' },
+        { seq: 1, ts: 1000, kind: 'in', data: 'run tests\n' },
         { seq: 2, ts: 1100, kind: 'out', data: '\x1b[32mOK\x1b[0m\n' },
         { seq: 3, ts: 1200, kind: 'out', data: 'OK\r\x1b[32mOK\x1b[0m\n' },
         { seq: 4, ts: 1300, kind: 'out', data: 'OK\n' },
@@ -161,10 +161,11 @@ test('extractFromTranscript coalesces consecutive keystroke in frames into one u
         { seq: 4, ts: 1300, kind: 'in', data: 'd' },
         { seq: 5, ts: 1400, kind: 'in', data: 'e' },
         { seq: 6, ts: 1500, kind: 'in', data: 'l' },
-        { seq: 7, ts: 1600, kind: 'out', data: 'model list\n' },
+        { seq: 7, ts: 1550, kind: 'in', data: '\n' }, // Enter 提交
+        { seq: 8, ts: 1600, kind: 'out', data: 'model list\n' },
         // gap > USER_GAP_MS between the previous in frame and this one → new turn
-        { seq: 8, ts: 6000, kind: 'in', data: 'hello' },
-        { seq: 9, ts: 6100, kind: 'in', data: ' world' },
+        { seq: 9, ts: 6000, kind: 'in', data: 'hello' },
+        { seq: 10, ts: 6100, kind: 'in', data: ' world' },
     ]);
     const { turns } = extractor.extractFromTranscript(store, 's1');
     assert.equal(turns.length, 3);
@@ -178,13 +179,35 @@ test('extractFromTranscript coalesces consecutive keystroke in frames into one u
 
 test('extractFromTranscript strips caret-notation CSI in assistant output', () => {
     const store = fakeTranscriptStore([
-        { seq: 1, ts: 1000, kind: 'in', data: 'hello' },
+        { seq: 1, ts: 1000, kind: 'in', data: 'hello\n' },
         { seq: 2, ts: 1100, kind: 'out', data: '^[[I^[[?1;2c^[[I' },
         { seq: 3, ts: 1200, kind: 'out', data: 'real answer' },
     ]);
     const { turns } = extractor.extractFromTranscript(store, 's1');
     const assistant = turns.find((t) => t.role === 'assistant');
     assert.equal(assistant.text, 'real answer');
+});
+
+test('extractFromTranscript ignores TUI keystroke echoes (out frames interleaved with in)', () => {
+    // opencode/Claude Code 等 TUI：每敲一键，终端回显一个 out 帧。
+    // 用户输入活跃期的 out 应视为回显跳过，不把输入拆成碎片。
+    const store = fakeTranscriptStore([
+        { seq: 1, ts: 1000, kind: 'in', data: '/' },
+        { seq: 2, ts: 1010, kind: 'out', data: '/' },          // 回显
+        { seq: 3, ts: 1020, kind: 'in', data: 's' },
+        { seq: 4, ts: 1030, kind: 'out', data: '/s' },         // 回显
+        { seq: 5, ts: 1040, kind: 'in', data: 'k' },
+        { seq: 6, ts: 1050, kind: 'out', data: '/sk' },        // 回显
+        { seq: 7, ts: 1100, kind: 'in', data: '\n' },          // Enter 提交
+        { seq: 8, ts: 2000, kind: 'out', data: 'Skills:\n' },
+        { seq: 9, ts: 2100, kind: 'out', data: '1. bash\n' },
+    ]);
+    const { turns } = extractor.extractFromTranscript(store, 's1');
+    assert.equal(turns.length, 2);
+    assert.equal(turns[0].role, 'user');
+    assert.equal(turns[0].text, '/sk');       // 逐键输入合并为一个用户轮次
+    assert.equal(turns[1].role, 'assistant');
+    assert.equal(turns[1].text, 'Skills:\n1. bash');
 });
 
 test('extractFromTranscript caps turns at 100 (drops oldest)', () => {
