@@ -36,6 +36,7 @@
   "custom_image_not_found": "Custom image not found",
   "image_version_not_found": "Image version not found",
   "custom_image_not_found": "Custom image not found",
+  "custom_image_name_exists": "Custom image named \"{{name}}\" already exists",
   "custom_builds_unavailable": "Custom image builds are not available",
   "docker_not_available": "Docker is not available",
   "build_in_progress": "Image build already in progress",

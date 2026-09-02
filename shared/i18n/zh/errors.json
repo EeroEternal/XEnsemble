@@ -36,6 +36,7 @@
   "custom_image_not_found": "自定义镜像不存在",
   "image_version_not_found": "镜像版本不存在",
   "custom_image_not_found": "自定义镜像不存在",
+  "custom_image_name_exists": "已存在同名自定义镜像「{{name}}」",
   "custom_builds_unavailable": "自定义镜像构建不可用",
   "docker_not_available": "Docker 不可用",
   "build_in_progress": "镜像构建已在进行中",

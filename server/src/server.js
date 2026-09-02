@@ -2296,13 +2296,21 @@ fastify.register(async function workspaceTerminalWsRoutes(app) {
                 } catch (e) {
                     req.log.warn({ err: e }, '[workspace-shell] failed to load session custom_env');
                 }
-                const shellCmds = [process.env.SHELL || 'bash', 'bash', 'sh'];
+                // Default to bash with -i (interactive). systemd injects SHELL=/bin/sh into
+                // service processes, so we cannot rely on process.env.SHELL — pick an absolute
+                // path explicitly and force interactive mode so the shell sources .bashrc,
+                // sets up a prompt, and supports tab completion.
+                const shellAttempts = [
+                    { cmd: process.env.WORKSPACE_SHELL_CMD, args: ['-i'] },
+                    { cmd: '/bin/bash', args: ['-i'] },
+                    { cmd: '/bin/sh', args: ['-i'] },
+                ].filter((s) => s.cmd);
                 let lastErr = null;
-                for (const shellCmd of shellCmds) {
+                for (const { cmd: shellCmd, args: shellArgs } of shellAttempts) {
                     try {
                         const handle = await runtime.exec.spawn(
                             shellCmd,
-                            [],
+                            shellArgs,
                             shellEnv,
                             {
                                 name: 'workspace-shell',
@@ -2312,7 +2320,7 @@ fastify.register(async function workspaceTerminalWsRoutes(app) {
                                 gid: process.env.RUNTIME_GID,
                             },
                         );
-                        req.log.info({ shellCmd }, '[workspace-shell] spawn ok');
+                        req.log.info({ shellCmd, args: shellArgs }, '[workspace-shell] spawn ok');
                         shell = WorkspaceShellManager.create(shellId, handle);
                         break;
                     } catch (err) {
@@ -2320,9 +2328,9 @@ fastify.register(async function workspaceTerminalWsRoutes(app) {
                         req.log.warn(
                             {
                                 shellCmd,
+                                args: shellArgs,
                                 errName: err?.name,
                                 errMessage: err?.message,
-                                errStack: err?.stack,
                             },
                             '[workspace-shell] spawn attempt failed',
                         );

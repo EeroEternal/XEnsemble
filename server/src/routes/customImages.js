@@ -35,6 +35,16 @@ function registerCustomImageRoutes(fastify) {
       });
       return reply.code(201).send(result);
     } catch (err) {
+      // Localize the "name already exists" 409 so the toast matches the user's language.
+      // Matches the error thrown by CustomImageService.createImage when a user reuses a name.
+      if (err.statusCode === 409 && /custom image named "[^"]+" already exists/i.test(err.message || '')) {
+        const existing = (err.message || '').match(/custom image named "([^"]+)" already exists/i);
+        const name = existing ? existing[1] : '';
+        return reply.code(409).send({
+          error: t('errors:custom_image_name_exists', { name }, request.locale || 'en'),
+          code: 'custom_image_name_exists',
+        });
+      }
       const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
       return sendPublicError(reply, err, 'Failed to create custom image', statusCode);
     }
