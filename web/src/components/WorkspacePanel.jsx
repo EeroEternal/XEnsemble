@@ -486,7 +486,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
                 {closable && (
                   <button
                     type="button"
-                    title={`Close ${tab.label}`}
+                    title={t('workspace:action.close_tab', { name: tab.label })}
                     onClick={(e) => {
                       e.stopPropagation();
                       closeExtraTab(tab.key);
@@ -568,12 +568,12 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
               >
                 <Icon className="h-3.5 w-3.5 shrink-0" />
                 <span>{tab.label}</span>
-                {alreadyOpen && <span className="ml-auto text-[10px] text-zinc-400">Already open</span>}
+                {alreadyOpen && <span className="ml-auto text-[10px] text-zinc-400">{t('workspace:action.already_open')}</span>}
               </button>
             );
           })}
           {addableRemaining.length === 0 && (
-            <div className="px-3 py-2 text-xs text-zinc-400">All panels already open</div>
+            <div className="px-3 py-2 text-xs text-zinc-400">{t('workspace:action.all_panels_open')}</div>
           )}
         </div>,
         document.body,

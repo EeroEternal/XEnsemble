@@ -42,7 +42,9 @@
     "approve": "Approve",
     "reject": "Reject",
     "logout": "Log out",
-    "saving": "Saving…"
+    "saving": "Saving…",
+    "select_all": "Select all",
+    "collapse_sidebar": "Collapse sidebar"
   },
   "state": {
     "loading": "Loading…",

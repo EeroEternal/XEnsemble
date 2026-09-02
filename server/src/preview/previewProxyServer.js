@@ -1,8 +1,9 @@
 // 通用单端口预览代理（部署后由 twoStage spawn 到沙箱）。
-//   静态模式（默认）: node previewProxyServer.js <distDir> <listenPort> <backendPort> [spaFallback(默认1)]
+//   静态模式（默认）: node previewProxyServer.js <distDir> <listenPort> <backendPort> [spaFallback(默认1)] [base]
 //     - 静态 serve 前端构建产物（dist 目录），含 SPA history 路由 fallback；
 //     - 把 /api/* 反向代理到本地后端端口；
-//   反代模式: node previewProxyServer.js --upstream <upstreamPort> <listenPort>
+//     - base（如 /preview/<id>/）注入 HTML <base>，让前端相对 URL 自动带预览前缀
+//   反代模式: node previewProxyServer.js --upstream <upstreamPort> <listenPort> [base]
 //     - 原样反代完整应用（upstream，如 verify 已 serve 的 bin.js web / uvicorn），
 //       仅把 upstream 返回的 HTML 里的绝对资源路径改写为相对（/assets/… → ./assets/…），
 //       适配 /preview/<id>/ 子路径，避免绝对路径泄漏到宿主源。
@@ -23,15 +24,17 @@ let spaFallback = true;
 if (args[0] === '--upstream') {
     upstreamPort = Number(args[1]);
     listenPort = Number(args[2]);
+    liveBase = args[3] || '';
 } else if (args[0] === '--live') {
     devPort = Number(args[1]);
     backendPort = Number(args[2]);
     listenPort = Number(args[3]);
     liveBase = args[4] || '';
 } else {
-    [distDirArg, listenPort, backendPort, spaFallbackArg] = args;
+    [distDirArg, listenPort, backendPort, spaFallbackArg, liveBase] = args;
     distDir = path.resolve(distDirArg);
     spaFallback = spaFallbackArg !== '0';
+    liveBase = liveBase || '';
 }
 const MIME = {
     '.html': 'text/html; charset=utf-8',
@@ -71,7 +74,7 @@ function serveStatic(req, res) {
                 // 不依赖 Referer 转发（否则部分资源请求落宿主根 /assets 会 401/text-html）。
                 if (type.startsWith('text/html')) {
                     let html = fs.readFileSync(p, 'utf8');
-                    html = html.replace(/(src|href)="\/(?!api\/|preview\/|@vite\/)/g, '$1="./');
+                    html = rewriteHtml(html);
                     res.writeHead(200, { 'Content-Type': type });
                     res.end(html);
                     return;
@@ -99,6 +102,95 @@ function stripFrameBlockingHeaders(headers) {
     delete h['content-security-policy'];
     delete h['x-frame-options'];
     return h;
+}
+
+// 统一 HTML 改写：
+//  1) 注入 <base href="/preview/<id>/">（若提供了 base 且 HTML 里没有 <base>），让前端所有
+//     相对 URL（webpack 动态 chunk、fetch 相对路径等）自动落到预览子路径，不脱离前缀。
+//  2) 把绝对资源路径改为相对（/assets/… → ./assets/…），不改 /api、/preview、/@vite 等。
+//  3) 注入运行时 URL 改写脚本：很多前端（vite dev、axios/fetch、WebSocket）会写死沙箱内地址
+//     （http://localhost:9000/api 之类）。浏览器无法访问沙箱 localhost → ERR_CONNECTION_REFUSED。
+//     这里把这类请求改写为相对路径，让它们走预览网关 → 隧道 → 沙箱后端，通用修复所有项目。
+const PREVIEW_RUNTIME_SCRIPT = `<script>
+(function () {
+  if (window.__xensemblePreviewPatched) return; window.__xensemblePreviewPatched = true;
+  var localRe = /^https?:\\/\\/(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\])(:\\d+)?/i;
+  function strip(url) {
+    if (typeof url !== 'string') return url;
+    try {
+      var u = new URL(url, location.href);
+      if (localRe.test(u.origin)) return u.pathname + u.search + u.hash;
+    } catch (e) {}
+    return url;
+  }
+  var of = window.fetch;
+  if (of) window.fetch = function (input, init) {
+    if (typeof input === 'string') input = strip(input);
+    else if (input && input.url) input = new Request(strip(input.url), input);
+    return of.call(this, input, init);
+  };
+  var oo = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (method, url) {
+    return oo.call(this, method, strip(url), arguments.length > 2 ? arguments[2] : true,
+      arguments.length > 3 ? arguments[3] : null, arguments.length > 4 ? arguments[4] : null);
+  };
+  var WS = window.WebSocket;
+  if (WS) {
+    var W = function (url, protocols) { return new WS(strip(url), protocols); };
+    W.prototype = WS.prototype; W.CONNECTING = WS.CONNECTING; W.OPEN = WS.OPEN;
+    W.CLOSING = WS.CLOSING; W.CLOSED = WS.CLOSED;
+    window.WebSocket = W;
+  }
+})();
+</script>`;
+
+const zlib = require('zlib');
+
+// 解压响应体：代理到 dev server / 后端时常见 gzip/br/deflate 压缩。
+// 必须解压后再做 HTML 改写，否则改写后的内容与 content-encoding 头不匹配，
+// 浏览器按压缩解包会失败（ERR_CONTENT_DECODING_FAILED）→ 白屏。
+function decompressBody(buf, encoding) {
+    const enc = String(encoding || '').toLowerCase();
+    try {
+        if (enc.includes('gzip')) return zlib.gunzipSync(buf);
+        if (enc.includes('br')) return zlib.brotliDecompressSync(buf);
+        if (enc.includes('deflate')) return zlib.inflateSync(buf);
+    } catch (e) {
+        // 解压失败：保留原字节（可能是代理层未真正压缩但头误标），交由下游决定。
+    }
+    return buf;
+}
+
+function rewriteHtml(html) {
+    if (liveBase && !/<base\s/i.test(html)) {
+        const base = liveBase.replace(/\/$/, '') + '/';
+        html = html.replace(/(<head[^>]*>)/i, `$1\n    <base href="${base}">`);
+    }
+    html = html.replace(/(src|href)="\/(?!api\/|preview\/|@vite\/)/g, '$1="./');
+    if (!html.includes('__xensemblePreviewPatched')) {
+        html = html.replace(/(<\/head>)/i, `${PREVIEW_RUNTIME_SCRIPT}\n$1`);
+    }
+    return html;
+}
+
+// 改写 HTML 并回写响应（含解压与编码头清理）：
+//  - 解压 gzip/br/deflate → 改写 → 去掉 content-encoding / content-length，按明文回写。
+//  - 避免上游返回压缩 HTML 时，改写后的明文仍带压缩头 → ERR_CONTENT_DECODING_FAILED。
+function rewriteAndSendHtml(res, pRes, chunks) {
+    const enc = String(pRes.headers['content-encoding'] || '').toLowerCase();
+    let html;
+    if (enc.includes('gzip') || enc.includes('br') || enc.includes('deflate')) {
+        html = decompressBody(Buffer.concat(chunks), enc).toString('utf8');
+    } else {
+        html = Buffer.concat(chunks).toString('utf8');
+    }
+    html = rewriteHtml(html);
+    const headers = stripFrameBlockingHeaders(pRes.headers);
+    delete headers['content-length'];
+    delete headers['transfer-encoding'];
+    delete headers['content-encoding'];
+    res.writeHead(pRes.statusCode || 200, headers);
+    res.end(html);
 }
 
 // 通用反代：把请求转发给指定端口，仅对 HTML 响应做资源路径改写 + 剥 iframe 限制头。
@@ -129,14 +221,7 @@ function proxyTo(req, res, port, allowFallback = true, overridePath = null) {
             const chunks = [];
             pRes.on('data', (c) => chunks.push(c));
             pRes.on('end', () => {
-                let html = Buffer.concat(chunks).toString('utf8');
-                // 把绝对资源路径改为相对（/assets/… → ./assets/…），不改 /api、/preview、/@vite 等。
-                html = html.replace(/(src|href)="\/(?!api\/|preview\/|@vite\/)/g, '$1="./');
-                const headers = stripFrameBlockingHeaders(pRes.headers);
-                delete headers['content-length'];
-                delete headers['transfer-encoding'];
-                res.writeHead(pRes.statusCode || 200, headers);
-                res.end(html);
+                rewriteAndSendHtml(res, pRes, chunks);
             });
             pRes.on('error', () => {
                 if (!res.headersSent) { res.writeHead(502); }
@@ -169,13 +254,7 @@ function proxyRoot(res, port) {
             const chunks = [];
             pRes.on('data', (c) => chunks.push(c));
             pRes.on('end', () => {
-                let html = Buffer.concat(chunks).toString('utf8');
-                html = html.replace(/(src|href)="\/(?!api\/|preview\/|@vite\/)/g, '$1="./');
-                const headers = stripFrameBlockingHeaders(pRes.headers);
-                delete headers['content-length'];
-                delete headers['transfer-encoding'];
-                res.writeHead(pRes.statusCode || 200, headers);
-                res.end(html);
+                rewriteAndSendHtml(res, pRes, chunks);
             });
             pRes.on('error', () => {
                 if (!res.headersSent) { res.writeHead(502); }
@@ -239,10 +318,19 @@ function forwardUpgrade(req, socket, head, port, targetPath) {
             pSocket.destroy();
             return;
         }
+        // 透传 101 状态行 + 全部响应头。upgrade 响应必须包含 Connection/Upgrade 头，
+        // 浏览器靠 Sec-WebSocket-Accept + Upgrade: websocket 完成握手，缺任一都会
+        // 报 "Invalid frame header"。pRes.headers 已含 Sec-WebSocket-Accept。
         socket.write(`HTTP/1.1 ${pRes.statusCode} ${pRes.statusMessage || ''}\r\n`);
         for (const [k, v] of Object.entries(pRes.headers)) {
             if (k && v !== undefined) socket.write(`${k}: ${v}\r\n`);
         }
+        // 兜底：若上游漏了 Connection/Upgrade 头则补上，否则浏览器端 WS 客户端
+        // 无法确认升级成功，握手后的首个帧会被判 "Invalid frame header"。
+        const lower = {};
+        for (const k of Object.keys(pRes.headers)) lower[k.toLowerCase()] = k;
+        if (!('connection' in lower)) socket.write('Connection: Upgrade\r\n');
+        if (!('upgrade' in lower)) socket.write('Upgrade: websocket\r\n');
         socket.write('\r\n');
         if (pHead && pHead.length) socket.write(pHead);
         socket.pipe(pSocket);

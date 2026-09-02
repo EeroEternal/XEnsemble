@@ -87,6 +87,18 @@ proxy.on('error', (err, req, res) => {
     console.error('[preview-gateway]', err.message);
 });
 
+// 首次打开 preview 页面（带 token 校验通过）时种下会话 cookie，绑定浏览器到该部署。
+// 之后 SPA 客户端路由导航（URL 丢失 preview_token）凭 cookie 免 token，避免深层导航 401。
+// 只在 HTML 导航响应种 cookie，资源/API 不必重复种（同值幂等无害）。
+proxy.on('proxyRes', (pRes, req) => {
+    const deploymentId = req && req.__previewDeploymentId;
+    if (!deploymentId) return;
+    const type = String(pRes.headers['content-type'] || '');
+    if (!/\btext\/html\b/i.test(type)) return;
+    const existing = pRes.headers['set-cookie'] || [];
+    pRes.headers['set-cookie'] = [...existing, previewCookieValue(deploymentId)];
+});
+
 function extractToken(request) {
     const previewHeader = request.headers['x-preview-token'];
     if (previewHeader) return previewHeader;
@@ -112,6 +124,33 @@ function extractToken(request) {
     return null;
 }
 
+// 预览会话 cookie：首次带 token 打开 preview 页面时种下，浏览器后续 SPA 导航/请求
+// （客户端路由后 URL 丢失 ?preview_token=，Referer 也不再携带）凭此 cookie 免 token。
+// 值 = base64url(JSON { id: deploymentId, exp })，仅用于确认"这个浏览器已通过该部署的
+// token 校验"，不暴露原 token。
+const PREVIEW_COOKIE = 'xe_preview';
+const PREVIEW_COOKIE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function previewCookieValue(deploymentId) {
+    const payload = Buffer.from(JSON.stringify({ id: deploymentId, exp: Date.now() + PREVIEW_COOKIE_TTL_MS })).toString('base64url');
+    return `${PREVIEW_COOKIE}=${payload}; Path=/; HttpOnly; SameSite=Lax`;
+}
+
+// 从 Cookie 头解析会话绑定的 deploymentId；无/过期返回 null。
+function previewSessionId(request) {
+    try {
+        const cookie = String(request.headers.cookie || '');
+        const m = cookie.match(/(?:^|;\s*)xe_preview=([^;]+)/);
+        if (!m) return null;
+        const payload = JSON.parse(Buffer.from(m[1], 'base64url').toString('utf8'));
+        if (!payload || typeof payload.id !== 'string' || !payload.id) return null;
+        if (payload.exp && Number(payload.exp) < Date.now()) return null;
+        return payload.id;
+    } catch {
+        return null;
+    }
+}
+
 async function assertDeploymentUserActive(userId) {
     const rows = await db.select({ status: schema.users.status })
         .from(schema.users)
@@ -129,7 +168,28 @@ async function resolveDeployment(request, deploymentId) {
     }
 
     const token = extractToken(request);
-    if (!token) return { error: 'Unauthorized', status: 401, code: 'missing_preview_token' };
+    if (!token) {
+        // SPA 客户端路由后 URL 丢失 preview_token（深层导航 /guide/quickstart 等），
+        // Referer 也可能已不带。若该浏览器此前已通过本部署 token 校验（会话 cookie 绑定
+        // deploymentId），则放行——否则返回 401。
+        const sessionId = previewSessionId(request);
+        if (!sessionId || sessionId !== deploymentId) {
+            return { error: 'Unauthorized', status: 401, code: 'missing_preview_token' };
+        }
+        // cookie 绑定有效，直接查部署记录（不再校验 token 哈希）
+        const rows = await db.select().from(schema.deployments)
+            .where(eq(schema.deployments.id, deploymentId));
+        const row = rows[0];
+        if (!row) return { error: 'Invalid preview token', status: 401, code: 'invalid_preview_token' };
+        const inactive = await assertDeploymentUserActive(row.userId);
+        if (inactive) return inactive;
+        if (row.status !== 'running') {
+            return { error: 'Preview is not running', status: 503, code: 'preview_not_running' };
+        }
+        const entry = previewRegistry.get(deploymentId);
+        if (!entry) return { error: 'Preview process not found', status: 503, code: 'preview_process_not_found' };
+        return { deployment: row, entry };
+    }
 
     const row = await deploymentService.getByPreviewToken(deploymentId, token);
     if (!row) return { error: 'Invalid preview token', status: 401, code: 'invalid_preview_token' };
@@ -361,6 +421,12 @@ async function registerPreviewGateway(fastify) {
     // request.raw 的 body 流完整，proxy.web 才能把 POST body 透传给后端（若走 fastify route，
     // body 已被 fastify 的 JSON parser 消费，转发时后端收不到 body → 408 超时，登录/注册全挂）。
     fastify.addHook('onRequest', async (request, reply) => {
+        // WebSocket upgrade 请求（Connection: Upgrade / Upgrade: websocket）不能在此做 HTTP 转发：
+        // 若 hijack + proxy.web 会把 upgrade 当普通 HTTP 代理，与 fastify.server.on('upgrade')
+        // 里的 proxy.ws 双重处理同一连接，导致 WebSocket 帧数据互相污染 → 浏览器/vite 端
+        // "Invalid frame header"。upgrade 统一交给 server.on('upgrade') 处理（含 __blink 与 preview WS）。
+        if (String(request.headers.upgrade || '').toLowerCase() === 'websocket') return;
+
         const pathname = new URL(request.url, 'http://localhost').pathname;
         // __dev/console 需要 fastify 解析 body（写 inbox 日志），放行给 route 处理。
         if (pathname.includes('/__dev/console')) return;
@@ -448,6 +514,8 @@ async function registerPreviewGateway(fastify) {
             // 同名网关会误读该头，在自己的空 preview registry 里路由 → 返回 503
             // "Preview not found"，导致 preview 页面永远打不开。
             delete request.raw.headers['x-preview-origin'];
+            // 标记部署，供 proxyRes 钩子在 HTML 响应上种会话 cookie
+            request.raw.__previewDeploymentId = deploymentId;
             proxy.web(
                 request.raw,
                 reply.raw,

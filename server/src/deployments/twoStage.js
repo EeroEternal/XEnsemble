@@ -872,7 +872,7 @@ async function ensureXensembleBackend({ runtimeRef, workspacePath, preferredPort
 // （静态 serve 前端 dist + 反代 /api 到后端），保证 preview 稳定可连且前后端都可用，
 // 不依赖 verify 期间 agent 起的短命进程。返回实际生效的端口（tunnel 连它）。
 // 用空闲端口 + spawn 后主动验证，避免残留进程占端口导致聚合没起来却被误判成功。
-async function ensureFrontendServed({ runtimeRef, workspacePath, port, onLog }) {
+async function ensureFrontendServed({ runtimeRef, workspacePath, port, base, onLog }) {
     const runtime = getRuntime();
     let dist = null;
     try {
@@ -974,7 +974,7 @@ done
             if (proxyPath) {
                 await runtime.exec.spawn(
                     'node',
-                    [proxyPath, distAbs, String(listenPort), String(backendOk ? backendPort : 0)],
+                    [proxyPath, distAbs, String(listenPort), String(backendOk ? backendPort : 0), '1', base || ''],
                     { HOME: process.env.HOME || '/root', PATH: process.env.PATH || '/usr/bin:/bin' },
                     { runtimeRef, cwd: workspacePath },
                 );
@@ -1021,7 +1021,7 @@ done
 // 原样反代全部请求（保留 /plugins、后端 API 等运行时资源），仅把 upstream 返回的 HTML 里的
 // 绝对资源路径改写为相对路径（/assets/… → ./assets/…），适配 /preview/<id>/ 子路径，
 // 避免绝对路径泄漏到宿主源（否则 /assets 落到宿主 SPA fallback 变 text-html、/api 落宿主接口 401）。
-async function startRewriteProxy({ runtimeRef, workspacePath, upstreamPort, listenPort, onLog }) {
+async function startRewriteProxy({ runtimeRef, workspacePath, upstreamPort, listenPort, base, onLog }) {
     const runtime = getRuntime();
     let proxyPath = null;
     try {
@@ -1036,7 +1036,7 @@ async function startRewriteProxy({ runtimeRef, workspacePath, upstreamPort, list
     try {
         await runtime.exec.spawn(
             'node',
-            [proxyPath, '--upstream', String(upstreamPort), String(listenPort)],
+            [proxyPath, '--upstream', String(upstreamPort), String(listenPort), base || ''],
             { HOME: process.env.HOME || '/root', PATH: process.env.PATH || '/usr/bin:/bin' },
             { runtimeRef, cwd: workspacePath },
         );
@@ -1495,6 +1495,9 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         // 1) xensemble 且 live 失败 → 直接用系统侧拉起的真实后端端口（单端口全栈，serve web/dist + /api）
         // 2) verify 有 appPort → 套"改写反代"保留完整应用（verify serve 的就是完整应用）
         // 3) 其余（纯静态）→ 聚合 serve dist 兜底
+        // 非 live 模式的静态/上游代理都注入 /preview/<id>/ base（HTML <base> 标签），
+        // 让前端相对 URL 自动带前缀，避免资源路径脱离 preview 子路径。
+        const staticBase = `/preview/${deploymentId}/`;
         if (mode !== 'live' && xensBackend) {
             port = xensBackend.port;
             served = { ok: true };
@@ -1505,6 +1508,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
                 const proxyOk = await startRewriteProxy({
                     runtimeRef: ref, workspacePath: wsPath,
                     upstreamPort: verify.appPort, listenPort: proxyPort,
+                    base: staticBase,
                     onLog: (m) => console.error(`[twoStage] ${m}`),
                 });
                 if (proxyOk) {
@@ -1517,7 +1521,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
                 console.error(`[twoStage] preview: no free guest port for rewrite proxy, tunneling verify port ${verify.appPort} directly`);
             }
         } else if (mode !== 'live') {
-            served = await ensureFrontendServed({ runtimeRef: ref, workspacePath: wsPath, port, onLog: (m) => console.error(`[twoStage] ${m}`) });
+            served = await ensureFrontendServed({ runtimeRef: ref, workspacePath: wsPath, port, base: staticBase, onLog: (m) => console.error(`[twoStage] ${m}`) });
             if (served.ok) port = served.port;
             console.error(`[twoStage] preview: verify had NO appPort, fell back to aggregate serve port ${port}`);
         }

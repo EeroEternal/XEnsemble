@@ -173,11 +173,14 @@ function isBoxDefaultPage(body) {
 async function probePort({ runtimeRef, workspacePath, port, boxDefaultPorts }) {
     const runtime = getRuntime();
     try {
+        // 注意：curl 的 -w 标记追加在 body 末尾，若再 `| head -c 3000` 截断，
+        // 长 HTML 页面会把 __HTTPCODE__ 标记一起截掉 → httpCode 解析失败误判 down。
+        // 改为先拿 code（-o /dev/null），再单独拿 body 前 3000 字节，两者互不影响。
         const r = await runtime.exec.exec(
             'sh',
-            ['-c', `curl -s -m 2 -w "\\n__HTTPCODE__:%{http_code}" http://127.0.0.1:${port}/ | head -c 3000`],
+            ['-c', `CODE=$(curl -s -m 8 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/ 2>/dev/null); BODY=$(curl -s -m 8 http://127.0.0.1:${port}/ 2>/dev/null | head -c 3000); printf '%s\\n__HTTPCODE__:%s' "$BODY" "$CODE"`],
             {},
-            { runtimeRef, cwd: workspacePath, timeoutMs: 6000 },
+            { runtimeRef, cwd: workspacePath, timeoutMs: 25000 },
         );
         const out = String(r.stdout || '');
         const codeMatch = out.match(/__HTTPCODE__:(\d{3})/);
@@ -239,51 +242,62 @@ async function assertAppIsServed({ runtimeRef, workspacePath, preferredPort }) {
     const commonPorts = [3000, 3888, 3889, 5173, 4173, 8080, 8000, 9000, 5000, 3001, 4000, 8081];
     // box 沙箱常驻默认预览端口：3000（欢迎页）与 5173（preview.json serve . --listen 5173）。
     const boxDefaultPorts = [Number(process.env.BOXLITE_DEFAULT_PREVIEW_PORT || 3000), 5173];
-    const errors = [];
-    const probeDetail = [];
-
-    const probeLoop = async (ports) => {
-        for (const port of ports) {
-            const res = await probePort({ runtimeRef, workspacePath, port, boxDefaultPorts });
-            probeDetail.push(`${port}=${res.httpCode || (res.listen ? 'listen' : 'down')}${res.ok ? '(app)' : ''}`);
-            if (res.ok) {
-                return { ok: true, port, httpCode: res.httpCode, snippet: res.snippet };
-            }
-            if (res.listen) errors.push(res.reason);
-        }
-        return null;
-    };
 
     // 收敛：优先只探测真实监听的端口（避免对 down 端口空 curl 等待），
     // 顺序 preferred → 监听中的常见端口 → 其余监听端口。
-    if (listenPorts.length) {
-        const listened = new Set(listenPorts);
-        const ordered = [];
-        if (preferred && listened.has(preferred)) ordered.push(preferred);
-        for (const p of commonPorts) {
-            if (p !== preferred && listened.has(p)) ordered.push(p);
+    // 轮询重试：verify agent 刚报告 ok 时应用进程可能还在启动（serve/vite/dsh 冷启动
+    // 常需数秒），一轮探测全 down 就失败会让真实应用被误判为"未发现监听端口"。
+    const probeAttempts = async () => {
+        const probeDetail = [];
+        const errors = [];
+        const probeLoop = async (ports) => {
+            for (const port of ports) {
+                const res = await probePort({ runtimeRef, workspacePath, port, boxDefaultPorts });
+                probeDetail.push(`${port}=${res.httpCode || (res.listen ? 'listen' : 'down')}${res.ok ? '(app)' : ''}`);
+                if (res.ok) {
+                    return { ok: true, port, httpCode: res.httpCode, snippet: res.snippet };
+                }
+                if (res.listen) errors.push(res.reason);
+            }
+            return null;
+        };
+        if (listenPorts.length) {
+            const listened = new Set(listenPorts);
+            const ordered = [];
+            if (preferred && listened.has(preferred)) ordered.push(preferred);
+            for (const p of commonPorts) {
+                if (p !== preferred && listened.has(p)) ordered.push(p);
+            }
+            for (const p of [...listenPorts].sort((a, b) => a - b)) {
+                if (!ordered.includes(p)) ordered.push(p);
+            }
+            const hit = await probeLoop(ordered);
+            if (hit) return { hit, detail: probeDetail, errors };
+            // 监听端口里没找到真实应用（可能 ss/proc 漏报、serve 刚起来、或监听端口非 HTTP），
+            // 回退探测常见应用端口（preferred + commonPorts），避免漏掉真实应用端口。
+            const probed = new Set(ordered);
+            const fallback = [preferred, ...commonPorts].filter((p) => p > 0 && !probed.has(p));
+            if (fallback.length) {
+                const fbHit = await probeLoop(fallback);
+                if (fbHit) return { hit: fbHit, detail: probeDetail, errors };
+            }
+        } else {
+            // 保底：ss + /proc/net/tcp 都拿不到监听端口时，回退全量 base 探测（curl 已收窄 2s）。
+            const base = [...new Set([preferred, ...commonPorts])];
+            const hit = await probeLoop(base);
+            if (hit) return { hit, detail: probeDetail, errors };
         }
-        for (const p of [...listenPorts].sort((a, b) => a - b)) {
-            if (!ordered.includes(p)) ordered.push(p);
-        }
-        const hit = await probeLoop(ordered);
-        if (hit) return hit;
-        // 监听端口里没找到真实应用（可能 ss/proc 漏报、serve 刚起来、或监听端口非 HTTP），
-        // 回退探测常见应用端口（preferred + commonPorts），避免漏掉真实应用端口。
-        const probed = new Set(ordered);
-        const fallback = [preferred, ...commonPorts].filter((p) => p > 0 && !probed.has(p));
-        if (fallback.length) {
-            const fbHit = await probeLoop(fallback);
-            if (fbHit) return fbHit;
-        }
-    } else {
-        // 保底：ss + /proc/net/tcp 都拿不到监听端口时，回退全量 base 探测（curl 已收窄 2s）。
-        const base = [...new Set([preferred, ...commonPorts])];
-        const hit = await probeLoop(base);
-        if (hit) return hit;
+        return { hit: null, detail: probeDetail, errors };
+    };
+
+    // 最多 3 轮、每轮间隔 5s：给冷启动（serve/vite/dsh/webpack）留出监听时间。
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        const result = await probeAttempts();
+        if (result.hit) return result.hit;
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 5000));
+        console.error(`[analyzeVerify] app port discovery attempt ${attempt}/3 failed. listenPorts=${JSON.stringify(listenPorts)} probes=${result.detail.join(', ')} errors=${result.errors.join('; ')}`);
     }
-    console.error(`[analyzeVerify] app port discovery failed. listenPorts=${JSON.stringify(listenPorts)} probes=${probeDetail.join(', ')} errors=${errors.join('; ')}`);
-    return { ok: false, reason: errors.length ? `未发现真实应用端口（${errors.join('；')}）` : '未发现监听的应用端口' };
+    return { ok: false, reason: `未发现监听的应用端口（3 次探测均无可用端口）` };
 }
 
 /**
@@ -412,6 +426,7 @@ function buildSystemPrompt(plan, toolchain) {
         '- A "directory listing" page (titles like "Index of /" or "Directory listing for /") or an EMPTY index.html is NOT a valid app — treat it as FAILURE. Never fake a pass with a static file server.',
         '- Health check must return the REAL application content (HTML with a <title> and app markup, or the backend API JSON). A 200 on a file listing or an empty page is NOT success.',
         '- If you cannot install deps / build / start the app for real, report ok:false with the real reason. Do NOT fake success to satisfy the check.',
+        'MONOREPO / WEB APP DISCOVERY (MANDATORY): if the repo root is a monorepo (has apps/*, packages/*, or a workspace root with sub-projects), do NOT serve whatever static index.html happens to exist at the root, in docs/, website/, or anywhere else — that is usually a docs site / landing page, NOT the real application. The REAL web app is the subproject whose package.json has a frontend build/dev script (`vite build` / `dev: vite` / `npm run dev` / `next build` / `nuxt build` / `react-scripts build`), typically under apps/web, apps/frontend, apps/ui, packages/web, or a dedicated client/ dir. Find that subproject, install its deps, build it, and serve its dist output. If the app also has a backend (server/, api/, apps/api, apps/cli), start it too and verify a real API endpoint responds. Serving a docs site (vitepress/docusaurus/docsify etc.) or a project landing page instead of the actual app is a FAILURE even if it returns 200.',
         'DATABASE SETUP (MANDATORY when the backend needs a database):',
         (plan?.context?.dbReady
             ? (plan?.context?.dbName
