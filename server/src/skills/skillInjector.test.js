@@ -209,7 +209,10 @@ test('injectForSession writes instruction file via fsAdapter', async () => {
         projectId: projX,
     });
 
-    const files = {};
+    const files = {
+        'AGENTS.md': '# My repo\n',
+        'CLAUDE.md': '# My repo\n',
+    };
     const fsAdapter = {
         async readFile(rootDir, rel) { return files[rel] ?? null; },
         async writeFile(rootDir, rel, content) { files[rel] = content; },
@@ -224,13 +227,17 @@ test('injectForSession writes instruction file via fsAdapter', async () => {
         assert.equal(result.injected, true);
         assert.equal(result.instructionFile, 'AGENTS.md');
         assert.equal(result.count, 1);
-        assert.ok(files['AGENTS.md'].includes('### DB migrate'));
+        // 0025（方案 B）：索引段写入平台文件 .xensemble/AGENTS.md；用户文件只有一行指针
+        assert.ok(files['.xensemble/AGENTS.md'].includes('### DB migrate'));
+        assert.ok(files['AGENTS.md'].includes('.xensemble/AGENTS.md'));
+        assert.ok(!files['AGENTS.md'].includes('### DB migrate'));
 
-        // claude-code → CLAUDE.md
+        // claude-code → CLAUDE.md（同样只写指针）
         await injector.injectForSession({
             userId: user, projectId: projX, agentId: 'claude-code', workspacePath: '/ws', fsAdapter,
         });
-        assert.ok(files['CLAUDE.md'].includes('### DB migrate'));
+        assert.ok(files['CLAUDE.md'].includes('.xensemble/AGENTS.md'));
+        assert.ok(!files['CLAUDE.md'].includes('### DB migrate'));
     } finally {
         if (prev === undefined) delete process.env.SKILL_INJECT_ENABLED;
         else process.env.SKILL_INJECT_ENABLED = prev;
@@ -325,7 +332,10 @@ test('injectForSession writes skill to platform root + agent native dirs (0021)'
         projectId: proj,
     });
 
-    const files = {};
+    const files = {
+        'AGENTS.md': '# My repo\n',
+        'CLAUDE.md': '# My repo\n',
+    };
     const fsAdapter = {
         async readFile(rootDir, rel) { return files[rel] ?? null; },
         async writeFile(rootDir, rel, content) { files[rel] = content; },
@@ -345,23 +355,25 @@ test('injectForSession writes skill to platform root + agent native dirs (0021)'
     const prev = process.env.SKILL_INJECT_ENABLED;
     process.env.SKILL_INJECT_ENABLED = 'true';
     try {
-        // claude-code → CLAUDE.md + .claude/skills
+        // claude-code → CLAUDE.md 指针 + .claude/skills
         const result = await injector.injectForSession({
             userId: user, projectId: proj, agentId: 'claude-code', workspacePath: '/ws', fsAdapter,
         });
         assert.equal(result.injected, true);
-        assert.ok(files['CLAUDE.md'].includes('.xensemble/skills/db-migrate/SKILL.md'));
+        assert.ok(files['.xensemble/AGENTS.md'].includes('.xensemble/skills/db-migrate/SKILL.md'));
+        assert.ok(files['CLAUDE.md'].includes('.xensemble/AGENTS.md'), 'user file gets pointer only');
+        assert.ok(!files['CLAUDE.md'].includes('.xensemble/skills/db-migrate/SKILL.md'));
         assert.ok(files['.xensemble/skills/db-migrate/SKILL.md']);
         assert.ok(files['.claude/skills/db-migrate/SKILL.md'], 'writes to agent native dir');
         // 0023：落盘时 frontmatter name 归一化为小写连字符（与目录名一致）
         const written = files['.xensemble/skills/db-migrate/SKILL.md'];
         assert.match(written, /^name: db-migrate$/m);
 
-        // opencode → AGENTS.md + .opencode/skills + .agents/skills
+        // opencode → AGENTS.md 指针 + .opencode/skills + .agents/skills
         await injector.injectForSession({
             userId: user, projectId: proj, agentId: 'opencode', workspacePath: '/ws', fsAdapter,
         });
-        assert.ok(files['AGENTS.md']);
+        assert.ok(files['AGENTS.md'].includes('.xensemble/AGENTS.md'));
         assert.ok(files['.opencode/skills/db-migrate/SKILL.md'], 'opencode native dir');
         assert.ok(files['.agents/skills/db-migrate/SKILL.md'], 'opencode agent-compatible dir');
     } finally {
@@ -495,7 +507,9 @@ test('injectForSession writes index to instruction file and skill directory (002
         projectId: proj,
     });
 
-    const files = {};
+    const files = {
+        'AGENTS.md': '# My repo\n',
+    };
     const fsAdapter = {
         async readFile(rootDir, rel) { return files[rel] ?? null; },
         async writeFile(rootDir, rel, content) { files[rel] = content; },
@@ -520,10 +534,12 @@ test('injectForSession writes index to instruction file and skill directory (002
             userId: user, projectId: proj, agentId: 'opencode', workspacePath: '/ws', fsAdapter,
         });
         assert.equal(result.injected, true);
-        // 主文件 = 索引（不含正文全文）
-        assert.ok(files['AGENTS.md'].includes('### DB migrate'));
-        assert.ok(files['AGENTS.md'].includes('.xensemble/skills/db-migrate/SKILL.md'));
-        assert.ok(!files['AGENTS.md'].includes('## Steps'));
+        // 0025（方案 B）：索引在平台文件，用户 AGENTS.md 只有指针
+        assert.ok(files['.xensemble/AGENTS.md'].includes('### DB migrate'));
+        assert.ok(files['.xensemble/AGENTS.md'].includes('.xensemble/skills/db-migrate/SKILL.md'));
+        assert.ok(!files['.xensemble/AGENTS.md'].includes('## Steps'));
+        assert.ok(files['AGENTS.md'].includes('.xensemble/AGENTS.md'));
+        assert.ok(!files['AGENTS.md'].includes('### DB migrate'));
         // 目录落盘
         assert.ok(files['.xensemble/skills/db-migrate/SKILL.md'].includes('## Steps'));
     } finally {
@@ -571,7 +587,7 @@ async function makeSession(userId, projectId, status) {
     return id;
 }
 
-test('reRenderForSkillChange writes/updates marker for projects without running sessions', async () => {
+test('reRenderForSkillChange writes platform index + pointers for existing instruction files', async () => {
     const user = await makeUser();
     const proj = await makeProject(user, 'R1');
     await makeActiveSkill(user, {
@@ -580,7 +596,10 @@ test('reRenderForSkillChange writes/updates marker for projects without running 
         projectId: proj,
     });
 
-    const files = {};
+    const files = {
+        'AGENTS.md': '# My repo\n',
+        'CLAUDE.md': '# My repo\n',
+    };
     const fsAdapter = {
         async readFile(rootDir, rel) { return files[rel] ?? null; },
         async writeFile(rootDir, rel, content) { files[rel] = content; },
@@ -590,9 +609,13 @@ test('reRenderForSkillChange writes/updates marker for projects without running 
     process.env.SKILL_INJECT_ENABLED = 'true';
     try {
         const result = await injector.reRenderForSkillChange({ userId: user, projectId: proj, fsAdapter });
-        assert.equal(result.reRendered, 2); // AGENTS.md + CLAUDE.md
-        assert.ok(files['AGENTS.md'].includes('### DB migrate'));
-        assert.ok(files['CLAUDE.md'].includes('### DB migrate'));
+        assert.equal(result.reRendered, 2); // AGENTS.md + CLAUDE.md 各写入一行指针
+        // 0025（方案 B）：索引在平台文件，用户文件只含指针
+        assert.ok(files['.xensemble/AGENTS.md'].includes('### DB migrate'));
+        assert.ok(files['AGENTS.md'].includes('.xensemble/AGENTS.md'));
+        assert.ok(!files['AGENTS.md'].includes('### DB migrate'));
+        assert.ok(files['CLAUDE.md'].includes('.xensemble/AGENTS.md'));
+        assert.ok(files['AGENTS.md'].includes('# My repo')); // 用户原有内容保留
     } finally {
         if (prev === undefined) delete process.env.SKILL_INJECT_ENABLED;
         else process.env.SKILL_INJECT_ENABLED = prev;
@@ -619,7 +642,9 @@ test('reRenderForSkillChange lands skill dirs but skips instruction file update 
     process.env.SKILL_INJECT_ENABLED = 'true';
     try {
         const result = await injector.reRenderForSkillChange({ userId: user, projectId: proj, fsAdapter });
-        assert.equal(result.reRendered, 0); // 指令文件更新被跳过
+        assert.equal(result.reRendered, 0); // 用户指令文件更新被跳过（且用户文件不存在则不创建）
+        // 0025（方案 B）：平台索引文件仍写入（gitignore 内，无需避开 running session）
+        assert.ok(files['.xensemble/AGENTS.md'], 'platform index written');
         // 0021：技能目录仍落盘（Agent 原生目录热加载），无需重启会话
         assert.ok(files['.xensemble/skills/db-migrate/SKILL.md'], 'platform root landed');
         assert.ok(files['.claude/skills/db-migrate/SKILL.md'], 'native dir landed for hot reload');
@@ -629,12 +654,12 @@ test('reRenderForSkillChange lands skill dirs but skips instruction file update 
     }
 });
 
-test('reRenderForSkillChange removes marker when no active skills remain (archive)', async () => {
+test('reRenderForSkillChange removes pointer when no active skills remain (archive)', async () => {
     const user = await makeUser();
     const proj = await makeProject(user, 'R3');
 
     const files = {
-        'AGENTS.md': '# My repo\n\n<!-- xe-skills:start -->\n## XEnsemble Skills\n### Old\nold\n<!-- xe-skills:end -->\n',
+        'AGENTS.md': '# My repo\n\n<!-- xe-skills-pointer:start -->\nXEnsemble Skills 索引详见 `.xensemble/AGENTS.md`（技能列表按需加载）\n<!-- xe-skills-pointer:end -->\n',
     };
     const fsAdapter = {
         async readFile(rootDir, rel) { return files[rel] ?? null; },

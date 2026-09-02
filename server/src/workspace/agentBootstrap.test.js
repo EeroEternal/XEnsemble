@@ -82,8 +82,9 @@ describe('agentBootstrap', () => {
         ensureGitignoreEntries(ws);
         ensureGitignoreEntries(ws);
         const gi = fs.readFileSync(path.join(ws, '.gitignore'), 'utf8');
-        const matches = gi.match(/\.agents\//g);
-        assert.equal(matches.length, 1);
+        // 精确匹配 `.agents/` 行（避免 `.agents/skills/` 干扰计数）
+        const lines = gi.split('\n').map((l) => l.trim());
+        assert.equal(lines.filter((l) => l === '.agents/').length, 1);
     });
 
     it('runs setup once and skips when hash unchanged', async () => {

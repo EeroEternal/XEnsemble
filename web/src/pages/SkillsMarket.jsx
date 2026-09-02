@@ -417,7 +417,7 @@ function SkillDetailDrawer({ skill, onClose }) {
 
           <div className="border border-zinc-200 rounded-lg p-3 bg-zinc-50">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">{t('skills:detail_inject_preview')}</div>
-            <pre className="text-xs text-zinc-600 leading-relaxed whitespace-pre-wrap font-mono">{`<!-- xe-skills:start -->\n## XEnsemble Skills\n\n### ${skill.title}\n${skill.description || ''}\n\n详见 .xensemble/skills/${(skill.title || '').toLowerCase().replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60)}/SKILL.md\n<!-- xe-skills:end -->`}</pre>
+            <pre className="text-xs text-zinc-600 leading-relaxed whitespace-pre-wrap font-mono">{`# 用户 AGENTS.md（仅一行引导指针，不污染 git）\n<!-- xe-skills-pointer:start -->\nXEnsemble Skills 索引详见 \`.xensemble/AGENTS.md\`（技能列表按需加载）\n<!-- xe-skills-pointer:end -->\n\n# 平台索引 .xensemble/AGENTS.md（gitignore 内）\n<!-- xe-skills:start -->\n## XEnsemble Skills\n\n### ${skill.title}\n${skill.description || ''}\n\n详见 .xensemble/skills/${(skill.title || '').toLowerCase().replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60)}/SKILL.md\n<!-- xe-skills:end -->`}</pre>
           </div>
         </div>
 

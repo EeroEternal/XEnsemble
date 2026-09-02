@@ -26,6 +26,7 @@
   "source_auto": "Auto",
   "source_manual": "Manual",
   "source_installed": "Installed",
+  "source_external": "Imported",
   "field_title": "Title",
   "field_status": "Status",
   "field_market": "Market",

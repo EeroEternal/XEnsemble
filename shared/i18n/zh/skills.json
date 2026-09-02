@@ -26,6 +26,7 @@
   "source_auto": "自动提炼",
   "source_manual": "手动创建",
   "source_installed": "市场安装",
+  "source_external": "本地导入",
   "field_title": "标题",
   "field_status": "状态",
   "field_market": "市场",

@@ -158,12 +158,29 @@ function refreshAgentsMd(workspacePath) {
 }
 
 /**
- * Idempotent: ensure workspace root `.gitignore` contains entries for `.agents/` and `.xensemble/`.
+ * Idempotent: ensure workspace root `.gitignore` contains entries for platform-managed dirs.
  * Appends missing entries without removing existing content.
+ *
+ * 0025（方案 B）：除 .agents/ 与 .xensemble/ 外，把全部 Agent 原生技能目录也加入忽略——
+ * 技能落盘不污染用户 git changes（claude/qwen/codebuddy/kimi/pi/qoder/opencode/openclaw 等）。
+ * 与 skillInjector 的 DEFAULT_AGENT_NATIVE_DIRS 保持同步。
  */
 function ensureGitignoreEntries(workspacePath) {
     const ignorePath = path.join(workspacePath, '.gitignore');
-    const entries = ['.agents/', '.xensemble/'];
+    const entries = [
+        '.agents/',
+        '.xensemble/',
+        // Agent 原生技能目录（平台注入，勿提交）
+        '.claude/skills/',
+        '.qwen/skills/',
+        '.codebuddy/skills/',
+        '.kimi-code/skills/',
+        '.pi/skills/',
+        '.qoder/r/s/skills/',
+        '.opencode/skills/',
+        '.agents/skills/',
+        'skills/',
+    ];
 
     let content = '';
     if (fs.existsSync(ignorePath)) {

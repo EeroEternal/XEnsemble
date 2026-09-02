@@ -33,6 +33,13 @@ const SECTION_END = '<!-- xe-skills:end -->';
 const SECTION_TITLE = '## XEnsemble Skills';
 // 0020：脚本级 Skill 落盘根目录（相对 workspace），目录名 = 技能名 slug
 const SKILLS_ROOT = '.xensemble/skills';
+// 0025（方案 B）：平台自己的技能索引文件（相对 workspace）。
+// 索引段不写入用户 AGENTS.md/CLAUDE.md（避免污染用户 git），统一收敛到 .xensemble/ 下。
+const PLATFORM_INDEX_FILE = '.xensemble/AGENTS.md';
+// 0025：用户指令文件中的一行引导指针（幂等、可移除）。仅当用户文件已存在时写入；
+// 用户文件不存在时不创建（避免新增 untracked 污染 changes）。
+const POINTER_START = '<!-- xe-skills-pointer:start -->';
+const POINTER_END = '<!-- xe-skills-pointer:end -->';
 // 0021：全部已注册 Agent 的原生技能目录（去重；用于重渲染时覆盖所有 Agent）
 const DEFAULT_AGENT_NATIVE_DIRS = [...new Set(
     DEFAULT_AGENTS.flatMap((a) => a.nativeSkillDirs || []),
@@ -219,6 +226,62 @@ function removeSection(existing) {
 }
 
 // ---------------------------------------------------------------------------
+// 0025（方案 B）：用户指令文件引导指针
+// 用户 AGENTS.md/CLAUDE.md 不再承载索引段（避免污染用户 git changes），
+// 只放一行指针指向平台索引 .xensemble/AGENTS.md。文件不存在时不创建。
+// ---------------------------------------------------------------------------
+
+/**
+ * 渲染一行引导指针（幂等标记包裹，可被 removePointer 移除）。
+ * @returns {string}
+ */
+function renderPointer() {
+    return `${POINTER_START}\nXEnsemble Skills 索引详见 \`${PLATFORM_INDEX_FILE}\`（技能列表按需加载）\n${POINTER_END}`;
+}
+
+/**
+ * 把引导指针合并进用户指令文件内容：
+ * - 已有指针块 → 整块替换（段外用户内容不动）
+ * - 无指针块 → 追加到末尾
+ * - existing == null（文件不存在）→ 返回 null，调用方跳过（不创建用户文件）
+ * @param {string|null} existing
+ * @returns {string|null}
+ */
+function applyPointer(existing) {
+    if (existing == null) return null;
+    const text = String(existing);
+    const pointer = renderPointer();
+    const startIdx = text.indexOf(POINTER_START);
+    const endIdx = text.indexOf(POINTER_END);
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+        const before = text.slice(0, startIdx);
+        const after = text.slice(endIdx + POINTER_END.length);
+        return `${before}${pointer}${after}`;
+    }
+    const trimmed = text.replace(/\s*$/, '');
+    if (!trimmed) return `${pointer}\n`;
+    return `${trimmed}\n\n${pointer}\n`;
+}
+
+/**
+ * 移除引导指针（无指针时原样返回；existing == null → null）。
+ * @param {string|null} existing
+ * @returns {string|null}
+ */
+function removePointer(existing) {
+    if (existing == null) return null;
+    const text = String(existing);
+    const startIdx = text.indexOf(POINTER_START);
+    const endIdx = text.indexOf(POINTER_END);
+    if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) return text;
+    const before = text.slice(0, startIdx);
+    const after = text.slice(endIdx + POINTER_END.length);
+    return (before + after)
+        .replace(/[ \t]*\n{3,}/g, '\n\n')
+        .replace(/\n{2,}$/, '\n');
+}
+
+// ---------------------------------------------------------------------------
 // 默认本地 fs 适配器（Local provider / 控制面可见 workspace）
 // ---------------------------------------------------------------------------
 
@@ -387,9 +450,14 @@ async function injectForSession({ userId, projectId, agentId, workspacePath, fsA
     const { section, truncated, count, skillIds, slugs } = renderSkillsSection(skills);
     const adapter = fsAdapter || localFs;
 
+    // 0025（方案 B）：索引段写入平台文件 .xensemble/AGENTS.md（gitignore 内，不污染用户 git）
+    await adapter.writeFile(workspacePath, PLATFORM_INDEX_FILE, section);
+    // 用户指令文件只写一行引导指针；文件不存在则跳过（不创建 untracked）
     const existing = await adapter.readFile(workspacePath, instructionFile);
-    const next = applyToContent(existing, section);
-    await adapter.writeFile(workspacePath, instructionFile, next);
+    const next = skills.length > 0 ? applyPointer(existing) : removePointer(existing);
+    if (next != null && next !== existing) {
+        await adapter.writeFile(workspacePath, instructionFile, next);
+    }
 
     // 0020/0021：技能目录落盘到平台根 + Agent 原生目录（失败不阻断主文件注入）
     const writtenSlugs = [];
@@ -476,8 +544,14 @@ async function reRenderForSkillChange({ userId, projectId = null, fsAdapter }) {
         }
         await cleanupSkillDirectories(adapter, wsPath, slugs, targetRoots);
 
-        // 指令文件（AGENTS.md/CLAUDE.md）更新：有 running/pending session 则跳过，
-        // 避免与 Agent 读取竞争（下次 spawn 自然更新）
+        // 0025（方案 B）：平台索引文件 .xensemble/AGENTS.md 始终更新（gitignore 内，
+        // 不污染用户 git；Agent 不直接读它，无需避开 running session）
+        try {
+            await adapter.writeFile(wsPath, PLATFORM_INDEX_FILE, section);
+        } catch (_) { /* 索引文件写入失败不阻断 */ }
+
+        // 用户指令文件（AGENTS.md/CLAUDE.md）：只写/移除一行引导指针。
+        // 有 running/pending session 则跳过，避免与 Agent 读取竞争（下次 spawn 自然更新）
         const running = await db
             .select({ id: schema.sessions.id })
             .from(schema.sessions)
@@ -491,10 +565,10 @@ async function reRenderForSkillChange({ userId, projectId = null, fsAdapter }) {
 
         for (const file of ['AGENTS.md', 'CLAUDE.md']) {
             const existing = await adapter.readFile(wsPath, file);
-            if (existing == null && skills.length === 0) continue; // 空文件且无技能，无需写
+            if (existing == null) continue; // 用户文件不存在则不创建（避免 untracked 污染）
             const next = skills.length > 0
-                ? applyToContent(existing, section)
-                : removeSection(existing);
+                ? applyPointer(existing)
+                : removePointer(existing);
             if (next !== existing) {
                 await adapter.writeFile(wsPath, file, next);
                 reRendered += 1;
@@ -509,6 +583,9 @@ module.exports = {
     SECTION_END,
     SECTION_TITLE,
     SKILLS_ROOT,
+    PLATFORM_INDEX_FILE,
+    POINTER_START,
+    POINTER_END,
     DEFAULT_AGENT_NATIVE_DIRS,
     isEnabled,
     maxCount,
@@ -523,6 +600,9 @@ module.exports = {
     renderSkillsSection,
     applyToContent,
     removeSection,
+    renderPointer,
+    applyPointer,
+    removePointer,
     listActiveSkills,
     writeSkillDirectory,
     writeSkillDirectories,
