@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Plus, Pencil, CheckCircle, Archive, Play, Trash2, UploadCloud, ArrowDownToLine,
@@ -27,6 +27,7 @@ import {
 
 import {
   listMySkills, createSkill, updateSkill, changeStatus, deleteSkill, publishSkill, unpublishSkill,
+  importSkillFromFiles,
 } from '../lib/skillsApi';
 
 const STATUS_META = {
@@ -67,6 +68,7 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const fetchSkills = useCallback(({ silent = false } = {}) => {
     if (!silent) setRefreshing(true);
@@ -153,8 +155,32 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
     }
   };
 
-  // 0022：本地目录导入外部开源技能（前端入口已隐藏，保留后端能力）
-  // 如后续恢复入口：Button + Dialog + importSkillFromPath + importPath/importing 状态即可。
+  // 0024：浏览器选择本地文件夹 → 读取全部文件 → 上传导入（无需服务端可见路径）
+  const fileInputRef = useRef(null);
+  const handleImportFolder = (e) => {
+    const picked = Array.from(e.target.files || []);
+    e.target.value = ''; // 允许重复选择同一文件夹
+    if (picked.length === 0) return;
+    if (picked.length > 500) {
+      showToast('error', t('skills:import_too_many', { defaultValue: 'Too many files (max 500).' }));
+      return;
+    }
+    setImporting(true);
+    const readers = picked.map((file) => new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve({ path: file.webkitRelativePath || file.name, content: String(reader.result || '') });
+      reader.onerror = () => resolve({ path: file.webkitRelativePath || file.name, content: '' });
+      reader.readAsText(file);
+    }));
+    Promise.all(readers)
+      .then((files) => importSkillFromFiles(files))
+      .then((res) => {
+        showToast('success', t('skills:import_done', { count: res.imported, defaultValue: '{{count}} skill(s) imported.' }));
+        fetchSkills({ silent: true });
+      })
+      .catch((err) => showToast('error', err.message || t('skills:toast_action_failed', { defaultValue: 'Action failed.' })))
+      .finally(() => setImporting(false));
+  };
 
   const togglePublish = (skill) => act(
     () => (skill.visibility === 'public' ? unpublishSkill(skill.id) : publishSkill(skill.id)),
@@ -205,10 +231,15 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
           <button type="button" onClick={() => fetchSkills()} disabled={refreshing} className={consoleIconButtonClass} title={t('common:action.refresh')}>
             {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           </button>
+          <Button type="button" onClick={() => fileInputRef.current?.click()} disabled={importing} variant="secondary" size="md" className="shrink-0">
+            {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
+            {t('skills:import', { defaultValue: 'Import Skill' })}
+          </Button>
           <Button type="button" onClick={openCreate} size="md" className="shrink-0">
             <Plus className="w-4 h-4" />
             {t('skills:create', { defaultValue: 'New Skill' })}
           </Button>
+          <input ref={fileInputRef} type="file" className="hidden" webkitdirectory="" directory="" onChange={handleImportFolder} title={t('skills:import_folder', { defaultValue: 'Select a folder containing skills' })} />
         </div>
       </div>
 

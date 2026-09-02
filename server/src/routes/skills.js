@@ -56,6 +56,17 @@ function registerSkillRoutes(fastify) {
         }
     });
 
+    // 0024：浏览器文件夹上传导入（webkitdirectory → 相对路径+内容 JSON，服务端临时重建）
+    fastify.post('/api/v1/skills/import-upload', { preValidation: authPre }, async (request, reply) => {
+        try {
+            const files = request.body?.files;
+            const skills = await skillService.importSkillFromUpload(request.user.id, files);
+            return reply.code(201).send({ imported: skills.length, skills });
+        } catch (err) {
+            return sendPublicError(reply, err, 'Failed to import skills', 500, request.locale || 'en');
+        }
+    });
+
     // 我的 skill 列表
     fastify.get('/api/v1/skills', { preValidation: authPre }, async (request, reply) => {
         try {

@@ -261,6 +261,25 @@ const localFs = {
 // ---------------------------------------------------------------------------
 
 /**
+ * 0023：把 SKILL.md frontmatter 的 name 归一化为小写连字符 slug（与目录名一致）。
+ * 各 Agent 原生技能目录普遍要求 name 匹配所在目录名（如 OpenCode 强制
+ * `^[a-z0-9]+(-[a-z0-9]+)*$`），否则技能会被忽略。slugify(title) 已产出合规
+ * 的目录名，这里同步改写 frontmatter name。
+ * @param {string} content SKILL.md 全文
+ * @param {string} slug 归一化后的目录名
+ * @returns {string}
+ */
+function normalizeFrontmatterName(content, slug) {
+    const text = String(content || '');
+    const m = /^---\s*\n([\s\S]*?)\n---/.exec(text);
+    if (!m) return text;
+    const yaml = m[1];
+    if (!/^name\s*:/m.test(yaml)) return text;
+    const nextYaml = yaml.replace(/^(name\s*:).*$/m, `$1 ${slug}`);
+    return text.slice(0, m.index) + `---\n${nextYaml}\n---` + text.slice(m.index + m[0].length);
+}
+
+/**
  * 写入单个技能目录：<targetRoot>/<slug>/SKILL.md + <targetRoot>/<slug>/<script.path>。
  * @param {string} [targetRoot] 相对 workspace 的目标根目录（默认 .xensemble/skills）
  * @returns {Promise<string>} 目录相对路径（不含 targetRoot）
@@ -268,7 +287,8 @@ const localFs = {
 async function writeSkillDirectory(adapter, rootDir, skill, targetRoot = SKILLS_ROOT) {
     const slug = slugify(skill.title);
     const dirRel = safeRel(slug, '');
-    await adapter.writeFile(rootDir, path.posix.join(targetRoot, dirRel, 'SKILL.md'), String(skill.content || ''));
+    const content = normalizeFrontmatterName(skill.content, slug);
+    await adapter.writeFile(rootDir, path.posix.join(targetRoot, dirRel, 'SKILL.md'), content);
     for (const script of skill.scripts || []) {
         const fileRel = safeRel(script.path, dirRel);
         await adapter.writeFile(rootDir, path.posix.join(targetRoot, fileRel), String(script.content || ''));
@@ -499,6 +519,7 @@ module.exports = {
     safeRel,
     sanitizeContent,
     parseDescription,
+    normalizeFrontmatterName,
     renderSkillsSection,
     applyToContent,
     removeSection,

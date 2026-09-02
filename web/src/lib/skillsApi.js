@@ -140,3 +140,23 @@ export async function importSkillFromPath(dirPath) {
   }
   return res.json();
 }
+
+/**
+ * 0024：从浏览器选择的本地文件夹导入技能（无需服务端可见路径）。
+ * @param {Array<{path: string, content: string}>} files 相对路径+内容
+ * @returns {Promise<{ imported: number, skills: object[] }>}
+ */
+export async function importSkillFromFiles(files) {
+  const res = await apiFetch('/api/v1/skills/import-upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ files }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const err = new Error(body?.error || 'Failed to import skills');
+    if (body?.code) err.code = body.code;
+    throw err;
+  }
+  return res.json();
+}

@@ -249,9 +249,10 @@ test('getSkillTargets resolves instructionFile + nativeSkillDirs per agent', () 
     assert.deepEqual(defs.getSkillTargets('codebuddy').nativeSkillDirs, ['.codebuddy/skills']);
     assert.deepEqual(defs.getSkillTargets('kimi-code').nativeSkillDirs, ['.kimi-code/skills']);
     assert.deepEqual(defs.getSkillTargets('qoder').nativeSkillDirs, ['.qoder/r/s/skills']);
+    assert.deepEqual(defs.getSkillTargets('opencode').nativeSkillDirs, ['.opencode/skills', '.agents/skills']);
+    assert.deepEqual(defs.getSkillTargets('pi').nativeSkillDirs, ['.pi/skills']);
     // 未确认的 Agent → 空数组（AGENTS.md 兜底）
     assert.deepEqual(defs.getSkillTargets('github-copilot').nativeSkillDirs, []);
-    assert.deepEqual(defs.getSkillTargets('opencode').nativeSkillDirs, []);
 });
 
 test('isLandableSkill requires valid frontmatter and confidence threshold', () => {
@@ -352,13 +353,17 @@ test('injectForSession writes skill to platform root + agent native dirs (0021)'
         assert.ok(files['CLAUDE.md'].includes('.xensemble/skills/db-migrate/SKILL.md'));
         assert.ok(files['.xensemble/skills/db-migrate/SKILL.md']);
         assert.ok(files['.claude/skills/db-migrate/SKILL.md'], 'writes to agent native dir');
+        // 0023：落盘时 frontmatter name 归一化为小写连字符（与目录名一致）
+        const written = files['.xensemble/skills/db-migrate/SKILL.md'];
+        assert.match(written, /^name: db-migrate$/m);
 
-        // opencode → AGENTS.md，无原生目录（不写 .qwen 等）
+        // opencode → AGENTS.md + .opencode/skills + .agents/skills
         await injector.injectForSession({
             userId: user, projectId: proj, agentId: 'opencode', workspacePath: '/ws', fsAdapter,
         });
         assert.ok(files['AGENTS.md']);
-        assert.ok(!files['.qwen/skills/db-migrate/SKILL.md']);
+        assert.ok(files['.opencode/skills/db-migrate/SKILL.md'], 'opencode native dir');
+        assert.ok(files['.agents/skills/db-migrate/SKILL.md'], 'opencode agent-compatible dir');
     } finally {
         if (prev === undefined) delete process.env.SKILL_INJECT_ENABLED;
         else process.env.SKILL_INJECT_ENABLED = prev;
@@ -427,6 +432,17 @@ test('safeRel blocks path traversal', () => {
     assert.throws(() => injector.safeRel('scripts/../../evil.sh', 'foo'));
 });
 
+test('normalizeFrontmatterName rewrites name to lowercase-hyphen slug (0023)', () => {
+    const md = '---\nname: Fix Pool\n description: x\n---\n## Steps';
+    const out = injector.normalizeFrontmatterName(md, 'fix-pool');
+    assert.match(out, /^name: fix-pool$/m);
+    assert.match(out, /description: x/);
+    assert.match(out, /## Steps/);
+    // 无 frontmatter / 无 name → 原样返回
+    assert.equal(injector.normalizeFrontmatterName('plain', 'x'), 'plain');
+    assert.equal(injector.normalizeFrontmatterName('---\ndescription: d\n---\nbody', 'x'), '---\ndescription: d\n---\nbody');
+});
+
 test('writeSkillDirectory writes SKILL.md + scripts with chmod', async () => {
     const files = {};
     const chmodded = [];
@@ -444,7 +460,9 @@ test('writeSkillDirectory writes SKILL.md + scripts with chmod', async () => {
     };
     const dir = await injector.writeSkillDirectory(fsAdapter, '/ws', skill);
     assert.equal(dir, 'fix-pool');
-    assert.ok(files['.xensemble/skills/fix-pool/SKILL.md'].includes('Fix Pool'));
+    // 0023：frontmatter name 归一化为小写连字符 slug，与目录名一致
+    assert.match(files['.xensemble/skills/fix-pool/SKILL.md'], /^name: fix-pool$/m);
+    assert.ok(files['.xensemble/skills/fix-pool/SKILL.md'].includes('## Steps'));
     assert.equal(files['.xensemble/skills/fix-pool/scripts/main.sh'], '#!/bin/bash\necho hi');
     assert.equal(files['.xensemble/skills/fix-pool/scripts/verify.py'], 'print(1)');
     assert.equal(chmodded.length, 2);

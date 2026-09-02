@@ -6,6 +6,8 @@
   "create": "新建 Skill",
   "edit": "编辑 Skill",
   "import": "导入 Skill",
+  "import_folder": "选择包含 Agent Skills 的文件夹（<name>/SKILL.md + 可选 scripts/）",
+  "import_too_many": "文件数量过多（最多 500 个），请只选择技能文件夹。",
   "import_dialog_title": "从本地目录导入 Skills",
   "import_dialog_hint": "指向包含 Agent Skills 的目录（<name>/SKILL.md + 可选 scripts/）。合法的技能文件夹将以草稿导入。",
   "import_path_label": "目录路径",

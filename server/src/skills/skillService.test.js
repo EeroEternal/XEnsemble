@@ -362,3 +362,34 @@ test('importSkillFromPath requires dirPath and rejects empty (0022)', async () =
         (e) => e.code === 'skill_import_not_found',
     );
 });
+
+test('importSkillFromUpload imports skills from browser file list (0024)', async () => {
+    const userId = await makeUser();
+    const imported = await svc.importSkillFromUpload(userId, [
+        { path: 'fix-pool/SKILL.md', content: '---\nname: fix-pool\ndescription: fix db pool leak\n---\n## Steps\n1. inspect' },
+        { path: 'fix-pool/scripts/run.sh', content: '#!/bin/bash\necho fix' },
+        { path: 'fix-pool/scripts/ignore.txt', content: 'not a script' },
+    ]);
+    assert.equal(imported.length, 1);
+    const skill = imported[0];
+    assert.equal(skill.title, 'fix-pool');
+    assert.equal(skill.source, 'external');
+    assert.equal(skill.status, 'draft');
+    assert.deepEqual(skill.scripts, [{ path: 'scripts/run.sh', content: '#!/bin/bash\necho fix' }]);
+});
+
+test('importSkillFromUpload blocks path traversal and rejects empty (0024)', async () => {
+    const userId = await makeUser();
+    // 穿越路径被忽略（不产生技能）
+    await assert.rejects(
+        () => svc.importSkillFromUpload(userId, [
+            { path: '../evil/SKILL.md', content: '---\nname: evil\ndescription: x\n---\nbody' },
+        ]),
+        (e) => e.code === 'skill_import_not_found',
+    );
+    // 空文件列表 → invalid
+    await assert.rejects(
+        () => svc.importSkillFromUpload(userId, []),
+        (e) => e.code === 'skill_import_invalid',
+    );
+});

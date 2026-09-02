@@ -6,6 +6,8 @@
   "create": "New Skill",
   "edit": "Edit Skill",
   "import": "Import Skill",
+  "import_folder": "Select a folder containing Agent Skills (<name>/SKILL.md + optional scripts/)",
+  "import_too_many": "Too many files (max 500). Please select a skill folder only.",
   "import_dialog_title": "Import skills from local directory",
   "import_dialog_hint": "Point to a directory containing Agent Skills (<name>/SKILL.md + optional scripts/). Valid skill folders are imported as drafts.",
   "import_path_label": "Directory path",

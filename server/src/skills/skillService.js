@@ -504,6 +504,8 @@ const IMPORT_MAX_DIR_DEPTH = 6;
 const IMPORT_MAX_DIRS = 200;
 const IMPORT_MAX_SCRIPTS = 10;
 const IMPORT_MAX_SCRIPT_BYTES = 65536;
+const IMPORT_MAX_FILES = 500;       // 0024：上传文件总数上限
+const IMPORT_MAX_FILE_BYTES = 262144; // 0024：单文件上限 256KB
 // 导入允许的脚本扩展名（与 scripts 白名单一致 + 常见开源技能格式）
 const IMPORT_SCRIPT_EXT_RE = /\.(sh|bash|py|js|mjs|ts|ps1|sql|zsh)$/;
 // 合法 frontmatter：name + description 都必填
@@ -612,6 +614,51 @@ function normalizeName(name) {
     return String(name || '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '').trim();
 }
 
+/**
+ * 0024：从浏览器上传的文件列表导入技能（无需服务端可见路径）。
+ *
+ * 浏览器通过 <input webkitdirectory> 选中本地文件夹后，把「相对路径+内容」
+ * 作为 JSON 上传，本函数在服务端临时目录重建目录结构，再复用
+ * importSkillFromPath 完成扫描/校验/落库。安全：相对路径禁止绝对路径与
+ * `..` 穿越；单文件大小受限；总数受限。
+ *
+ * @param {string} userId
+ * @param {Array<{path: string, content: string}>} files
+ * @returns {Promise<Array<object>>} 导入成功的技能列表
+ */
+async function importSkillFromUpload(userId, files) {
+    const os = require('os');
+    const fsp = require('fs/promises');
+    const list = Array.isArray(files) ? files : [];
+    if (list.length === 0) {
+        const err = new Error('files are required');
+        err.code = 'skill_import_invalid';
+        err.statusCode = 400;
+        throw err;
+    }
+    if (list.length > IMPORT_MAX_FILES) {
+        const err = new Error(`too many files (max ${IMPORT_MAX_FILES})`);
+        err.code = 'skill_import_invalid';
+        err.statusCode = 400;
+        throw err;
+    }
+    const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'xensemble-skill-import-'));
+    try {
+        for (const f of list) {
+            const rel = String(f?.path ?? '').replace(/\\/g, '/').replace(/^\/+/, '');
+            if (!rel || rel.includes('..') || path.isAbsolute(rel)) continue; // 防穿越
+            const content = String(f?.content ?? '');
+            if (Buffer.byteLength(content, 'utf8') > IMPORT_MAX_FILE_BYTES) continue;
+            const dest = path.join(tmp, rel);
+            await fsp.mkdir(path.dirname(dest), { recursive: true });
+            await fsp.writeFile(dest, content, 'utf8');
+        }
+        return await importSkillFromPath(userId, tmp);
+    } finally {
+        await fsp.rm(tmp, { recursive: true, force: true }).catch(() => {});
+    }
+}
+
 module.exports = {
     CATEGORIES,
     createSkill,
@@ -629,6 +676,7 @@ module.exports = {
     getDraftsLastSeenAt,
     markDraftsSeen,
     importSkillFromPath,
+    importSkillFromUpload,
     parseFrontmatter,
     normalizeName,
 };

@@ -87,6 +87,8 @@ const DEFAULT_AGENTS = [
         cmd: 'opencode',
         args: [],
         env_required: [],
+        // 0021：原生技能目录（官方支持 .opencode/skills、.claude/skills、.agents/skills）
+        nativeSkillDirs: ['.opencode/skills', '.agents/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'XDG_DATA_HOME',
@@ -355,6 +357,8 @@ const DEFAULT_AGENTS = [
         cmd: 'pi',
         args: [],
         env_required: ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'],
+        // 0021：原生技能目录（官方项目级 .pi/skills、全局 ~/.pi/agent/skills）
+        nativeSkillDirs: ['.pi/skills'],
         resume: {
             level: 'L2',
             stateArgs: ['--session-dir'],
