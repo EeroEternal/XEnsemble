@@ -32,6 +32,28 @@ const VERIFY_STATE_TTL_MS = 30 * 60 * 1000;
 // 后台化（缺少 &/nohup）而挂起，必须有总超时自动中止，否则部署永不结束、前端一直显示 running。
 const DEPLOY_TOTAL_TIMEOUT_MS = Number(process.env.DEPLOY_TOTAL_TIMEOUT_MS) || 25 * 60 * 1000;
 
+// 在 stage A 之前 fetch sandbox projectDir 的 origin/main，让 stage A LLM 看到最新代码。
+// 不做 reset --hard：保留用户在工作目录的未提交改动（平台在 /var/lib/.../proj_xxx 上
+// 有时存在 agentharness/xxx 之类的 session 分支上的 uncommitted 改动；reset 会丢）。
+// 只读操作不会破坏用户工作区，但能保证 detectProjectType / collectProjectContext
+// 读到的源码与 IDE pull 后的 main 一致。
+async function syncProjectToLatestMain(project) {
+    const hostPath = workspace.projectDir(project.userId, project.id);
+    if (!fs.existsSync(path.join(hostPath, '.git'))) return;
+    const baseBranch = project.repoDefaultBranch || 'main';
+    try {
+        const started = Date.now();
+        execSync(
+            `git fetch origin ${baseBranch} --no-tags --depth=1`,
+            { cwd: hostPath, stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 },
+        );
+        console.error(`[twoStage] fetched origin/${baseBranch} for ${project.id} in ${Date.now() - started}ms`);
+    } catch (e) {
+        // offline / no remote / 等情况非致命：fall back to whatever is in the working tree
+        console.error(`[twoStage] fetch origin/${baseBranch} failed (non-fatal): ${e.message?.slice(0, 200)}`);
+    }
+}
+
 // 给长耗时异步操作加总超时：超时返回 fallback（不阻塞调用方），并通过 onTimeout 通知真正中止底层工作，
 // 避免只丢弃结果而底层 agent 继续跑（僵尸进程/资源泄漏）。
 function withTimeout(promise, ms, fallback, onTimeout) {
@@ -210,17 +232,49 @@ async function clearVerifyState(projectId) {
 // —— 阶段 A 部署计划缓存：二次部署复用上次分析结果，跳过 opencode/LLM 探索 ——
 const PLAN_CACHE_TTL_MS = Number(process.env.DEPLOY_PLAN_CACHE_TTL_MS) || 24 * 60 * 60 * 1000;
 
-// 项目内容指纹：优先 git HEAD（host 上有 .git 时），否则回退关键 manifest 文件的哈希。
-// 用于缓存失效判断——内容变了立即失效而非靠时间猜测，避免「项目已改仍用旧计划」。
+// 项目内容指纹：用户期望的 main HEAD（origin/<baseBranch>）+ 关键 manifest 哈希。
+// 用 origin/<baseBranch> 而非 sandbox projectDir 的 active branch HEAD ——
+// sandbox projectDir 可能卡在 agentharness/xxx 老 session 分支上（8.24 落后 main 13+ commit），
+// 用 active branch 会让 cache 永远命中；用 origin/main 反映用户 IDE pull 后的内容。
+// 改动 1：fingerprint 升级（多语言 manifests + origin/main）
 function computeProjectFingerprint(hostWs, wsPath) {
     const base = (hostWs && fs.existsSync(hostWs)) ? hostWs : (wsPath || '');
     if (!base) return null;
+
+    // 1) 读取 origin/<baseBranch> SHA（用户 IDE 拉到的 main）
+    let mainSha = '';
     try {
-        const sha = execSync('git rev-parse HEAD', { cwd: base, stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000 })
+        const baseBranch = execSync(
+            'git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || git rev-parse --abbrev-ref HEAD',
+            { cwd: base, stdio: ['ignore', 'pipe', 'ignore'], timeout: 4000 },
+        ).toString().trim().replace(/^origin\//, '') || 'main';
+        // 优先用项目配置里的默认分支
+        const repoDefault = (() => {
+            try {
+                const cfg = fs.readFileSync(path.join(base, '.git', 'config'), 'utf8');
+                const m = cfg.match(/\[branch "([^"]+)"\][^\[]*?remote = origin[^\[]*?merge = refs\/heads\/([^"\n]+)/);
+                if (m && m[2]) return m[2].trim();
+            } catch { /* ignore */ }
+            return null;
+        })();
+        const effectiveBranch = repoDefault || baseBranch;
+        mainSha = execSync(`git rev-parse origin/${effectiveBranch}`, { cwd: base, stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000 })
             .toString().trim();
-        if (sha) return `git:${sha}`;
-    } catch { /* 无 git 仓库或失败，回退 manifest 哈希 */ }
-    const manifests = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'requirements.txt', 'go.mod', 'Cargo.toml', 'pyproject.toml', 'package.json'];
+    } catch { /* 无 git / 无 remote / fetch 失败 —— 回退 manifest 哈希 */ }
+
+    // 2) 多语言关键 manifest 哈希（任何一项变了 → fingerprint 变 → cache 失效）
+    const manifests = [
+        // node
+        'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'package.json',
+        // python
+        'requirements.txt', 'Pipfile.lock', 'poetry.lock', 'uv.lock', 'Pipfile',
+        'pyproject.toml', 'setup.py',
+        // go / rust
+        'go.mod', 'go.sum', 'Cargo.toml', 'Cargo.lock',
+        // ruby / php / .net / java
+        'Gemfile', 'Gemfile.lock', 'composer.json', 'composer.lock',
+        'packages.lock.json', 'pom.xml', 'build.gradle', 'build.gradle.kts',
+    ];
     const h = crypto.createHash('sha256');
     let any = false;
     for (const m of manifests) {
@@ -229,7 +283,11 @@ function computeProjectFingerprint(hostWs, wsPath) {
             if (fs.existsSync(p)) { h.update(`${m}:${fs.readFileSync(p, 'utf8')}\n`); any = true; }
         } catch { /* ignore */ }
     }
-    return any ? `files:${h.digest('hex').slice(0, 16)}` : null;
+    const manifestHash = h.digest('hex').slice(0, 16);
+
+    return mainSha
+        ? `main:${mainSha.slice(0, 12)}:files:${manifestHash}`
+        : `files:${manifestHash}`;
 }
 
 async function loadPlanCache(projectId, fingerprint) {
@@ -543,20 +601,32 @@ async function startBlinkForwarder(runtimeRef, workspacePath, blinkApiUrl, blink
     return false;
 }
 
-// 依赖缓存检测：node_modules 存在且比 lockfile 新，说明上次安装的依赖仍匹配当前 lockfile，
-// 可跳过 install 直接 build/serve（否则重装走全新下载，耗时长）。
-// 无 lockfile 或 node_modules 缺失时保守返回 false（不跳过）。
-async function detectDepsCached(runtimeRef, workspacePath) {
+// 依赖缓存检测（改动 2：多语言 + monorepo-aware + per-subpackage 状态）。
+// 返回 { overallCached, perPackage: { '<subdir>': 'CACHED'|'STALE'|'STALE_LOCK'|'STALE_PKG'|'MISSING'|'NO_LOCKFILE' } }
+// 沙箱内按 stack.type 跑对应探测脚本（node / node-monorepo / python / go / rust / none），
+// 整体缓存判断保留性能优化（deps 命中时跳过 install），但精确到子包 —— 避免 xensemble
+// 这种 monorepo 把 server deps 命中当作整体 CACHED、漏装 web/katex。
+async function detectDepsCached(runtimeRef, workspacePath, stack) {
     const runtime = getRuntime();
+    const { buildDetectScript, parseDepsStatus } = require('./detectStack');
+    const script = buildDetectScript(stack);
     try {
         const r = await runtime.exec.exec(
             'sh',
-            ['-c', 'test -d node_modules && (test node_modules -nt package-lock.json 2>/dev/null || test node_modules -nt pnpm-lock.yaml 2>/dev/null || test node_modules -nt yarn.lock 2>/dev/null || test node_modules -nt requirements.txt 2>/dev/null) && echo CACHED || echo STALE'],
+            ['-c', script],
             {},
-            { runtimeRef, cwd: workspacePath, timeoutMs: 15000 },
+            { runtimeRef, cwd: workspacePath, timeoutMs: 30000 },
         );
-        return String(r.stdout || '').includes('CACHED');
-    } catch { return false; }
+        const status = parseDepsStatus(r.stdout);
+        if (Object.keys(status.perPackage).length === 0) {
+            // 探测脚本没产出任何子包行（unknown / parse 失败）→ 保守按 STALE 处理
+            return { overallCached: false, perPackage: {} };
+        }
+        return status;
+    } catch (e) {
+        console.error('[twoStage] detectDepsCached failed (non-fatal):', e.message?.slice(0, 200));
+        return { overallCached: false, perPackage: {} };
+    }
 }
 
 // 从阶段 A 产出的 configFiles（.env 模板）里解析 PostgreSQL 连接信息，供系统侧直接建库建用户，
@@ -1140,6 +1210,10 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         }
     }
 
+    // 让 sandbox projectDir 的 origin/main 跟上 IDE pull 的 main（让 stage A 看到最新代码）。
+    // 不做 reset --hard —— 只 fetch，避免丢工作目录上的未提交改动。
+    await syncProjectToLatestMain(project);
+
     const ready = await ensureProjectRuntime(project, ensureOpts);
     const runtime = getRuntime();
     const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
@@ -1233,6 +1307,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
     // 项目树只扫一次：优先复用阶段 A 已收集的树（fallback 路径已收集；opencode 成功为 null 才在此补一次），
     // 并注入 verify 的 system prompt，避免 verify agent 重新 list_dir/read_file 探索。
     let depsCached = false;
+    let depsStatus = null;
     {
         let tree = plan._tree || null;
         if (!tree) {
@@ -1246,7 +1321,18 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             }
         }
         delete plan._tree;
-        depsCached = await detectDepsCached(ref, wsPath);
+        // 改动 2：把 stack (detected) 传进去，让 detectDepsCached 选对应语言的探测脚本
+        const depsRes = await detectDepsCached(ref, wsPath, detected);
+        depsCached = depsRes.overallCached;
+        depsStatus = depsRes.perPackage;
+        if (Object.keys(depsStatus).length) {
+            const stale = Object.entries(depsStatus).filter(([, v]) => v !== 'CACHED');
+            if (stale.length) {
+                console.error(`[twoStage] deps STALE: ${stale.map(([k, v]) => `${k}=${v}`).join(', ')}`);
+            } else {
+                console.error(`[twoStage] deps CACHED for all ${Object.keys(depsStatus).length} sub-package(s)`);
+            }
+        }
         // 系统侧预启动 PostgreSQL（检测到需要时），避免 verify agent 用 su/runuser/sudo 试错
         const dbProvision = await provisionPostgresIfNeeded(ref, wsPath, plan);
         // 注入 unigateway 二进制：仅对被部署应用是 xensemble 类（server/src/gateway 存在）时执行，
@@ -1254,7 +1340,8 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         if (isXensemble) {
             await injectGatewayBinary(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
         }
-        plan = { ...plan, context: { tree, depsCached, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, successRun: plan._successRun || null } };
+        // 改动 2：plan.context 同时存 depsCached (boolean, 向后兼容) + depsStatus (per-subpackage)
+        plan = { ...plan, context: { tree, depsCached, depsStatus, stack: { type: detected?.type, framework: detected?.framework }, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, successRun: plan._successRun || null } };
         delete plan._successRun;
         // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）。
         // 防护：若阶段 A 把项目误判为“纯静态”（serve 根目录），但 host 检测出真实应用类型

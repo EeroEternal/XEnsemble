@@ -432,6 +432,30 @@ function stackToPreviewContract(stack) {
     };
 }
 
+// 改动 2 配套：每种 stack 的"依赖 stale 探测"规则
+// - node 生态：检查每个子包 directory 里 node_modules 是否比 package.json / lockfile 旧
+// - python：检查 site-packages（或 venv）是否比 lockfile 旧
+// - go：依赖统一放在 $GOPATH/pkg/mod，无法用文件系统 mtime 直接判断；规则简化为
+//   "总是 STALE"，让 verify agent 跑 `go mod download`（这个命令轻量且幂等）
+// - rust：检查 target/ 缺失或旧
+// - monorepo：枚举所有子 package.json（排除 node_modules 内部），每个独立判断
+// 输出格式：每行 `<subdir>: CACHED|STALE|STALE_LOCK|STALE_PKG|MISSING`，最后 `OVERALL: CACHED|STALE`
+const STACK_DEPS_RULES = {
+    'node-vite':      { pkg: 'node', detect: 'node' },
+    'node-next':      { pkg: 'node', detect: 'node' },
+    'node-nuxt':      { pkg: 'node', detect: 'node' },
+    'node-sveltekit': { pkg: 'node', detect: 'node' },
+    'node-react':     { pkg: 'node', detect: 'node' },
+    'node-express':   { pkg: 'node', detect: 'node' },
+    'monorepo':       { pkg: 'node', detect: 'node-monorepo' },
+    'python':         { pkg: 'python', detect: 'python' },
+    'go':             { pkg: 'go', detect: 'go' },
+    'rust':           { pkg: 'rust', detect: 'rust' },
+    'static':         { pkg: 'none', detect: 'none' },
+    'unknown':        { pkg: 'node', detect: 'node-monorepo' },
+    'fallback':       { pkg: 'node', detect: 'node-monorepo' },
+};
+
 module.exports = {
     detectStack,
     stackToPreviewContract,
@@ -446,4 +470,134 @@ module.exports = {
         resolvePort,
         resolveStartScript,
     },
+    STACK_DEPS_RULES,
+    buildDetectScript,
+    parseDepsStatus,
 };
+
+// 改动 2 配套：每种 stack 的"依赖 stale 探测"规则
+// - node 生态：检查每个子包 directory 里 node_modules 是否比 package.json / lockfile 旧
+// - python：检查 site-packages（或 venv）是否比 lockfile 旧
+// - go：依赖统一放在 $GOPATH/pkg/mod，无法用文件系统 mtime 直接判断；规则简化为
+//   "总是 STALE"，让 verify agent 跑 `go mod download`（这个命令轻量且幂等）
+// - rust：检查 target/ 缺失或旧
+// - monorepo：枚举所有子 package.json（排除 node_modules 内部），每个独立判断
+// 输出格式：每行 `<subdir>: CACHED|STALE|STALE_LOCK|STALE_PKG|MISSING`，最后 `OVERALL: CACHED|STALE`
+
+// 改动 2：按 stack type 生成沙箱内跑的"依赖是否 stale"探测脚本。
+// 在沙箱内 sh -c 跑，输出形如：
+//   server: CACHED
+//   web: STALE_PKG
+//   OVERALL: STALE
+function buildDetectScript(stack) {
+    const detect = (stack && stack.type && STACK_DEPS_RULES[stack.type]?.detect) || 'node-monorepo';
+    switch (detect) {
+        case 'node':
+            return `
+status_cached=1
+subdir="."
+if [ ! -d "node_modules" ]; then
+    echo "\${subdir}: MISSING"; status_cached=0
+elif [ -f "package-lock.json" ] && [ "node_modules" -ot "package-lock.json" ]; then
+    echo "\${subdir}: STALE_LOCK"; status_cached=0
+elif [ "node_modules" -ot "package.json" ]; then
+    echo "\${subdir}: STALE_PKG"; status_cached=0
+else
+    echo "\${subdir}: CACHED"
+fi
+[ "\$status_cached" = "1" ] && echo "OVERALL: CACHED" || echo "OVERALL: STALE"
+`.trim();
+        case 'node-monorepo':
+            return `
+status_cached=1
+# 找所有 package.json（排除 node_modules 内部）；maxdepth 4 覆盖 server/ web/ client/ apps/x/
+for pkg in $(find . -maxdepth 4 -name 'package.json' \
+    -not -path '*/node_modules/*' -not -path '*/.git/*' 2>/dev/null); do
+    dir=\$(dirname "\$pkg")
+    subdir=\${dir#./}; subdir=\${subdir:-.}
+    lk=""
+    for f in "\$dir/package-lock.json" "\$dir/pnpm-lock.yaml" "\$dir/yarn.lock" "\$dir/bun.lockb"; do
+        [ -f "\$f" ] && lk="\$f" && break
+    done
+    if [ ! -d "\$dir/node_modules" ]; then
+        echo "\$subdir: MISSING"; status_cached=0
+    elif [ -n "\$lk" ] && [ "\$dir/node_modules" -ot "\$lk" ]; then
+        echo "\$subdir: STALE_LOCK"; status_cached=0
+    elif [ "\$dir/node_modules" -ot "\$pkg" ]; then
+        echo "\$subdir: STALE_PKG"; status_cached=0
+    else
+        echo "\$subdir: CACHED"
+    fi
+done
+[ "\$status_cached" = "1" ] && echo "OVERALL: CACHED" || echo "OVERALL: STALE"
+`.trim();
+        case 'python':
+            return `
+status_cached=1
+subdir="."
+# 找 site-packages（venv / system / poetry virtualenv）
+sp=$(find . -maxdepth 4 -type d -name 'site-packages' 2>/dev/null | head -1)
+[ -z "\$sp" ] && sp=\$(python3 -c 'import sys; print(sys.prefix + "/lib/python" + ".".join(map(str, sys.version_info[:2])) + "/site-packages")' 2>/dev/null)
+# 优先级：uv.lock / poetry.lock / requirements.txt / Pipfile.lock
+lk=""
+for f in uv.lock poetry.lock Pipfile.lock requirements.txt; do
+    [ -f "\$f" ] && lk="\$f" && break
+done
+if [ -z "\$lk" ]; then
+    echo "\$subdir: NO_LOCKFILE"; status_cached=0
+elif [ ! -d "\$sp" ]; then
+    echo "\$subdir: MISSING"; status_cached=0
+elif [ "\$sp" -ot "\$lk" ]; then
+    echo "\$subdir: STALE"; status_cached=0
+else
+    echo "\$subdir: CACHED"
+fi
+[ "\$status_cached" = "1" ] && echo "OVERALL: CACHED" || echo "OVERALL: STALE"
+`.trim();
+        case 'go':
+            // go 没有标准本地 mtime 缓存；永远 STALE 让 agent 跑 go mod download（轻量幂等）
+            return `
+echo ".: STALE"
+echo "OVERALL: STALE"
+`.trim();
+        case 'rust':
+            return `
+status_cached=1
+subdir="."
+if [ ! -d "target" ] || [ ! -f "Cargo.lock" ]; then
+    echo "\$subdir: MISSING"; status_cached=0
+elif [ "target" -ot "Cargo.lock" ]; then
+    echo "\$subdir: STALE"; status_cached=0
+else
+    echo "\$subdir: CACHED"
+fi
+[ "\$status_cached" = "1" ] && echo "OVERALL: CACHED" || echo "OVERALL: STALE"
+`.trim();
+        case 'none':
+        default:
+            return `echo "OVERALL: CACHED"`;
+    }
+}
+
+// 改动 2 配套：沙箱内 shell 输出 → { overallCached, perPackage }
+function parseDepsStatus(stdout) {
+    const lines = String(stdout || '').split('\n').map((l) => l.trim()).filter(Boolean);
+    const perPackage = {};
+    let overallCached = true;
+    for (const line of lines) {
+        if (line.startsWith('OVERALL:')) {
+            overallCached = line.includes('CACHED') && !line.includes('STALE');
+            continue;
+        }
+        const m = line.match(/^([^:]+):\s*(.+)$/);
+        if (m) {
+            const [, subdir, status] = m;
+            perPackage[subdir.trim()] = status.trim();
+            if (status !== 'CACHED') overallCached = false;
+        }
+    }
+    return { overallCached, perPackage };
+}
+
+// ensure STACK_DEPS_RULES / buildDetectScript / parseDepsStatus are all exported above
+// so twoStage.js can use them via require('./detectStack')

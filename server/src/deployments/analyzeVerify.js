@@ -344,7 +344,9 @@ function buildSystemPrompt(plan, toolchain) {
         '- Keep the serve process alive even after your shell exits: start it with nohup / setsid and disown. Pick any free port (export PORT=<port> if the app reads it; prefer the default port when free) — the platform auto-detects the real app port for the preview, so do not waste rounds fighting over one specific port.',
         '- Verify with an actual HTTP request, not just "process started": `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:<port>/`. A 2xx/3xx/expected response means success.',
         '- When a command fails, DO NOT just rerun it. Read the error, inspect files (read_file/list_dir), fix the root cause (edit_file), then retry.',
-        '- NEVER run `npm install` / `pip install` / `go mod download` more than once. If node_modules / site-packages already exist and the lockfile is unchanged, SKIP install entirely.',
+        // 改动 4 配套：CRITICAL 规则改为 per-subpackage —— 之前是整项目 boolean，
+        // 会让 agent 在 monorepo 里把 server/node_modules 命中当作全 CACHED、跳过 web install。
+        '- NEVER run install for the same sub-package twice. The DEPENDENCY CACHE block below is the authoritative per-sub-package install decision (platform-checked by mtime vs package.json / lockfile). If a sub-package is CACHED, skip its install; if STALE/MISSING/STALE_LOCK/STALE_PKG, you MUST install THAT sub-package exactly once. In a monorepo each sub-package is independent — installing the root does NOT cover subdirs unless the root has a "workspaces" / pnpm-workspace.yaml / yarn workspaces config.',
         '- NEVER run `npm run build` / `vite build` / `make` more than once. If the build artifact (web/dist, build/, out/) already exists and the source has not changed, SKIP rebuild and serve the existing artifact.',
         '- Do NOT waste rounds on environment inspection (`free -m`, `nproc`, `which`, `node -v`, `cat package.json`) — those were already provided. Only run a check if it directly unblocks a failing step.',
         'Deploy plan to execute:',
@@ -365,11 +367,31 @@ function buildSystemPrompt(plan, toolchain) {
         'Project structure (from analysis — DO NOT re-explore):',
         (plan?.context?.tree || '(none)'),
         '',
-        'DEPENDENCY CACHE:',
-        (plan?.context?.depsCached
-            ? '- The workspace already has node_modules installed and its package-manager lockfile is unchanged from the previous deploy. SKIP the install step and go straight to build/serve. Only reinstall if a later step actually fails with a missing-dependency error.'
-            : '- Dependencies are NOT cached — run the install step normally.'
-        ),
+        (() => {
+            // 改动 4：per-subpackage deps 状态。优先用 depsStatus（精确到子包），
+            // 退化到旧 depsCached boolean。Stale sub-package 必须 install，否则缺包 → 运行时 fail。
+            const ds = plan?.context?.depsStatus;
+            if (ds && Object.keys(ds).length) {
+                const lines = ['DEPENDENCY CACHE (per sub-package, platform-checked authoritative):'];
+                let anyStale = false;
+                for (const [k, v] of Object.entries(ds)) {
+                    if (v === 'CACHED') {
+                        lines.push(`  - ${k}: CACHED`);
+                    } else {
+                        lines.push(`  - ${k}: ${v}  → MUST install this sub-package (run: cd ${k} && <pm> install)`);
+                        anyStale = true;
+                    }
+                }
+                lines.push('');
+                lines.push(anyStale
+                    ? 'OVERALL: STALE — install the sub-packages marked above BEFORE build/serve. The plan\'s install steps (if any) should target these sub-packages; do not skip them.'
+                    : 'OVERALL: CACHED — skip all install steps, go straight to build/serve.');
+                return lines.join('\n');
+            }
+            return 'DEPENDENCY CACHE:\n' + (plan?.context?.depsCached
+                ? '- The workspace already has node_modules installed and its package-manager lockfile is unchanged from the previous deploy. SKIP the install step and go straight to build/serve. Only reinstall if a later step actually fails with a missing-dependency error.'
+                : '- Dependencies are NOT cached — run the install step normally.');
+        })(),
         '',
         'IMPORTANT: The project has already been analyzed — structure, configs, the plan, and the project tree above are all provided. DO NOT call list_dir / read_file to explore the project or re-read files already covered (package.json, README, configs, server files). Execute the plan steps directly. Read a specific file ONLY if a step fails and you need its exact contents to fix it — never to re-discover what is already described above.',
         '',
