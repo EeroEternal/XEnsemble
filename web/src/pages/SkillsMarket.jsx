@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -301,8 +302,9 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
         </div>
       )}
 
-      {selectedSkill && (
-        <SkillDetailDrawer skill={selectedSkill} onClose={() => setSelectedId(null)} />
+      {selectedSkill && createPortal(
+        <SkillDetailDrawer skill={selectedSkill} onClose={() => setSelectedId(null)} />,
+        document.body,
       )}
     </div>
   );

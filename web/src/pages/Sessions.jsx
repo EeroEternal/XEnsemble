@@ -281,7 +281,11 @@ export default React.forwardRef(function Sessions({
   // Portal target for the session header (rendered into the full-width top bar
   // provided by App.jsx). Null until mounted; the portal renders once available.
   const isSessionsRoute = location.pathname === '/sessions';
-  const topbarVisible = isSessionsRoute || launchPanelOpen;
+  // Only show the session terminal top bar (workspace/branch/language/deploy)
+  // while actually on /sessions. When New Session is opened from /history or
+  // /skills, `launchPanelOpen` is true but the terminal bar must NOT portal
+  // into the app top bar — it would overlay the current page's header.
+  const topbarVisible = isSessionsRoute;
   const [topbarEl, setTopbarEl] = useState(null);
   useEffect(() => {
     if (!topbarVisible) { setTopbarEl(null); return; }

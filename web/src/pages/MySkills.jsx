@@ -191,10 +191,10 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
             </colgroup>
             <thead>
               <tr className={consoleTableHeadRowClass}>
-                <th className={consoleTableHeadCellClass}>{t('skills:field.title', { defaultValue: 'Title' })}</th>
-                <th className={consoleTableHeadCellClass}>{t('skills:field.status', { defaultValue: 'Status' })}</th>
-                <th className={consoleTableHeadCellClass}>{t('skills:field.market', { defaultValue: 'Market' })}</th>
-                <th className={consoleTableHeadCellClass}>{t('skills:field.source', { defaultValue: 'Source' })}</th>
+                <th className={consoleTableHeadCellClass}>{t('skills:field_title', { defaultValue: 'Title' })}</th>
+                <th className={consoleTableHeadCellClass}>{t('skills:field_status', { defaultValue: 'Status' })}</th>
+                <th className={consoleTableHeadCellClass}>{t('skills:field_market', { defaultValue: 'Market' })}</th>
+                <th className={consoleTableHeadCellClass}>{t('skills:field_source', { defaultValue: 'Source' })}</th>
                 <th className={consoleTableHeadCellClass}>{t('common:table.actions')}</th>
               </tr>
             </thead>
@@ -258,11 +258,11 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
           />
           <ConsoleStructuredDialogBody>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field.title', { defaultValue: 'Title' })}</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field_title', { defaultValue: 'Title' })}</label>
               <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field.category', { defaultValue: 'Category' })}</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field_category', { defaultValue: 'Category' })}</label>
               <SelectMenu
                 value={form.category}
                 onChange={(v) => setForm({ ...form, category: v })}
@@ -279,11 +279,11 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field.tags', { defaultValue: 'Tags' })}</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field_tags', { defaultValue: 'Tags' })}</label>
               <Input value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} placeholder={t('skills:tags_placeholder', { defaultValue: 'drizzle, postgres, migration' })} />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field.content', { defaultValue: 'Content (markdown)' })}</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field_content', { defaultValue: 'Content (markdown)' })}</label>
               <textarea
                 value={form.content}
                 onChange={(e) => setForm({ ...form, content: e.target.value })}

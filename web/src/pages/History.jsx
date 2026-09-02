@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Search, RotateCcw, Bot, Folder, Clock, FileText, ChevronLeft, ChevronRight,
@@ -754,8 +755,9 @@ export default function History({ agents, projects, className = '', 'aria-hidden
         </div>
       )}
 
-      {selectedSession && (
-        <ConversationDrawer session={selectedSession} onClose={() => setSelectedId(null)} />
+      {selectedSession && createPortal(
+        <ConversationDrawer session={selectedSession} onClose={() => setSelectedId(null)} />,
+        document.body,
       )}
     </div>
   );
