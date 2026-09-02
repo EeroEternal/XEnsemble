@@ -44,8 +44,8 @@ async function syncProjectToLatestMain(project) {
     try {
         const started = Date.now();
         execSync(
-            `git fetch origin ${baseBranch} --no-tags --depth=1`,
-            { cwd: hostPath, stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 },
+            `git fetch origin ${baseBranch} --no-tags --prune`,
+            { cwd: hostPath, stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000 },
         );
         console.error(`[twoStage] fetched origin/${baseBranch} for ${project.id} in ${Date.now() - started}ms`);
     } catch (e) {
