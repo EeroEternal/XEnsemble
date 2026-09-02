@@ -1,8 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/noto-sans";
-@import "@fontsource-variable/playfair-display";
 @import "katex/dist/katex.min.css";
 
 @tailwind base;
@@ -71,6 +69,7 @@
     --zinc-900: 24 24 27;
     --zinc-950: 9 9 11;
     --surface: 255 255 255;
+    --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
   }
   .dark {
     --background: oklch(0.147 0.004 49.3);
@@ -119,18 +118,18 @@
     --zinc-950: 255 255 255;
     --surface: 39 39 42;
   }
-  .theme {
-    --font-sans: 'Noto Sans Variable', sans-serif;
-    --font-heading: 'Playfair Display Variable', serif;
-  }
   * {
     @apply border-border;
     outline-color: color-mix(in oklch, var(--ring) 50%, transparent);
   }
 
-  button:focus,
-  button:focus-visible {
+  /* 键盘焦点可见环（WCAG 2.4.7）：鼠标点击不显示环，Tab 导航时显示。
+     buttonStyles.js / consoleButtonFocusClass 提供组件级一致的 ring。 */
+  button:focus:not(:focus-visible) {
     @apply outline-none ring-0 ring-offset-0;
+  }
+  button:focus-visible {
+    @apply outline-none ring-2 ring-zinc-500 ring-offset-1 ring-offset-background;
   }
 }
 

@@ -1,7 +1,7 @@
 import { cn } from './utils';
 
 export const buttonBase =
-  'inline-flex items-center justify-center gap-2 font-medium transition-colors focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 disabled:opacity-50 disabled:pointer-events-none';
+  'inline-flex items-center justify-center gap-2 font-medium transition duration-150 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-1 focus-visible:ring-offset-background active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none';
 
 export const buttonSizes = {
   sm: 'h-9 px-3 text-sm rounded-md',

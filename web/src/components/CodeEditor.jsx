@@ -196,7 +196,7 @@ export default function CodeEditor({ content, path, readOnly: readOnlyProp, isBi
         />
         {ctxMenu && (
           <div
-            className="fixed z-[120] min-w-[160px] bg-white border border-zinc-200 rounded-md shadow-lg py-1"
+            className="fixed z-[120] min-w-[160px] bg-surface border border-zinc-200 rounded-md shadow-lg py-1"
             style={{ top: Math.min(ctxMenu.y, window.innerHeight - 180), left: Math.min(ctxMenu.x, window.innerWidth - 180) }}
             role="menu"
             onContextMenu={(e) => e.preventDefault()}

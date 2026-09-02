@@ -44,7 +44,8 @@ describe('MarkdownView', () => {
     render(<MarkdownView>{'```python\nprint(1)\n```'}</MarkdownView>);
     const header = document.querySelector('.markdown-body > div > div');
     expect(header.className).toContain('bg-zinc-100');
-    expect(header.className).toContain('dark:bg-zinc-200');
+    // 暗色下 zinc 色阶由 CSS 变量整体反转，基础类自动适配，无需 dark: 变体
+    expect(header.className).not.toContain('dark:bg-zinc-200');
     expect(screen.getByText('python')).toBeInTheDocument();
   });
 

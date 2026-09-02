@@ -287,7 +287,7 @@ function ConversationDrawer({ session, onClose }) {
       type="button"
       onClick={refresh}
       disabled={refreshing}
-      className={`inline-flex h-7 items-center gap-2 rounded-md border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 dark:hover:text-zinc-100 ${consoleButtonFocusClass}`}
+      className={`inline-flex h-7 items-center gap-2 rounded-md border border-zinc-200 bg-surface px-2.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-50 ${consoleButtonFocusClass}`}
     >
       {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
       {refreshing
@@ -319,7 +319,7 @@ function ConversationDrawer({ session, onClose }) {
       onClick={extractSkill}
       disabled={extracting}
       title={t('skills:extract_from_session', { defaultValue: 'Extract as Skill' })}
-      className={`inline-flex h-7 items-center gap-2 rounded-md border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 dark:hover:text-zinc-100 ${consoleButtonFocusClass}`}
+      className={`inline-flex h-7 items-center gap-2 rounded-md border border-zinc-200 bg-surface px-2.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-50 ${consoleButtonFocusClass}`}
     >
       {extracting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
       {extracting
@@ -479,7 +479,7 @@ function ConversationDrawer({ session, onClose }) {
                     <button
                       type="button"
                       onClick={() => setVisibleGroups((v) => v + GROUPS_PER_BATCH)}
-                      className={`inline-flex items-center justify-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 dark:hover:text-zinc-100 ${consoleButtonFocusClass}`}
+                      className={`inline-flex items-center justify-center gap-1.5 rounded-md border border-zinc-200 bg-surface px-3 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 ${consoleButtonFocusClass}`}
                     >
                       <ChevronsDown className="h-3.5 w-3.5" strokeWidth={1.75} />
                       {t('sessions:conversation.load_more', { count: Math.min(GROUPS_PER_BATCH, remaining), defaultValue: 'Show {{count}} more turns' })}

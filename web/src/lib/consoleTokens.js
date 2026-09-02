@@ -53,7 +53,7 @@ export const consoleToolPageClass =
 export const consoleAdminTableScrollClass = 'min-h-0 flex-1 overflow-auto';
 
 export const consoleTableShellClass =
-  'bg-surface border border-zinc-200 rounded-lg overflow-hidden shadow-sm';
+  'bg-surface border border-zinc-200 rounded-xl overflow-hidden shadow-sm';
 
 export const consoleAdminTableShellClass =
   `${consoleTableShellClass} flex min-h-0 flex-1 flex-col`;
@@ -77,7 +77,7 @@ export const consoleTableBodyCellDenseClass = 'px-3 py-3 text-sm text-zinc-700';
 export const consoleTableSectionHeaderClass =
   'px-4 py-3 border-b border-zinc-200 flex items-center justify-between';
 
-export const consoleCardClass = 'bg-surface border border-zinc-200 rounded-lg shadow-sm';
+export const consoleCardClass = 'bg-surface border border-zinc-200 rounded-xl shadow-sm';
 
 export const consoleFormLabelClass =
   'block text-xs font-semibold uppercase tracking-wider text-zinc-500';
@@ -122,13 +122,13 @@ export const consoleMenuDropdownZClass = 'z-[110]';
 
 /** Icon-only actions — see docs/Designs.md § 图标按钮 */
 export const consoleButtonFocusClass =
-  'focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0';
+  'focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-1 focus-visible:ring-offset-background';
 
 export const consoleIconButtonClass =
-  `inline-flex items-center justify-center rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`;
+  `inline-flex items-center justify-center rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 active:scale-95 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`;
 
 export const consoleIconButtonDangerClass =
-  `inline-flex items-center justify-center rounded-md p-1.5 text-zinc-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`;
+  `inline-flex items-center justify-center rounded-md p-1.5 text-zinc-500 hover:bg-red-50 hover:text-red-700 active:scale-95 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`;
 
 /* ───────────────────────────────────────────────────────────
  * Semantic surface tokens (zinc-mapped, formerly consoleTheme.js)

@@ -406,7 +406,7 @@ function SkillDetailDrawer({ skill, onClose }) {
               <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">{t('skills:field_scripts', { defaultValue: 'Scripts (optional, JSON array)' })}</div>
               <div className="space-y-2">
                 {skill.scripts.map((sc, i) => (
-                  <div key={i} className="border border-zinc-200 rounded-md bg-white overflow-hidden dark:border-zinc-700 dark:bg-zinc-800">
+                  <div key={i} className="border border-zinc-200 rounded-md bg-surface overflow-hidden">
                     <div className="px-2.5 py-1 bg-zinc-100 text-[10px] font-mono text-zinc-500 border-b border-zinc-200 truncate">{sc.path}</div>
                     <pre className="px-2.5 py-2 text-xs text-zinc-700 whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">{sc.content}</pre>
                   </div>

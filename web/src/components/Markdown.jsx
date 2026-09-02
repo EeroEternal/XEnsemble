@@ -72,13 +72,13 @@ function BlockCode({ lang, children }) {
   };
 
   return (
-    <div className="my-2 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-300">
-      <div className="flex items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-100 px-3 py-1 dark:border-zinc-300 dark:bg-zinc-200">
-        <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">{lang || 'code'}</span>
+    <div className="my-2 overflow-hidden rounded-lg border border-zinc-200">
+      <div className="flex items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-100 px-3 py-1">
+        <span className="text-[11px] font-medium text-zinc-500">{lang || 'code'}</span>
         <button
           type="button"
           onClick={handleCopy}
-          className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-700 focus:outline-none dark:text-zinc-400 dark:hover:text-zinc-200"
+          className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-700 focus:outline-none"
           aria-label={t('sessions:conversation.copy_code', { defaultValue: 'Copy code' })}
         >
           {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
@@ -87,7 +87,7 @@ function BlockCode({ lang, children }) {
       </div>
       <pre
         ref={preRef}
-        className="overflow-x-auto bg-zinc-50 p-3 text-[12.5px] leading-relaxed text-zinc-800 dark:bg-black dark:text-zinc-300"
+        className="overflow-x-auto bg-zinc-50 p-3 text-[12.5px] leading-relaxed text-zinc-800"
       >
         {children}
       </pre>
@@ -127,7 +127,7 @@ export default function MarkdownView({ children, className = '' }) {
               return (
                 <code
                   {...rest}
-                  className="block bg-transparent p-0 font-mono text-[12.5px] text-zinc-800 dark:text-zinc-300"
+                  className="block bg-transparent p-0 font-mono text-[12.5px] text-zinc-800"
                 />
               );
             }
