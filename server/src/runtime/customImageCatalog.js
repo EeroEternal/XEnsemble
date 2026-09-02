@@ -12,11 +12,11 @@ const LANGUAGE_INSTALL = {
   python: {
     '3.11': { install: 'apt-get update && apt-get install -y python3.11 python3.11-venv python3.11-dev && rm -rf /var/lib/apt/lists/*', default: true, diskSizeMb: 200 },
     '3.12': {
-      install: 'apt-get update && apt-get install -y build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev && curl -fsSL https://www.python.org/ftp/python/3.12.9/Python-3.12.9.tar.xz | tar -xJ -C /tmp && cd /tmp/Python-3.12.9 && ./configure --enable-optimizations --with-ensurepip=install && make -j$(nproc) && make altinstall && cd / && rm -rf /tmp/Python-3.12.9 /var/lib/apt/lists/*',
+      install: 'apt-get update && apt-get install -y build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev && curl -fsSL https://mirrors.huaweicloud.com/python/3.12.9/Python-3.12.9.tar.xz | tar -xJ -C /tmp && cd /tmp/Python-3.12.9 && ./configure --enable-optimizations --with-ensurepip=install && make -j$(nproc) && make altinstall && cd / && rm -rf /tmp/Python-3.12.9 /var/lib/apt/lists/*',
       default: false, diskSizeMb: 500,
     },
     '3.13': {
-      install: 'apt-get update && apt-get install -y build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev && curl -fsSL https://www.python.org/ftp/python/3.13.3/Python-3.13.3.tar.xz | tar -xJ -C /tmp && cd /tmp/Python-3.13.3 && ./configure --enable-optimizations --with-ensurepip=install && make -j$(nproc) && make altinstall && cd / && rm -rf /tmp/Python-3.13.3 /var/lib/apt/lists/*',
+      install: 'apt-get update && apt-get install -y build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev && curl -fsSL https://mirrors.huaweicloud.com/python/3.13.3/Python-3.13.3.tar.xz | tar -xJ -C /tmp && cd /tmp/Python-3.13.3 && ./configure --enable-optimizations --with-ensurepip=install && make -j$(nproc) && make altinstall && cd / && rm -rf /tmp/Python-3.13.3 /var/lib/apt/lists/*',
       default: false, diskSizeMb: 500,
     },
   },
@@ -30,11 +30,11 @@ const LANGUAGE_INSTALL = {
   java: {
     '17': { install: 'apt-get update && apt-get install -y openjdk-17-jdk-headless && rm -rf /var/lib/apt/lists/*', default: false, diskSizeMb: 300 },
     '21': {
-      install: 'curl -fsSL https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.5%2B11/OpenJDK21U-jdk_x64_linux_hotspot_21.0.5_11.tar.gz -o /tmp/jdk21.tar.gz && mkdir -p /usr/lib/jvm/java-21 && tar -xzf /tmp/jdk21.tar.gz -C /usr/lib/jvm/java-21 --strip-components=1 && update-alternatives --install /usr/bin/java java /usr/lib/jvm/java-21/bin/java 1 && update-alternatives --install /usr/bin/javac javac /usr/lib/jvm/java-21/bin/javac 1 && rm /tmp/jdk21.tar.gz',
+      install: 'curl -fsSL https://mirrors.huaweicloud.com/openjdk/21.0.2/openjdk-21.0.2_linux-x64_bin.tar.gz -o /tmp/jdk21.tar.gz && mkdir -p /usr/lib/jvm/java-21 && tar -xzf /tmp/jdk21.tar.gz -C /usr/lib/jvm/java-21 --strip-components=1 && update-alternatives --install /usr/bin/java java /usr/lib/jvm/java-21/bin/java 1 && update-alternatives --install /usr/bin/javac javac /usr/lib/jvm/java-21/bin/javac 1 && rm /tmp/jdk21.tar.gz',
       default: true, diskSizeMb: 300,
     },
     '24': {
-      install: 'curl -fsSL https://github.com/adoptium/temurin24-binaries/releases/download/jdk-24.0.2%2B12/OpenJDK24U-jdk_x64_linux_hotspot_24.0.2_12.tar.gz -o /tmp/jdk24.tar.gz && mkdir -p /usr/lib/jvm/java-24 && tar -xzf /tmp/jdk24.tar.gz -C /usr/lib/jvm/java-24 --strip-components=1 && update-alternatives --install /usr/bin/java java /usr/lib/jvm/java-24/bin/java 2 && update-alternatives --install /usr/bin/javac javac /usr/lib/jvm/java-24/bin/javac 2 && rm /tmp/jdk24.tar.gz',
+      install: 'curl -fsSL https://mirrors.huaweicloud.com/openjdk/24.0.2/openjdk-24.0.2_linux-x64_bin.tar.gz -o /tmp/jdk24.tar.gz && mkdir -p /usr/lib/jvm/java-24 && tar -xzf /tmp/jdk24.tar.gz -C /usr/lib/jvm/java-24 --strip-components=1 && update-alternatives --install /usr/bin/java java /usr/lib/jvm/java-24/bin/java 2 && update-alternatives --install /usr/bin/javac javac /usr/lib/jvm/java-24/bin/javac 2 && rm /tmp/jdk24.tar.gz',
       default: false, diskSizeMb: 300,
     },
   },
@@ -50,7 +50,7 @@ const LANGUAGE_INSTALL = {
     '25': { install: 'curl -fsSL https://npmmirror.com/mirrors/node/v25.9.0/node-v25.9.0-linux-x64.tar.gz | tar -xz -C /usr/local --strip-components=1', default: false, diskSizeMb: 100 },
   },
   rust: {
-    'stable': { install: 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable', default: true, diskSizeMb: 500 },
+    'stable': { install: 'export RUSTUP_DIST_SERVER=https://rsproxy.cn RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup && curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable', default: true, diskSizeMb: 500 },
   },
   ruby: {
     '3.1': { install: 'apt-get update && apt-get install -y ruby-full && rm -rf /var/lib/apt/lists/*', default: true, diskSizeMb: 100 },
@@ -62,8 +62,8 @@ const LANGUAGE_INSTALL = {
     'latest': { install: 'apt-get update && apt-get install -y build-essential cmake gdb && rm -rf /var/lib/apt/lists/*', default: true, diskSizeMb: 500 },
   },
   dotnet: {
-    '8.0': { install: 'curl -fsSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 8.0 && ln -sf /root/.dotnet/dotnet /usr/local/bin/dotnet', default: true, diskSizeMb: 200 },
-    '9.0': { install: 'curl -fsSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 9.0 && ln -sf /root/.dotnet/dotnet /usr/local/bin/dotnet', default: false, diskSizeMb: 200 },
+    '8.0': { install: 'curl -fsSL https://dotnetcli.azureedge.net/dotnet/Sdk/8.0.424/dotnet-sdk-8.0.424-linux-x64.tar.gz -o /tmp/dotnet-sdk.tar.gz && mkdir -p /usr/local/dotnet && tar -xzf /tmp/dotnet-sdk.tar.gz -C /usr/local/dotnet && ln -sf /usr/local/dotnet/dotnet /usr/local/bin/dotnet && rm /tmp/dotnet-sdk.tar.gz', default: true, diskSizeMb: 200 },
+    '9.0': { install: 'curl -fsSL https://dotnetcli.azureedge.net/dotnet/Sdk/9.0.107/dotnet-sdk-9.0.107-linux-x64.tar.gz -o /tmp/dotnet-sdk.tar.gz && mkdir -p /usr/local/dotnet && tar -xzf /tmp/dotnet-sdk.tar.gz -C /usr/local/dotnet && ln -sf /usr/local/dotnet/dotnet /usr/local/bin/dotnet && rm /tmp/dotnet-sdk.tar.gz', default: false, diskSizeMb: 200 },
   },
 };
 
@@ -78,7 +78,7 @@ const TOOLS_INSTALL = {
     'latest': { install: 'apt-get update && apt-get install -y redis-tools && rm -rf /var/lib/apt/lists/*', default: true, diskSizeMb: 20 },
   },
   kubectl: {
-    'latest': { install: 'curl -fsSL "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" -o /usr/local/bin/kubectl && chmod +x /usr/local/bin/kubectl', default: true, diskSizeMb: 50 },
+    'latest': { install: 'curl -fsSL https://storage.googleapis.com/kubernetes-release/release/v1.31.0/bin/linux/amd64/kubectl -o /usr/local/bin/kubectl && chmod +x /usr/local/bin/kubectl', default: true, diskSizeMb: 50 },
   },
   terraform: {
     '1.10': { install: 'apt-get update && apt-get install -y unzip && curl -fsSL https://releases.hashicorp.com/terraform/1.10.5/terraform_1.10.5_linux_amd64.zip -o /tmp/tf.zip && unzip -q /tmp/tf.zip -d /usr/local/bin && rm -rf /tmp/tf.zip /var/lib/apt/lists/*', default: true, diskSizeMb: 80 },
