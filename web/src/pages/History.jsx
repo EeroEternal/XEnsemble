@@ -479,7 +479,7 @@ function ConversationDrawer({ session, onClose }) {
                     <button
                       type="button"
                       onClick={() => setVisibleGroups((v) => v + GROUPS_PER_BATCH)}
-                      className={`inline-flex items-center justify-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 ${consoleButtonFocusClass}`}
+                      className={`inline-flex items-center justify-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 dark:hover:text-zinc-100 ${consoleButtonFocusClass}`}
                     >
                       <ChevronsDown className="h-3.5 w-3.5" strokeWidth={1.75} />
                       {t('sessions:conversation.load_more', { count: Math.min(GROUPS_PER_BATCH, remaining), defaultValue: 'Show {{count}} more turns' })}
