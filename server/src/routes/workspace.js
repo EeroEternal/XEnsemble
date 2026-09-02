@@ -44,9 +44,13 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
 
         const force = Boolean(request.body?.force);
         const agentId = request.body?.agentId || null;
-        const deploymentId = process.env.XENSEMBLE_DEPLOYMENT_ID || null;
+        // 在 preview 上下文中，生成带随机后缀的 workspace 标识符，避免与 preview 自身 blink session 重名
+        const previewDeploymentId = process.env.XENSEMBLE_DEPLOYMENT_ID || null;
+        const workspaceDeploymentId = previewDeploymentId
+            ? `${previewDeploymentId}_ws_${crypto.randomBytes(4).toString('hex')}`
+            : null;
         try {
-            const { workspacePath } = await ensureProjectRuntime(project, { agentId, deploymentId });
+            const { workspacePath } = await ensureProjectRuntime(project, { agentId, deploymentId: workspaceDeploymentId });
             const status = await ensureAgentBootstrap(project, workspacePath, { force });
             if (status?.status === 'failed') {
                 return reply.code(500).send({
@@ -69,9 +73,12 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
         const force = Boolean(request.body?.force);
         const ensurePreview = request.body?.ensure_preview !== false;
         const agentId = request.body?.agentId || null;
-        const deploymentId = process.env.XENSEMBLE_DEPLOYMENT_ID || null;
+        const previewDeploymentId = process.env.XENSEMBLE_DEPLOYMENT_ID || null;
+        const workspaceDeploymentId = previewDeploymentId
+            ? `${previewDeploymentId}_ws_${crypto.randomBytes(4).toString('hex')}`
+            : null;
         try {
-            const { workspacePath } = await ensureProjectRuntime(project, { agentId, deploymentId });
+            const { workspacePath } = await ensureProjectRuntime(project, { agentId, deploymentId: workspaceDeploymentId });
             const status = await ensureAgentResume(project, workspacePath, { force, ensurePreview });
             if (status?.status === 'failed') {
                 return reply.code(500).send({

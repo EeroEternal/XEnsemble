@@ -791,7 +791,7 @@ async function probeBackendApi(runtimeRef, workspacePath, port) {
 // 返回实际后端端口（作为 tunnel 目标），保证登录/注册/API 全部可用。
 // previewPublicUrl（如 http://IP:8099/preview/dep_x/）：注入后端 CONTROL_PLANE_PUBLIC_URL /
 // ALLOWED_ORIGINS，使嵌套后端生成的预览/网关 URL 落在宿主预览端口，且前端 CORS 放行。
-async function ensureXensembleBackend({ runtimeRef, workspacePath, preferredPort, previewPublicUrl, onLog }) {
+async function ensureXensembleBackend({ runtimeRef, workspacePath, preferredPort, previewPublicUrl, deploymentId, onLog }) {
     const runtime = getRuntime();
     // 1) 复用已就绪后端（verify 可能已起过，探测健康 API）
     const candidates = [...new Set([preferredPort, 3888, 3000, 8000, 8080].filter((x) => Number(x) > 0))];
@@ -837,6 +837,7 @@ async function ensureXensembleBackend({ runtimeRef, workspacePath, preferredPort
             && envExtra.UNIGATEWAY_ADMIN_TOKEN !== 'change-me-to-a-long-random-admin-token'
             ? envExtra.UNIGATEWAY_ADMIN_TOKEN
             : (process.env.UNIGATEWAY_ADMIN_TOKEN || crypto.randomBytes(32).toString('hex')),
+        XENSEMBLE_DEPLOYMENT_ID: deploymentId,
         ...(previewUrl ? {
             CONTROL_PLANE_PUBLIC_URL: previewUrl,
             ALLOWED_ORIGINS: [previewOrigin, previewUrl, 'http://localhost:3888', 'http://127.0.0.1:3888'].filter(Boolean).join(','),
@@ -1449,6 +1450,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
                 runtimeRef: ref, workspacePath: wsPath,
                 preferredPort: verify?.appPort || detected.defaultPort || 0,
                 previewPublicUrl,
+                deploymentId,
                 onLog: previewLog,
             });
             if (be.ok) {
