@@ -6,6 +6,7 @@
 //   Returns { ok, source, tested, finalStderr, warning } for twoStage.js to consume.
 
 const { getRuntime } = require('../runtime/registry');
+const { detectRuntimeToolchain, renderToolchainBlock } = require('./runtimeToolchain');
 
 const API_KEY = process.env.LLM_ANALYZE_API_KEY;
 const API_URL = process.env.LLM_ANALYZE_API_URL || 'https://api.deepseek.com/chat/completions';
@@ -285,11 +286,53 @@ async function assertAppIsServed({ runtimeRef, workspacePath, preferredPort }) {
     return { ok: false, reason: errors.length ? `未发现真实应用端口（${errors.join('；')}）` : '未发现监听的应用端口' };
 }
 
-function buildSystemPrompt(plan) {
+/**
+ * Code-side post-verify constraint: re-probe the sandbox toolchain and
+ * flag any tool the plan's serve step still needs but is missing. This
+ * is the "code is the stable constraint" check the user asked for —
+ * even if the LLM's final answer says `ok: true`, we refuse success
+ * when the binary the serve step needs is still not on PATH.
+ *
+ * Only flags tools that the plan actually invokes AND the plan does
+ * NOT already install via apt-get in some prepare step.
+ *
+ * @param {object} plan
+ * @param {string} runtimeRef
+ * @param {string} workspacePath
+ * @returns {Promise<{tool:string, reason:string}[]>}
+ */
+async function findMissingPlanTools(plan, runtimeRef, workspacePath) {
+    const steps = Array.isArray(plan?.steps) ? plan.steps : [];
+    if (steps.length === 0) return [];
+    // Collect tools used by non-apt-get steps.
+    const toolRe = /(?:^|\s|;|&&|\|\|)(go|cargo|rustc|python3|pip|pip3|java|mvn|gradle|make|gcc|node|pnpm|npm|yarn|corepack)\b/g;
+    const aptRe = /apt-get\s+install/;
+    const used = new Set();
+    for (const step of steps) {
+        if (aptRe.test(step.command || '')) continue; // apt-get install is the install, not a dep
+        for (const m of String(step.command || '').matchAll(toolRe)) {
+            used.add(m[1]);
+        }
+    }
+    if (used.size === 0) return [];
+    const inv = await detectRuntimeToolchain(runtimeRef, workspacePath).catch(() => []);
+    const byCmd = Object.fromEntries(inv.map((i) => [i.command, i]));
+    const missing = [];
+    for (const tool of used) {
+        const info = byCmd[tool];
+        if (!info || !info.available) {
+            missing.push({ tool, reason: `plan step calls "${tool}" but boxlite sandbox does not have it on PATH` });
+        }
+    }
+    return missing;
+}
+
+function buildSystemPrompt(plan, toolchain) {
     const stepsJson = JSON.stringify(plan?.steps || [], null, 2);
+    const toolchainBlock = renderToolchainBlock(toolchain || []);
     return [
         'You are a deployment verification agent running inside a sandbox Linux VM. Your job: execute a deploy plan for a project at /workspace, make the app actually pass a health check, and fix problems yourself until it works.',
-        'Environment: Linux sandbox with node/npm/pnpm/yarn, python3/pip, go, cargo, curl. The project root is /workspace.',
+        toolchainBlock,
         'Tools (respond with EXACTLY ONE tool call or the final answer, as valid JSON, no markdown fences):',
         '1. {"action":"tool","tool":"list_dir","args":{"path":"."}} — list a directory (relative to /workspace; "." for root).',
         '2. {"action":"tool","tool":"read_file","args":{"path":"package.json"}} — read a file.',
@@ -394,6 +437,12 @@ function buildResumeHint(trail) {
 
 async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType, onRound, resume, isAborted }) {
     const defaultPort = projectType?.defaultPort || 3000;
+    // Live-probe the sandbox toolchain so the LLM is told the truth about
+    // what is and isn't installed. The previous prompt claimed
+    // "node/python/go/cargo" were all available — that was a lie on
+    // boxlite (only node ships in the base image) and wasted 14 minutes
+    // per deploy trying to go build with no go binary.
+    const toolchain = await detectRuntimeToolchain(runtimeRef, workspacePath).catch(() => []);
     let messages;
     let roundStart = 0;
     if (resume && Array.isArray(resume.messages) && resume.messages.length > 0) {
@@ -407,7 +456,7 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
             'Start executing the plan now. Report what you run. Work until the health check passes.',
         ].join('\n');
         messages = [
-            { role: 'system', content: buildSystemPrompt(plan) },
+            { role: 'system', content: buildSystemPrompt(plan, toolchain) },
             { role: 'user', content: initialUser },
         ];
     }
@@ -473,8 +522,24 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
                 summary: String(r.summary || '').slice(0, 500),
             };
             trail.push({ round, action: 'final', ok });
+            // Code-side constraint: re-probe the toolchain right before
+            // declaring victory. The LLM may have claimed the install
+            // worked but apt-get can silently fail on lock contention or
+            // network blips. If a tool the plan needed is still missing,
+            // refuse success — the caller will see a real failure reason
+            // instead of "agent says ok but server can't start".
+            const toolsStillMissing = await findMissingPlanTools(plan, runtimeRef, workspacePath);
+            if (toolsStillMissing.length) {
+                trail.push({ round, action: 'toolchain_still_missing', tools: toolsStillMissing });
+                lastResult = {
+                    ...lastResult,
+                    ok: false,
+                    warning: `tools still missing after verify: ${toolsStillMissing.map((t) => `${t.tool} (${t.reason})`).join(', ')}`,
+                    finalStderr: `code-side toolchain check found ${toolsStillMissing.length} missing tool(s):\n${toolsStillMissing.map((t) => `  - ${t.tool}: ${t.reason}`).join('\n')}\n\n${lastResult.finalStderr || ''}`.slice(0, 4000),
+                };
+            }
             let appPort = null;
-            if (ok) {
+            if (ok && lastResult.ok) {
                 const probe = await assertAppIsServed({ runtimeRef, workspacePath, preferredPort: defaultPort });
                 if (!probe.ok) {
                     trail.push({ round, action: 'app_check_failed', reason: probe.reason });

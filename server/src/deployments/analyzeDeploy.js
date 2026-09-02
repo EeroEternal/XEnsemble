@@ -1,6 +1,7 @@
 const { getRuntime } = require('../runtime/registry');
 const { RuntimeError } = require('../runtime/interfaces');
 const { analyzeProjectWithOpencode } = require('./analyzeOpencode');
+const { detectRuntimeToolchain } = require('./runtimeToolchain');
 
 const API_KEY = process.env.LLM_ANALYZE_API_KEY;
 // OpenAI 兼容端点：配置可能给 base URL（如 …/api/v1）或完整 chat/completions URL；
@@ -246,11 +247,40 @@ function shellQuote(s) {
     return `'${String(s).replace(/'/g, "'\\''")}'`;
 }
 
-// 对 AI 生成的步骤做"只读自查"：目录存在性、npm/pnpm/yarn script 存在性、cd 重复。
+// 对 AI 生成的步骤做"只读自查"：目录存在性、npm/pnpm/yarn script 存在性、cd 重复、
+// 工具链可用性（用户明确要求"只有代码约束才是稳定的"）。
 // 不实际安装/启动，只跑轻量只读命令，把问题反馈给 LLM 修正。
 async function runSelfCheck({ steps, configFiles, runtimeRef, workspacePath }) {
     const runtime = getRuntime();
     const issues = [];
+
+    // 0) 工具链探测：步骤里如果直接调用了 go/cargo/python3/mvn/java，
+    //    需要沙箱里装好。LLM 自报"有这些工具"不可信，所以走代码 `command -v` 探测。
+    //    探测并行触发（4s 总预算），不阻塞下面 cd/script 检查。
+    const toolchainPromise = detectRuntimeToolchain(runtimeRef, workspacePath)
+        .catch(() => []);
+    const toolchain = await toolchainPromise;
+    const toolByName = Object.fromEntries(toolchain.map((t) => [t.command, t]));
+
+    // 工具名 → 推测语言（用于反馈给 LLM 怎么装）
+    const toolLang = {
+        go: 'go', cargo: 'rust', rustc: 'rust', python3: 'python', pip: 'python',
+        pip3: 'python', java: 'jvm', mvn: 'jvm', gradle: 'jvm',
+        gcc: 'native', make: 'native', python: 'native',
+    };
+    const aptPkgForTool = {
+        go: 'golang-go',
+        cargo: 'cargo',
+        rustc: 'rustc',
+        python3: 'python3 python3-pip',
+        pip: 'python3-pip',
+        pip3: 'python3-pip',
+        java: 'default-jdk',
+        mvn: 'maven',
+        gradle: 'gradle',
+        gcc: 'build-essential',
+        make: 'build-essential',
+    };
 
     // 1) cd 目录提取 + 重复检测
     const cdDirs = [];
@@ -294,6 +324,79 @@ async function runSelfCheck({ steps, configFiles, runtimeRef, workspacePath }) {
                 }
             } catch (e) {
                 issues.push(`Step "${step.name}": could not verify script "${script}" in "${dir}" (${e.message}).`);
+            }
+        }
+    }
+
+    // 4) 工具链探测：步骤里如果调用了 go/cargo/python3/mvn/java 等，
+    //    沙箱里必须装好。`command -v` 跑完再决定是报错还是自动补 prepare 步骤。
+    //    用户明确要求"只有代码约束才是稳定的"，所以这是真实探测，不是 LLM 报。
+    //
+    //    行为:
+    //    - 工具缺失 + 步骤已经是 apt-get install 自己 → OK
+    //    - 工具缺失 + 某 prepare 步已经装了这个包 → OK
+    //    - 工具缺失 + 整个 plan 都没装 → 自动在第一个 prepare 步前面插入
+    //      `apt-get update && apt-get install -y <pkg>` 步骤（不靠 LLM 记得装）
+    //
+    //    工具名 token 匹配：避免 `golang-go` 误匹配 `go`，
+    //    用 (?![A-Za-z0-9+\-]) 排除后接字母/数字/连字符的情况。
+    const TOOLS_TO_CHECK = ['go', 'cargo', 'rustc', 'python3', 'pip', 'pip3', 'java', 'mvn', 'gradle', 'make', 'gcc'];
+    const toolMatchRe = (tool) => new RegExp(`(^|[^A-Za-z0-9_+\\-])${tool}(?![A-Za-z0-9_+\\-])`);
+    // Phase A: scan every apt-get install step and mark the installed
+    // tool as "covered by the plan". A `golang-go` install step covers
+    // the `go` tool because that's the package the boxlite base needs.
+    const installedViaApt = new Set();
+    for (const step of steps) {
+        if (!/apt-get\s+install/.test(step.command || '')) continue;
+        const m = (step.command || '').match(/apt-get\s+install[^\n]*?\s+([a-z0-9][a-z0-9+\-]*(?:\s+[a-z0-9][a-z0-9+\-]*)*)\s*$/i);
+        if (m) {
+            for (const pkg of m[1].split(/\s+/)) {
+                if (!pkg) continue;
+                if (/^golang-?/.test(pkg)) installedViaApt.add('go');
+                if (/^cargo$/.test(pkg)) installedViaApt.add('cargo');
+                if (/^rustc$/.test(pkg)) installedViaApt.add('rustc');
+                if (/^python3?$/.test(pkg)) installedViaApt.add('python3');
+                if (/^python3-pip$/.test(pkg)) { installedViaApt.add('pip'); installedViaApt.add('pip3'); }
+                if (/^default-jdk$/.test(pkg)) installedViaApt.add('java');
+                if (/^maven$/.test(pkg)) installedViaApt.add('mvn');
+                if (/^gradle$/.test(pkg)) installedViaApt.add('gradle');
+                if (/^build-essential$/.test(pkg)) { installedViaApt.add('make'); installedViaApt.add('gcc'); }
+            }
+        }
+    }
+    // Phase B: report missing tools (skip those already covered by apt-get).
+    const insertBefore = new Map(); // stepIndex -> [{name, command, description, kind}]
+    for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        const cmd = step.command || '';
+        for (const tool of TOOLS_TO_CHECK) {
+            if (installedViaApt.has(tool)) continue;
+            if (!toolMatchRe(tool).test(cmd)) continue;
+            const info = toolByName[tool];
+            if (info && !info.available) {
+                const pkg = aptPkgForTool[tool] || tool;
+                const lang = toolLang[tool] || 'unknown';
+                issues.push(`Step "${step.name}": tool "${tool}" is not installed in the sandbox (${lang} toolchain). Auto-injected a prepare step to install it.`);
+                const list = insertBefore.get(i) || [];
+                list.push({
+                    name: `Install ${lang} toolchain (${tool})`,
+                    command: `apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${pkg}`,
+                    description: `Install ${pkg} (auto-injected by self-check because "${tool}" was used in "${step.name}" but is not in the boxlite base image).`,
+                    kind: 'prepare',
+                });
+                insertBefore.set(i, list);
+                installedViaApt.add(tool); // mark this as covered now
+            }
+        }
+    }
+
+    // 把插入的 prepare 步骤反向 merge（同一 index 只插一次，包含多个 tool）
+    if (insertBefore.size) {
+        const sortedIndexes = [...insertBefore.keys()].sort((a, b) => b - a);
+        for (const idx of sortedIndexes) {
+            const inserts = insertBefore.get(idx).reverse();
+            for (const inj of inserts) {
+                steps.splice(idx, 0, { id: `step_inject_${idx}_${steps.length}`, ...inj });
             }
         }
     }
@@ -525,4 +628,4 @@ async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeR
     };
 }
 
-module.exports = { analyzeProjectDeploy, collectProjectContext };
+module.exports = { analyzeProjectDeploy, collectProjectContext, runSelfCheck };
