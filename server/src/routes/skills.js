@@ -45,6 +45,17 @@ function registerSkillRoutes(fastify) {
         }
     });
 
+    // 0022：本地目录导入（外部开源技能安装——扫描 <name>/SKILL.md 结构）
+    fastify.post('/api/v1/skills/import-local', { preValidation: authPre }, async (request, reply) => {
+        try {
+            const dirPath = String(request.body?.path ?? '').trim();
+            const skills = await skillService.importSkillFromPath(request.user.id, dirPath);
+            return reply.code(201).send({ imported: skills.length, skills });
+        } catch (err) {
+            return sendPublicError(reply, err, 'Failed to import skills', 500, request.locale || 'en');
+        }
+    });
+
     // 我的 skill 列表
     fastify.get('/api/v1/skills', { preValidation: authPre }, async (request, reply) => {
         try {
@@ -67,6 +78,7 @@ function registerSkillRoutes(fastify) {
                 tags: body.tags,
                 category: body.category,
                 projectId: body.projectId || null,
+                scripts: body.scripts,
                 source: 'manual',
             });
             return reply.code(201).send(skill);

@@ -262,6 +262,8 @@ const skills = pgTable('skills', {
   sessionId: text('session_id').references(() => sessions.id, { onDelete: 'set null' }),
   title: text('title').notNull(),
   content: text('content').notNull(),
+  // 0020: 脚本级 Skill——[{ path: 'scripts/xxx.sh', content: '<script>' }]，注入时落盘到 workspace
+  scripts: jsonb('scripts').notNull().default([]),
   tags: jsonb('tags').notNull().default([]),
   status: text('status').notNull().default('draft'),
   source: text('source').notNull().default('auto'),

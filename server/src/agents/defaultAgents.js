@@ -8,6 +8,8 @@ const DEFAULT_AGENTS = [
         args: [],
         // Kimi Code authenticates via `kimi login` / config.toml - no BYOK env injection.
         env_required: [],
+        // 0021：原生技能目录（项目级 .kimi-code/skills，官方确认）
+        nativeSkillDirs: ['.kimi-code/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'KIMI_CODE_HOME',
@@ -44,6 +46,8 @@ const DEFAULT_AGENTS = [
         env_required: ['ANTHROPIC_API_KEY'],
         // P4：技能注入目标文件（仅 claude-code 用 CLAUDE.md，其余默认 AGENTS.md）
         instructionFile: 'CLAUDE.md',
+        // 0021：原生技能目录（项目级 .claude/skills，官方确认）
+        nativeSkillDirs: ['.claude/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'CLAUDE_CONFIG_DIR',
@@ -158,6 +162,8 @@ const DEFAULT_AGENTS = [
         cmd: 'codebuddy',
         args: [],
         env_required: [],
+        // 0021：原生技能目录（.codebuddy/skills，腾讯官方文档确认）
+        nativeSkillDirs: ['.codebuddy/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'CODEBUDDY_CONFIG_DIR',
@@ -243,6 +249,8 @@ const DEFAULT_AGENTS = [
         cmd: 'qodercli',
         args: [],
         env_required: ['QODER_PERSONAL_ACCESS_TOKEN'],
+        // 0021：原生技能目录（.qoder/r/s/skills，官方确认）
+        nativeSkillDirs: ['.qoder/r/s/skills'],
         resume: {
             level: 'L2',
             stateArgs: ['--config-dir'],
@@ -290,6 +298,8 @@ const DEFAULT_AGENTS = [
         cmd: 'qwen',
         args: [],
         env_required: ['DASHSCOPE_API_KEY'],
+        // 0021：原生技能目录（项目级 .qwen/skills，官方文档确认）
+        nativeSkillDirs: ['.qwen/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'QWEN_HOME',
@@ -432,6 +442,8 @@ const DEFAULT_AGENTS = [
         cmd: 'openclaw',
         args: [],
         env_required: [],
+        // 0021：原生技能目录（workspace 级 skills/，官方 ClawHub 文档确认）
+        nativeSkillDirs: ['skills'],
         resume: {
             level: 'L2',
             stateEnv: 'OPENCLAW_STATE_DIR',
@@ -489,4 +501,28 @@ function getInstructionFile(agentId) {
     return agent?.instructionFile || 'AGENTS.md';
 }
 
-module.exports = { DEFAULT_AGENTS, getInstructionFile };
+/**
+ * 0021：解析某 agent 的原生技能目录（相对 workspace）。
+ * - 已确认官方原生支持 Agent Skills 目录的 → 写入其原生目录（Agent 自动发现，零配置）
+ * - 未确认 / 原生目录在用户主目录（跨项目共享，避免污染）→ null，走 AGENTS.md 索引兜底
+ * @param {string} agentId
+ * @returns {string[]} 原生技能目录列表（可为空数组 = 仅 AGENTS.md 兜底）
+ */
+function getNativeSkillDirs(agentId) {
+    const agent = DEFAULT_AGENTS.find((a) => a.id === agentId);
+    return agent?.nativeSkillDirs || [];
+}
+
+/**
+ * 0021：完整技能注入目标（指令文件 + 原生技能目录）。
+ * @param {string} agentId
+ * @returns {{ instructionFile: string, nativeSkillDirs: string[] }}
+ */
+function getSkillTargets(agentId) {
+    return {
+        instructionFile: getInstructionFile(agentId),
+        nativeSkillDirs: getNativeSkillDirs(agentId),
+    };
+}
+
+module.exports = { DEFAULT_AGENTS, getInstructionFile, getNativeSkillDirs, getSkillTargets };

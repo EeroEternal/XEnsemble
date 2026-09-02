@@ -80,7 +80,10 @@ test('updateSkill edits fields but keeps status', async () => {
 
 test('changeStatus follows state machine and rejects illegal transitions', async () => {
     const userId = await makeUser();
-    const skill = await svc.createSkill({ userId, title: 't', content: 'c' });
+    // 0021：激活需合法 SKILL.md frontmatter（name/description）
+    const skill = await svc.createSkill({
+        userId, title: 't', content: '---\nname: t\ndescription: d\n---\n## Steps\n1. x',
+    });
 
     const active = await svc.changeStatus(userId, skill.id, 'activate');
     assert.equal(active.status, 'active');
@@ -97,6 +100,54 @@ test('changeStatus follows state machine and rejects illegal transitions', async
         () => svc.changeStatus(userId, skill2.id, 'archive'),
         (e) => e.code === 'skill_invalid_transition',
     );
+});
+
+// ---------------------------------------------------------------------------
+// 0021：落盘门槛——激活校验
+// ---------------------------------------------------------------------------
+
+test('changeStatus rejects activate when content has no valid frontmatter', async () => {
+    const userId = await makeUser();
+    const bad = await svc.createSkill({ userId, title: 'bad', content: '## Steps\n1. x' }); // 无 frontmatter
+    await assert.rejects(
+        () => svc.changeStatus(userId, bad.id, 'activate'),
+        (e) => e.code === 'skill_not_landable',
+    );
+
+    const noDesc = await svc.createSkill({ userId, title: 'nd', content: '---\nname: nd\n---\nbody' }); // 缺 description
+    await assert.rejects(
+        () => svc.changeStatus(userId, noDesc.id, 'activate'),
+        (e) => e.code === 'skill_not_landable',
+    );
+});
+
+test('changeStatus rejects activate for low-confidence auto skill (SKILL_LAND_MIN_CONFIDENCE)', async () => {
+    const userId = await makeUser();
+    const auto = await svc.createSkill({
+        userId, title: 'auto-low', source: 'auto', confidence: 0.2,
+        content: '---\nname: auto-low\ndescription: d\n---\nbody',
+    });
+    const prev = process.env.SKILL_LAND_MIN_CONFIDENCE;
+    process.env.SKILL_LAND_MIN_CONFIDENCE = '0.5';
+    try {
+        await assert.rejects(
+            () => svc.changeStatus(userId, auto.id, 'activate'),
+            (e) => e.code === 'skill_not_landable',
+        );
+    } finally {
+        if (prev === undefined) delete process.env.SKILL_LAND_MIN_CONFIDENCE;
+        else process.env.SKILL_LAND_MIN_CONFIDENCE = prev;
+    }
+});
+
+test('changeStatus allows activate for manual skill regardless of confidence', async () => {
+    const userId = await makeUser();
+    const manual = await svc.createSkill({
+        userId, title: 'manual', source: 'manual', confidence: 0.1,
+        content: '---\nname: manual\ndescription: d\n---\nbody',
+    });
+    const active = await svc.changeStatus(userId, manual.id, 'activate');
+    assert.equal(active.status, 'active');
 });
 
 test('getSkill forbids cross-user access to private skill', async () => {
@@ -191,4 +242,123 @@ test('deleteSkill removes a skill (owner only)', async () => {
     await assert.rejects(() => svc.deleteSkill(other, skill.id), (e) => e.code === 'skill_not_found');
     await svc.deleteSkill(userId, skill.id);
     await assert.rejects(() => svc.getSkill(userId, skill.id), (e) => e.code === 'skill_not_found');
+});
+
+// ---------------------------------------------------------------------------
+// 0020 脚本级 Skill：scripts 字段存取
+// ---------------------------------------------------------------------------
+
+test('createSkill stores and returns validated scripts (0020)', async () => {
+    const userId = await makeUser();
+    const skill = await svc.createSkill({
+        userId,
+        title: 'Auto fix',
+        content: 'c',
+        scripts: [
+            { path: 'scripts/main.sh', content: '#!/bin/bash' },
+            { path: '../evil.sh', content: 'x' },          // 过滤：穿越
+            { path: 'scripts/noext', content: 'x' },       // 过滤：扩展名
+        ],
+    });
+    assert.deepEqual(skill.scripts, [{ path: 'scripts/main.sh', content: '#!/bin/bash' }]);
+});
+
+test('updateSkill patches scripts', async () => {
+    const userId = await makeUser();
+    const skill = await svc.createSkill({ userId, title: 't', content: 'c' });
+    const updated = await svc.updateSkill(userId, skill.id, {
+        scripts: [{ path: 'scripts/fix.py', content: 'print(1)' }],
+    });
+    assert.deepEqual(updated.scripts, [{ path: 'scripts/fix.py', content: 'print(1)' }]);
+});
+
+test('installSkill copies scripts to the new copy', async () => {
+    const owner = await makeUser();
+    const installer = await makeUser();
+    const source = await svc.createSkill({
+        userId: owner,
+        title: '共享脚本技能',
+        content: 'c',
+        scripts: [{ path: 'scripts/run.sh', content: '#!/bin/bash\nrun' }],
+    });
+    await svc.publishSkill(owner, source.id);
+
+    const copy = await svc.installSkill(installer, source.id);
+    assert.deepEqual(copy.scripts, [{ path: 'scripts/run.sh', content: '#!/bin/bash\nrun' }]);
+    assert.equal(copy.source, 'installed');
+    assert.equal(copy.forkedFrom, source.id);
+});
+
+// ---------------------------------------------------------------------------
+// 0022：本地目录导入（外部开源技能安装）
+// ---------------------------------------------------------------------------
+
+const { mkdtemp, mkdir, writeFile, rm } = require('fs/promises');
+const os = require('os');
+const path = require('path');
+
+async function makeTempSkillRoot({ withScripts = true } = {}) {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'xe-skill-import-'));
+    const skillDir = path.join(root, 'fix-pool');
+    await mkdir(skillDir);
+    await mkdir(path.join(skillDir, 'scripts')).catch(() => {});
+    await writeFile(path.join(skillDir, 'SKILL.md'), [
+        '---',
+        'name: fix-pool',
+        'description: fix db pool leak',
+        '---',
+        '## Steps\n1. inspect',
+    ].join('\n'));
+    if (withScripts) {
+        await writeFile(path.join(skillDir, 'scripts', 'run.sh'), '#!/bin/bash\necho fix');
+        await writeFile(path.join(skillDir, 'scripts', 'ignore.txt'), 'not a script');
+    }
+    return root;
+}
+
+test('importSkillFromPath imports valid skill dirs with scripts (0022)', async () => {
+    const userId = await makeUser();
+    const root = await makeTempSkillRoot();
+    try {
+        const imported = await svc.importSkillFromPath(userId, root);
+        assert.equal(imported.length, 1);
+        const skill = imported[0];
+        assert.equal(skill.title, 'fix-pool');
+        assert.equal(skill.source, 'external');
+        assert.equal(skill.status, 'draft');
+        assert.deepEqual(skill.scripts, [{ path: 'scripts/run.sh', content: '#!/bin/bash\necho fix' }]);
+        assert.ok(skill.content.includes('fix db pool leak'));
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('importSkillFromPath skips invalid dirs and rejects when nothing valid (0022)', async () => {
+    const userId = await makeUser();
+    const root = await mkdtemp(path.join(os.tmpdir(), 'xe-skill-import-bad-'));
+    try {
+        // 缺 frontmatter description / 目录名不匹配
+        await mkdir(path.join(root, 'bad'));
+        await writeFile(path.join(root, 'bad', 'SKILL.md'), '---\nname: bad\n---\nno desc');
+        await mkdir(path.join(root, 'mismatch'));
+        await writeFile(path.join(root, 'mismatch', 'SKILL.md'), '---\nname: other-name\ndescription: d\n---\nbody');
+        await assert.rejects(
+            () => svc.importSkillFromPath(userId, root),
+            (e) => e.code === 'skill_import_invalid',
+        );
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('importSkillFromPath requires dirPath and rejects empty (0022)', async () => {
+    const userId = await makeUser();
+    await assert.rejects(
+        () => svc.importSkillFromPath(userId, ''),
+        (e) => e.code === 'skill_import_invalid',
+    );
+    await assert.rejects(
+        () => svc.importSkillFromPath(userId, path.join(os.tmpdir(), 'does-not-exist-xyz')),
+        (e) => e.code === 'skill_import_not_found',
+    );
 });

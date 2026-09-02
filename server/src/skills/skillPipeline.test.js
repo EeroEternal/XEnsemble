@@ -183,6 +183,7 @@ test('runExtract produces auto draft skill + SSE and advances candidate to extra
             content: '## When to use\n数据库连接池报错时。\n## Steps\n1. 检查 pool 配置\n2. 启用复用',
             tags: ['postgres', 'pool'],
             confidence: 0.9,
+            scripts: [{ path: 'scripts/check.sh', content: '#!/bin/bash\npgrep postgres' }],
         };
     };
 
@@ -199,6 +200,8 @@ test('runExtract produces auto draft skill + SSE and advances candidate to extra
     assert.equal(skill[0].source, 'auto');
     assert.equal(skill[0].category, 'database');
     assert.equal(skill[0].sessionId, sessionId);
+    // 0020：提炼脚本贯通到 skills.scripts
+    assert.deepEqual(skill[0].scripts, [{ path: 'scripts/check.sh', content: '#!/bin/bash\npgrep postgres' }]);
 });
 
 test('runExtract rejects low-value via L3 (reusable=false)', async () => {

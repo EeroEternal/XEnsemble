@@ -35,7 +35,24 @@ const STATUS_META = {
   archived: { tone: 'warning', icon: Archive, key: 'status_archived' },
 };
 
-const emptyForm = { title: '', content: '', tags: '', category: '' };
+const emptyForm = { title: '', content: '', tags: '', category: '', scripts: '[]' };
+
+/** scripts 数组 ↔ 表单 JSON 文本 */
+function scriptsToText(scripts) {
+  try {
+    return JSON.stringify(Array.isArray(scripts) ? scripts : [], null, 2);
+  } catch {
+    return '[]';
+  }
+}
+
+function textToScripts(text) {
+  const t = String(text || '').trim();
+  if (!t) return [];
+  const parsed = JSON.parse(t);
+  if (!Array.isArray(parsed)) throw new Error('not array');
+  return parsed;
+}
 
 export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) {
   const { t } = useTranslation();
@@ -81,6 +98,7 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
       content: skill.content,
       tags: (skill.tags || []).join(', '),
       category: skill.category || '',
+      scripts: scriptsToText(skill.scripts),
     });
     setDialogMode('edit');
   };
@@ -94,14 +112,21 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
       showToast('error', t('skills:toast_required', { defaultValue: 'Title and content are required' }));
       return;
     }
+    let scripts = [];
+    try {
+      scripts = textToScripts(form.scripts);
+    } catch {
+      showToast('error', t('skills:scripts_invalid_json', { defaultValue: 'Scripts must be a valid JSON array' }));
+      return;
+    }
     setSaving(true);
     try {
       const tags = form.tags.split(',').map((s) => s.trim()).filter(Boolean);
       if (dialogMode === 'create') {
-        await createSkill({ title, content, tags, category: form.category || null });
+        await createSkill({ title, content, tags, category: form.category || null, scripts });
         showToast('success', t('skills:toast_created', { defaultValue: 'Skill created.' }));
       } else {
-        await updateSkill(editing.id, { title, content, tags, category: form.category || null });
+        await updateSkill(editing.id, { title, content, tags, category: form.category || null, scripts });
         showToast('success', t('skills:toast_updated', { defaultValue: 'Skill updated.' }));
       }
       closeDialog();
@@ -119,9 +144,17 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
       showToast('success', okMsg);
       fetchSkills({ silent: true });
     } catch (err) {
+      // 0021：激活未过落盘门槛 → 明确提示原因
+      if (err?.code === 'skill_not_landable') {
+        showToast('error', t('skills:error_not_landable', { defaultValue: 'Skill cannot be activated (frontmatter/confidence not satisfied).' }));
+        return;
+      }
       showToast('error', err.message || errMsg);
     }
   };
+
+  // 0022：本地目录导入外部开源技能（前端入口已隐藏，保留后端能力）
+  // 如后续恢复入口：Button + Dialog + importSkillFromPath + importPath/importing 状态即可。
 
   const togglePublish = (skill) => act(
     () => (skill.visibility === 'public' ? unpublishSkill(skill.id) : publishSkill(skill.id)),
@@ -291,6 +324,17 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
                 placeholder={t('skills:content_placeholder')}
                 className="w-full bg-surface border border-zinc-300 rounded-md px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-colors font-mono"
               />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field_scripts', { defaultValue: 'Scripts (optional, JSON array)' })}</label>
+              <textarea
+                value={form.scripts}
+                onChange={(e) => setForm({ ...form, scripts: e.target.value })}
+                rows={5}
+                placeholder={t('skills:scripts_placeholder')}
+                className="w-full bg-surface border border-zinc-300 rounded-md px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-colors font-mono"
+              />
+              <p className="mt-1 text-[11px] text-zinc-400">{t('skills:scripts_hint')}</p>
             </div>
           </ConsoleStructuredDialogBody>
           <ConsoleStructuredDialogFooter>

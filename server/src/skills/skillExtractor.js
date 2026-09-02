@@ -22,6 +22,15 @@ const MAX_TITLE = 100;
 // 正文上限留 frontmatter 余量（skillService.content ≤ 16384）
 const MAX_BODY = 16000;
 
+// 脚本级 Skill（0020）：从会话工具调用提取可执行命令 → LLM 整理为脚本
+const MAX_COMMANDS = 50;            // 喂给 LLM 的命令序列上限
+const MAX_SCRIPTS = 3;              // 单技能脚本文件数上限
+const MAX_SCRIPT_BYTES = 32768;     // 单脚本大小上限
+const SCRIPT_PATH_RE = /^scripts\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const SCRIPT_EXT_RE = /\.(sh|bash|py|js|mjs|ts|ps1|sql)$/;
+// 判定为"命令型工具"的 tool 名（转小写比对）
+const COMMAND_TOOLS = new Set(['bash', 'shell', 'terminal', 'run_shell', 'command']);
+
 // ---------------------------------------------------------------------------
 // Prompt construction
 // ---------------------------------------------------------------------------
@@ -37,7 +46,48 @@ function renderTurns(turns) {
         .join('\n');
 }
 
-function buildExtractPrompt({ overview, keyDecisions = [], filesTouched = [], turns = [] }) {
+/**
+ * 从 turns 提取工具执行的命令序列（0020）。
+ * 只收集命令型工具（Bash/Shell 等），args 为 JSON 时取 command/cmd 字段，
+ * 附上截断的 result 供 LLM 判断成功与否。
+ * @param {Array} turns ConversationTurn[]（turn.tools[]: { tool, args, callId?, result? }）
+ * @returns {Array<{ command: string, result: string }>}
+ */
+function collectCommands(turns) {
+    const commands = [];
+    for (const turn of turns || []) {
+        for (const t of turn.tools || []) {
+            const name = String(t?.tool || '').toLowerCase();
+            if (!COMMAND_TOOLS.has(name)) continue;
+            let command = '';
+            const args = t?.args;
+            if (typeof args === 'string') {
+                try {
+                    const parsed = JSON.parse(args);
+                    command = String(parsed.command || parsed.cmd || '').trim();
+                } catch {
+                    command = args.trim();
+                }
+            } else if (args && typeof args === 'object') {
+                command = String(args.command || args.cmd || '').trim();
+            }
+            if (!command) continue;
+            const result = String(t?.result || '').slice(0, 300);
+            commands.push({ command, result });
+            if (commands.length >= MAX_COMMANDS) return commands;
+        }
+    }
+    return commands;
+}
+
+function buildExtractPrompt({ overview, keyDecisions = [], filesTouched = [], turns = [], commands = [] }) {
+    const commandLines = commands.length > 0
+        ? [
+            '',
+            'Executed commands (in order, with output snippets; decide which are reproducible and package them into scripts):',
+            ...commands.map((c, i) => `  #${i + 1} $ ${c.command}${c.result ? `\n  → ${c.result}` : ''}`),
+        ]
+        : [];
     return [
         'You are extracting a reusable skill from a coding session.',
         'Produce a concise, actionable skill that another user could follow to reproduce this procedure.',
@@ -48,6 +98,7 @@ function buildExtractPrompt({ overview, keyDecisions = [], filesTouched = [], tu
         '',
         'Conversation turns:',
         renderTurns(turns),
+        ...commandLines,
         '',
         'Respond with ONLY a JSON object:',
         '{',
@@ -162,6 +213,22 @@ async function confirmDuplicate({ existingTitle, existingContent, newTitle, newC
 // Extract
 // ---------------------------------------------------------------------------
 
+function validateScripts(scripts) {
+    if (!Array.isArray(scripts)) return [];
+    const out = [];
+    for (const s of scripts) {
+        if (!s || typeof s !== 'object') continue;
+        const pathVal = String(s.path || '').trim();
+        const contentVal = String(s.content || '');
+        if (!SCRIPT_PATH_RE.test(pathVal)) continue;
+        if (!SCRIPT_EXT_RE.test(pathVal)) continue;
+        if (!contentVal || Buffer.byteLength(contentVal, 'utf8') > MAX_SCRIPT_BYTES) continue;
+        out.push({ path: pathVal, content: contentVal });
+        if (out.length >= MAX_SCRIPTS) break;
+    }
+    return out;
+}
+
 function validateExtracted(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
     const name = String(raw.name || '').trim();
@@ -175,7 +242,8 @@ function validateExtracted(raw) {
     const confidence = Number.isFinite(raw.confidence)
         ? Math.min(1, Math.max(0, raw.confidence))
         : null;
-    return { name, description, body, tags, confidence };
+    const scripts = validateScripts(raw.scripts);
+    return { name, description, body, tags, confidence, scripts };
 }
 
 /**
@@ -188,11 +256,14 @@ function validateExtracted(raw) {
  *   LLM 未配置/失败/非法 JSON 时抛出（由调用方处理）。
  */
 async function extract({ summary, turns = [] }) {
+    // 0020：先收集会话中的命令序列，作为脚本提炼的上下文
+    const commands = collectCommands(turns);
     const user = buildExtractPrompt({
         overview: summary?.overview || '',
         keyDecisions: summary?.keyDecisions || [],
         filesTouched: summary?.filesTouched || [],
         turns,
+        commands,
     });
     const raw = await analyzeClient.chatJson({
         system: 'You are a precise skill extractor. Always respond with valid JSON only.',
@@ -215,6 +286,7 @@ async function extract({ summary, turns = [] }) {
         }),
         tags: validated.tags,
         confidence: validated.confidence,
+        scripts: validated.scripts,
     };
 }
 
@@ -222,8 +294,15 @@ module.exports = {
     EXTRACT_MAX_TOKENS,
     DEDUP_MAX_TOKENS,
     TITLE_SIMILARITY_THRESHOLD,
+    MAX_COMMANDS,
+    MAX_SCRIPTS,
+    MAX_SCRIPT_BYTES,
+    SCRIPT_PATH_RE,
+    SCRIPT_EXT_RE,
     buildExtractPrompt,
     buildSkillMarkdown,
+    collectCommands,
+    validateScripts,
     normalizeTitle,
     titleSimilarity,
     editDistance,

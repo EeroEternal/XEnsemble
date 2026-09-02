@@ -37,11 +37,11 @@ export async function getSkill(id) {
   return res.json();
 }
 
-export async function createSkill({ title, content, tags = [], category = '', projectId = null }) {
+export async function createSkill({ title, content, tags = [], category = '', projectId = null, scripts = [] }) {
   const res = await apiFetch('/api/v1/skills', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, content, tags, category: category || null, projectId }),
+    body: JSON.stringify({ title, content, tags, category: category || null, projectId, scripts }),
   });
   if (!res.ok) throw new Error('Failed to create skill');
   return res.json();
@@ -63,7 +63,13 @@ export async function changeStatus(id, action) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action }),
   });
-  if (!res.ok) throw new Error('Failed to change skill status');
+  if (!res.ok) {
+    // 0021：透传后端错误 code（如 skill_not_landable），供 UI 分支提示
+    const body = await res.json().catch(() => ({}));
+    const err = new Error(body?.error || 'Failed to change skill status');
+    if (body?.code) err.code = body.code;
+    throw err;
+  }
   return res.json();
 }
 
@@ -113,4 +119,24 @@ export async function markDraftsSeen() {
   const res = await apiFetch('/api/v1/skills/drafts/mark-seen', { method: 'POST' });
   if (!res.ok && res.status !== 204) throw new Error('Failed to mark drafts seen');
   return { ok: true };
+}
+
+/**
+ * 0022：从本地目录导入外部开源技能（扫描 <name>/SKILL.md 结构）。
+ * @param {string} dirPath 服务端可见的本地目录绝对路径
+ * @returns {Promise<{ imported: number, skills: object[] }>}
+ */
+export async function importSkillFromPath(dirPath) {
+  const res = await apiFetch('/api/v1/skills/import-local', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: dirPath }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const err = new Error(body?.error || 'Failed to import skills');
+    if (body?.code) err.code = body.code;
+    throw err;
+  }
+  return res.json();
 }

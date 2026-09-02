@@ -96,3 +96,67 @@ test('extract returns SKILL.md content with title = name', async () => {
     assert.deepEqual(out.tags, ['postgres']);
     assert.equal(out.confidence, 0.85);
 });
+
+// ---------------------------------------------------------------------------
+// 0020 脚本级 Skill：命令序列提取 + 脚本校验
+// ---------------------------------------------------------------------------
+
+test('collectCommands extracts Bash commands with args + result', () => {
+    const turns = [
+        { role: 'assistant', tools: [{ tool: 'Bash', args: '{"command":"npm install"}', result: 'added 42 pkgs' }] },
+        { role: 'assistant', tools: [{ tool: 'Edit', args: '{"path":"a.js"}' }, { tool: 'Bash', args: 'ls -la' }] },
+        { role: 'assistant', tools: [{ tool: 'run_shell', args: { cmd: 'npm test' }, result: 'ok' }] },
+        { role: 'assistant', tools: [{ tool: 'Read', args: '{"path":"x"}' }] },
+    ];
+    const cmds = extractor.collectCommands(turns);
+    assert.deepEqual(cmds.map((c) => c.command), ['npm install', 'ls -la', 'npm test']);
+    assert.equal(cmds[0].result, 'added 42 pkgs');
+});
+
+test('collectCommands caps at MAX_COMMANDS and skips empty commands', () => {
+    const turns = [{ role: 'assistant', tools: [{ tool: 'Bash', args: '{"command":""}' }] }];
+    assert.equal(extractor.collectCommands(turns).length, 0);
+    assert.equal(extractor.collectCommands([]).length, 0);
+});
+
+test('buildExtractPrompt includes executed commands context when present', () => {
+    const prompt = extractor.buildExtractPrompt({
+        overview: 'x',
+        commands: [{ command: 'npm run build', result: 'ok' }],
+    });
+    assert.ok(prompt.includes('Executed commands'));
+    assert.ok(prompt.includes('$ npm run build'));
+});
+
+test('validateScripts accepts whitelisted script paths and rejects traversal', () => {
+    const ok = extractor.validateScripts([
+        { path: 'scripts/main.sh', content: '#!/bin/bash' },
+        { path: 'scripts/check.py', content: 'x' },
+    ]);
+    assert.deepEqual(ok.map((s) => s.path), ['scripts/main.sh', 'scripts/check.py']);
+
+    const bad = extractor.validateScripts([
+        { path: '../evil.sh', content: 'x' },      // 穿越
+        { path: 'scripts/noext', content: 'x' },   // 无白名单扩展名
+        { path: 'scripts/empty.sh', content: '' }, // 空内容
+        { path: 'scripts/big.sh', content: 'x'.repeat(40000) }, // 超 32KB
+    ]);
+    assert.equal(bad.length, 0);
+    assert.equal(extractor.validateScripts(null).length, 0);
+});
+
+test('extract passes through validated scripts', async () => {
+    analyzeClient.chatJson = async () => ({
+        name: 'Auto fix',
+        description: 'd',
+        content: '## Steps',
+        tags: [],
+        confidence: 0.7,
+        scripts: [
+            { path: 'scripts/fix.sh', content: '#!/bin/bash\necho fix' },
+            { path: '../bad.sh', content: 'x' }, // 应被过滤
+        ],
+    });
+    const out = await extractor.extract({ summary: { overview: 'o' }, turns: [] });
+    assert.deepEqual(out.scripts, [{ path: 'scripts/fix.sh', content: '#!/bin/bash\necho fix' }]);
+});

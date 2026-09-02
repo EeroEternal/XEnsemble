@@ -9,6 +9,7 @@
  */
 
 const { randomBytes } = require('crypto');
+const path = require('path');
 const { and, eq, desc, sql, or, ilike } = require('drizzle-orm');
 const { db } = require('../db');
 const schema = require('../db/schema');
@@ -20,6 +21,12 @@ const STATUS_TRANSITIONS = {
     active: { archive: 'archived' },
     archived: { restore: 'active' },
 };
+
+// 0020 脚本级 Skill：路径白名单（scripts/*，禁 `..` 穿越）、扩展名白名单、大小/数量上限
+const SCRIPT_PATH_RE = /^scripts\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const SCRIPT_EXT_RE = /\.(sh|bash|py|js|mjs|ts|ps1|sql)$/;
+const MAX_SCRIPTS = 3;
+const MAX_SCRIPT_BYTES = 32768;
 
 function newSkillId() {
     return `skl_${randomBytes(8).toString('hex')}`;
@@ -45,6 +52,26 @@ function parseSignals(signals) {
     return signals;
 }
 
+/**
+ * 0020 校验并归一化脚本列表（服务端边界，与 extractor 校验一致）。
+ * 丢弃非法项（路径穿越 / 扩展名不白名单 / 超限 / 空内容），保留前 MAX_SCRIPTS 项。
+ */
+function parseScripts(scripts) {
+    if (!Array.isArray(scripts)) return [];
+    const out = [];
+    for (const s of scripts) {
+        if (!s || typeof s !== 'object') continue;
+        const pathVal = String(s.path || '').trim();
+        const contentVal = String(s.content || '');
+        if (!SCRIPT_PATH_RE.test(pathVal)) continue;
+        if (!SCRIPT_EXT_RE.test(pathVal)) continue;
+        if (!contentVal || Buffer.byteLength(contentVal, 'utf8') > MAX_SCRIPT_BYTES) continue;
+        out.push({ path: pathVal, content: contentVal });
+        if (out.length >= MAX_SCRIPTS) break;
+    }
+    return out;
+}
+
 function mapRow(row) {
     if (!row) return null;
     return {
@@ -54,6 +81,7 @@ function mapRow(row) {
         sessionId: row.sessionId ?? null,
         title: row.title,
         content: row.content,
+        scripts: Array.isArray(row.scripts) ? row.scripts : [],
         tags: Array.isArray(row.tags) ? row.tags : [],
         status: row.status,
         source: row.source,
@@ -125,7 +153,7 @@ function validateCreate({ title, content }) {
 /**
  * 创建 skill（手动创建 / 从会话提炼入口）。
  */
-async function createSkill({ userId, title, content, tags = [], category = null, projectId = null, sessionId = null, source = 'manual', signals = null, confidence = null }) {
+async function createSkill({ userId, title, content, tags = [], category = null, projectId = null, sessionId = null, source = 'manual', signals = null, confidence = null, scripts = null }) {
     const { title: t, content: c } = validateCreate({ title, content });
     const id = newSkillId();
     const now = Date.now();
@@ -136,9 +164,11 @@ async function createSkill({ userId, title, content, tags = [], category = null,
         sessionId: sessionId || null,
         title: t,
         content: c,
+        scripts: parseScripts(scripts),
         tags: parseTags(tags),
         status: 'draft',
-        source: source === 'auto' ? 'auto' : 'manual',
+        // 0022：支持外部导入 source='external'；其余归 auto/manual
+        source: ['auto', 'external'].includes(source) ? source : 'manual',
         confidence: Number.isFinite(confidence) ? confidence : null,
         signals: parseSignals(signals),
         category: CATEGORIES.includes(category) ? category : null,
@@ -214,6 +244,7 @@ async function updateSkill(userId, skillId, patch = {}) {
         next.content = c;
     }
     if (patch.tags !== undefined) next.tags = parseTags(patch.tags);
+    if (patch.scripts !== undefined) next.scripts = parseScripts(patch.scripts);
     if (patch.category !== undefined) next.category = CATEGORIES.includes(patch.category) ? patch.category : null;
     if (patch.projectId !== undefined) next.projectId = patch.projectId || null;
     next.updatedAt = Date.now();
@@ -245,6 +276,19 @@ async function changeStatus(userId, skillId, action) {
         throw err;
     }
     const nextStatus = allowed[action];
+
+    // 0021：激活（draft→active）时做落盘门槛校验——格式合法 + 置信度阈值。
+    // 只有能落盘的技能才允许激活，避免低质量/非法格式污染 Agent 目录。
+    if (action === 'activate') {
+        const { isLandableSkill } = require('./skillInjector');
+        if (!isLandableSkill({ ...skill, status: nextStatus })) {
+            const err = new Error('skill does not meet landing requirements (valid SKILL.md frontmatter with name/description; auto skills need confidence >= threshold)');
+            err.code = 'skill_not_landable';
+            err.statusCode = 400;
+            throw err;
+        }
+    }
+
     await db.update(schema.skills)
         .set({ status: nextStatus, updatedAt: Date.now() })
         .where(and(eq(schema.skills.id, skillId), eq(schema.skills.userId, userId)));
@@ -370,6 +414,7 @@ async function installSkill(userId, skillId) {
             sessionId: null,
             title: source.title,
             content: source.content,
+            scripts: Array.isArray(source.scripts) ? source.scripts : [],
             tags: source.tags,
             status: 'draft',
             source: 'installed',
@@ -449,6 +494,124 @@ async function markDraftsSeen(userId) {
     await prefs.setPreference(userId, 'skills_drafts_last_seen_at', Date.now());
 }
 
+// ---------------------------------------------------------------------------
+// 本地技能目录导入（A：支持外部开源技能安装，本地路径扫描）
+// ---------------------------------------------------------------------------
+
+const { readFile, readdir } = require('fs/promises');
+
+const IMPORT_MAX_DIR_DEPTH = 6;
+const IMPORT_MAX_DIRS = 200;
+const IMPORT_MAX_SCRIPTS = 10;
+const IMPORT_MAX_SCRIPT_BYTES = 65536;
+// 导入允许的脚本扩展名（与 scripts 白名单一致 + 常见开源技能格式）
+const IMPORT_SCRIPT_EXT_RE = /\.(sh|bash|py|js|mjs|ts|ps1|sql|zsh)$/;
+// 合法 frontmatter：name + description 都必填
+const FRONTMATTER_RE = /^---\s*\n([\s\S]*?)\n---/;
+
+function parseFrontmatter(content) {
+    const m = FRONTMATTER_RE.exec(String(content || ''));
+    if (!m) return null;
+    const yaml = m[1];
+    const name = /^name:\s*(.+)$/m.exec(yaml)?.[1]?.trim().replace(/^["']|["']$/g, '');
+    const description = /^description:\s*(.+)$/m.exec(yaml)?.[1]?.trim().replace(/^["']|["']$/g, '');
+    if (!name || !description) return null;
+    return { name, description };
+}
+
+/**
+ * 0022：从本地目录导入符合 Agent Skills 目录标准的技能。
+ * - 输入 dirPath：技能目录的父目录（含一个或多个 <name>/SKILL.md 子目录），或直接指向技能目录本身
+ * - 校验：SKILL.md 存在 + frontmatter 含 name/description + 目录名与 name 匹配
+ * - scripts：复制 <name>/scripts/* 白名单扩展名脚本（≤10 个 / 单个 ≤64KB）
+ * - 落库：source='external'，status='draft'（激活后由注入器落盘到 Agent 目录）
+ *
+ * @param {string} userId
+ * @param {string} dirPath 本地目录绝对路径（服务端可见）
+ * @returns {Promise<Array<object>>} 导入成功的技能列表
+ */
+async function importSkillFromPath(userId, dirPath) {
+    if (!dirPath || typeof dirPath !== 'string') {
+        const err = new Error('dirPath is required');
+        err.code = 'skill_import_invalid';
+        err.statusCode = 400;
+        throw err;
+    }
+    const root = path.resolve(dirPath);
+    const skillDirs = [];
+    await walkSkillDirs(root, 0, skillDirs);
+    if (skillDirs.length === 0) {
+        const err = new Error(`no skill directories found under ${root}`);
+        err.code = 'skill_import_not_found';
+        err.statusCode = 404;
+        throw err;
+    }
+
+    const imported = [];
+    for (const skillDir of skillDirs) {
+        const skillMdPath = path.join(skillDir, 'SKILL.md');
+        const content = await readFile(skillMdPath, 'utf8').catch(() => null);
+        if (!content) continue;
+        const fm = parseFrontmatter(content);
+        if (!fm) continue;
+        const dirName = path.basename(skillDir);
+        // 目录名需与 name 匹配（宽松：去掉空格/连字符差异后相等）
+        if (normalizeName(dirName) !== normalizeName(fm.name)) continue;
+
+        const scripts = [];
+        const scriptsDir = path.join(skillDir, 'scripts');
+        const scriptEntries = await readdir(scriptsDir, { withFileTypes: true }).catch(() => []);
+        for (const entry of scriptEntries) {
+            if (!entry.isFile()) continue;
+            if (!IMPORT_SCRIPT_EXT_RE.test(entry.name)) continue;
+            const scriptPath = path.join(scriptsDir, entry.name);
+            const scriptContent = await readFile(scriptPath, 'utf8').catch(() => '');
+            if (!scriptContent) continue;
+            if (Buffer.byteLength(scriptContent, 'utf8') > IMPORT_MAX_SCRIPT_BYTES) continue;
+            scripts.push({ path: `scripts/${entry.name}`, content: scriptContent });
+            if (scripts.length >= IMPORT_MAX_SCRIPTS) break;
+        }
+
+        const skill = await createSkill({
+            userId,
+            title: fm.name,
+            content,
+            scripts,
+            category: null,
+            source: 'external',
+            confidence: null,
+        });
+        imported.push(skill);
+    }
+    if (imported.length === 0) {
+        const err = new Error('no valid skills found (need SKILL.md with name+description, dir name matching)');
+        err.code = 'skill_import_invalid';
+        err.statusCode = 400;
+        throw err;
+    }
+    return imported;
+}
+
+async function walkSkillDirs(dir, depth, acc) {
+    if (depth > IMPORT_MAX_DIR_DEPTH || acc.length > IMPORT_MAX_DIRS) return;
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const child = path.join(dir, entry.name);
+        const hasSkillMd = await readFile(path.join(child, 'SKILL.md'), 'utf8').catch(() => null);
+        if (hasSkillMd) {
+            acc.push(child);
+        } else {
+            await walkSkillDirs(child, depth + 1, acc);
+        }
+        if (acc.length > IMPORT_MAX_DIRS) return;
+    }
+}
+
+function normalizeName(name) {
+    return String(name || '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '').trim();
+}
+
 module.exports = {
     CATEGORIES,
     createSkill,
@@ -465,4 +628,7 @@ module.exports = {
     countUnseenAutoDrafts,
     getDraftsLastSeenAt,
     markDraftsSeen,
+    importSkillFromPath,
+    parseFrontmatter,
+    normalizeName,
 };

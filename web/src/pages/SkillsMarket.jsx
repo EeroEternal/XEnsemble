@@ -401,9 +401,23 @@ function SkillDetailDrawer({ skill, onClose }) {
             </div>
           )}
 
+          {Array.isArray(skill.scripts) && skill.scripts.length > 0 && (
+            <div className="border border-zinc-200 rounded-lg p-3 bg-zinc-50">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">{t('skills:field_scripts', { defaultValue: 'Scripts (optional, JSON array)' })}</div>
+              <div className="space-y-2">
+                {skill.scripts.map((sc, i) => (
+                  <div key={i} className="border border-zinc-200 rounded-md bg-white overflow-hidden">
+                    <div className="px-2.5 py-1 bg-zinc-100 text-[10px] font-mono text-zinc-500 border-b border-zinc-200 truncate">{sc.path}</div>
+                    <pre className="px-2.5 py-2 text-xs text-zinc-700 whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">{sc.content}</pre>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="border border-zinc-200 rounded-lg p-3 bg-zinc-50">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">{t('skills:detail_inject_preview')}</div>
-            <pre className="text-xs text-zinc-600 leading-relaxed whitespace-pre-wrap font-mono">{`<!-- xe-skills:start -->\n## ${skill.title}\n${skill.content}\n<!-- xe-skills:end -->`}</pre>
+            <pre className="text-xs text-zinc-600 leading-relaxed whitespace-pre-wrap font-mono">{`<!-- xe-skills:start -->\n## XEnsemble Skills\n\n### ${skill.title}\n${skill.description || ''}\n\n详见 .xensemble/skills/${(skill.title || '').toLowerCase().replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60)}/SKILL.md\n<!-- xe-skills:end -->`}</pre>
           </div>
         </div>
 

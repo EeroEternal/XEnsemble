@@ -141,6 +141,13 @@
       "when": 1788200000000,
       "tag": "0019_preview_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788300000000,
+      "tag": "0020_skills_scripts",
+      "breakpoints": true
     }
   ]
 }

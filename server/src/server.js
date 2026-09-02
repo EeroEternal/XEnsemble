@@ -1860,13 +1860,18 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
         // P4：spawn 前把 active skills 注入 workspace 指令文件（AGENTS.md / CLAUDE.md）。
         // 失败仅 log，不阻断 spawn。workspace 目录由 workspace.js 在控制面本地创建
         // （Local/BoxLite 均可见），故用默认本地 fs 适配器直写。
+        // 路径注意：注入器用「宿主机本地 fs」直写，因此必须传**宿主机真实路径**。
+        //   - Local runtime：ready.workspacePath 即宿主机路径（createProjectDirectory）
+        //   - BoxLite runtime：ready.workspacePath 是沙箱内 guest 路径（/workspace），
+        //     宿主机真实目录在 ready.hostWorkspacePath —— 传 guest 路径会写到宿主机 /workspace
+        //     导致沙箱挂载目录里看不到技能（历史 bug，已修复）。
         if (skillInjectEnabled()) {
             try {
                 const injectResult = await injectSkillsForSession({
                     userId: request.user.id,
                     projectId: project_id,
                     agentId: agentMeta.id,
-                    workspacePath,
+                    workspacePath: ready.hostWorkspacePath || workspacePath,
                 });
                 if (injectResult.injected) {
                     fastify.log.info(

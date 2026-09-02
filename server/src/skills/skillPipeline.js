@@ -393,6 +393,7 @@ async function runExtract({ log = console } = {}) {
             source: 'auto',
             signals,
             confidence: extracted.confidence,
+            scripts: extracted.scripts || [],
         });
         if (duplicateOf) {
             await db.update(schema.skills)
@@ -513,6 +514,7 @@ async function extractFromSession(sessionId, { userId, log = console } = {}) {
         source: 'auto',
         signals,
         confidence: extracted.confidence,
+        scripts: extracted.scripts || [],
     });
     if (duplicateOf) {
         await db.update(schema.skills).set({ duplicateOf }).where(eq(schema.skills.id, skill.id));
