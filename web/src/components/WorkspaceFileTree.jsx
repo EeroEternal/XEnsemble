@@ -264,11 +264,11 @@ function LazyTree({ selectedPath, onOpenFile, projectId, sessionId, onFetchDir, 
   const tree = buildTree('.', 0);
 
   if (!tree.length) {
-    return <div className="py-4 text-center text-sm text-zinc-400" data-testid="tree-empty">No files</div>;
+    return <div className="py-4 text-center text-sm text-zinc-400" data-testid="tree-empty" onContextMenu={(e) => e.preventDefault()}>No files</div>;
   }
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-0.5" onContextMenu={(e) => e.preventDefault()}>
       {tree.map((node) => (
         <TreeNode
           key={node.path}
@@ -326,7 +326,7 @@ export default function WorkspaceFileTree({ items, selectedPath, onOpenFile, sho
   if (!tree.length) return null;
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-0.5" onContextMenu={(e) => e.preventDefault()}>
       {tree.map((node) => (
         <TreeNode
           key={node.path}

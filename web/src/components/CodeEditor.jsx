@@ -140,7 +140,7 @@ export default function CodeEditor({ content, path, readOnly: readOnlyProp, isBi
   ];
 
   return (
-    <div className="flex flex-col h-full w-full" onKeyDown={handleKeyDown}>
+    <div className="flex flex-col h-full w-full" onKeyDown={handleKeyDown} onContextMenu={(e) => e.preventDefault()}>
       {showToolbar && (
         <div className="flex items-center justify-between px-4 py-1.5 border-b border-zinc-200 bg-zinc-50">
           <div className="flex items-center gap-2 text-xs text-zinc-500">
