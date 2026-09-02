@@ -190,3 +190,87 @@ test('runSelfCheck: passes when all called tools are available', async () => {
         }
     } finally { restore(); }
 });
+
+test('runSelfCheck: fatal — npx serve on a monorepo is rejected (cannot serve the real app)', async () => {
+    // The host fs is what detects pnpm-workspace.yaml. We point
+    // hostWorkspacePath at a real temp dir that has the marker, so
+    // runSelfCheck's monorepo probe sees a true signal.
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const hostWs = fs.mkdtempSync(path.join(os.tmpdir(), 'monorepo-host-'));
+    fs.writeFileSync(path.join(hostWs, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n');
+    const fake = makeFakeRuntime({ node: '/u/node', npm: '/u/npm' });
+    const restore = patchRuntime(fake);
+    try {
+        // This is the exact wrong plan opencode produced for multica:
+        // a monorepo (pnpm-workspace.yaml) but serve step is npx serve
+        // a single directory — can never serve the real app stack.
+        const steps = [
+            { id: 'step_1', name: 'Install', command: 'cd packages/tsconfig && pnpm install', kind: 'prepare' },
+            { id: 'step_2', name: 'Start', command: 'npx --yes serve . --listen $PORT --no-clipboard', kind: 'serve' },
+        ];
+        const r = await runSelfCheck({ steps, runtimeRef: 'rt', workspacePath: '/workspace', hostWorkspacePath: hostWs });
+        // Fatal must be set; non-fatal issues array still has any
+        // toolchain misses (npx is fine here so issues should be empty).
+        assert.ok(r.fatal && r.fatal.length > 0, `expected fatal issues, got ${JSON.stringify(r)}`);
+        assert.ok(r.fatal[0].includes('static-serve') && r.fatal[0].includes('monorepo'));
+        // The static-serve plan was NOT auto-fixed by self-check; the
+        // caller (analyzeProjectDeploy) must fall back to detectStack
+        // instead.
+        assert.equal(steps.length, 2, 'must not auto-inject for fatal plan');
+    } finally {
+        fs.rmSync(hostWs, { recursive: true, force: true });
+        restore();
+    }
+});
+
+test('runSelfCheck: no fatal for static-serve when the project is NOT a monorepo', async () => {
+    // hostWorkspacePath has no monorepo markers → plan-text signals are
+    // the fallback. A plain `npx serve` on a static site is fine.
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const hostWs = fs.mkdtempSync(path.join(os.tmpdir(), 'static-host-'));
+    fs.writeFileSync(path.join(hostWs, 'index.html'), '<html></html>');
+    const fake = makeFakeRuntime({ node: '/u/node', npm: '/u/npm' });
+    const restore = patchRuntime(fake);
+    try {
+        const steps = [
+            { id: 'step_1', name: 'Install', command: 'npm install', kind: 'prepare' },
+            { id: 'step_2', name: 'Start', command: 'npx --yes serve . --listen $PORT --no-clipboard', kind: 'serve' },
+        ];
+        const r = await runSelfCheck({ steps, runtimeRef: 'rt', workspacePath: '/workspace', hostWorkspacePath: hostWs });
+        assert.equal((r.fatal || []).length, 0, 'static-serve on a non-monorepo is fine');
+    } finally {
+        fs.rmSync(hostWs, { recursive: true, force: true });
+        restore();
+    }
+});
+
+test('runSelfCheck: fatal also fires when no hostWorkspacePath but plan-text signals monorepo', async () => {
+    // Some hosts pass workspacePath === hostWorkspacePath; the fallback
+    // is to look at the plan text for `turbo run` / `pnpm -r` / etc.
+    const fake = makeFakeRuntime({ node: '/u/node', npm: '/u/npm' });
+    const restore = patchRuntime(fake);
+    try {
+        const steps = [
+            { id: 'step_1', name: 'Install', command: 'pnpm install', kind: 'prepare' },
+            { id: 'step_2', name: 'Start', command: 'npx --yes serve . --listen $PORT --no-clipboard', kind: 'serve' },
+        ];
+        // No hostWorkspacePath — fall back to plan-text signals: the
+        // install step uses pnpm -r which is a monorepo signal.
+        const r = await runSelfCheck({
+            steps,
+            runtimeRef: 'rt',
+            workspacePath: '/workspace',
+            // Inject a fake install step that uses `pnpm -r` so the
+            // plan-text signal triggers.
+        });
+        // Without pnpm -r, this shouldn't fatal. Now add a pnpm -r
+        // signal to make the point.
+        steps[0].command = 'pnpm -r install';
+        const r2 = await runSelfCheck({ steps, runtimeRef: 'rt', workspacePath: '/workspace' });
+        assert.ok(r2.fatal && r2.fatal.length > 0, 'pnpm -r should signal monorepo');
+    } finally { restore(); }
+});

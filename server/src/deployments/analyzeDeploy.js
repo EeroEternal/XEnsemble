@@ -2,6 +2,7 @@ const { getRuntime } = require('../runtime/registry');
 const { RuntimeError } = require('../runtime/interfaces');
 const { analyzeProjectWithOpencode } = require('./analyzeOpencode');
 const { detectRuntimeToolchain } = require('./runtimeToolchain');
+const { detectStack, stackToPreviewContract } = require('./detectStack');
 
 const API_KEY = process.env.LLM_ANALYZE_API_KEY;
 // OpenAI 兼容端点：配置可能给 base URL（如 …/api/v1）或完整 chat/completions URL；
@@ -250,9 +251,10 @@ function shellQuote(s) {
 // 对 AI 生成的步骤做"只读自查"：目录存在性、npm/pnpm/yarn script 存在性、cd 重复、
 // 工具链可用性（用户明确要求"只有代码约束才是稳定的"）。
 // 不实际安装/启动，只跑轻量只读命令，把问题反馈给 LLM 修正。
-async function runSelfCheck({ steps, configFiles, runtimeRef, workspacePath }) {
+async function runSelfCheck({ steps, configFiles, runtimeRef, workspacePath, hostWorkspacePath }) {
     const runtime = getRuntime();
     const issues = [];
+    const fatal = [];
 
     // 0) 工具链探测：步骤里如果直接调用了 go/cargo/python3/mvn/java，
     //    需要沙箱里装好。LLM 自报"有这些工具"不可信，所以走代码 `command -v` 探测。
@@ -401,7 +403,38 @@ async function runSelfCheck({ steps, configFiles, runtimeRef, workspacePath }) {
         }
     }
 
-    return { passed: issues.length === 0, issues };
+    // Fatal checks: if any of these fire, the plan CANNOT be salvaged
+    // by self-check alone — analyzeProjectDeploy must reject the plan and
+    // fall back to the detectStack-based plan. Auto-injecting a toolchain
+    // step is fine; rewriting a "serve with npx serve" plan when the
+    // project is a monorepo is not, because the static fallback would
+    // hide the real app (Next.js, FastAPI, etc.) from the preview.
+    //
+    // We return `fatal: [...]` alongside `issues` so the caller can
+    // decide whether to fall back vs warn-and-proceed.
+    const STATIC_SERVE_RE = /(?:npx\s+(?:--yes\s+)?serve\b|python3?\s+-m\s+http\.server)/i;
+    const monorepoMarkers = ['pnpm-workspace.yaml', 'turbo.json', 'nx.json', 'lerna.json'];
+    let isMonorepoProject = false;
+    if (hostWorkspacePath) {
+        try {
+            const fs = require('fs');
+            const path = require('path');
+            isMonorepoProject = monorepoMarkers.some((m) => fs.existsSync(path.join(hostWorkspacePath, m)));
+        } catch { /* host fs not available in tests; fall through */ }
+    }
+    if (!isMonorepoProject) {
+        isMonorepoProject = steps.some((s) => /-r\s+dev\b|\bpnpm\s+-r\b|\bturbo\s+run\b|\bnx\s+run-many\b/.test(s.command || ''));
+    }
+    if (isMonorepoProject) {
+        for (const step of steps) {
+            if (step.kind !== 'serve') continue;
+            if (STATIC_SERVE_RE.test(step.command || '')) {
+                fatal.push(`Step "${step.name}" uses a static-serve command (npx serve / python3 -m http.server) but the project is a monorepo — this can never serve the real app. The plan must start the real frontend + backend (e.g. \`cd apps/web && pnpm dev\` or root \`pnpm dev\`).`);
+            }
+        }
+    }
+
+    return { passed: issues.length === 0, issues, fatal };
 }
 
 function fallbackSteps(fileContentsText) {
@@ -535,6 +568,68 @@ function tryParseJson(text) {
     try { return JSON.parse(s.slice(start, end + 1)); } catch { return null; }
 }
 
+// Mirror of the regex inside runSelfCheck() — referenced from
+// analyzeProjectDeploy() when falling back to a detectStack-built plan
+// after opencode produced a fatally-wrong one (e.g. monorepo served
+// with npx serve). Kept in sync manually; if you change the inner
+// check, update this too.
+const STATIC_SERVE_RE = /(?:npx\s+(?:--yes\s+)?serve\b|python3?\s+-m\s+http\.server)/i;
+
+/**
+ * Build a fallback plan from detectStack + stackToPreviewContract.
+ * Replaces a fatally-wrong opencode plan (e.g. static-serve on a
+ * monorepo) with a plan that actually starts the real frontend /
+ * backend. Two-step layout:
+ *   - step_1 (prepare): install dependencies at the project root
+ *     (monorepo: this is what fills every workspace)
+ *   - step_2 (serve): the resolved start command from the contract,
+ *     with $PORT substituted for the real port
+ *
+ * @param {object} stack - detectStack() result
+ * @param {{command:string,args:string[],port:number}} contract - stackToPreviewContract()
+ * @returns {{steps: any[], configFiles: any[]} | null}
+ */
+function buildPlanFromDetectStack(stack, contract) {
+    if (!stack || !contract || !contract.command) return null;
+    if (!contract.args || !contract.args.length) return null;
+    const steps = [];
+    // Install: always at the project root, with the resolved package
+    // manager. For monorepos this is what populates every workspace.
+    if (stack.installCmd) {
+        steps.push({
+            id: 'step_1',
+            name: 'Install dependencies',
+            command: stack.installCmd,
+            description: `Install packages with ${stack.packageManager || 'the package manager'}`,
+            kind: 'prepare',
+        });
+    }
+    // Build: only if the stack has a build step (most dev servers don't
+    // need it; production stacks like Next.js sometimes do).
+    if (stack.buildCmd) {
+        steps.push({
+            id: 'step_2',
+            name: 'Build',
+            command: stack.buildCmd,
+            description: 'Production build',
+            kind: 'prepare',
+        });
+    }
+    // Serve: the resolved start command with $PORT replaced.
+    const serveId = steps.length === 0 ? 'step_1' : `step_${steps.length + 1}`;
+    const port = String(contract.port || 3000);
+    const serveArgs = contract.args.map((a) => a.replace(/\$PORT/g, port));
+    steps.push({
+        id: serveId,
+        name: 'Start app',
+        command: contract.command,
+        args: serveArgs,
+        description: `Run on port ${port} (auto-detected from detectStack)`,
+        kind: 'serve',
+    });
+    return { steps, configFiles: [] };
+}
+
 async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeRef, isAborted }) {
     // 优先用 opencode（真正的 agent：LLM 自主探索项目 + 输出 JSON），失败 fallback 轻量 ReAct
     // opencode 跑在 host，需要 host workspace path（boxlite 下 /workspace 是 guest 路径，xensemble host 看不到）
@@ -546,9 +641,27 @@ async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeR
         // opencode 跑 host 只出计划，没扫 guest 文件树；这里补扫 guest 树供阶段 B（verify）复用，
         // 避免 verify agent 重新 list_dir/read_file 探索。自查与扫描在 guest 上可并行。
         const [check, guestCtx] = await Promise.all([
-            runSelfCheck({ ...normalized, runtimeRef, workspacePath }),
+            runSelfCheck({ ...normalized, runtimeRef, workspacePath, hostWorkspacePath }),
             collectProjectContext(getRuntime().fs, workspacePath, runtimeRef).catch(() => null),
         ]);
+        // Fatal self-check issues (e.g. "monorepo project got a static-serve
+        // plan") cannot be salvaged by injecting toolchain steps; the opencode
+        // plan is structurally wrong. Reject it and rebuild from detectStack
+        // heuristics so the project actually starts (e.g. `pnpm dev:web`).
+        if ((check.fatal || []).length) {
+            const detected = detectStack(hostWorkspacePath || workspacePath);
+            const contract = stackToPreviewContract(detected);
+            if (contract && contract.command && !STATIC_SERVE_RE.test(contract.command)) {
+                console.error(`[analyzeDeploy] self-check rejected opencode plan (${check.fatal.length} fatal); falling back to detectStack: ${contract.command} ${contract.args.join(' ')} on :${contract.port}`);
+                const detectPlan = buildPlanFromDetectStack(detected, contract);
+                if (detectPlan) {
+                    return { ...detectPlan, source: 'opencode-rejected-detectstack', checked: true, contextTree: guestCtx?.treeText || null, warning: `opencode plan rejected: ${check.fatal.join('; ')}; using detectStack fallback` };
+                }
+            }
+            // detectStack could not produce a usable plan either — fall
+            // through to the original behavior (return opencode plan with
+            // a warning) so stage B at least gets something to try.
+        }
         return { ...normalized, source: 'opencode', checked: check.passed, contextTree: guestCtx?.treeText || null, ...(check.passed ? {} : { warning: `opencode produced plan but self-check found ${check.issues.length} issue(s)` }) };
     }
 
