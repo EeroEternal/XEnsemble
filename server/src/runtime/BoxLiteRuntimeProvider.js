@@ -235,7 +235,8 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
 
     async ensureReady(project, opts = {}) {
         const runtimeId = opts && opts.runtimeId ? opts.runtimeId : null;
-        const name = runtimeId || `p_${project.id}_${opts.agentId || 'default'}`;
+        const deploymentId = opts && opts.deploymentId ? opts.deploymentId : null;
+        const name = runtimeId || `p_${project.id}${deploymentId ? `_dep_${deploymentId}` : ''}_${opts.agentId || 'default'}`;
         const image = await resolveBoxImage({
             agentId: opts.agentId,
             image: opts.image,
@@ -296,12 +297,15 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
                     await this.client.openSession(name, image, warm, openOptions);
                     return { reused: false };
                 } catch (e) {
-                    if (/already|exists/i.test(String(e))) {
+                    const errMsg = String(e);
+                    // Host blink-server returns 500 with this message when session is in Failed state
+                    const isFailedStatus = /Invalid BoxStatus for initialization: Failed/i.test(errMsg);
+                    if (/already|exists/i.test(errMsg) || isFailedStatus) {
                         // Session exists - check if it's actually healthy
                         let statusInfo = null;
                         try {
                             statusInfo = await this.client.getSessionStatus(name);
-                        } catch (_) { /* status query failed - try openSession below */ }
+                        } catch (_) { /* status query failed */ }
                         if (statusInfo && statusInfo.running && statusInfo.status === 'Running') {
                             if (needRecreate) {
                                 throw new RuntimeError(
@@ -311,7 +315,14 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
                             }
                             return { reused: true };
                         }
-                        // VM is not Running or status unknown.
+                        // VM is in Failed state (detected via status API or error message) - cannot be initialized, must delete and recreate
+                        if (isFailedStatus || (statusInfo && statusInfo.status === 'Failed')) {
+                            try { await this.client.deleteSession(name); } catch (_) {}
+                            await new Promise((r) => setTimeout(r, 500));
+                            await this.client.openSession(name, image, warm, openOptions);
+                            return { reused: false };
+                        }
+                        // VM is not Running or status unknown (e.g. Stopped).
                         // Try openSession again - blink-server may resume a Stopped VM.
                         // Only delete+recreate if openSession still fails.
                         try {

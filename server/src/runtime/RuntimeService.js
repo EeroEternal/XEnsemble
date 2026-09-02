@@ -210,6 +210,7 @@ async function ensureProjectRuntime(project, opts = {}) {
                     vmResources: opts.agentVmResources || null,
                     componentDiskSizeMb: opts.componentDiskSizeMb || 0,
                 }),
+                deploymentId: opts.deploymentId,
             } : {}),
             baseSnapshotId: opts.baseSnapshotId,
             checkpointId: opts.checkpointId,

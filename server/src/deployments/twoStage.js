@@ -540,10 +540,10 @@ async function injectGatewayBinary(runtimeRef, workspacePath, onLog) {
 // 从而在预览里创建 boxlite 隔离的 agent session（沙箱 guest 无 KVM，无法自身起 blink）。
 async function injectBlinkEnv(runtimeRef, workspacePath, deploymentId, blinkApiUrl, blinkToken, onLog) {
     const runtime = getRuntime();
-    const content = `BLINK_API_URL=${blinkApiUrl}\nBLINK_AUTH_TOKEN=${blinkToken}\n`;
+    const content = `BLINK_API_URL=${blinkApiUrl}\nBLINK_AUTH_TOKEN=${blinkToken}\nXENSEMBLE_DEPLOYMENT_ID=${deploymentId}\n`;
     try {
         await runtime.fs.fsWrite(workspacePath, 'server/.blink.env', content, { runtimeRef });
-        if (onLog) onLog(`blink env injected: BLINK_API_URL=${blinkApiUrl}`);
+        if (onLog) onLog(`blink env injected: BLINK_API_URL=${blinkApiUrl}, deploymentId=${deploymentId}`);
         return true;
     } catch (e) {
         if (onLog) onLog(`blink env injection failed: ${e.message}`);

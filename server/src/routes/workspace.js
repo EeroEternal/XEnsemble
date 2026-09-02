@@ -43,8 +43,10 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
         const force = Boolean(request.body?.force);
+        const agentId = request.body?.agentId || null;
+        const deploymentId = process.env.XENSEMBLE_DEPLOYMENT_ID || null;
         try {
-            const { workspacePath } = await ensureProjectRuntime(project);
+            const { workspacePath } = await ensureProjectRuntime(project, { agentId, deploymentId });
             const status = await ensureAgentBootstrap(project, workspacePath, { force });
             if (status?.status === 'failed') {
                 return reply.code(500).send({
@@ -66,8 +68,10 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
 
         const force = Boolean(request.body?.force);
         const ensurePreview = request.body?.ensure_preview !== false;
+        const agentId = request.body?.agentId || null;
+        const deploymentId = process.env.XENSEMBLE_DEPLOYMENT_ID || null;
         try {
-            const { workspacePath } = await ensureProjectRuntime(project);
+            const { workspacePath } = await ensureProjectRuntime(project, { agentId, deploymentId });
             const status = await ensureAgentResume(project, workspacePath, { force, ensurePreview });
             if (status?.status === 'failed') {
                 return reply.code(500).send({
@@ -109,7 +113,7 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
         const level = request.body?.level || 'log';
         const tag = request.body?.source || 'browser';
         try {
-            const { workspacePath } = await ensureProjectRuntime(project);
+            const { workspacePath } = await ensureProjectRuntime(project, { deploymentId: process.env.XENSEMBLE_DEPLOYMENT_ID || null });
             appendInboxLog(workspacePath, tag, `${level}: ${message}`);
             return { ok: true };
         } catch (err) {
@@ -123,7 +127,7 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
 
         try {
-            const ready = await ensureProjectRuntime(project);
+            const ready = await ensureProjectRuntime(project, { deploymentId: process.env.XENSEMBLE_DEPLOYMENT_ID || null });
             const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
             const result = await analyzeProjectDeploy({ workspacePath: ready.workspacePath, hostWorkspacePath: ready.hostWorkspacePath, runtimeRef: ref });
             return result;
@@ -145,10 +149,10 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
         }
 
         try {
-            const ready = await ensureProjectRuntime(project);
+            const deploymentId = `dep_${crypto.randomBytes(8).toString('hex')}`;
+            const ready = await ensureProjectRuntime(project, { deploymentId });
             const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
             const now = Date.now();
-            const deploymentId = `dep_${crypto.randomBytes(8).toString('hex')}`;
 
             // 部署新预览前，先清掉该项目所有旧 tunnel（避免 wsServer/browserServer/VM child 累积导致 node OOM）
             try { stopByProjectId(project.id); } catch { /* ignore */ }

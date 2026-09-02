@@ -90,10 +90,14 @@ async function getForUser(userId, deploymentId) {
 }
 
 async function createPreview(userId, project, opts = {}) {
-    const ensureOpts = opts.runtimeId ? { runtimeId: opts.runtimeId } : {};
+    // Generate deployment ID first so we can pass it to ensureProjectRuntime for unique blink session name
+    const deploymentId = `dep_${crypto.randomBytes(8).toString('hex')}`;
+    // Generate a unique runtime ID for this preview deployment to ensure unique blink session name
+    const runtimeId = `rt_dep_${deploymentId}`;
+    const ensureOpts = opts.runtimeId ? { runtimeId: opts.runtimeId, deploymentId } : { runtimeId, deploymentId };
     const { runtime } = await ensureProjectRuntime(project, ensureOpts);
     const now = Date.now();
-    const id = `dep_${crypto.randomBytes(8).toString('hex')}`;
+    const id = deploymentId;
 
     const checkpoint = await createCheckpoint(project, { status: 'ready' }, userId);
     const revision = `checkpoint:${checkpoint.id}`;
@@ -153,9 +157,9 @@ async function getByPreviewToken(deploymentId, rawToken) {
 
 async function startPreview(userId, project, deployment) {
     return singleflight(`preview:start:${deployment.id}`, async () => {
-        let ensureOpts = {};
+        let ensureOpts = { deploymentId: deployment.id };
         if (deployment.runtimeId) {
-            ensureOpts = { runtimeId: deployment.runtimeId };
+            ensureOpts = { ...ensureOpts, runtimeId: deployment.runtimeId };
         }
         if (deployment.revision && deployment.revision.startsWith('checkpoint:')) {
             const ckId = deployment.revision.split(':')[1];
