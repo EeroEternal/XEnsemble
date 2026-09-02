@@ -541,7 +541,14 @@ async function importSkillFromPath(userId, dirPath) {
     }
     const root = path.resolve(dirPath);
     const skillDirs = [];
-    await walkSkillDirs(root, 0, skillDirs);
+    // 优先支持「传入目录本身即技能目录」（根含 SKILL.md）；
+    // 否则按「父目录下每个子目录一个 SKILL.md」的批量结构扫描。
+    const rootHasSkillMd = await readFile(path.join(root, 'SKILL.md'), 'utf8').catch(() => null);
+    if (rootHasSkillMd) {
+        skillDirs.push(root);
+    } else {
+        await walkSkillDirs(root, 0, skillDirs);
+    }
     if (skillDirs.length === 0) {
         const err = new Error(`no skill directories found under ${root}`);
         err.code = 'skill_import_not_found';
@@ -557,8 +564,11 @@ async function importSkillFromPath(userId, dirPath) {
         const fm = parseFrontmatter(content);
         if (!fm) continue;
         const dirName = path.basename(skillDir);
-        // 目录名需与 name 匹配（宽松：去掉空格/连字符差异后相等）
-        if (normalizeName(dirName) !== normalizeName(fm.name)) continue;
+        // 目录名需与 name 匹配（宽松：去掉空格/连字符差异后，目录名包含 name 即视为匹配——
+        // 兼容 `dev-expert-1.0.52`（含版本号）等带后缀的打包目录）
+        const nd = normalizeName(dirName);
+        const nn = normalizeName(fm.name);
+        if (!nd || !nn || !nd.includes(nn)) continue;
 
         const scripts = [];
         const scriptsDir = path.join(skillDir, 'scripts');
