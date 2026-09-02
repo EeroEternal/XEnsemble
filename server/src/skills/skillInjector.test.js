@@ -678,3 +678,79 @@ test('reRenderForSkillChange removes pointer when no active skills remain (archi
         else process.env.SKILL_INJECT_ENABLED = prev;
     }
 });
+
+// ---------------------------------------------------------------------------
+// 0025：注入矩阵——每个已注册 Agent 都应正确注入（索引 + 指针 + 原生目录）
+// ---------------------------------------------------------------------------
+
+test('0025 injection matrix: every registered agent receives platform index + pointer + native dirs', async () => {
+    const defs = ctx.reloaded['../agents/defaultAgents'];
+    const agents = defs.DEFAULT_AGENTS || [];
+    assert.ok(agents.length >= 10, `expected a non-trivial agent catalog, got ${agents.length}`);
+
+    const user = await makeUser();
+    const proj = await makeProject(user, 'Mtx');
+    await makeActiveSkill(user, {
+        title: 'DB migrate',
+        content: '---\nname: DB migrate\ndescription: run migration\n---\n## Steps\n1. migrate',
+        projectId: proj,
+    });
+
+    const prev = process.env.SKILL_INJECT_ENABLED;
+    process.env.SKILL_INJECT_ENABLED = 'true';
+
+    const results = [];
+    try {
+        for (const agent of agents) {
+            const files = {
+                'AGENTS.md': '# My repo\n',
+                'CLAUDE.md': '# My repo\n',
+            };
+            const fsAdapter = {
+                async readFile(rootDir, rel) { return files[rel] ?? null; },
+                async writeFile(rootDir, rel, content) { files[rel] = content; },
+                async chmod() {},
+                async rmrf(rootDir, rel) {
+                    for (const k of Object.keys(files)) {
+                        if (k === rel || k.startsWith(`${rel}/`)) delete files[k];
+                    }
+                },
+                async readDir(rootDir, rel) {
+                    return Object.keys(files)
+                        .filter((k) => k.startsWith(`${rel}/`))
+                        .map((k) => ({ name: k.slice(rel.length + 1).split('/')[0], isDirectory: true }));
+                },
+            };
+
+            const res = await injector.injectForSession({
+                userId: user, projectId: proj, agentId: agent.id, workspacePath: '/ws', fsAdapter, bumpUsage: false,
+            });
+
+            const { instructionFile, nativeSkillDirs } = defs.getSkillTargets(agent.id);
+            const problems = [];
+            if (!res.injected) problems.push(`injected=false (${res.reason})`);
+            if (!files['.xensemble/AGENTS.md']) problems.push('platform index missing');
+            else if (!files['.xensemble/AGENTS.md'].includes('### DB migrate')) problems.push('platform index lacks skill');
+            if (!files[instructionFile]) problems.push(`instruction file ${instructionFile} not written`);
+            else if (!files[instructionFile].includes('.xensemble/AGENTS.md')) problems.push(`${instructionFile} lacks pointer`);
+            for (const dir of nativeSkillDirs || []) {
+                if (!files[`${dir}/db-migrate/SKILL.md`]) problems.push(`native dir ${dir} missing`);
+            }
+
+            results.push({ agent: agent.id, instructionFile, nativeSkillDirs: nativeSkillDirs || [], ok: problems.length === 0, problems });
+        }
+
+        // 汇总输出（便于人工核对覆盖矩阵）
+        // eslint-disable-next-line no-console
+        console.log('\n[0025 injection matrix]');
+        for (const r of results) {
+            console.log(`${r.ok ? '  OK ' : 'FAIL '} ${r.agent.padEnd(16)} → ${r.instructionFile}${r.nativeSkillDirs.length ? ' + ' + r.nativeSkillDirs.join(', ') : ''}${r.problems.length ? '  ✗ ' + r.problems.join('; ') : ''}`);
+        }
+
+        const failed = results.filter((r) => !r.ok);
+        assert.deepEqual(failed.map((r) => ({ agent: r.agent, problems: r.problems })), [], 'all agents must inject correctly');
+    } finally {
+        if (prev === undefined) delete process.env.SKILL_INJECT_ENABLED;
+        else process.env.SKILL_INJECT_ENABLED = prev;
+    }
+});

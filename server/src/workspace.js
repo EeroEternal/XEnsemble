@@ -22,8 +22,11 @@ function createProjectDirectory(userId, projectId) {
     ensureWorkspaceRoot();
     const dir = projectDir(userId, projectId);
     fs.mkdirSync(dir, { recursive: true });
-    const { seedAgentWorkspaceFiles } = require('./workspace/agentBootstrap');
+    const { seedAgentWorkspaceFiles, ensureGitignoreEntries } = require('./workspace/agentBootstrap');
     seedAgentWorkspaceFiles(dir);
+    // 0025（方案 B）：导入工程即写入 .gitignore 忽略条目（.xensemble/ 与各 Agent 原生技能目录），
+    // 否则技能落盘会以 untracked 形式污染 changes 面板
+    ensureGitignoreEntries(dir);
     return dir;
 }
 
