@@ -55,13 +55,16 @@
     "hint": "Click the Deploy button in the top-right to start one-click deployment"
   },
   "steps": {
-    "analyze": "Step 1: Analyze project",
-    "build": "Step 2: Deploy & verify"
-  },
-  "running": {
-    "opening_preview": "Opening preview…"
+    "analyze": "Analyze project",
+    "prepare": "Install dependencies",
+    "build": "Build artifacts",
+    "serve": "Start service",
+    "check": "Health check",
+    "fix": "Fix issues",
+    "preview": "Open preview"
   },
   "aborted": "Deployment aborted",
+  "timeout": "Deployment timed out",
   "failed": {
     "title": "Deployment failed",
     "quota_title": "Concurrency limit reached",
@@ -102,7 +105,8 @@
   },
   "toast": {
     "finished": "Deployment finished",
-    "aborted": "Deployment aborted",
+  "aborted": "Deployment aborted",
+  "timeout": "Deployment timed out",
     "failed": "Deployment failed",
     "finished_with": "Deployment finished for {{session}} in {{workspace}}",
     "aborted_with": "Deployment aborted for {{session}} in {{workspace}}",

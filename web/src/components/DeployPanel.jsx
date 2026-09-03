@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, ChevronDown, ChevronUp, Rocket, Search } from 'lucide-react';
+import { Activity, AlertCircle, ChevronDown, ChevronUp, Globe, Hammer, Package, Rocket, Search, Wrench } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import WorkspacePreviewPane from './WorkspacePreviewPane';
 import CreationProgress from './CreationProgress';
@@ -19,10 +19,30 @@ import { withSessionId } from '../lib/sessionContext';
  */
 const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSuccess, onDeployStatus, abortRequested }, ref) {
     const { t } = useTranslation();
+    // 前端分步展示：阶段 A（分析）+ 阶段 B 内子阶段（由后端 SSE substage 驱动）+ preview。
+    // 后端逻辑保持两阶段不变，这里只做更细的展示拆分。
     const deploySteps = [
         { id: 'analyze', label: t('deploy:steps.analyze'), icon: Search },
-        { id: 'build', label: t('deploy:steps.build'), icon: Rocket },
+        { id: 'prepare', label: t('deploy:steps.prepare'), icon: Package },
+        { id: 'build', label: t('deploy:steps.build'), icon: Hammer },
+        { id: 'serve', label: t('deploy:steps.serve'), icon: Rocket },
+        { id: 'check', label: t('deploy:steps.check'), icon: Activity },
+        { id: 'fix', label: t('deploy:steps.fix'), icon: Wrench },
+        { id: 'preview', label: t('deploy:steps.preview'), icon: Globe },
     ];
+    // 阶段 B 子阶段：后端按工具/命令推断透传（prepare/build/serve/check/fix），
+    // 长任务期间有心跳复报；无 substage 时保持步骤顺序推进。
+    // 注意：verify agent 是迭代式工作（check 失败 → fix → 重新 build → 再 check），
+    // 子阶段信号会来回跳。进度条必须"只进不退"——记录最远到达的步骤，新 substage 比它靠后才前进。
+    const SUBSTAGE_ORDER = ['prepare', 'build', 'serve', 'check', 'fix'];
+    const [furthestSubstep, setFurthestSubstep] = useState(null);
+    const advanceSubstep = (s) => {
+        setFurthestSubstep((prev) => {
+            const cur = prev ? SUBSTAGE_ORDER.indexOf(prev) : -1;
+            const next = SUBSTAGE_ORDER.indexOf(s);
+            return next > cur ? s : prev;
+        });
+    };
     const [runState, setRunState] = useState('idle');
     const [result, setResult] = useState(null);
     // 当前部署阶段：null（初始）| 'A'（分析）| 'B'（部署/验证）| 'preview'（开预览）
@@ -79,6 +99,9 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                         setPhase('A');
                     } else if (evt.stage === 'B') {
                         setPhase('B'); // 阶段 1 结束 → 阶段 2，界面显示完成提示
+                        // 后端透传子阶段（prepare/build/serve/check/fix），驱动更细的步骤高亮。
+                        // 只进不退：取最远到达的步骤，避免 agent 修复回跳导致进度倒退。
+                        if (evt.substage) advanceSubstep(evt.substage);
                     } else if (evt.stage === 'preview') {
                         setPhase('preview');
                     }
@@ -151,7 +174,10 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                         setResult({ ok: true, deploymentId: last.id, elapsedMs: (last.updated_at - last.created_at) || 0 });
                     }
                     else if (last.status === 'failed') { setRunState('failed'); setResult({ ok: false, error: last.stage_message || '上次部署失败', stage: last.stage }); }
-                    else if (last.status === 'stopped') setRunState('aborted');
+                    else if (last.status === 'stopped') {
+                        setRunState('aborted');
+                        setResult({ ok: false, aborted: true, code: last.last_error_code || undefined, error: last.last_error_message || undefined });
+                    }
                 }
                 // 无该 session 记录 → 保持 idle（空态）
             } catch {
@@ -180,7 +206,9 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 } else if (row.status === 'failed') {
                     setRunState('failed'); setResult({ ok: false, error: row.stage_message || '部署失败', stage: row.stage }); setRecoveredId(null);
                 } else if (row.status === 'stopped') {
-                    setRunState('aborted'); setRecoveredId(null);
+                    setRunState('aborted');
+                    setResult({ ok: false, aborted: true, code: row.last_error_code || undefined, error: row.last_error_message || undefined });
+                    setRecoveredId(null);
                 }
             } catch { /* ignore */ }
         }, 3000);
@@ -212,6 +240,7 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                     setResult({ ok: false, error: latest.stage_message || '部署失败', stage: latest.stage });
                 } else if (latest.status === 'stopped') {
                     setRunState('aborted');
+                    setResult({ ok: false, aborted: true, code: latest.last_error_code || undefined, error: latest.last_error_message || undefined });
                 }
             } catch { /* ignore */ }
         }, 5000);
@@ -241,15 +270,21 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                     <div className="flex flex-col items-center justify-center gap-3 px-6 py-8">
                         <CreationProgress
                             steps={deploySteps}
-                            currentStep={phase === 'B' || phase === 'preview' ? 'build' : 'analyze'}
+                            currentStep={
+                                phase === 'preview' ? 'preview'
+                                    : phase === 'B'
+                                        ? (furthestSubstep && SUBSTAGE_ORDER.includes(furthestSubstep) ? furthestSubstep : 'build')
+                                        : 'analyze'
+                            }
                         />
-                        {phase === 'preview' && <div className="text-sm text-zinc-500">{t('deploy:running.opening_preview')}</div>}
                     </div>
                 )}
                 {runState === 'aborted' && (
                     <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8">
                         <AlertCircle className="w-9 h-9 text-zinc-400" />
-                        <div className="text-sm font-semibold text-zinc-700">{t('deploy:aborted')}</div>
+                        <div className="text-sm font-semibold text-zinc-700">
+                            {result?.code === 'deploy_timeout' ? t('deploy:timeout') : t('deploy:aborted')}
+                        </div>
                     </div>
                 )}
                 {runState === 'failed' && result && (

@@ -73,6 +73,31 @@ function summarizeArgs(args) {
     return out;
 }
 
+// 语义化命令签名：剥离 shell 装饰（日志重定向、tail/echo 收尾、cd 前缀、nohup/括号包裹、后台 &），
+// 只保留核心命令本身。用于跨工具调用的命令级去重——agent 换个日志文件名就绕过精确匹配的情况。
+function normalizeCmdSig(rawCmd) {
+    let c = String(rawCmd || '');
+    // 去掉重定向与 2>&1 / 2>/dev/null
+    c = c.replace(/\s*(?:2>&1|\d?>\/dev\/null|>>?\s*[^\s;&|]+)/g, ' ');
+    // 去掉管道收尾（| head / | tail / | grep …）
+    c = c.replace(/\s*\|\s*(?:head|tail|grep|cat|wc|awk|sed)\b[^;]*$/g, '');
+    // 去掉 ; echo / ; sleep / ; tail 等收尾装饰（到下一个 ; 为止）
+    c = c.replace(/\s*;\s*(?:echo|printf|sleep|tail|head|cat|test|\[)\b[^;]*/g, ' ');
+    // 去掉前导 cd X && / cd X; 以及 nohup/setsid、括号包裹、结尾 &
+    c = c.replace(/^(?:cd\s+[^;]+?\s*(?:&&|;)\s*)+/, '');
+    c = c.replace(/\s*(?:nohup|setsid)\s+/g, ' ');
+    c = c.replace(/^[([]+/, '').replace(/[)\]]+\s*$/, '');
+    c = c.replace(/\s*&\s*$/, '');
+    return c.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+// 泛化判定：pkill/kill 是否指向安装/构建类进程（agent 常误杀自己刚起的 install/build）。
+function isKillingOwnInstall(rawCmd) {
+    const c = String(rawCmd || '').toLowerCase();
+    if (!/\b(pkill|killall|kill)\b/.test(c)) return false;
+    return /(npm|pnpm|yarn|bun|pip|pip3|uv|apt|go mod|maven|gradle|composer|poetry)\s*(install|add|build|ci)|install|build|pnpm\s*install/.test(c) && /(-9\b|force|f\b)/.test(c) || /pkill\s+-9\s+-f.*(install|build)/.test(c);
+}
+
 function summarize(s, max = 160) {
     const t = String(s || '');
     return t.length > max ? `${t.slice(0, max)}…(+${t.length - max} chars)` : t;
@@ -418,6 +443,7 @@ function buildSystemPrompt(plan, toolchain) {
         '2. Start the full app (frontend + backend) on a port, then CONFIRM it is actually up with ONE curl: `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:<port>/`. If it is 2xx/3xx, output your final answer IMMEDIATELY — do NOT curl the same port again.',
         '3. If you also see a `npm test` / test script that is quick, run it too and count it as tested.',
         '4. When a health check fails, READ the app log / error output to find the ROOT CAUSE (port in use, missing env/config, build or startup error) and fix it with edit_file / correct command — do not blindly rerun the same thing or keep checking the process. Iterate until the health check passes.',
+        'RUNTIME ENGINE VERSION (MANDATORY): many modern repos pin a minimum runtime version (package.json "engines", .nvmrc, .tool-versions, .python-version, go.mod go directive). If install/build/start emits "Unsupported engine" / "engine ... wanted ... current ..." or the build exits 0 but produces NO output files (empty dist/), that is usually a silently-failing engine mismatch — DO NOT retry the same build. First check the pinned version (cat package.json engines / .nvmrc / .tool-versions / .python-version), then install it: for Node use `nvm install <ver> && nvm use <ver>` (or `n` / `fnm`), for Python use `pyenv install <ver>` or apt-get the matching version, then rerun install + build WITH that runtime in PATH. Before declaring a build successful, verify the expected artifacts actually exist (e.g. `ls web/dist`, `ls build/`) — a 0-exit build with no artifacts is a FAILURE, not success.',
         'OUTPUT SIZE RULE (MANDATORY): a TOOL CALL must be ONE compact JSON under 800 characters. NEVER paste file contents, logs or commands into your JSON — use read_file / edit_file / run_shell tools for that. If you were about to write a long reply, STOP and output the short JSON tool call instead. The FINAL answer may be up to 4000 characters so you can include the key error output in finalStderr.',
         'HEALTH CHECK (MANDATORY):',
         '- Confirm the app is up with ONE successful curl (2xx/3xx). Then IMMEDIATELY output your final answer.',
@@ -476,7 +502,7 @@ function buildResumeHint(trail) {
     return lines.filter(Boolean).join('\n');
 }
 
-async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType, onRound, resume, isAborted }) {
+async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted }) {
     const defaultPort = projectType?.defaultPort || 3000;
     // Live-probe the sandbox toolchain so the LLM is told the truth about
     // what is and isn't installed. The previous prompt claimed
@@ -518,6 +544,20 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
     let prevToolSig = '';
     let repeatCount = 0;
     const trail = [];
+    // 泛化防重复：按"语义化命令签名"记录最近一次执行及其成败（agent 换日志文件名也拦得住）。
+    // 同一条核心命令（install/build/start）已跑过且期间没有 edit_file → 阻止重复执行。
+    const ranCmds = new Map();
+    let lastEditRound = -1;
+    let lastNudgeRound = -1;
+    // 阶段 B 内子阶段上报（prepare/install/build/serve/check/fix）：让前端分步展示，
+    // 驱动信号来自每轮实际执行的工具/命令，不影响 verify 逻辑本身。
+    let lastSubstage = null;
+    const reportSubstage = (s, hint) => {
+        if (s && s !== lastSubstage) {
+            lastSubstage = s;
+            if (onSubstage) onSubstage(s, hint);
+        }
+    };
 
     for (let round = roundStart; round < MAX_AGENT_ROUNDS; round++) {
         if (isAborted?.()) {
@@ -550,6 +590,53 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
             continue;
         }
         if (parsed.action === 'tool') {
+            // 子阶段推断：仅用于前端分步展示，不影响 verify 逻辑。优先按工具类型/命令关键字
+            // 归类（prepare=装依赖、build=构建、serve=起服务、check=健康检查、fix=改代码）。
+            if (onSubstage) {
+                const rawCmd = String(parsed.tool === 'run_shell' ? (parsed.args?.cmd || parsed.args?.command || '') : '');
+                const norm = rawCmd.toLowerCase();
+                let sub = 'check';
+                if (parsed.tool === 'edit_file' || parsed.tool === 'write_file' || parsed.tool === 'create_file') sub = 'fix';
+                else if (parsed.tool === 'run_shell') {
+                    if (/(install|add|ci|setup|bundle|composer|apt-get|apk add|go mod download|pip install|pnpm i\b|npm i\b|corepack)/.test(norm)) sub = 'prepare';
+                    else if (/(build|bundle|tsc|transpile|vite build|next build|nuxt build|make\b|gcc|webpack)/.test(norm)) sub = 'build';
+                    else if (/(serve|start|run (dev|prod)|uvicorn|gunicorn|pm2|forever|\.\/bin|nohup|setsid|listen|port)/.test(norm)) sub = 'serve';
+                    else if (/(curl|wget|health|check|nc -z|pgrep|ps aux|ss -t)/.test(norm)) sub = 'check';
+                }
+                reportSubstage(sub, rawCmd.slice(0, 120));
+            }
+            // 记录编辑轮次：edit_file 之后允许重新构建/重装（源已变化，重复执行是合理的）
+            if (parsed.tool === 'edit_file') {
+                lastEditRound = round;
+            }
+            // 泛化防自杀式杀进程：pkill/kill 指向 install/build 类进程时阻止并提示等待
+            if (parsed.tool === 'run_shell' && isKillingOwnInstall(parsed.args?.cmd)) {
+                trail.push({ round, action: 'kill_install', cmd: summarizeArgs(parsed.args) });
+                messages.push({
+                    role: 'user',
+                    content: 'Your command kills an install/build process (npm/pnpm/pip/apt/go …). If that install is still running, KILLING it then re-running wastes the whole install. Wait for it to finish (poll the process or the generated node_modules/site-packages dirs) instead of killing it. Only kill processes you are sure are stuck for minutes.',
+                });
+                continue;
+            }
+            // 泛化命令级去重：同一条核心命令（install/build/start）刚跑过、期间无 edit_file → 阻止重复执行，
+            // 而不是让 agent 换日志文件名再跑一次。成功过的命令还可能是"产物没找到"型循环的根因。
+            let dupSig = null;
+            if (parsed.tool === 'run_shell') {
+                dupSig = normalizeCmdSig(parsed.args?.cmd);
+                const prev = dupSig ? ranCmds.get(dupSig) : null;
+                if (prev && lastEditRound < prev.round) {
+                    trail.push({ round, action: 'repeat_cmd', cmd: dupSig, prevOk: prev.ok });
+                    messages.push({
+                        role: 'user',
+                        content: prev.ok
+                            ? `You already ran \`${dupSig}\` successfully earlier and have not edited any files since. Do NOT re-run it. If its output is missing, read the build/dev script (package.json / scripts/*) to find where it outputs, then serve that; do not rebuild.`
+                            : `You already ran \`${dupSig}\` and it failed, with no file edits since. Re-running the same command won't fix it. Inspect the previous error, fix the root cause (edit_file), or start the app / output final with the real reason.`,
+                    });
+                    prevToolSig = '';
+                    repeatCount = 0;
+                    continue;
+                }
+            }
             const sig = `${parsed.tool}:${JSON.stringify(parsed.args || {})}`;
             if (sig === prevToolSig) {
                 repeatCount++;
@@ -565,6 +652,11 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
                 repeatCount = 0;
             }
             const out = await runTool(parsed.tool, parsed.args || {}, runtimeRef, workspacePath);
+            // 记录命令结果：exit=0 视为成功（用于后续去重提示"已成功过"）
+            if (parsed.tool === 'run_shell' && dupSig) {
+                const m = String(out).match(/^exit=(\d+)/);
+                ranCmds.set(dupSig, { round, ok: !!m && m[1] === '0' });
+            }
             const trailEntry = { round, action: 'tool', tool: parsed.tool, args: summarizeArgs(parsed.args), out: summarize(out) };
             // 保留完整命令，供成功后提取「成功执行轨迹」复用（summarizeArgs 会截断长命令）
             if (parsed.tool === 'run_shell') trailEntry.cmd = String(parsed.args?.cmd || '');
@@ -572,8 +664,17 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
             console.error(`[analyzeVerify] round ${round}: tool=${parsed.tool} args=${JSON.stringify(summarizeArgs(parsed.args))} out_len=${String(out).length}`);
             messages.push({ role: 'user', content: `Tool "${parsed.tool}" result:\n${out}` });
             messages = trimContext(messages);
-            if (checkAborted()) {
-                return { ok: false, source: 'ai', aborted: true, warning: '部署已中止', finalStderr: '', tested: [], trail, messages: trimContext(messages), roundsUsed: round };
+            // 收敛兜底 nudge：命令级去重已处理"重复执行同一条命令"，这里只在 agent 长时间
+            // 没有任何文件修改（即一直空转探查/尝试，而非在修复）时提醒收敛，避免误伤正常诊断。
+            // 阈值放宽到 30 轮且最近 12 轮无 edit_file：复杂 monorepo 前十几轮都在探明结构/构建产物，
+            // 过早 nudge 会让模型提前输出 final 失败，反而比超时更糟。
+            if (round >= roundStart + 30 && round - lastEditRound >= 12 && round - lastNudgeRound >= 8) {
+                lastNudgeRound = round;
+                messages.push({
+                    role: 'user',
+                    content: `You have been working for ${round + 1 - roundStart} rounds and have not edited any file for a long time. If you are stuck repeating exploration/build attempts, STOP: locate the root cause and fix it with edit_file, then rebuild. If the app is up, output final with ok:true and its port; if it cannot be fixed, output final with ok:false and the REAL error in finalStderr.`,
+                });
+                messages = trimContext(messages);
             }
             continue;
         }
@@ -711,11 +812,11 @@ async function runVerifyWithoutLlm({ workspacePath, runtimeRef, plan, projectTyp
     }
 }
 
-async function analyzeProjectVerify({ workspacePath, runtimeRef, plan, projectType, onRound, resume, isAborted }) {
+async function analyzeProjectVerify({ workspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted }) {
     if (!API_KEY || !API_URL) {
         return runVerifyWithoutLlm({ workspacePath, runtimeRef, plan, projectType });
     }
-    return runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType, onRound, resume, isAborted });
+    return runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted });
 }
 
 module.exports = { analyzeProjectVerify, assertAppIsServed };

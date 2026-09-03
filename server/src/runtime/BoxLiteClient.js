@@ -169,7 +169,11 @@ class BoxLiteClient {
     createExecutionAttachWebSocket(sessionName, execId, options = {}) {
         this._refreshFromFile();
         const attachUrl = this.buildExecutionAttachUrl(sessionName, execId, options);
-        const wsUrl = this.base.replace(/^http/, 'ws') + attachUrl;
+        // attachUrl 是含 /preview/<id>/__blink 前缀的相对 pathname；这里只取 origin 再拼接，
+        // 避免 base 本身也带 /preview/<id>/__blink 时前缀重复（嵌套部署 attach 404 的根因）。
+        const baseUrl = new URL(this.base);
+        const wsOrigin = `${baseUrl.protocol === 'https:' ? 'wss:' : 'ws:'}//${baseUrl.host}`;
+        const wsUrl = wsOrigin + attachUrl;
         return new WebSocket(wsUrl, this.authToken ? { headers: this._authHeaders() } : undefined);
     }
 

@@ -832,6 +832,12 @@ async function ensureXensembleBackend({ runtimeRef, workspacePath, preferredPort
         ...envExtra,
         PORT: String(backendPort),
         NODE_ENV: 'production',
+        // 覆盖 .env 里的相对 WORKSPACE_ROOT（./server/data/workspaces）：
+        // 嵌套后端 cwd=/workspace/server，相对路径会解析成 /workspace/server/server/data/workspaces
+        // （双重 server），把嵌套 workspace 数据写进宿主 git worktree → 宿主文件区出现大量变更，
+        // 且嵌套文件区按错误路径读不到 → 变空。这里用绝对路径落到 /workspace/server/data/workspaces
+        // （.gitignore 已忽略 server/data/），宿主 git 干净、嵌套数据可读写。
+        WORKSPACE_ROOT: '/workspace/server/data/workspaces',
         // 生产模式后端默认不自动迁移；嵌套部署无外部 migrate 步骤，强制后端启动时执行迁移。
         RUN_DB_MIGRATE: '1',
         // 嵌套 .env 的 UNIGATEWAY_ADMIN_TOKEN 常为占位符，production 启动会抛错退出；
@@ -858,6 +864,23 @@ async function ensureXensembleBackend({ runtimeRef, workspacePath, preferredPort
     } catch (e) {
         if (onLog) onLog(`nested backend spawn failed: ${e.message}`);
         return { ok: false, reason: `backend spawn failed: ${e.message}` };
+    }
+    // 修复沙箱内 git worktree 指针：worktree 的 .git 文件指向宿主绝对路径（沙箱内不可达），
+    // 嵌套后端在沙箱内跑 git（status/list 等）会报 "not a git repository" → 嵌套文件区变空。
+    // /workspace.git 是挂载进来的主仓库 .git，改指针指向其 worktrees/<wt> 即可让沙箱内 git 可用。
+    try {
+        await runtime.exec.exec('sh', ['-c',
+            `if [ -f /workspace/.git ]; then ` +
+            `GITDIR=$(cat /workspace/.git | sed 's/^gitdir: //'); ` +
+            `if [ ! -d "$GITDIR" ] && [ -d /workspace.git/worktrees ]; then ` +
+            `WTNAME=$(basename "$GITDIR"); ` +
+            `if [ -d "/workspace.git/worktrees/$WTNAME" ]; then ` +
+            `echo "gitdir: /workspace.git/worktrees/$WTNAME" > /workspace/.git; ` +
+            `echo "/workspace/.git" > "/workspace.git/worktrees/$WTNAME/gitdir" 2>/dev/null || true; ` +
+            `fi; fi; fi`,
+        ], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+    } catch (e) {
+        if (onLog) onLog(`nested worktree git pointer fix failed (non-fatal): ${e.message}`);
     }
     // 6) 轮询健康检查（后端冷启动 + 建表，最多 60s）
     for (let i = 0; i < 60; i++) {
@@ -1149,7 +1172,15 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
             // 先等阶段写库完成（串行队列），再落终态，避免终态与阶段乱序
             await reportQueue.catch(() => {});
             db.update(schema.deployments)
-                .set({ status: finalStatus, updatedAt: Date.now() })
+                .set({
+                    status: finalStatus,
+                    updatedAt: Date.now(),
+                    // 超时中止落 last_error_*，前端据此区分"超时"与"用户中止"（均 status=stopped）
+                    ...(result?.code === 'deploy_timeout' ? {
+                        lastErrorCode: 'deploy_timeout',
+                        lastErrorMessage: String(result.error || '部署验证超时').slice(0, 500),
+                    } : {}),
+                })
                 .where(eq(schema.deployments.id, deployRef.id))
                 .catch((e) => console.error('[twoStage] persist deploy final:', e.message));
         }
@@ -1357,6 +1388,18 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             await savePlanCache(project.id, { steps: plan.steps, configFiles: plan.configFiles, source: plan.source, context: { tree, fingerprint: planFingerprint } });
         }
     }
+    // 阶段 B 子阶段心跳：长任务（单条 run_shell 可能跑几十秒）期间周期复报当前子阶段，
+    // 让前端进度条保持"进行中"而非停在旧步骤。纯上报，不改 verify 逻辑。
+    let currentSubstage = null;
+    let lastSubstageAt = 0;
+    const substageHeartbeat = setInterval(() => {
+        if (!currentSubstage) return;
+        // 子阶段近 10s 无新变化才复报，避免高频刷屏
+        if (Date.now() - lastSubstageAt < 10000) return;
+        lastSubstageAt = Date.now();
+        report({ stage: 'B', substage: currentSubstage, message: `阶段 2 · ${currentSubstage}` });
+    }, 5000);
+
     const verify = await withTimeout(
         analyzeProjectVerify({
             workspacePath: wsPath,
@@ -1366,11 +1409,19 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             projectType: detected,
             resume: resumeState ? { messages: resumeState.messages, trail: resumeState.trail, roundsUsed: resumeState.roundsUsed } : undefined,
             isAborted: () => isAborted(),
+            // 阶段 B 子阶段透传：前端分步展示（prepare/build/serve/check/fix）。
+            // 不改 verify 逻辑，仅把 verify 侧推断的子阶段转发为 SSE progress。
+            onSubstage: (substage, hint) => {
+                currentSubstage = substage;
+                lastSubstageAt = Date.now();
+                report({ stage: 'B', substage, message: hint || `阶段 2 · ${substage}` });
+            },
         }),
         DEPLOY_TOTAL_TIMEOUT_MS,
         {
             ok: false,
             aborted: true,
+            code: 'deploy_timeout',
             error: `部署验证超时（超过 ${Math.round(DEPLOY_TOTAL_TIMEOUT_MS / 60000)} 分钟）已自动中止`,
             warning: '部署验证卡住超时，已自动中止。常见原因是沙箱内启动服务的命令未后台化（缺少 & / nohup ... &），run_shell 一直等待。',
         },
@@ -1380,8 +1431,9 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             console.error(`[twoStage] deploy total timeout (${Math.round(DEPLOY_TOTAL_TIMEOUT_MS / 60000)}min), cancelling verify agent project=${project.id}`);
         },
     );
+    clearInterval(substageHeartbeat);
     if (verify.aborted) {
-        return { ok: false, aborted: true, error: verify.error || '部署已中止', elapsedMs: Date.now() - startedAt };
+        return { ok: false, aborted: true, code: verify.code || undefined, error: verify.error || '部署已中止', elapsedMs: Date.now() - startedAt };
     }
     report({
         stage: 'B',
@@ -1502,9 +1554,31 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         // 让前端相对 URL 自动带前缀，避免资源路径脱离 preview 子路径。
         const staticBase = `/preview/${deploymentId}/`;
         if (mode !== 'live' && xensBackend) {
-            port = xensBackend.port;
+            // xensemble 静态回退：后端单端口全栈（serve web/dist + /api）。dist 是 verify 阶段
+            // 构建的，其 VITE_API_BASE 常被烘焙为沙箱内地址（如 http://127.0.0.1:3888）——
+            // 浏览器访问时 127.0.0.1 解析为宿主本机 → 打到宿主后端 401。必须套 rewrite proxy
+            // 注入 <base> + 运行时 URL 改写脚本，把这些绝对地址改写成 /preview/<id>/ 相对路径，
+            // 否则直接隧道后端端口，嵌套前端所有 API 请求都会 401（新建 session 卡死）。
+            const proxyPort = (await getGuestFreePort(ref)) || 0;
+            if (proxyPort) {
+                const proxyOk = await startRewriteProxy({
+                    runtimeRef: ref, workspacePath: wsPath,
+                    upstreamPort: xensBackend.port, listenPort: proxyPort,
+                    base: staticBase,
+                    onLog: (m) => console.error(`[twoStage] ${m}`),
+                });
+                if (proxyOk) {
+                    port = proxyPort;
+                    console.error(`[twoStage] preview: xensemble rewrite proxy :${proxyPort} -> backend :${xensBackend.port}`);
+                } else {
+                    port = xensBackend.port;
+                    console.error(`[twoStage] preview: xensemble rewrite proxy failed, tunneling backend :${xensBackend.port} directly`);
+                }
+            } else {
+                port = xensBackend.port;
+                console.error(`[twoStage] preview: no free guest port for xensemble rewrite proxy, tunneling backend :${xensBackend.port} directly`);
+            }
             served = { ok: true };
-            console.error(`[twoStage] preview: xensemble live 未启用，回退后端单端口全栈 :${port} (mode=static)`);
         } else if (mode !== 'live' && verify?.appPort) {
             const proxyPort = (await getGuestFreePort(ref)) || 0;
             if (proxyPort) {

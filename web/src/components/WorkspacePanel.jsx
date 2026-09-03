@@ -402,16 +402,13 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
     setMainTab((current) => (current === key ? 'files' : current));
   }, []);
 
-  // 新创建 workspace / session 时调用：只保留 Files + Changes 两个 tab，回到文件界面
+  // 新创建 workspace / session 时调用：只保留 Files + Changes 两个 tab，回到文件界面。
+  // 注意：不删 sessionStorage。useCallback([]) 闭包捕获的是组件首次挂载时的 sessionId，
+  // 用它 removeItem 会误删"正在部署的其他 session"的 tab 状态（部署页切走再切回就消失）。
+  // 新 session 本身没有 storage 记录，sessionId 切换时 useEffect 会自然恢复为空 → files。
   const resetTabs = useCallback(() => {
     setExtraTabs([]);
     setMainTab('files');
-    try {
-      if (sessionId) {
-        sessionStorage.removeItem(`xe_main_tab_${sessionId}`);
-        sessionStorage.removeItem(`xe_extra_tabs_${sessionId}`);
-      }
-    } catch { /* ignore */ }
   }, []);
 
   // 暴露给父组件：程序化创建/切换/关闭 tab（一键部署用于创建 Terminal/Preview/Deploy tab）

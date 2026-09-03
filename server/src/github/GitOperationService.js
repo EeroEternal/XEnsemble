@@ -134,10 +134,19 @@ class GitOperationService {
 
         try {
             const exec = this._execFn();
+            const env = { ...(credentials ? credentials.env : {}) };
+            // 沙箱内 git：worktree 的 .git 指针指向宿主绝对路径（沙箱内不可达），
+            // 但 /workspace.git 已挂载进沙箱（= 宿主 .git）、/workspace = worktree。
+            // 用 GIT_DIR/GIT_WORK_TREE 显式指到沙箱路径，让沙箱内 git 不依赖 .git 指针；
+            // 宿主侧指针保持宿主路径，宿主 git（--git-dir/--work-tree）不受影响。
+            if (this._runtimeId) {
+                env.GIT_DIR = `/workspace.git/worktrees/${this._runtimeId}`;
+                env.GIT_WORK_TREE = '/workspace';
+            }
             const result = await exec(
                 'git',
                 args,
-                credentials ? credentials.env : {},
+                env,
                 { cwd: workspacePath, runtimeRef, timeoutMs: 120_000, ...options },
             );
 
@@ -213,9 +222,12 @@ class GitOperationService {
             const { stdout } = await this._execGit(project, ['rev-parse', '--abbrev-ref', 'origin/HEAD']);
             const remoteRef = stdout.trim();
             localBranch = remoteRef.replace(/^origin\//, '');
-            await this._execGit(project, ['checkout', '-b', localBranch, remoteRef]);
+            // -f：clone 前 ensureAgentBootstrap 可能预置了 untracked 的 .gitignore / AGENTS.md
+            // （含 .agents/、.xensemble/ 平台元数据条目），checkout 会因"untracked 文件将被覆盖"失败。
+            // 克隆阶段工作树无本地修改，强制覆盖预置文件即可让远程版本落地。
+            await this._execGit(project, ['checkout', '-f', '-b', localBranch, remoteRef]);
         } else {
-            await this._execGit(project, ['checkout', '-b', localBranch, `origin/${localBranch}`]);
+            await this._execGit(project, ['checkout', '-f', '-b', localBranch, `origin/${localBranch}`]);
         }
 
         // Set local git config so agent-side `git commit` inside the VM works

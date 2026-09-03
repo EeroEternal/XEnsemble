@@ -55,13 +55,16 @@
     "hint": "点击右上角「Deploy」按钮开始一键部署"
   },
   "steps": {
-    "analyze": "阶段 1：分析项目",
-    "build": "阶段 2：部署测试"
-  },
-  "running": {
-    "opening_preview": "正在开启预览…"
+    "analyze": "分析项目",
+    "prepare": "安装依赖",
+    "build": "构建产物",
+    "serve": "启动服务",
+    "check": "健康检查",
+    "fix": "修复问题",
+    "preview": "开启预览"
   },
   "aborted": "部署已中止",
+  "timeout": "部署超时",
   "failed": {
     "title": "部署失败",
     "quota_title": "已达并发部署上限",
@@ -102,7 +105,8 @@
   },
   "toast": {
     "finished": "部署完成",
-    "aborted": "部署已中止",
+  "aborted": "部署已中止",
+  "timeout": "部署超时",
     "failed": "部署失败",
     "finished_with": "「{{workspace}}」的「{{session}}」部署完成",
     "aborted_with": "「{{workspace}}」的「{{session}}」部署已中止",

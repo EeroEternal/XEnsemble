@@ -1,5 +1,6 @@
 const httpProxy = require('http-proxy');
 const path = require('path');
+const fs = require('fs');
 const { Readable } = require('stream');
 const { eq, and, sql } = require('drizzle-orm');
 const deploymentService = require('../deployments/DeploymentService');
@@ -232,6 +233,17 @@ function stripBlinkPrefix(url, deploymentId) {
     const qIndex = url.indexOf('?');
     const pathname = qIndex >= 0 ? url.slice(0, qIndex) : url;
     const search = qIndex >= 0 ? url.slice(qIndex + 1) : '';
+    // 兜底：嵌套部署里沙箱 BoxLiteClient 可能把 /preview/<id>/__blink 前缀重复拼接
+    // （base 带路径前缀 + attach pathname 也带），连续剥掉重复的同一前缀。
+    // 用锚定 ^ 匹配，一次 replace 消费全部连续重复前缀；剥离后直接返回，不再走下方
+    // "再剥一次"分支（否则剥离结果不以 prefix 开头 → 误落 null → __blink 被当普通 preview）。
+    const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`^(?:${escapedPrefix})+(?=/|$)`);
+    const stripped = pathname.replace(re, '');
+    if (stripped !== pathname) {
+        return search ? `${stripped || '/'}?${search}` : (stripped || '/');
+    }
+    // 无重复前缀的普通 __blink 路径
     let path = pathname;
     if (path === prefix) {
         path = '/';
@@ -342,7 +354,22 @@ async function handleBlinkProxy(request, reply, deploymentId, blinkPath) {
                 const body = JSON.parse(raw.toString('utf8'));
                 if (body && Array.isArray(body.volumes)) {
                     for (const v of body.volumes) {
-                        if (v && v.host_path) v.host_path = rewriteVolumeHostPath(v.host_path, hostWorkspace);
+                        if (v && v.host_path) {
+                            const rewritten = rewriteVolumeHostPath(v.host_path, hostWorkspace);
+                            // blink-server 要求 volume host_path 必须已存在（vmm_spawn 前 stat）。
+                            // 嵌套部署时 guest 端可能未建 runtime 目录（如 git worktree add 失败），
+                            // 宿主侧兜底 mkdir，避免 openSession 因目录缺失返回 500 → 前端 60s 超时。
+                            // 仅当重写后仍在部署项目目录树内才补建（绝对路径保持原样的情况跳过，
+                            // 防止 guest 用任意绝对路径在宿主乱建目录）。
+                            const insideWorkspace = rewritten === hostWorkspace
+                                || rewritten.startsWith(hostWorkspace + path.sep);
+                            if (insideWorkspace) {
+                                try {
+                                    fs.mkdirSync(rewritten, { recursive: true });
+                                } catch { /* 宿主只读/无权限时忽略，blink 会给出真实错误 */ }
+                            }
+                            v.host_path = rewritten;
+                        }
                     }
                 }
                 // 镜像名改写：裸 xensemble/... → <registry>/xensemble/...（旧沙箱代码无本地 registry 配置，
@@ -546,14 +573,25 @@ async function registerPreviewGateway(fastify) {
     // 注意：/preview/* 的 HTTP 转发已全部由上面的 onRequest hook 处理（hijack 在 body 解析前，
     // 保证 POST body 透传），这里不再注册 /preview/:deploymentId 路由，避免与 onRequest 双重处理。
 
-    fastify.server.on('upgrade', async (req, socket, head) => {
+    // __blink / preview WebSocket 由本网关优先处理。
+    // 关键：@fastify/websocket(server.js 早于本 gateway 注册)自带 upgrade 监听，对"未注册 WS
+    // 路由"的 upgrade 会走 fastify 路由 → 无匹配 → 返回 404。若不处理，guest 的 __blink
+    // attach WS 会在插件层被 404 掉（嵌套 session 创建时 exec/attach 全挂，表现为 60~120s 超时）。
+    // 因此把插件监听器包装一层：本网关已处理的请求（打 __previewGatewayHandled 标记）直接跳过。
+    const gatewayUpgrade = async (req, socket, head) => {
         try {
             // __blink WebSocket：沙箱后端与宿主 blink-server 的执行 attach 通道。
             const blinkWsMatch = req.url?.match(/^\/preview\/([^/?]+)\/__blink(?:\/.*)?$/);
             if (blinkWsMatch) {
                 const deploymentId = blinkWsMatch[1];
+                // 立即置标记（await 之前）：gatewayUpgrade 是 async，await deploymentIsRunning()
+                // 期间事件循环会先跑 @fastify/websocket 插件的 upgrade 监听器（已包装成"标记跳过"）。
+                // 若此处不抢先标记，插件会把 __blink attach 当未注册 WS 路由 → fastify 404，
+                // 表现为嵌套 session 创建时 exec/attach 秒 404（"Unexpected server response: 404"）。
+                req.__previewGatewayHandled = true;
                 const token = req.headers['x-blink-token'];
                 if (!token || !verifyBlinkToken(String(token), deploymentId)) {
+                    console.error(`[preview-gateway] blink WS 401 dep=${deploymentId} url=${req.url} hasToken=${!!token}`);
                     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
                     socket.destroy();
                     return;
@@ -564,6 +602,7 @@ async function registerPreviewGateway(fastify) {
                     return;
                 }
                 const blinkPath = stripBlinkPrefix(req.url, deploymentId);
+                console.error(`[preview-gateway] blink WS dep=${deploymentId} path=${blinkPath} url=${req.url}`);
                 if (blinkPath === null) {
                     socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
                     socket.destroy();
@@ -595,6 +634,10 @@ async function registerPreviewGateway(fastify) {
             }
             if (!deploymentId) return;
 
+            // 立即置标记（await 之前）：与 __blink 分支同理，避免 await resolveDeployment 期间
+            // @fastify/websocket 插件监听器抢先处理未注册 WS 路由 → fastify 404。
+            req.__previewGatewayHandled = true;
+
             // 与 HTTP 一致：running 的 preview 资源（含 HMR/终端 WS）直接透传。
             // HMR WS 的 token 是 vite 自带的（?token=<hmr>），不是 preview_token；
             // 且 SPA 跳到绝对路由后 Referer 丢失 preview_token，走 resolveDeployment 会 401。
@@ -622,6 +665,23 @@ async function registerPreviewGateway(fastify) {
                 socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
                 socket.destroy();
             }
+        }
+    };
+    // 注册顺序关键：prepend 本网关监听，再把既有（插件的）监听器包装为跳过已处理请求。
+    // 必须在 onReady 里做：@fastify/websocket 的 upgrade 监听是在插件函数体里
+    // （ready 阶段）才注册到 fastify.server，若在 registerPreviewGateway 调用时捕获
+    // existingUpgradeListeners 会是空数组，包装落空 → 插件监听仍最先触发，把未注册 WS
+    // 路由（含 __blink attach）走 fastify 路由返回 404，嵌套 session 创建时 exec/attach
+    // 全挂（表现为 60~120s 超时）。
+    fastify.addHook('onReady', () => {
+        const existingUpgradeListeners = fastify.server.listeners('upgrade');
+        fastify.server.removeAllListeners('upgrade');
+        fastify.server.prependListener('upgrade', gatewayUpgrade);
+        for (const listener of existingUpgradeListeners) {
+            fastify.server.on('upgrade', (req, socket, head) => {
+                if (req && req.__previewGatewayHandled) return;
+                listener.call(fastify.server, req, socket, head);
+            });
         }
     });
 }

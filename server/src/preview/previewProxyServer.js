@@ -115,11 +115,17 @@ const PREVIEW_RUNTIME_SCRIPT = `<script>
 (function () {
   if (window.__xensemblePreviewPatched) return; window.__xensemblePreviewPatched = true;
   var localRe = /^https?:\\/\\/(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\])(:\\d+)?/i;
+  // 当前页面若挂在 /preview/<id>/ 子路径下，改写时保留该前缀（如 /preview/<id>/api/...），
+  // 否则浏览器把 http://127.0.0.1:3888/api/... 直接打向宿主根 → 401。
+  function previewBase() {
+    var m = /^\\/preview\\/[^/?#]+\\//.exec(location.pathname);
+    return m ? m[0] : '';
+  }
   function strip(url) {
     if (typeof url !== 'string') return url;
     try {
       var u = new URL(url, location.href);
-      if (localRe.test(u.origin)) return u.pathname + u.search + u.hash;
+      if (localRe.test(u.origin)) return previewBase() + u.pathname.replace(/^\\//, '') + u.search + u.hash;
     } catch (e) {}
     return url;
   }
