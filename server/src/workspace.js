@@ -18,6 +18,25 @@ function worktreeDir(userId, projectId, runtimeId) {
     return path.join(WORKSPACE_ROOT, userId, `${projectId}.wt`, runtimeId);
 }
 
+/**
+ * 0026（技能卷）：用户级技能卷根目录（跨项目共享，不落工程 git 仓库）。
+ * 布局：<WORKSPACE_ROOT>/<userId>/skills/home/<agent 的 HOME 相对路径>/
+ * 与沙箱 /root/<HOME相对路径> 一一对应，BoxLite 按子路径逐个挂载。
+ */
+function skillsDir(userId) {
+    return path.join(WORKSPACE_ROOT, userId, 'skills');
+}
+
+/** 技能卷中模拟沙箱 HOME 的根目录 */
+function userSkillHome(userId) {
+    return path.join(skillsDir(userId), 'home');
+}
+
+/** 某用户技能卷内、对应沙箱 HOME 相对路径的宿主目录（如 .claude/skills） */
+function userSkillPath(userId, homeRel) {
+    return path.join(userSkillHome(userId), String(homeRel || '').replace(/^\/+/, ''));
+}
+
 function createProjectDirectory(userId, projectId) {
     ensureWorkspaceRoot();
     const dir = projectDir(userId, projectId);
@@ -109,6 +128,9 @@ module.exports = {
     ensureWorkspaceRoot,
     projectDir,
     worktreeDir,
+    skillsDir,
+    userSkillHome,
+    userSkillPath,
     createProjectDirectory,
     resolveSafePath,
 };

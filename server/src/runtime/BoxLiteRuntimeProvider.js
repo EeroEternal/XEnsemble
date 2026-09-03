@@ -15,6 +15,26 @@ function buildWorkspaceMountKey(hostPath, guestPath) {
     return `${hostPath}=>${guestPath}`;
 }
 
+/**
+ * 0026（技能卷）：构造某用户的技能卷挂载列表。
+ * 把所有已注册 Agent 的「用户级技能目录」（HOME 相对路径，如 .claude/skills）去重后，
+ * 逐个映射为 host=<WORKSPACE_ROOT>/<userId>/skills/home/<dir> → guest=/root/<dir>。
+ * host 目录不存在时递归创建（BoxLite 要求 host 目录存在）。
+ */
+function buildSkillsVolumes(userId) {
+    const { DEFAULT_AGENTS } = require('../agents/defaultAgents');
+    const dirs = [...new Set(DEFAULT_AGENTS.flatMap((a) => a.userSkillDirs || []))];
+    return dirs.map((dir) => {
+        const hostPath = workspace.userSkillPath(userId, dir);
+        try { fs.mkdirSync(hostPath, { recursive: true }); } catch { /* best-effort */ }
+        return {
+            host_path: hostPath,
+            guest_path: `/root/${dir}`,
+            read_only: false,
+        };
+    });
+}
+
 function resolveAgentProbeCommand(agentId) {
     if (!agentId) return null;
     const { DEFAULT_AGENTS } = require('../agents/defaultAgents');
@@ -63,12 +83,20 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
             // concurrent access across worktrees that share the same .git dir.
             read_only: false,
         } : null;
+        // 0026（技能卷）：用户级技能目录挂载进沙箱 HOME（/root/<userSkillDir>）。
+        // 技能卷位于宿主机 WORKSPACE_ROOT/<userId>/skills/home/，与工程 git 仓库物理隔离，
+        // 不污染用户代码库，也不覆盖用户自建技能。host 目录不存在时由调用方 mkdir -p。
+        const skillsVolumes = buildSkillsVolumes(project.userId);
+        const mountKey = buildWorkspaceMountKey(hostPath, guestPath)
+            + (gitVolume ? `+${gitVolume.guest_path}` : '')
+            + (skillsVolumes.length ? `+skills:${skillsVolumes.map((v) => v.guest_path).join(',')}` : '');
         return {
             host_path: hostPath,
             guest_path: guestPath,
             read_only: false,
-            mountKey: buildWorkspaceMountKey(hostPath, guestPath) + (gitVolume ? `+${gitVolume.guest_path}` : ''),
+            mountKey,
             gitVolume,
+            skillsVolumes,
         };
     }
 
@@ -277,6 +305,8 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
                     guest_path: workspaceVolume.gitVolume.guest_path,
                     read_only: workspaceVolume.gitVolume.read_only,
                 }] : []),
+                // 0026（技能卷）：用户级技能目录挂载进沙箱 HOME，Agent 原生发现技能
+                ...(workspaceVolume.skillsVolumes || []),
             ],
             network: resolveBoxliteSessionNetwork(opts.network),
             resources: {
