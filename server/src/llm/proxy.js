@@ -270,8 +270,25 @@ function extractUserMessage(bodyBuffer) {
         for (let i = messages.length - 1; i >= 0; i--) {
             const m = messages[i];
             if (!m || m.role !== 'user') continue;
-            const content = typeof m.content === 'string' ? m.content.trim() : '';
-            if (content) return content;
+            // OpenAI Chat Completions: content is a plain string.
+            if (typeof m.content === 'string') {
+                const t = m.content.trim();
+                if (t) return t;
+                continue;
+            }
+            // Anthropic Messages: content is an array of blocks.
+            // Pull text blocks; skip tool_result blocks (those are echoed tool outputs,
+            // not user prompts).
+            if (Array.isArray(m.content)) {
+                const parts = [];
+                for (const block of m.content) {
+                    if (block?.type === 'text' && typeof block.text === 'string') {
+                        parts.push(block.text);
+                    }
+                }
+                const joined = parts.join('\n').trim();
+                if (joined) return joined;
+            }
         }
         return null;
     } catch {
@@ -287,7 +304,43 @@ function extractAssistantMessage(bodyBuffer, contentType) {
     if (!Buffer.isBuffer(bodyBuffer) || bodyBuffer.length === 0) return '';
     const isStream = typeof contentType === 'string' && contentType.includes('text/event-stream');
     if (isStream) {
+        // Detect the protocol by sampling the first parsed SSE event.
+        // OpenAI streaming: `data: {"choices":[{"delta":{"content":"…"}}]}` on a single `data:` line.
+        // Anthropic streaming: multi-line events (`event: <type>` then `data: {...}`), or
+        //   a bare JSON object on a `data:` line whose `type` is "content_block_delta" etc.
         const lines = bodyBuffer.toString('utf8').split('\n');
+        let isAnthropic = false;
+        for (const line of lines) {
+            const t = line.trim();
+            if (!t.startsWith('data:')) continue;
+            const data = t.slice(5).trim();
+            if (!data || data === '[DONE]') continue;
+            try {
+                const obj = JSON.parse(data);
+                if (obj?.type === 'content_block_delta' || obj?.type === 'message_start' || obj?.type === 'content_block_start') {
+                    isAnthropic = true;
+                    break;
+                }
+            } catch { /* partial line */ }
+        }
+        if (isAnthropic) {
+            const parts = [];
+            for (const line of lines) {
+                const t = line.trim();
+                if (!t.startsWith('data:')) continue;
+                const data = t.slice(5).trim();
+                if (!data || data === '[DONE]') continue;
+                try {
+                    const obj = JSON.parse(data);
+                    if (obj?.type === 'content_block_delta' && obj?.delta?.type === 'text_delta') {
+                        const piece = obj.delta.text;
+                        if (typeof piece === 'string') parts.push(piece);
+                    }
+                } catch { /* partial line */ }
+            }
+            return parts.join('').trim();
+        }
+        // OpenAI Chat Completions streaming.
         const parts = [];
         for (const line of lines) {
             const trimmed = line.trim();
@@ -302,8 +355,20 @@ function extractAssistantMessage(bodyBuffer, contentType) {
         }
         return parts.join('').trim();
     }
+    // Non-streaming response.
     try {
         const obj = JSON.parse(bodyBuffer.toString('utf8'));
+        // Anthropic Messages: obj.content is [{type:'text', text:'…'}, {type:'tool_use', ...}].
+        if (Array.isArray(obj?.content)) {
+            const parts = [];
+            for (const block of obj.content) {
+                if (block?.type === 'text' && typeof block.text === 'string') {
+                    parts.push(block.text);
+                }
+            }
+            return parts.join('').trim();
+        }
+        // OpenAI Chat Completions: obj.choices[0].message.content.
         const content = obj?.choices?.[0]?.message?.content;
         return typeof content === 'string' ? content.trim() : '';
     } catch {
@@ -317,12 +382,71 @@ function extractAssistantMessage(bodyBuffer, contentType) {
  * same call id spans multiple fragments that must be concatenated) and
  * non-streaming JSON.
  */
+/**
+ * Extract tool_calls from an upstream chat/completions response body.
+ * Returns [{ id, name, args }]. Handles both streaming (SSE deltas, where the
+ * same call id spans multiple fragments that must be concatenated) and
+ * non-streaming JSON. Supports OpenAI Chat Completions and Anthropic Messages
+ * (where tool_use blocks carry `input` as a JSON object, streamed as
+ * `input_json_delta` partial_json fragments).
+ */
 function extractToolCalls(bodyBuffer, contentType) {
     if (!Buffer.isBuffer(bodyBuffer) || bodyBuffer.length === 0) return [];
     const isStream = typeof contentType === 'string' && contentType.includes('text/event-stream');
     if (isStream) {
-        const byIndex = new Map(); // index -> { id, name, args }
+        // Detect Anthropic streaming vs OpenAI streaming.
         const lines = bodyBuffer.toString('utf8').split('\n');
+        let isAnthropic = false;
+        for (const line of lines) {
+            const t = line.trim();
+            if (!t.startsWith('data:')) continue;
+            const data = t.slice(5).trim();
+            if (!data || data === '[DONE]') continue;
+            try {
+                const obj = JSON.parse(data);
+                if (obj?.type === 'content_block_start' || obj?.type === 'content_block_delta' || obj?.type === 'message_start') {
+                    isAnthropic = true;
+                    break;
+                }
+            } catch { /* partial line */ }
+        }
+        if (isAnthropic) {
+            // Track tool_use blocks by their content_block index.
+            // id/name come from content_block_start; args accumulate from
+            // input_json_delta.partial_json fragments.
+            const blocks = new Map(); // index -> { id, name, args }
+            for (const line of lines) {
+                const t = line.trim();
+                if (!t.startsWith('data:')) continue;
+                const data = t.slice(5).trim();
+                if (!data || data === '[DONE]') continue;
+                try {
+                    const obj = JSON.parse(data);
+                    if (obj?.type === 'content_block_start') {
+                        const cb = obj?.content_block;
+                        if (cb?.type === 'tool_use') {
+                            const idx = obj?.index ?? 0;
+                            blocks.set(idx, {
+                                id: cb.id || null,
+                                name: cb.name || '',
+                                args: '',
+                            });
+                        }
+                    } else if (obj?.type === 'content_block_delta') {
+                        const idx = obj?.index ?? 0;
+                        const piece = obj?.delta?.partial_json;
+                        if (typeof piece === 'string' && blocks.has(idx)) {
+                            blocks.get(idx).args += piece;
+                        }
+                    }
+                } catch { /* partial line */ }
+            }
+            return [...blocks.values()]
+                .filter((c) => c.name)
+                .map((c) => ({ id: c.id || null, name: c.name, args: c.args }));
+        }
+        // OpenAI Chat Completions streaming.
+        const byIndex = new Map(); // index -> { id, name, args }
         for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed.startsWith('data:')) continue;
@@ -346,8 +470,23 @@ function extractToolCalls(bodyBuffer, contentType) {
             .filter((c) => c.name)
             .map((c) => ({ id: c.id || null, name: c.name, args: c.args }));
     }
+    // Non-streaming response.
     try {
         const obj = JSON.parse(bodyBuffer.toString('utf8'));
+        // Anthropic Messages: obj.content = [{type:'tool_use', id, name, input}].
+        if (Array.isArray(obj?.content)) {
+            const calls = [];
+            for (const block of obj.content) {
+                if (block?.type !== 'tool_use' || !block.name) continue;
+                let args = '';
+                if (block.input != null) {
+                    args = typeof block.input === 'string' ? block.input : JSON.stringify(block.input);
+                }
+                calls.push({ id: block.id || null, name: block.name, args });
+            }
+            return calls;
+        }
+        // OpenAI Chat Completions.
         const calls = obj?.choices?.[0]?.message?.tool_calls;
         if (!Array.isArray(calls)) return [];
         return calls
@@ -367,19 +506,60 @@ function extractToolCalls(bodyBuffer, contentType) {
  * body. Returns [{ callId, name, content }]. Tool results are messages with
  * role:'tool' — the agent echoes them after executing a tool call.
  */
+/**
+ * Extract tool_result messages from an OpenAI/Anthropic-style chat request
+ * body. Returns [{ callId, name, content }].
+ *
+ * OpenAI: messages[].role='tool' with tool_call_id + content as string.
+ * Anthropic Messages: tool results are inlined as `tool_result` blocks inside
+ * a `role: 'user'` message's content array. Each block carries tool_use_id
+ * and a content payload (string OR an array of content blocks).
+ */
 function extractToolResults(bodyBuffer) {
     if (!Buffer.isBuffer(bodyBuffer) || bodyBuffer.length === 0) return [];
     try {
         const parsed = JSON.parse(bodyBuffer.toString('utf8'));
         const messages = parsed?.messages;
         if (!Array.isArray(messages)) return [];
-        return messages
-            .filter((m) => m?.role === 'tool' && (m.tool_call_id || m.name || m.content))
-            .map((m) => ({
-                callId: m.tool_call_id || null,
-                name: typeof m.name === 'string' ? m.name : '',
-                content: typeof m.content === 'string' ? m.content : '',
-            }));
+        const results = [];
+        for (const m of messages) {
+            if (!m) continue;
+            // OpenAI: standalone role:'tool' message.
+            if (m.role === 'tool' && (m.tool_call_id || m.name || m.content)) {
+                results.push({
+                    callId: m.tool_call_id || null,
+                    name: typeof m.name === 'string' ? m.name : '',
+                    content: typeof m.content === 'string' ? m.content : '',
+                });
+                continue;
+            }
+            // Anthropic: tool_result blocks inside a user message.
+            if (m.role === 'user' && Array.isArray(m.content)) {
+                for (const block of m.content) {
+                    if (!block || block.type !== 'tool_result') continue;
+                    let content = '';
+                    if (typeof block.content === 'string') {
+                        content = block.content;
+                    } else if (Array.isArray(block.content)) {
+                        // Anthropic tool result content can be a list of
+                        // text blocks (e.g. for image / document references).
+                        const parts = [];
+                        for (const sub of block.content) {
+                            if (sub?.type === 'text' && typeof sub.text === 'string') {
+                                parts.push(sub.text);
+                            }
+                        }
+                        content = parts.join('\n');
+                    }
+                    results.push({
+                        callId: block.tool_use_id || null,
+                        name: '', // Anthropic does not echo the tool name in the result block.
+                        content,
+                    });
+                }
+            }
+        }
+        return results;
     } catch {
         return [];
     }

@@ -6,6 +6,13 @@ import {
 import { apiFetch, getAccessToken, getWsUrl } from '../../lib/api';
 import { consoleInputClass, consoleButtonFocusClass } from '../../lib/consoleTokens';
 
+// Drop the "Agent is thinking…" marker if the server has been silent for this
+// long while we're not actively sending. Catches stalled sessions (network
+// blip, boxlite hiccup, LLM proxy error) where the WS connection is still
+// alive but no more chat_events will ever arrive — without this the dialog
+// view latches the spinner on the last tool/user event.
+const THINKING_IDLE_TIMEOUT_MS = 60000;
+
 /**
  * Devin/Cursor-style dialog view for a running agent session.
  *
@@ -171,6 +178,16 @@ export default function ChatView({ sessionId, onSessionEnd }) {
   // still alive, so ended stays false).
   const stopAtRef = useRef(0);
   const [lastEventAt, setLastEventAt] = useState(0);
+  // 1s tick used to age lastEventAt — without this, isThinking can latch on
+  // forever when the server stops emitting chat_events but the WS connection
+  // is still alive (e.g. the agent session went silent but boxlite didn't
+  // report a clean exit; the agent view shows no output while the dialog
+  // view keeps flashing "Agent is thinking…").
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
   const scrollbarTrackRef = useRef(null);
 
   // Auto-scroll to bottom on new messages.
@@ -288,8 +305,14 @@ export default function ChatView({ sessionId, onSessionEnd }) {
     // chat visibly settles; any new chat_event clears the grace window.
     if (stopAtRef.current && Date.now() - stopAtRef.current < 1500) return false;
     if (lastEventAt && stopAtRef.current && lastEventAt >= stopAtRef.current) return false;
+    // Silent-session fallback: if the server has been quiet for a while and
+    // we're not actively sending, the agent is effectively idle even though
+    // the last item is a user prompt or tool event. Without this, a stalled
+    // agent (network blip, boxlite hiccup, LLM proxy error) makes the
+    // dialog view flash "Agent is thinking…" forever.
+    if (lastEventAt && nowTick - lastEventAt > THINKING_IDLE_TIMEOUT_MS) return false;
     return true;
-  }, [connected, ended, sending, renderedItems, lastEventAt]);
+  }, [connected, ended, sending, renderedItems, lastEventAt, nowTick]);
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
       {/* Message list */}
