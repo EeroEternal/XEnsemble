@@ -23,7 +23,9 @@ function getFreePort() {
     });
 }
 
-function getHostIp() {
+function getTunnelHostIp() {
+    const explicit = process.env.TUNNEL_HOST_IP?.trim();
+    if (explicit) return explicit;
     const publicUrl = process.env.CONTROL_PLANE_PUBLIC_URL?.trim();
     if (publicUrl) {
         try { return new URL(publicUrl).hostname; } catch { /* ignore */ }
@@ -51,7 +53,7 @@ async function createTunnel({ deploymentId, workspacePath, runtimeRef, vmPort, p
     const runtime = getRuntime();
     const browserPort = await getFreePort();
     const wsPort = await getFreePort();
-    const hostIp = getHostIp();
+    const hostIp = getTunnelHostIp();
 
     await runtime.fs.fsWrite(workspacePath, '.agents/tunnelClient.cjs', TUNNEL_CLIENT_SCRIPT, { runtimeRef });
 
@@ -106,7 +108,8 @@ async function createTunnel({ deploymentId, workspacePath, runtimeRef, vmPort, p
     );
 
     await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Tunnel client connection timeout')), 15000);
+        const timeoutMs = Number(process.env.TUNNEL_CONNECT_TIMEOUT_MS) || 30000;
+        const timer = setTimeout(() => reject(new Error('Tunnel client connection timeout')), timeoutMs);
         const check = () => {
             if (vmSocket) { clearTimeout(timer); resolve(); }
             else setTimeout(check, 200);
