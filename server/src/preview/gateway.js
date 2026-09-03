@@ -280,13 +280,26 @@ function readRawBody(req) {
 
 // 解析外层部署的宿主工作目录：guest 的 /workspace 即挂载自此目录，
 // 代理据此把 guest 内计算的 volume host_path 重写为宿主可达路径。
+// 注意：部署若复用 session runtime（worktree 模式），VM 的 /workspace 实际挂载到
+// `<project>.wt/<runtimeId>`，而 projects.serverPath 仍是主项目目录。必须用
+// runtimes.specs.host_workspace_path 拿真实挂载点，否则重写基准错（卷路径不存在
+// → boxlite "Volume host path does not exist" → box Failed → 复用时 panic）。
 async function getDeploymentHostWorkspace(deploymentId) {
     try {
-        const rows = await db.select({ userId: schema.deployments.userId, projectId: schema.deployments.projectId })
+        const rows = await db.select({ userId: schema.deployments.userId, projectId: schema.deployments.projectId, runtimeId: schema.deployments.runtimeId })
             .from(schema.deployments)
             .where(eq(schema.deployments.id, deploymentId))
             .limit(1);
-        if (rows[0]) return workspace.projectDir(rows[0].userId, rows[0].projectId);
+        if (!rows[0]) return null;
+        if (rows[0].runtimeId) {
+            const rtRows = await db.select({ specs: schema.runtimes.specs })
+                .from(schema.runtimes)
+                .where(eq(schema.runtimes.id, rows[0].runtimeId))
+                .limit(1);
+            const specs = rtRows[0]?.specs ? JSON.parse(rtRows[0].specs) : null;
+            if (specs?.host_workspace_path) return specs.host_workspace_path;
+        }
+        return workspace.projectDir(rows[0].userId, rows[0].projectId);
     } catch { /* ignore */ }
     return null;
 }
