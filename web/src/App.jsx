@@ -14,6 +14,7 @@ import GatewayAdmin from './pages/GatewayAdmin';
 import AppSidebar from './components/AppSidebar';
 import BrandMark from './components/BrandMark';
 import ConfirmDialog from './components/ConfirmDialog';
+import WorkspaceSwitcher from './components/WorkspaceSwitcher';
 import SettingsTabSidebar from './components/SettingsTabSidebar';
 import SettingsShell from './components/settings/SettingsShell';
 import { useWorkspaces } from './hooks/useWorkspaces';
@@ -120,7 +121,21 @@ function AuthenticatedLayout({
             </button>
           </div>
         ) : (
-          <div id="xe-topbar-dynamic" className="flex-1 min-w-0 flex items-center justify-between gap-3" />
+          <>
+            {/* Workspace switcher lives in the global top bar (all routes), so
+                /history, /skills etc. never lose access to the active workspace.
+                Session-specific controls (branch/restart/preview) portal into
+                #xe-topbar-dynamic below and only render on /sessions. */}
+            <WorkspaceSwitcher
+              projects={projects}
+              activeWorkspaceId={activeWorkspaceId}
+              sessions={sessions}
+              onSelect={switchWorkspace}
+              onCreate={() => { setLaunchPanelOpen(true); sessionsRef.current?.openLaunchModal?.('workspace'); }}
+              onDelete={(ws) => sessionsRef.current?.requestDeleteWorkspace?.(ws)}
+            />
+            <div id="xe-topbar-dynamic" className="flex-1 min-w-0 flex items-center justify-between gap-3" />
+          </>
         )}
       </div>
 

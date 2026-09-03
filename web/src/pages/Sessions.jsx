@@ -4,7 +4,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import AgentConsole from '../components/AgentConsole';
 import ChatView from '../components/chat/ChatView';
 import { loadViewPref, saveViewPref, subscribeViewPref } from '../lib/viewPrefs';
-import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import WorkspaceShell from '../components/WorkspaceShell';
 import WorkspacePanel from '../components/WorkspacePanel';
 import RepoImportDialog from '../components/git/RepoImportDialog';
@@ -1341,16 +1340,6 @@ export default React.forwardRef(function Sessions({
           <>
           {topbarEl && createPortal(
             <>
-              <div className="flex items-center gap-2 min-w-0">
-                <WorkspaceSwitcher
-                  projects={projects}
-                  activeWorkspaceId={activeWorkspaceId}
-                  sessions={sessions}
-                  onSelect={switchWorkspace}
-                  onCreate={() => openLaunchModal('workspace')}
-                  onDelete={requestDeleteWorkspace}
-                />
-              </div>
               <div className="flex items-center min-w-0 justify-center">
                 {activeSession?.projectId && activeProject?.repoProvider && GIT_REPO_PROVIDERS.has(activeProject.repoProvider) && (
                   <BranchSwitcher projectId={activeSession.projectId} project={activeProject} git={gitChanges} />
