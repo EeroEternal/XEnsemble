@@ -866,7 +866,7 @@ async function ensureXensembleBackend({ runtimeRef, workspacePath, preferredPort
         // 且嵌套文件区按错误路径读不到 → 变空。统一用宿主 control plane 的绝对路径（通常
         // /var/lib/xensemble/{workspaces,repos,unigateway}，由 install.sh 注入 xensemble.env），
         // 嵌套与宿主写到同一个 runtime 目录，宿主文件区永远干净、嵌套数据可读写。
-        WORKSPACE_ROOT: process.env.WORKSPACE_ROOT || '/var/lib/xensemble/workspaces',
+        WORKSPACE_ROOT: workspace.WORKSPACE_ROOT,
         BARE_REPO_ROOT: process.env.BARE_REPO_ROOT || '/var/lib/xensemble/repos',
         UNIGATEWAY_DATA_DIR: process.env.UNIGATEWAY_DATA_DIR || '/var/lib/xensemble/unigateway',
         // 生产模式后端默认不自动迁移；嵌套部署无外部 migrate 步骤，强制后端启动时执行迁移。

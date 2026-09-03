@@ -6,15 +6,23 @@ const fs = require('fs');
 // (e.g. /var/lib/xensemble/workspaces) via xensemble.env → install.sh injects
 // a sensible default when missing.
 //
-// Fallback to process.cwd()-relative instead of __dirname-relative so the
-// path is independent of where Node was launched from. The previous
-// __dirname-based fallback resolved to the wrong root when xensemble was
-// started inside a sandbox whose CWD was <repo>/server, producing a stray
-// server/server/data/workspaces/ tree inside the source tree.
+// Dev / npm start convention: server/.env ships WORKSPACE_ROOT=./server/data/workspaces
+// so `npm run dev` from the repo root keeps workspace data inside the repo for
+// inspection. That relative value is only correct when CWD is the repo root;
+// in a dev container that runs `npm start` from <repo>/server, the same env
+// resolves to <repo>/server/server/data/workspaces (the "double-server" bug
+// that pollutes the source tree and breaks nested deploys).
+//
+// Hardening: if WORKSPACE_ROOT arrives as a relative path, resolve it against
+// the repo root (this file's __dirname/../..) — independent of process.cwd().
+// Absolute paths (production /var/lib/xensemble/workspaces, e2e tmpdir, etc.)
+// pass through untouched, so neither prod nor tests change behavior.
 const DEFAULT_WORKSPACE_ROOT = '/var/lib/xensemble/workspaces';
-
-const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT
-    || DEFAULT_WORKSPACE_ROOT;
+const REPO_ROOT = path.resolve(__dirname, '..', '..');
+const RAW_WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || DEFAULT_WORKSPACE_ROOT;
+const WORKSPACE_ROOT = path.isAbsolute(RAW_WORKSPACE_ROOT)
+    ? RAW_WORKSPACE_ROOT
+    : path.resolve(REPO_ROOT, RAW_WORKSPACE_ROOT);
 
 function ensureWorkspaceRoot() {
     if (!fs.existsSync(WORKSPACE_ROOT)) {
