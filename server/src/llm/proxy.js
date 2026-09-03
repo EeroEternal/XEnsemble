@@ -260,7 +260,81 @@ function forwardToGateway(request, reply, { targetBaseUrl, gatewayKey, path, onR
  * Agent CLIs send the full conversation history on every request, so we pick
  * the last role:'user' message (the user's actual input). Tool results are
  * role:'tool' and reasoning messages role:'assistant', so they are skipped.
+ *
+ * Stripped noise (per-block, applied AFTER joining text):
+ *  - <system-reminder>...</system-reminder>        (claude-code injects context)
+ *  - <local-command-caveat>...</local-command-caveat>
+ *  - <command-name>…</command-name>, <command-args>…</command-args>,
+ *    <command-message>…</command-message>, <local-command-stdout>…</local-command-stdout>
+ *  - generic <foo>...</foo> tags with no attributes (best-effort, leaves
+ *    content that has bare < but not closed tags alone)
+ * This matters for the dialog view: openai-style bodies prepend these as a
+ * leading "<system-reminder>...</system-reminder>\n\n" on every user turn,
+ * and anthropic-style bodies put them as the FIRST text block before the
+ * actual user input. Without stripping, the dialog shows duplicated/
+ * truncated user messages (the first turn becomes the whole reminder blob).
  */
+// Strip balanced XML-like tag pairs that agent CLIs inject as fake user
+// context (claude-code/opencode prepend <system-reminder>…</system-reminder>
+// to every turn, plus <local-command-caveat>, <command-name>, etc.). Walks
+// the string with a small balanced-tag parser so nested wrappers are peeled
+// layer by layer — a plain non-greedy regex would either match the wrong
+// pair or stop at the first inner close tag.
+function stripInjectedContext(text) {
+    if (!text) return '';
+    const TAG_NAME_RE = '[A-Za-z][A-Za-z0-9-]*';
+    // Capture group 1 = tag name, group 2 = optional attributes (with
+    // leading space). Using two groups so m[1] is always the tag name.
+    const OPEN_RE = new RegExp('^<(' + TAG_NAME_RE + ')(\\s[^>]*)?>');
+    const CLOSE_NAME_RE = new RegExp('^</(' + TAG_NAME_RE + ')>');
+    const result = [];
+    let i = 0;
+    while (i < text.length) {
+        const rest = text.slice(i);
+        const m = rest.match(OPEN_RE);
+        if (!m) {
+            result.push(text[i]);
+            i++;
+            continue;
+        }
+        const tagName = m[1];
+        const innerStart = i + m[0].length;
+        let depth = 1;
+        let j = innerStart;
+        let balanced = false;
+        while (j < text.length) {
+            const sub = text.slice(j);
+            const close = sub.match(CLOSE_NAME_RE);
+            if (close) {
+                if (close[1] === tagName) {
+                    depth--;
+                    j += close[0].length;
+                    if (depth === 0) { balanced = true; break; }
+                } else {
+                    j += close[0].length;
+                }
+                continue;
+            }
+            const open = sub.match(OPEN_RE);
+            if (open) {
+                if (open[1] === tagName) depth++;
+                j += open[0].length;
+                continue;
+            }
+            j++;
+        }
+        if (balanced) {
+            i = j;
+        } else {
+            // No matching close — keep the literal characters and advance one
+            // so we don't loop forever on `<foo>bar` (no close).
+            result.push(text.slice(i, i + m[0].length));
+            i += m[0].length;
+        }
+    }
+    return result.join('').replace(/^\s*\n/, '').trim();
+}
+
 function extractUserMessage(bodyBuffer) {
     if (!Buffer.isBuffer(bodyBuffer) || bodyBuffer.length === 0) return null;
     try {
@@ -272,7 +346,7 @@ function extractUserMessage(bodyBuffer) {
             if (!m || m.role !== 'user') continue;
             // OpenAI Chat Completions: content is a plain string.
             if (typeof m.content === 'string') {
-                const t = m.content.trim();
+                const t = stripInjectedContext(m.content);
                 if (t) return t;
                 continue;
             }
@@ -286,8 +360,9 @@ function extractUserMessage(bodyBuffer) {
                         parts.push(block.text);
                     }
                 }
-                const joined = parts.join('\n').trim();
-                if (joined) return joined;
+                const joined = parts.join('\n');
+                const t = stripInjectedContext(joined);
+                if (t) return t;
             }
         }
         return null;
