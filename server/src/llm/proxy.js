@@ -654,8 +654,16 @@ async function proxyLlmRequest(request, reply) {
     // Record the user's prompt for the chat view (dedup: agent CLIs replay the
     // full history every request, so only record when it differs from the last
     // recorded user message for this session).
-    const isChatPath = path === '/v1/chat/completions' || path === '/chat/completions'
-        || path === '/v1/messages' || path.endsWith('/chat/completions');
+    // Strip the query string so Anthropic's `?beta=true` and similar
+    // decorator params don't defeat the match. `path` is what stripLlmPrefix
+    // returns, which is `pathname + '?' + search` (i.e. the upstream URL
+    // including the query that the agent SDK sent). The chat-completions and
+    // anthropic-messages endpoints are identified by their pathname only;
+    // beta / stream / version flags live in the query and don't change
+    // whether the request is one we should transcribe.
+    const pathName = path.split('?', 1)[0];
+    const isChatPath = pathName === '/v1/chat/completions' || pathName === '/chat/completions'
+        || pathName === '/v1/messages' || pathName.endsWith('/chat/completions');
     if (isChatPath && userPrompt && lastUserPromptBySession.get(claims.sid) !== userPrompt) {
         lastUserPromptBySession.set(claims.sid, userPrompt);
         void chatTranscript.append(claims.sid, { role: 'user', content: userPrompt });
