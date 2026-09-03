@@ -177,6 +177,27 @@ echo "==> [inner] Running upstream install.sh (build + migrate; services skipped
 SKIP_SERVICES=1 bash "$APP_ROOT/deploy/install.sh"
 
 # ---------------------------------------------------------------------------
+# 4b. Provision runtime data directories outside the source tree (intranet
+#     runs as root, so always create them under /var/lib/xensemble). Inject
+#     defaults into xensemble.env when missing so the server's fallback
+#     path never lands in <repo>/server/data/.
+# ---------------------------------------------------------------------------
+RUNTIME_BASE="${XENSEMBLE_RUNTIME_BASE:-/var/lib/xensemble}"
+for sub in workspaces repos unigateway; do
+  [ -d "$RUNTIME_BASE/$sub" ] || mkdir -p "$RUNTIME_BASE/$sub"
+done
+ENV_FILE="$APP_ROOT/deploy/xensemble.env"
+for kv in \
+  "WORKSPACE_ROOT=$RUNTIME_BASE/workspaces" \
+  "BARE_REPO_ROOT=$RUNTIME_BASE/repos" \
+  "UNIGATEWAY_DATA_DIR=$RUNTIME_BASE/unigateway"; do
+  k="${kv%%=*}"; v="${kv#*=}"
+  if ! grep -q "^${k}=" "$ENV_FILE" 2>/dev/null; then
+    echo "${k}=${v}" >> "$ENV_FILE"
+  fi
+done
+
+# ---------------------------------------------------------------------------
 # 5. Overwrite systemd unit for THIS intranet host (root + this path).
 # ---------------------------------------------------------------------------
 NODE_BIN="$(nvm which current)"

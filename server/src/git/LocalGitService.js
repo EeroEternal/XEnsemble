@@ -28,7 +28,7 @@ const { singleflight } = require('../runtime/singleflight');
 const { hostGit, usesHostWorkspace } = require('./hostGit');
 
 const BARE_REPO_ROOT = process.env.BARE_REPO_ROOT
-    || path.join(__dirname, '../../data/repos');
+    || '/var/lib/xensemble/repos';
 
 const GITIGNORE_TEMPLATE = `# XEnsemble runtime / secrets — never version
 .env

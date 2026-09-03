@@ -84,6 +84,31 @@ if ! command -v systemctl >/dev/null 2>&1; then
   exit 0
 fi
 
+# Provision runtime data directories outside the source tree so workspace
+# clones, git worktrees, skill volumes, and unigateway config never pollute
+# the repo. These are the *defaults* the server falls back to when
+# xensemble.env has no explicit override; users can still point any of them
+# elsewhere via xensemble.env.
+SERVICE_USER="$(id -un)"
+RUNTIME_BASE="${XENSEMBLE_RUNTIME_BASE:-/var/lib/xensemble}"
+for sub in workspaces repos unigateway; do
+  if [ ! -d "$RUNTIME_BASE/$sub" ]; then
+    sudo mkdir -p "$RUNTIME_BASE/$sub"
+    sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$RUNTIME_BASE/$sub"
+  fi
+done
+
+# Inject defaults into xensemble.env when missing (never overwrite explicit values).
+for kv in \
+  "WORKSPACE_ROOT=$RUNTIME_BASE/workspaces" \
+  "BARE_REPO_ROOT=$RUNTIME_BASE/repos" \
+  "UNIGATEWAY_DATA_DIR=$RUNTIME_BASE/unigateway"; do
+  k="${kv%%=*}"; v="${kv#*=}"
+  if ! grep -q "^${k}=" deploy/xensemble.env 2>/dev/null; then
+    echo "${k}=${v}" >> deploy/xensemble.env
+  fi
+done
+
 NODE_BIN="$(nvm which current)"
 sed "s|/home/xinference/.nvm/versions/node/v20.19.2/bin/node|$NODE_BIN|g" \
   deploy/systemd/xensemble.service | sudo tee /etc/systemd/system/xensemble.service >/dev/null

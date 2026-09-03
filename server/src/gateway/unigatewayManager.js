@@ -9,7 +9,8 @@ const {
 } = require('./defaultConfig');
 const gatewaySettings = require('../admin/GatewaySettings');
 
-const DATA_DIR = path.join(__dirname, '../../data');
+const DATA_DIR = process.env.UNIGATEWAY_DATA_DIR
+    || '/var/lib/xensemble/unigateway';
 const CONFIG_PATH = path.join(DATA_DIR, 'unigateway.toml');
 const ADMIN_TOKEN_PATH = path.join(DATA_DIR, 'unigateway.admin.token');
 const GATEWAY_KEY_PATH = path.join(DATA_DIR, 'unigateway.gateway.key');

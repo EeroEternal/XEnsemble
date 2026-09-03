@@ -1,8 +1,20 @@
 const path = require('path');
 const fs = require('fs');
 
+// WORKSPACE_ROOT hosts per-user project data (clones, git worktrees, skill
+// volumes). Production deployments must set this to a path OUTSIDE the repo
+// (e.g. /var/lib/xensemble/workspaces) via xensemble.env → install.sh injects
+// a sensible default when missing.
+//
+// Fallback to process.cwd()-relative instead of __dirname-relative so the
+// path is independent of where Node was launched from. The previous
+// __dirname-based fallback resolved to the wrong root when xensemble was
+// started inside a sandbox whose CWD was <repo>/server, producing a stray
+// server/server/data/workspaces/ tree inside the source tree.
+const DEFAULT_WORKSPACE_ROOT = '/var/lib/xensemble/workspaces';
+
 const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT
-    || path.join(__dirname, '../data/workspaces');
+    || DEFAULT_WORKSPACE_ROOT;
 
 function ensureWorkspaceRoot() {
     if (!fs.existsSync(WORKSPACE_ROOT)) {

@@ -832,12 +832,15 @@ async function ensureXensembleBackend({ runtimeRef, workspacePath, preferredPort
         ...envExtra,
         PORT: String(backendPort),
         NODE_ENV: 'production',
-        // 覆盖 .env 里的相对 WORKSPACE_ROOT（./server/data/workspaces）：
+        // 覆盖 .env 里的相对 WORKSPACE_ROOT：
         // 嵌套后端 cwd=/workspace/server，相对路径会解析成 /workspace/server/server/data/workspaces
         // （双重 server），把嵌套 workspace 数据写进宿主 git worktree → 宿主文件区出现大量变更，
-        // 且嵌套文件区按错误路径读不到 → 变空。这里用绝对路径落到 /workspace/server/data/workspaces
-        // （.gitignore 已忽略 server/data/），宿主 git 干净、嵌套数据可读写。
-        WORKSPACE_ROOT: '/workspace/server/data/workspaces',
+        // 且嵌套文件区按错误路径读不到 → 变空。统一用宿主 control plane 的绝对路径（通常
+        // /var/lib/xensemble/{workspaces,repos,unigateway}，由 install.sh 注入 xensemble.env），
+        // 嵌套与宿主写到同一个 runtime 目录，宿主文件区永远干净、嵌套数据可读写。
+        WORKSPACE_ROOT: process.env.WORKSPACE_ROOT || '/var/lib/xensemble/workspaces',
+        BARE_REPO_ROOT: process.env.BARE_REPO_ROOT || '/var/lib/xensemble/repos',
+        UNIGATEWAY_DATA_DIR: process.env.UNIGATEWAY_DATA_DIR || '/var/lib/xensemble/unigateway',
         // 生产模式后端默认不自动迁移；嵌套部署无外部 migrate 步骤，强制后端启动时执行迁移。
         RUN_DB_MIGRATE: '1',
         // 嵌套 .env 的 UNIGATEWAY_ADMIN_TOKEN 常为占位符，production 启动会抛错退出；
