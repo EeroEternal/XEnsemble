@@ -70,15 +70,13 @@ test('ensureReady recreates blink session when stored image differs', async () =
     assert.equal(client.opened.length, 1);
     assert.equal(client.opened[0].name, 'rt_swap');
     assert.equal(client.opened[0].image, 'xensemble/agent-droid:latest');
-    assert.equal(client.opened[0].volumes.length, 2);
+    assert.equal(client.opened[0].volumes.length, 1);
     assert.match(client.opened[0].volumes[0].host_path, /usr_swap[/\\]proj_image_swap$/);
     assert.equal(client.opened[0].volumes[0].guest_path, '/workspace');
-    // 0027：仅挂载当前 agent（droid → .factory/skills）的技能卷
-    assert.equal(client.opened[0].volumes[1].guest_path, '/root/.factory/skills');
     assert.deepEqual(client.opened[0].network, { mode: 'enabled', allow_net: [] });
     assert.equal(result.runtimeRef, 'rt_swap');
     assert.equal(result.image, 'xensemble/agent-droid:latest');
-    assert.match(result.mountKey, /=>[/\\]workspace\+skills:\/root\/\.factory\/skills$/);
+    assert.match(result.mountKey, /=>[/\\]workspace$/);
 });
 
 test('ensureReady recreates blink session when stored image is missing', async () => {
@@ -110,7 +108,7 @@ test('ensureReady forceRecreate deletes blink session when image differs', async
         agentId: 'kimi-code',
         image,
         storedImage: 'xensemble/agent-old:latest',
-        storedMount: resultMountKey(project, 'kimi-code'),
+        storedMount: resultMountKey(project),
         forceRecreate: true,
     });
 
@@ -129,7 +127,7 @@ test('ensureReady keeps existing session when image is unchanged', async () => {
         agentId: 'claude-code',
         image,
         storedImage: image,
-        storedMount: resultMountKey(project, 'claude-code'),
+        storedMount: resultMountKey(project),
     });
 
     assert.deepEqual(client.deleted, []);
@@ -156,7 +154,7 @@ test('ensureReady recreates blink session when agent command probe fails', async
         agentId: 'kimi-code',
         image: 'xensemble/agent-kimi-code:latest',
         storedImage: 'xensemble/agent-kimi-code:latest',
-        storedMount: resultMountKey(project, 'kimi-code'),
+        storedMount: resultMountKey(project),
     });
 
     assert.equal(probeAttempts, 2);
@@ -223,7 +221,7 @@ test('ensureReady runs post-boot boxlite execs sequentially (no concurrent zygot
         agentId: 'cursor',
         image: 'xensemble/agent-cursor:latest',
         storedImage: 'xensemble/agent-cursor:latest',
-        storedMount: resultMountKey(project, 'cursor'),
+        storedMount: resultMountKey(project),
     });
 
     assert.equal(maxInFlight, 1, `expected serialized boxlite execs (maxInFlight=1), got ${maxInFlight}`);
@@ -250,14 +248,8 @@ test('ensureWorkspacePath retries on transient spawn failure', async () => {
     assert.equal(spawnAttempts, 2, 'expected ensureWorkspacePath to retry after first spawn failure');
 });
 
-function resultMountKey(project, agentId) {
+function resultMountKey(project) {
     const guestPath = '/workspace';
     const hostPath = workspace.projectDir(project.userId, project.id);
-    // 复刻 buildWorkspaceVolume 的 mountKey：含当前 agent 的技能卷 guest 路径
-    const { DEFAULT_AGENTS } = require('../agents/defaultAgents');
-    const agent = agentId ? DEFAULT_AGENTS.find((a) => a.id === agentId) : null;
-    const dirs = agent ? [...new Set(agent.userSkillDirs || [])] : [];
-    let key = `${hostPath}=>${guestPath}`;
-    if (dirs.length) key += `+skills:${dirs.map((d) => `/root/${d}`).join(',')}`;
-    return key;
+    return `${hostPath}=>${guestPath}`;
 }

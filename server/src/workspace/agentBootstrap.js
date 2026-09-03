@@ -161,15 +161,25 @@ function refreshAgentsMd(workspacePath) {
  * Idempotent: ensure workspace root `.gitignore` contains entries for platform-managed dirs.
  * Appends missing entries without removing existing content.
  *
- * 0026（技能卷）：技能已移出工程 git 仓库（落盘到独立技能卷 <WORKSPACE_ROOT>/<userId>/skills/），
- * 故不再忽略各 Agent 原生技能目录（.claude/skills 等）——那些条目会误伤用户在工程内
- * 自建、希望 git 共享的项目级技能。仅保留平台自身仍写入工程目录的 .agents/ 与 .xensemble/。
+ * 0025（方案 B）：除 .agents/ 与 .xensemble/ 外，把全部 Agent 原生技能目录也加入忽略——
+ * 技能落盘不污染用户 git changes（claude/qwen/codebuddy/kimi/pi/qoder/opencode/openclaw 等）。
+ * 与 skillInjector 的 DEFAULT_AGENT_NATIVE_DIRS 保持同步。
  */
 function ensureGitignoreEntries(workspacePath) {
     const ignorePath = path.join(workspacePath, '.gitignore');
     const entries = [
         '.agents/',
         '.xensemble/',
+        // Agent 原生技能目录（平台注入，勿提交）
+        '.claude/skills/',
+        '.qwen/skills/',
+        '.codebuddy/skills/',
+        '.kimi-code/skills/',
+        '.pi/skills/',
+        '.qoder/r/s/skills/',
+        '.opencode/skills/',
+        '.agents/skills/',
+        'skills/',
     ];
 
     let content = '';

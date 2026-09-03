@@ -83,8 +83,8 @@ async function makeActiveSkill(userId, projectId, { title, content }) {
     });
 }
 
-/** 模拟 Agent 消费链路：读指令文件 → 解析指针 → 读平台索引 → 读 SKILL.md（技能卷宿主） */
-async function simulateAgentConsumption(workspacePath, instructionFile, skillsVolumeHome) {
+/** 模拟 Agent 消费链路：读指令文件 → 解析指针 → 读平台索引 → 读 SKILL.md */
+async function simulateAgentConsumption(workspacePath, instructionFile) {
     const inst = fs.readFileSync(path.join(workspacePath, instructionFile), 'utf8');
     const m = inst.match(/<!-- xe-skills-pointer:start -->\n([\s\S]*?)<!-- xe-skills-pointer:end -->/);
     assert.ok(m, `${instructionFile} 应包含引导指针`);
@@ -96,14 +96,12 @@ async function simulateAgentConsumption(workspacePath, instructionFile, skillsVo
     assert.ok(fs.existsSync(indexPath), '平台索引应落盘');
     const index = fs.readFileSync(indexPath, 'utf8');
     assert.ok(index.includes('## XEnsemble Skills'), '索引应含标题');
-    // 0026：索引引用技能卷挂载点（/root/<dir>/<slug>/SKILL.md），宿主对应 <userId>/skills/home/<dir>/...
-    const refs = [...index.matchAll(/详见 (\/root\/[^\s]+)/g)].map((x) => x[1]);
+    const refs = [...index.matchAll(/详见 (\.xensemble\/skills\/[^\s]+)/g)].map((x) => x[1]);
     assert.ok(refs.length >= 1, '索引应含技能引用');
-    for (const guestRef of refs) {
-        const rel = guestRef.replace(/^\/root\//, '');
-        const p = path.join(skillsVolumeHome, rel);
-        assert.ok(fs.existsSync(p), `SKILL.md 应可读: ${guestRef}`);
-        assert.ok(fs.readFileSync(p, 'utf8').length > 0, `SKILL.md 非空: ${guestRef}`);
+    for (const rel of refs) {
+        const p = path.join(workspacePath, rel);
+        assert.ok(fs.existsSync(p), `SKILL.md 应可读: ${rel}`);
+        assert.ok(fs.readFileSync(p, 'utf8').length > 0, `SKILL.md 非空: ${rel}`);
     }
     return { indexRefs: refs.length };
 }
@@ -144,25 +142,19 @@ test('E2E: 技能注入真实落盘 → git changes 干净 → Agent 可消费',
     }
 
     // 1. 真实落盘断言（磁盘文件系统）
-    const skillsVolumeHome = path.join(WORKSPACE_ROOT, user, 'skills', 'home');
-    const assertFile = (root, rel) => {
-        const p = path.join(root, rel);
+    const assertFile = (rel) => {
+        const p = path.join(wsPath, rel);
         assert.ok(fs.existsSync(p), `应落盘: ${rel}`);
         return fs.readFileSync(p, 'utf8');
     };
-    const indexContent = assertFile(wsPath, '.xensemble/AGENTS.md');
+    const indexContent = assertFile('.xensemble/AGENTS.md');
     assert.ok(indexContent.includes('DB migrate'), '平台索引应含技能');
-    // 0026：技能内容写入技能卷（沙箱内挂载于 /root/<dir>），不落工程仓库
-    const volumeClaude = assertFile(skillsVolumeHome, '.claude/skills/db-migrate/SKILL.md');
-    assert.ok(volumeClaude.includes('## Steps'), '技能卷内 SKILL.md 应含正文');
-    assert.ok(!fs.existsSync(path.join(wsPath, '.claude/skills')), '工程目录不应再写技能');
-    // 各 Agent 用户级技能目录真实落盘到技能卷
-    const seen = new Set();
+    const skillContent = assertFile('.xensemble/skills/db-migrate/SKILL.md');
+    assert.ok(skillContent.includes('## Steps'), 'SKILL.md 应含正文');
+    // 各 Agent 原生目录真实落盘
     for (const agent of defs.DEFAULT_AGENTS) {
-        for (const dir of agent.userSkillDirs || []) {
-            if (seen.has(dir)) continue;
-            seen.add(dir);
-            assertFile(skillsVolumeHome, `${dir}/db-migrate/SKILL.md`);
+        for (const dir of agent.nativeSkillDirs || []) {
+            assertFile(`${dir}/db-migrate/SKILL.md`);
         }
     }
 
@@ -173,14 +165,14 @@ test('E2E: 技能注入真实落盘 → git changes 干净 → Agent 可消费',
     assert.ok(changed.some((l) => l.includes('AGENTS.md')), '用户 AGENTS.md 因指针被改（最小污染）');
     assert.ok(!changed.some((l) => l.includes('main.py')), '用户源码文件不应被改');
     assert.ok(!changed.some((l) => l.includes('.xensemble')), '.xensemble 应被 gitignore 隐藏');
-    assert.ok(!changed.some((l) => l.includes('.claude/skills')), '.claude/skills 不应出现在工程 changes');
+    assert.ok(!changed.some((l) => l.includes('.claude/skills')), '.claude/skills 应被 gitignore 隐藏');
 
-    // 3. Agent 可消费链路：读指针 → 平台索引 → 技能卷 SKILL.md
-    const consumption = await simulateAgentConsumption(wsPath, 'AGENTS.md', skillsVolumeHome);
+    // 3. Agent 可消费链路：读指针 → 平台索引 → SKILL.md
+    const consumption = await simulateAgentConsumption(wsPath, 'AGENTS.md');
     assert.ok(consumption.indexRefs >= 1, 'Agent 应能通过索引读到技能');
 
     // 4. claude-code 场景：预置 CLAUDE.md（方案 B 语义：仅对已存在文件写指针），
-    //    验证 CLAUDE.md 指针链路同样可消费 + 技能卷 .claude/skills 落盘
+    //    验证 CLAUDE.md 指针链路同样可消费 + .claude/skills 原生目录落盘
     fs.writeFileSync(path.join(wsPath, 'CLAUDE.md'), '# Claude repo\n');
     const prev2 = process.env.SKILL_INJECT_ENABLED;
     process.env.SKILL_INJECT_ENABLED = 'true';
@@ -192,6 +184,6 @@ test('E2E: 技能注入真实落盘 → git changes 干净 → Agent 可消费',
         if (prev2 === undefined) delete process.env.SKILL_INJECT_ENABLED;
         else process.env.SKILL_INJECT_ENABLED = prev2;
     }
-    assert.ok(fs.existsSync(path.join(skillsVolumeHome, '.claude/skills/db-migrate/SKILL.md')), '技能卷 claude 技能目录应落盘');
-    await simulateAgentConsumption(wsPath, 'CLAUDE.md', skillsVolumeHome);
+    assert.ok(fs.existsSync(path.join(wsPath, '.claude/skills/db-migrate/SKILL.md')), 'claude 原生技能目录应落盘');
+    await simulateAgentConsumption(wsPath, 'CLAUDE.md');
 });

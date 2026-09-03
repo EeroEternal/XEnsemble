@@ -25,7 +25,7 @@ const path = require('path');
 const { db } = require('../db');
 const schema = require('../db/schema');
 const workspace = require('../workspace');
-const { DEFAULT_AGENTS, getSkillTargets, getUserSkillDirs } = require('../agents/defaultAgents');
+const { DEFAULT_AGENTS, getSkillTargets } = require('../agents/defaultAgents');
 const { recordEvent } = require('../events/recordEvent');
 
 const SECTION_START = '<!-- xe-skills:start -->';
@@ -143,15 +143,14 @@ function parseDescription(content) {
 /**
  * 渲染技能注入段（02 §7.3 + 0020 索引形态）。
  *
- * 主指令文件只放索引（name + description + 指向技能根/slug/ 的路径），
+ * 主指令文件只放索引（name + description + 指向 .xensemble/skills/<slug>/ 的路径），
  * SKILL.md 与 scripts 落盘独立目录——Agent 按 description 命中后再按需读取，
  * 避免多技能全文挤入单文件导致上下文膨胀（渐进式披露）。
  *
  * @param {Array} skills skills 行（需含 id/title/content/description/scripts/usageCount/updatedAt）
- * @param {string} [rootRef] 技能根引用（默认 SKILLS_ROOT；0026 技能卷模式下传 `/root/<dir>`）
  * @returns {{ section: string, truncated: boolean, count: number, skillIds: string[], slugs: string[] }}
  */
-function renderSkillsSection(skills, rootRef = SKILLS_ROOT) {
+function renderSkillsSection(skills) {
     const countLimit = maxCount();
     const byteLimit = maxBytes();
     const sorted = [...skills].sort((a, b) => {
@@ -170,8 +169,8 @@ function renderSkillsSection(skills, rootRef = SKILLS_ROOT) {
     for (const s of sorted) {
         if (count >= countLimit) { truncated = true; break; }
         const slug = slugify(s.title);
-        const desc = sanitizeContent(parseDescription(s.content) || `Skills 详见 ${rootRef}/${slug}/SKILL.md`);
-        const block = `### ${s.title}\n${desc}\n\n详见 ${rootRef}/${slug}/SKILL.md\n`;
+        const desc = sanitizeContent(parseDescription(s.content) || `Skills 详见 ${SKILLS_ROOT}/${slug}/SKILL.md`);
+        const block = `### ${s.title}\n${desc}\n\n详见 ${SKILLS_ROOT}/${slug}/SKILL.md\n`;
         const blockBytes = Buffer.byteLength(block, 'utf8');
         if (bytes + blockBytes > byteLimit) { truncated = true; break; }
         parts.push(block);
@@ -446,14 +445,9 @@ async function injectForSession({ userId, projectId, agentId, workspacePath, fsA
     const skills = allSkills.filter(isLandableSkill);
     if (skills.length === 0) return { injected: false, reason: 'no_landable_skills' };
 
-    const { instructionFile } = getSkillTargets(agentId);
-    // 0026：用户级技能目录（HOME 相对路径，如 .claude/skills）——写入技能卷，沙箱内挂载于 /root/<dir>
-    const userSkillDirs = getUserSkillDirs(agentId);
-    // 技能卷宿主根：<WORKSPACE_ROOT>/<userId>/skills/home（与工程 git 仓库物理隔离）
-    const skillsVolumeHome = workspace.userSkillHome(userId);
-    // 索引段引用的技能根：技能卷挂载点（/root/<dir>）；无用户级目录的 Agent 回退平台根 .xensemble/skills
-    const rootRef = userSkillDirs.length > 0 ? `/root/${userSkillDirs[0]}` : SKILLS_ROOT;
-    const { section, truncated, count, skillIds, slugs } = renderSkillsSection(skills, rootRef);
+    const { instructionFile, nativeSkillDirs } = getSkillTargets(agentId);
+    const targetRoots = [SKILLS_ROOT, ...nativeSkillDirs];
+    const { section, truncated, count, skillIds, slugs } = renderSkillsSection(skills);
     const adapter = fsAdapter || localFs;
 
     // 0025（方案 B）：索引段写入平台文件 .xensemble/AGENTS.md（gitignore 内，不污染用户 git）
@@ -465,16 +459,13 @@ async function injectForSession({ userId, projectId, agentId, workspacePath, fsA
         await adapter.writeFile(workspacePath, instructionFile, next);
     }
 
-    // 0020/0021/0026：技能目录落盘到技能卷用户级目录（Agent 原生发现，不污染工程仓库）。
-    // 无用户级目录的 Agent（copilot 等）仍走平台根 .xensemble/skills（gitignore 内）。
-    const skillRoot = userSkillDirs.length > 0 ? skillsVolumeHome : workspacePath;
-    const targetRoots = userSkillDirs.length > 0 ? userSkillDirs : [SKILLS_ROOT];
+    // 0020/0021：技能目录落盘到平台根 + Agent 原生目录（失败不阻断主文件注入）
     const writtenSlugs = [];
     for (const s of skills) {
         if (!slugs.includes(slugify(s.title))) continue; // 只写入选索引的技能
-        writtenSlugs.push(...await writeSkillDirectories(adapter, skillRoot, s, targetRoots));
+        writtenSlugs.push(...await writeSkillDirectories(adapter, workspacePath, s, targetRoots));
     }
-    await cleanupSkillDirectories(adapter, skillRoot, writtenSlugs, targetRoots);
+    await cleanupSkillDirectories(adapter, workspacePath, writtenSlugs, targetRoots);
 
     // T4.3：注入成功后对入选 skills 批量 usage_count+1（审计/计数失败不阻断）
     if (bumpUsage && skillIds.length > 0) {
@@ -536,25 +527,22 @@ async function reRenderForSkillChange({ userId, projectId = null, fsAdapter }) {
     let reRendered = 0;
     for (const pid of projectIds) {
         const allSkills = await listActiveSkills(userId, pid);
-        // 0021：落盘门槛过滤 + 0026：技能卷目标根 = 全部已注册 Agent 用户级技能目录（HOME 相对路径）
+        // 0021：落盘门槛过滤 + 目标根 = 平台根 + 全部已注册 Agent 原生目录
         const skills = allSkills.filter(isLandableSkill);
-        const userSkillDirs = [...new Set(DEFAULT_AGENTS.flatMap((a) => a.userSkillDirs || []))];
-        const targetRoots = userSkillDirs.length > 0 ? userSkillDirs : [SKILLS_ROOT];
-        // 技能卷宿主根：<WORKSPACE_ROOT>/<userId>/skills/home（与工程 git 仓库物理隔离）
-        const skillsVolumeHome = workspace.userSkillHome(userId);
+        const targetRoots = [...new Set([SKILLS_ROOT, ...DEFAULT_AGENT_NATIVE_DIRS])];
         const wsPath = workspace.projectDir(userId, pid);
-        // 0020/0021/0026：技能目录落盘到技能卷（Agent 原生发现，热加载无需重启会话）
-        const rootRef = userSkillDirs.length > 0 ? `/root/${userSkillDirs[0]}` : SKILLS_ROOT;
+        // 0020/0021：目录落盘/清理 —— 即使有 running session 也执行，
+        // 写入 Agent 原生技能目录（.claude/skills 等）即热加载，无需重启会话
         const { section, slugs } = skills.length > 0
-            ? renderSkillsSection(skills, rootRef)
+            ? renderSkillsSection(skills)
             : { section: '', slugs: [] };
         if (skills.length > 0) {
             for (const s of skills) {
                 if (!slugs.includes(slugify(s.title))) continue;
-                await writeSkillDirectories(adapter, skillsVolumeHome, s, targetRoots);
+                await writeSkillDirectories(adapter, wsPath, s, targetRoots);
             }
         }
-        await cleanupSkillDirectories(adapter, skillsVolumeHome, slugs, targetRoots);
+        await cleanupSkillDirectories(adapter, wsPath, slugs, targetRoots);
 
         // 0025（方案 B）：平台索引文件 .xensemble/AGENTS.md 始终更新（gitignore 内，
         // 不污染用户 git；Agent 不直接读它，无需避开 running session）

@@ -15,32 +15,6 @@ function buildWorkspaceMountKey(hostPath, guestPath) {
     return `${hostPath}=>${guestPath}`;
 }
 
-/**
- * 0026（技能卷）：构造某用户的技能卷挂载列表。
- * 仅挂载当前 agent 声明的「用户级技能目录」（HOME 相对路径，如 .claude/skills），
- * 映射为 host=<WORKSPACE_ROOT>/<userId>/skills/home/<dir> → guest=/root/<dir>。
- * host 目录不存在时递归创建（BoxLite 要求 host 目录存在）。
- *
- * 0027：按 agent 过滤，避免把全部 agent 的 13+ 个技能目录一次性挂载——
- * libkrun 每挂一个 virtio-fs 卷就占一个 IRQ 向量，全量挂载导致
- * RegisterFsDevice(IrqsExhausted)，新会话无法启动。agent 未声明 userSkillDirs
- * 或未指定 agentId 时不挂技能卷。
- */
-function buildSkillsVolumes(userId, agentId) {
-    const { DEFAULT_AGENTS } = require('../agents/defaultAgents');
-    const agent = agentId ? DEFAULT_AGENTS.find((a) => a.id === agentId) : null;
-    const dirs = agent ? [...new Set(agent.userSkillDirs || [])] : [];
-    return dirs.map((dir) => {
-        const hostPath = workspace.userSkillPath(userId, dir);
-        try { fs.mkdirSync(hostPath, { recursive: true }); } catch { /* best-effort */ }
-        return {
-            host_path: hostPath,
-            guest_path: `/root/${dir}`,
-            read_only: false,
-        };
-    });
-}
-
 function resolveAgentProbeCommand(agentId) {
     if (!agentId) return null;
     const { DEFAULT_AGENTS } = require('../agents/defaultAgents');
@@ -77,7 +51,7 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         return workspace.projectDir(project.userId, project.id);
     }
 
-    buildWorkspaceVolume(project, worktreePath, agentId) {
+    buildWorkspaceVolume(project, worktreePath) {
         const guestPath = this.workspacePath();
         const hostPath = worktreePath || this.hostWorkspacePath(project);
         const gitVolume = worktreePath ? {
@@ -89,21 +63,12 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
             // concurrent access across worktrees that share the same .git dir.
             read_only: false,
         } : null;
-        // 0026（技能卷）：用户级技能目录挂载进沙箱 HOME（/root/<userSkillDir>）。
-        // 技能卷位于宿主机 WORKSPACE_ROOT/<userId>/skills/home/，与工程 git 仓库物理隔离，
-        // 不污染用户代码库，也不覆盖用户自建技能。host 目录不存在时由调用方 mkdir -p。
-        // 0027：仅挂载当前 agent 声明的技能目录（见 buildSkillsVolumes）。
-        const skillsVolumes = buildSkillsVolumes(project.userId, agentId);
-        const mountKey = buildWorkspaceMountKey(hostPath, guestPath)
-            + (gitVolume ? `+${gitVolume.guest_path}` : '')
-            + (skillsVolumes.length ? `+skills:${skillsVolumes.map((v) => v.guest_path).join(',')}` : '');
         return {
             host_path: hostPath,
             guest_path: guestPath,
             read_only: false,
-            mountKey,
+            mountKey: buildWorkspaceMountKey(hostPath, guestPath) + (gitVolume ? `+${gitVolume.guest_path}` : ''),
             gitVolume,
-            skillsVolumes,
         };
     }
 
@@ -284,7 +249,7 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         if (runtimeId && project.defaultRuntimeId && runtimeId !== project.defaultRuntimeId) {
             worktreePath = await this._ensureWorktree(project, runtimeId);
         }
-        const workspaceVolume = this.buildWorkspaceVolume(project, worktreePath, opts.agentId);
+        const workspaceVolume = this.buildWorkspaceVolume(project, worktreePath);
         const { host_path: hostWorkspacePath, guest_path: guestWorkspacePath, mountKey } = workspaceVolume;
         workspace.createProjectDirectory(project.userId, project.id);
         const storedImage = opts.storedImage || null;
@@ -312,8 +277,6 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
                     guest_path: workspaceVolume.gitVolume.guest_path,
                     read_only: workspaceVolume.gitVolume.read_only,
                 }] : []),
-                // 0026（技能卷）：用户级技能目录挂载进沙箱 HOME，Agent 原生发现技能
-                ...(workspaceVolume.skillsVolumes || []),
             ],
             network: resolveBoxliteSessionNetwork(opts.network),
             resources: {

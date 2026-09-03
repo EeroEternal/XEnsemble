@@ -316,8 +316,7 @@ test('injectForSession enabled by default when SKILL_INJECT_ENABLED unset', asyn
         });
         assert.equal(result.injected, true);
         assert.equal(result.reason, undefined);
-        // 0026：技能落盘到技能卷用户级目录（opencode → .config/opencode/skills 等）
-        assert.ok(files['.config/opencode/skills/db-migrate/SKILL.md'], 'default-on lands skill dir in volume');
+        assert.ok(files['.xensemble/skills/db-migrate/SKILL.md'], 'default-on lands skill dir');
     } finally {
         if (prev === undefined) delete process.env.SKILL_INJECT_ENABLED;
         else process.env.SKILL_INJECT_ENABLED = prev;
@@ -356,25 +355,26 @@ test('injectForSession writes skill to platform root + agent native dirs (0021)'
     const prev = process.env.SKILL_INJECT_ENABLED;
     process.env.SKILL_INJECT_ENABLED = 'true';
     try {
-        // claude-code → CLAUDE.md 指针 + 技能卷 .claude/skills
+        // claude-code → CLAUDE.md 指针 + .claude/skills
         const result = await injector.injectForSession({
             userId: user, projectId: proj, agentId: 'claude-code', workspacePath: '/ws', fsAdapter,
         });
         assert.equal(result.injected, true);
-        assert.ok(files['.xensemble/AGENTS.md'].includes('/root/.claude/skills/db-migrate/SKILL.md'));
+        assert.ok(files['.xensemble/AGENTS.md'].includes('.xensemble/skills/db-migrate/SKILL.md'));
         assert.ok(files['CLAUDE.md'].includes('.xensemble/AGENTS.md'), 'user file gets pointer only');
-        assert.ok(!files['CLAUDE.md'].includes('/root/.claude/skills'));
-        assert.ok(files['.claude/skills/db-migrate/SKILL.md'], 'writes to skill volume user-level dir');
+        assert.ok(!files['CLAUDE.md'].includes('.xensemble/skills/db-migrate/SKILL.md'));
+        assert.ok(files['.xensemble/skills/db-migrate/SKILL.md']);
+        assert.ok(files['.claude/skills/db-migrate/SKILL.md'], 'writes to agent native dir');
         // 0023：落盘时 frontmatter name 归一化为小写连字符（与目录名一致）
-        const written = files['.claude/skills/db-migrate/SKILL.md'];
+        const written = files['.xensemble/skills/db-migrate/SKILL.md'];
         assert.match(written, /^name: db-migrate$/m);
 
-        // opencode → AGENTS.md 指针 + 技能卷 .config/opencode/skills + .agents/skills
+        // opencode → AGENTS.md 指针 + .opencode/skills + .agents/skills
         await injector.injectForSession({
             userId: user, projectId: proj, agentId: 'opencode', workspacePath: '/ws', fsAdapter,
         });
         assert.ok(files['AGENTS.md'].includes('.xensemble/AGENTS.md'));
-        assert.ok(files['.config/opencode/skills/db-migrate/SKILL.md'], 'opencode user-level dir');
+        assert.ok(files['.opencode/skills/db-migrate/SKILL.md'], 'opencode native dir');
         assert.ok(files['.agents/skills/db-migrate/SKILL.md'], 'opencode agent-compatible dir');
     } finally {
         if (prev === undefined) delete process.env.SKILL_INJECT_ENABLED;
@@ -536,12 +536,12 @@ test('injectForSession writes index to instruction file and skill directory (002
         assert.equal(result.injected, true);
         // 0025（方案 B）：索引在平台文件，用户 AGENTS.md 只有指针
         assert.ok(files['.xensemble/AGENTS.md'].includes('### DB migrate'));
-        assert.ok(files['.xensemble/AGENTS.md'].includes('/root/.config/opencode/skills/db-migrate/SKILL.md'));
+        assert.ok(files['.xensemble/AGENTS.md'].includes('.xensemble/skills/db-migrate/SKILL.md'));
         assert.ok(!files['.xensemble/AGENTS.md'].includes('## Steps'));
         assert.ok(files['AGENTS.md'].includes('.xensemble/AGENTS.md'));
         assert.ok(!files['AGENTS.md'].includes('### DB migrate'));
-        // 目录落盘到技能卷
-        assert.ok(files['.config/opencode/skills/db-migrate/SKILL.md'].includes('## Steps'));
+        // 目录落盘
+        assert.ok(files['.xensemble/skills/db-migrate/SKILL.md'].includes('## Steps'));
     } finally {
         if (prev === undefined) delete process.env.SKILL_INJECT_ENABLED;
         else process.env.SKILL_INJECT_ENABLED = prev;
@@ -645,8 +645,9 @@ test('reRenderForSkillChange lands skill dirs but skips instruction file update 
         assert.equal(result.reRendered, 0); // 用户指令文件更新被跳过（且用户文件不存在则不创建）
         // 0025（方案 B）：平台索引文件仍写入（gitignore 内，无需避开 running session）
         assert.ok(files['.xensemble/AGENTS.md'], 'platform index written');
-        // 0026：技能目录仍落盘到技能卷（Agent 用户级目录热加载），无需重启会话
-        assert.ok(files['.claude/skills/db-migrate/SKILL.md'], 'volume user-level dir landed for hot reload');
+        // 0021：技能目录仍落盘（Agent 原生目录热加载），无需重启会话
+        assert.ok(files['.xensemble/skills/db-migrate/SKILL.md'], 'platform root landed');
+        assert.ok(files['.claude/skills/db-migrate/SKILL.md'], 'native dir landed for hot reload');
     } finally {
         if (prev === undefined) delete process.env.SKILL_INJECT_ENABLED;
         else process.env.SKILL_INJECT_ENABLED = prev;
@@ -725,26 +726,25 @@ test('0025 injection matrix: every registered agent receives platform index + po
                 userId: user, projectId: proj, agentId: agent.id, workspacePath: '/ws', fsAdapter, bumpUsage: false,
             });
 
-            const { instructionFile } = defs.getSkillTargets(agent.id);
-            const userSkillDirs = defs.getUserSkillDirs ? defs.getUserSkillDirs(agent.id) : [];
+            const { instructionFile, nativeSkillDirs } = defs.getSkillTargets(agent.id);
             const problems = [];
             if (!res.injected) problems.push(`injected=false (${res.reason})`);
             if (!files['.xensemble/AGENTS.md']) problems.push('platform index missing');
             else if (!files['.xensemble/AGENTS.md'].includes('### DB migrate')) problems.push('platform index lacks skill');
             if (!files[instructionFile]) problems.push(`instruction file ${instructionFile} not written`);
             else if (!files[instructionFile].includes('.xensemble/AGENTS.md')) problems.push(`${instructionFile} lacks pointer`);
-            for (const dir of userSkillDirs || []) {
-                if (!files[`${dir}/db-migrate/SKILL.md`]) problems.push(`user-level dir ${dir} missing`);
+            for (const dir of nativeSkillDirs || []) {
+                if (!files[`${dir}/db-migrate/SKILL.md`]) problems.push(`native dir ${dir} missing`);
             }
 
-            results.push({ agent: agent.id, instructionFile, userSkillDirs: userSkillDirs || [], ok: problems.length === 0, problems });
+            results.push({ agent: agent.id, instructionFile, nativeSkillDirs: nativeSkillDirs || [], ok: problems.length === 0, problems });
         }
 
         // 汇总输出（便于人工核对覆盖矩阵）
         // eslint-disable-next-line no-console
         console.log('\n[0025 injection matrix]');
         for (const r of results) {
-            console.log(`${r.ok ? '  OK ' : 'FAIL '} ${r.agent.padEnd(16)} → ${r.instructionFile}${r.userSkillDirs.length ? ' + ' + r.userSkillDirs.join(', ') : ''}${r.problems.length ? '  ✗ ' + r.problems.join('; ') : ''}`);
+            console.log(`${r.ok ? '  OK ' : 'FAIL '} ${r.agent.padEnd(16)} → ${r.instructionFile}${r.nativeSkillDirs.length ? ' + ' + r.nativeSkillDirs.join(', ') : ''}${r.problems.length ? '  ✗ ' + r.problems.join('; ') : ''}`);
         }
 
         const failed = results.filter((r) => !r.ok);
