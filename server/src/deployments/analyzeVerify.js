@@ -576,6 +576,7 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
                 return { ok: false, source: 'ai', aborted: true, warning: '部署已中止', finalStderr: '', tested: [], trail, messages: trimContext(messages), roundsUsed: round };
             }
             continue;
+        }
         if (parsed.action === 'final') {
             const r = parsed.result || {};
             const ok = Boolean(r.ok);
