@@ -344,19 +344,22 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             };
 
         case 'opencode': {
+            const { toOpencodeModelAlias } = require('../agents/agentModelAlias');
             const ocModels = {};
             for (const t of targets) {
-                const modelId = t.includes('/') ? t.split('/').slice(1).join('/') : t;
+                const realId = t.includes('/') ? t.split('/').slice(1).join('/') : t;
+                const modelId = toOpencodeModelAlias(realId);
                 ocModels[modelId] = {
                     name: modelId,
                     // limit.context overrides the context window that opencode
                     // would otherwise pull from Models.dev; the latter is often
                     // missing for newly-released / long-tail models, which is
                     // why we set it from guessContextLength() instead.
-                    limit: { context: guessContextLength(t), output: 8192 },
+                    limit: { context: guessContextLength(realId), output: 8192 },
                 };
             }
-            const defId = def.includes('/') ? def.split('/').slice(1).join('/') : def;
+            const defReal = def.includes('/') ? def.split('/').slice(1).join('/') : def;
+            const defId = toOpencodeModelAlias(defReal);
             return {
                 dirPath: '/root/.config/opencode',
                 filePath: '/root/.config/opencode/opencode.json',

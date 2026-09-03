@@ -269,9 +269,14 @@ test('buildGatewayConfigSpec: opencode with unknown model falls back to 1M', () 
     });
     const content = JSON.parse(spec.content);
     const models = content.provider.gateway.models;
-    // Models.dev lacks this long-tail model entirely; without our override
-    // opencode treats it as having 0-token context. Write 1M via guessContextLength.
-    assert.equal(models['nvidia/nemotron-3-ultra-550b-a55b:free'].limit.context, 1048576);
+    // opencode's parser splits on `/`, so we hand it a no-`/`/no-`:` alias
+    // (`/` and `:` -> `-`); UniGateway's model_mapping translates the alias
+    // back to the real upstream model. Models.dev lacks this long-tail model
+    // entirely; without our override opencode treats it as having 0-token
+    // context. Write 1M via guessContextLength on the real id.
+    assert.equal(models['nvidia-nemotron-3-ultra-550b-a55b-free'].limit.context, 1048576);
+    assert.equal(models['nvidia-nemotron-3-ultra-550b-a55b-free'].limit.output, 8192);
+    assert.equal(content.model, 'gateway/nvidia-nemotron-3-ultra-550b-a55b-free');
 });
 
 test('buildGatewayConfigSpec: droid writes compactionTokenLimit + per-model map', () => {

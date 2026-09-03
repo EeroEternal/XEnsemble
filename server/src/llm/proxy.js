@@ -13,6 +13,7 @@ const { db } = require('../db/index');
 const schema = require('../db/schema');
 const { eq } = require('drizzle-orm');
 const agentGatewayConfig = require('../admin/AgentGatewayConfig');
+const { toOpencodeModelAlias } = require('../agents/agentModelAlias');
 const { t } = require('../i18n');
 
 const LLM_PROXY_PREFIX = '/api/v1/llm';
@@ -442,6 +443,33 @@ async function proxyLlmRequest(request, reply) {
             bodyModel = parsed.model || null;
         } catch { /* non-JSON body */ }
         userPrompt = extractUserMessage(request.body);
+    }
+    // opencode 1.18.x /model picker re-splits the candidate id on `/` (see
+    // agentModelAlias.js), so we hand it a no-`/`/no-`:` alias in its config
+    // and the proxy's /v1/models catalog. UniGateway, however, matches the
+    // real upstream model id (its model_mapping and MODELS catalog are
+    // keyed on the real openrouter name). Rewrite the request body's
+    // top-level `model` from alias -> real for opencode before forwarding,
+    // so the gateway routes on the real name without polluting its model
+    // catalog with alias entries.
+    if (claims.aid === 'opencode' && bodyModel && Buffer.isBuffer(request.body)) {
+        try {
+            const cfg = await agentGatewayConfig.getForAgent(claims.aid);
+            const reals = agentGatewayConfig.allModels(cfg);
+            if (reals.length > 0) {
+                const aliasToReal = new Map();
+                for (const r of reals) aliasToReal.set(toOpencodeModelAlias(r), r);
+                const real = aliasToReal.get(bodyModel);
+                if (real && real !== bodyModel) {
+                    const parsed = JSON.parse(request.body.toString('utf8'));
+                    parsed.model = real;
+                    request.body = Buffer.from(JSON.stringify(parsed), 'utf8');
+                    bodyModel = real;
+                }
+            }
+        } catch (e) {
+            request.log.warn({ err: e?.message, bodyModel }, '[llm-proxy] opencode alias->real rewrite skipped');
+        }
     }
     // Record the user's prompt for the chat view (dedup: agent CLIs replay the
     // full history every request, so only record when it differs from the last

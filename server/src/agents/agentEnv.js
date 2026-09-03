@@ -171,6 +171,8 @@ function applyKimiCodeGatewayEnv(env) {
     };
 }
 
+const { toOpencodeModelAlias } = require('./agentModelAlias');
+
 function applyOpencodeGatewayEnv(env, modelTargets, defaultTarget) {
     const routerUrl = env.LLM_ROUTER_URL?.trim();
     const routerKey = env.LLM_ROUTER_API_KEY?.trim();
@@ -181,10 +183,12 @@ function applyOpencodeGatewayEnv(env, modelTargets, defaultTarget) {
     const defaultModel = ((defaultTarget ?? targets[0]) ?? '').trim();
     const models = {};
     for (const target of targets) {
-        const modelId = target.includes('/') ? target.split('/').slice(1).join('/') : target;
+        const realId = target.includes('/') ? target.split('/').slice(1).join('/') : target;
+        const modelId = toOpencodeModelAlias(realId);
         models[modelId] = { name: modelId };
     }
-    const defaultModelId = defaultModel.includes('/') ? defaultModel.split('/').slice(1).join('/') : defaultModel;
+    const defaultReal = defaultModel.includes('/') ? defaultModel.split('/').slice(1).join('/') : defaultModel;
+    const defaultModelId = toOpencodeModelAlias(defaultReal);
     const config = {
         autoupdate: false,
         model: `gateway/${defaultModelId}`,
@@ -630,6 +634,7 @@ module.exports = {
     mergeSpawnEnvLayers,
     applyGatewayAgentEnv,
     applyOpencodeGatewayEnv,
+    toOpencodeModelAlias,
     resolveAgentGatewayModelTargets,
     computeEffectiveRequired,
     isAgentKeysReady,
