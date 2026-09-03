@@ -435,7 +435,15 @@ async fn openai_chat(
 
     let mut request = openai_payload_to_chat_request(&payload, &default_model)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    request.model = default_model.to_string();
+    request.model = raw_model.to_string();
+    tracing::info!(
+        %service_id,
+        sent_model = %request.model,
+        raw_model = %raw_model,
+        default_model = %default_model,
+        provider_hint = %provider_hint,
+        "openai_chat upstream send (model actually sent to upstream provider)"
+    );
 
     let response = dispatch_for_service(
         &state,
