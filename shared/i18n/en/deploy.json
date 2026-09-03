@@ -101,7 +101,9 @@
     "load_preview_failed": "Failed to load preview",
     "preview_deploy_failed": "Preview deploy failed",
     "auto_deploy_failed": "Auto-deploy failed ({{status}})",
-    "quota_exceeded": "Concurrency limit reached ({{current}}/{{limit}})"
+    "quota_exceeded": "Concurrency limit reached ({{current}}/{{limit}})",
+    "deploy_not_effective": "Deploy request did not take effect, please retry",
+    "deploy_stopping": "Previous deploy is stopping, please retry in a few seconds"
   },
   "toast": {
     "finished": "Deployment finished",

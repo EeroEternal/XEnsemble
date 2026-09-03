@@ -10,7 +10,7 @@ const crypto = require('crypto');
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { eq, and, inArray } = require('drizzle-orm');
+const { eq, and, inArray, desc } = require('drizzle-orm');
 const { getRuntime } = require('../runtime/registry');
 const { ensureProjectRuntime } = require('../runtime/RuntimeService');
 const { analyzeProjectDeploy, collectProjectContext } = require('./analyzeDeploy');
@@ -20,7 +20,7 @@ const { signBlinkToken } = require('../preview/blinkToken');
 const { resolveControlPlanePublicUrlSync } = require('../llm/publicUrl');
 const deploymentService = require('./DeploymentService');
 const workspace = require('../workspace');
-const { registerDeploy, unregisterDeploy, isAborted, countByUser, listProjectIdsByUser, listByUser, deployKey } = require('./activeDeploys');
+const { registerDeploy, peekDeploy, unregisterDeploy, isAborted, countByUser, listProjectIdsByUser, listByUser, deployKey } = require('./activeDeploys');
 const { ensureUserQuota, getUsage } = require('../auth/PolicyService');
 const { broadcastSse } = require('../session/sseManager');
 const { db } = require('../db');
@@ -1168,16 +1168,94 @@ async function reclaimOrphanedDeployRecords({ projectId, userId, ourKey, sameKey
     }
 }
 
-async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUser, onProgress, resume, sessionId }) {
+/**
+ * 查同 project+session 最新一条 building 中的 kind='deploy' 记录。
+ * 可重入判定用：注册表有在飞条目时，据此把第二次点击接到进行中的部署上。
+ */
+async function findBuildingDeployRecord(projectId, sessionId, userId) {
+    try {
+        const conds = [
+            eq(schema.deployments.projectId, projectId),
+            eq(schema.deployments.kind, 'deploy'),
+            eq(schema.deployments.status, 'building'),
+        ];
+        if (sessionId) conds.push(eq(schema.deployments.sessionId, sessionId));
+        if (userId) conds.push(eq(schema.deployments.userId, userId));
+        const rows = await db.select({
+            id: schema.deployments.id,
+            stage: schema.deployments.stage,
+            createdAt: schema.deployments.createdAt,
+        }).from(schema.deployments)
+            .where(and(...conds))
+            .orderBy(desc(schema.deployments.createdAt))
+            .limit(1);
+        return rows[0] || null;
+    } catch (e) {
+        console.error('[twoStage] findBuildingDeployRecord failed:', e?.message || e);
+        return null;
+    }
+}
+
+async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUser, onProgress, onStarted, resume, sessionId }) {
     const project = await getProjectForUser(userId, projectId);
     if (!project) return { ok: false, error: 'Project not found' };
     if (!process.env.LLM_ANALYZE_API_KEY && !process.env.LLM_ANALYZE_API_URL) {
         return { ok: false, error: 'LLM_ANALYZE_* env not configured.' };
     }
+    // ── 可重入判定（必须在 registerDeploy 之前：registerDeploy 的覆盖语义会
+    // 重置在飞部署的 aborted 标志，把用户刚下的停止指令弄丢）──
+    // 同键部署已在飞时，第二次点击不新起部署：
+    //   - 正常在飞 → 重入（reattach）：返回已有 deploymentId，前端回到进行中进度；
+    //   - 正在停止（aborted=true，agent 尚未退出）→ 拒绝，避免与收尾中的旧部署抢 workspace。
+    const peeked = peekDeploy(project.id, sessionId);
+    if (peeked) {
+        if (peeked.aborted) {
+            console.error(`[twoStage] deploy_stopping: project=${project.id} session=${sessionId || '-'} second click while previous deploy is winding down`);
+            return {
+                ok: false,
+                code: 'deploy_stopping',
+                error: '上次部署正在停止，请几秒后重试',
+            };
+        }
+        const inFlight = await findBuildingDeployRecord(project.id, sessionId, userId);
+        if (inFlight) {
+            console.error(`[twoStage] reattach: project=${project.id} session=${sessionId || '-'} deploy=${inFlight.id} (second click absorbed by in-flight deploy)`);
+            return {
+                ok: true,
+                reattached: true,
+                deploymentId: inFlight.id,
+                stage: inFlight.stage || 'A',
+                elapsedMs: Date.now() - Number(inFlight.createdAt || Date.now()),
+            };
+        }
+        // 注册表有条目但没有 building 记录（陈旧注册）→ 走新部署并接管该键
+    }
     // per-user 并发闸门：进行中的部署 + 运行中的预览 ≤ 该用户个人配额（admin 同普通用户，
     // 均在用户管理/个人配额里配置，避免无限制并发部署同时跑多个 VM 耗尽沙箱资源）。
     // 先注册（内存计数原子）再校验，避免多个并发请求同时通过；超限则注销并拒绝。
     const registerCreated = registerDeploy(project.id, userId, sessionId);
+    if (!registerCreated) {
+        // 抢注失败：peek 与 register 之间有 DB await 窗口，并发第二次点击可能
+        // 在这里才发现键已被占。对方是本次部署的真正持有者——重试找它的
+        // building 记录并重入（对方注册后 ~100ms 内会插入记录）；始终找不到
+        // （极端：对方在插入记录前死亡）才接管该键继续新部署。
+        let inFlight = null;
+        for (let i = 0; i < 3 && !inFlight; i++) {
+            if (i > 0) await new Promise((r) => setTimeout(r, 300));
+            inFlight = await findBuildingDeployRecord(project.id, sessionId, userId);
+        }
+        if (inFlight) {
+            console.error(`[twoStage] reattach(race): project=${project.id} session=${sessionId || '-'} deploy=${inFlight.id}`);
+            return {
+                ok: true,
+                reattached: true,
+                deploymentId: inFlight.id,
+                stage: inFlight.stage || 'A',
+                elapsedMs: Date.now() - Number(inFlight.createdAt || Date.now()),
+            };
+        }
+        // 接管：registerDeploy 已把条目覆盖为新鲜状态（aborted=false），继续新部署
+    }
     // 孤儿 building 记录回收（进程被杀遗留）：清理后让本次部署自动走 resume，
     // 有保存的 verify 状态则断点续修，没有则回退到计划缓存/全新分析。
     let reclaimedOrphans = 0;
@@ -1234,6 +1312,10 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
     let lastStage = null;
     let lastStageAt = startedAt;
     const report = (p) => {
+        // 中止后停止一切进度写库/SSE：Stop 已把记录标 stopped，心跳与子阶段
+        // 上报若继续写会把状态翻回 building（刷新页面又显示"部署中"）。
+        // verify agent 退出前（单轮 LLM 调用可达几十秒）这是唯一的回跳源头。
+        if (aborted()) return;
         const now = Date.now();
         if (p?.stage && p.stage !== lastStage) {
             if (lastStage) console.error(`[twoStage] project=${projectId} stage ${lastStage} took ${now - lastStageAt}ms`);
@@ -1253,6 +1335,26 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
         }
         if (onProgress) onProgress(payload);
     };
+    // 持久化"进行中部署"记录（kind='deploy'）——提前到请求入口（原先在
+    // runDeployInner 内、ensureProjectRuntime 之后才创建）：
+    //  (1) 前端在 <1s 内收到 started 确认事件，明确"点击已生效"；
+    //  (2) 冷启动开 VM 期间记录已存在，进程若在此窗口被杀，孤儿回收也能兜住；
+    //  (3) 同键重入判定可精确找到它。runtimeId 待运行时就绪后由 runDeployInner 回填。
+    const now0 = Date.now();
+    const deployId = `dep_${crypto.randomBytes(8).toString('hex')}`;
+    try {
+        await db.insert(schema.deployments).values({
+            id: deployId, userId, projectId: project.id, sessionId: sessionId || null,
+            runtimeId: null, kind: 'deploy', status: 'building', stage: 'A',
+            createdAt: now0, updatedAt: now0, createdBy: userId,
+        });
+        deployRef.id = deployId;
+        if (onStarted) {
+            try { onStarted(deployId); } catch (_) { /* SSE 断开不影响部署 */ }
+        }
+    } catch (e) {
+        console.error('[twoStage] failed to persist deploy record:', e.message);
+    }
     let result;
     try {
         result = await runDeployInner({ project, userId, projectId, sessionId, resume: Boolean(resume) || reclaimedOrphans > 0, report, startedAt, deployRef, isAborted: aborted, deployState });
@@ -1347,18 +1449,13 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
     const hostWs = ready.hostWorkspacePath;
     const wsPath = ready.workspacePath;
 
-    // 持久化"进行中部署"记录（kind='deploy'，绑定 session）：前端跨 session 据此恢复，避免重复部署
-    const now0 = Date.now();
-    const deployId = `dep_${crypto.randomBytes(8).toString('hex')}`;
-    try {
-        await db.insert(schema.deployments).values({
-            id: deployId, userId, projectId: project.id, sessionId: sessionId || null,
-            runtimeId, kind: 'deploy', status: 'building', stage: 'A',
-            createdAt: now0, updatedAt: now0, createdBy: userId,
-        });
-        deployRef.id = deployId;
-    } catch (e) {
-        console.error('[twoStage] failed to persist deploy record:', e.message);
+    // 部署记录已在 runAutoTwoStageDeploy 入口提前创建（deployRef.id），这里仅回填
+    // runtimeId（创建时运行时未就绪，只能置空）。
+    if (deployRef.id && runtimeId) {
+        db.update(schema.deployments)
+            .set({ runtimeId, updatedAt: Date.now() })
+            .where(eq(schema.deployments.id, deployRef.id))
+            .catch((e) => console.error('[twoStage] backfill deploy runtimeId:', e.message));
     }
 
     // 部署前置：确保 host workspace 对 guest 可写（修复 root 属主导致的 write failed）。
@@ -1749,8 +1846,16 @@ function registerAutoDeployRoutes(fastify, { getProjectForUser }) {
                 resume: Boolean(request.body?.resume),
                 sessionId: request.query?.session_id || request.body?.session_id,
                 onProgress: (p) => send({ type: 'progress', ...p }),
+                // started 确认事件：部署记录创建即推送，前端据此确认"点击已生效"
+                onStarted: (deploymentId) => send({ type: 'started', deploymentId }),
             });
-            send({ type: 'result', result });
+            if (result?.reattached) {
+                // 重入：第二次点击命中在飞部署——发 started(reattached) 让前端
+                // 把 recoveredId 指向已有部署，回到进行中进度，而不是误报终态。
+                send({ type: 'started', deploymentId: result.deploymentId, reattached: true, stage: result.stage || null });
+            } else {
+                send({ type: 'result', result });
+            }
         } catch (err) {
             request.log.error(err);
             send({ type: 'error', error: err.message || String(err) });

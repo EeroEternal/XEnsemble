@@ -17,7 +17,7 @@ import { withSessionId } from '../lib/sessionContext';
  * 成功 → 短暂显示完成状态后回调 onSuccess（父组件跳转到 Preview tab）；
  * 失败 → 显示错误 + 「重新部署」按钮。
  */
-const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSuccess, onDeployStatus, abortRequested }, ref) {
+const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSuccess, onDeployStatus, abortRequested, autoStartVersion = 0 }, ref) {
     const { t } = useTranslation();
     // 前端分步展示：阶段 A（分析）+ 阶段 B 内子阶段（由后端 SSE substage 驱动）+ preview。
     // 后端逻辑保持两阶段不变，这里只做更细的展示拆分。
@@ -47,6 +47,16 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
     const [result, setResult] = useState(null);
     // 当前部署阶段：null（初始）| 'A'（分析）| 'B'（部署/验证）| 'preview'（开预览）
     const [phase, setPhase] = useState(null);
+    // ── 部署确认闭环 ──
+    // startedAtRef：本次点击时刻；confirmedIdRef：服务端确认的 deploymentId
+    //（started 事件或轮询到本次点击之后创建的记录）。确认前绝不把旧记录的
+    // 终态当成"本次部署"的结果（旧记录冒充当前状态的修复点）。
+    const startedAtRef = useRef(0);
+    const confirmedIdRef = useRef(null);
+    const confirmTimerRef = useRef(null);
+    const runStateRef = useRef(runState);
+    runStateRef.current = runState;
+    const DEPLOY_CONFIRM_TIMEOUT_MS = 5000;
     // 挂载时先查该 session 的部署状态：有进行中/已完成的 kind='deploy' 则恢复展示，不重复触发
     const [recoveredId, setRecoveredId] = useState(null);
     const jumpTimerRef = useRef(null);
@@ -66,9 +76,24 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
     }, [runState, onDeployStatus]);
 
     const startRun = useCallback(async (opts = {}) => {
+        // 确认闭环：记录点击时刻 + 清空确认状态。部署是否"生效"以两个信号为准：
+        //  (1) SSE started 事件（服务端创建记录即推送，<1s）；
+        //  (2) 兜底轮询到 created_at >= startedAt 的 building 记录。
+        // 确认超时（DEPLOY_CONFIRM_TIMEOUT_MS）仍未确认 → 明确报"未生效"，
+        // 不再把旧记录的状态冒充本次部署的结果。
+        startedAtRef.current = Date.now();
+        confirmedIdRef.current = null;
+        if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
         setRunState('running');
         setResult(null);
         setPhase(null);
+        setRecoveredId(null);
+        confirmTimerRef.current = setTimeout(() => {
+            if (!confirmedIdRef.current && runStateRef.current === 'running') {
+                setRunState('failed');
+                setResult({ ok: false, error: t('deploy:error.deploy_not_effective') });
+            }
+        }, DEPLOY_CONFIRM_TIMEOUT_MS);
         const finish = (data) => {
             if (data.ok) {
                 setResult(data);
@@ -91,9 +116,21 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 const data = await res.json().catch(() => ({}));
                 throw new Error(data.error || `Auto-deploy failed (${res.status})`);
             }
-            // SSE 流式：progress 事件驱动分阶段展示，result 事件收尾
+            // SSE 流式：started 确认生效，progress 事件驱动分阶段展示，result 事件收尾
             const handleEvent = (evt) => {
                 if (!evt || typeof evt !== 'object') return;
+                if (evt.type === 'started') {
+                    // 服务端已创建部署记录 → 点击确认生效。reattached=true 表示
+                    // 第二次点击命中了在飞部署（服务端重入），同样回到进度展示。
+                    if (evt.deploymentId) {
+                        confirmedIdRef.current = evt.deploymentId;
+                        if (confirmTimerRef.current) { clearTimeout(confirmTimerRef.current); confirmTimerRef.current = null; }
+                        setRecoveredId(evt.deploymentId);
+                        // 确认兜底此前若已判"未生效"，此处重新回到运行态
+                        if (runStateRef.current !== 'running') setRunState('running');
+                    }
+                    return;
+                }
                 if (evt.type === 'progress') {
                     if (evt.stage === 'A') {
                         setPhase('A');
@@ -137,7 +174,10 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
         }
     }, [projectId, sessionId, onSuccess]);
 
-    // 主动部署请求（父组件"Deploy"按钮触发）：跳过"查状态恢复"，强制重新部署
+    // 主动部署请求（父组件"Deploy"按钮触发）：跳过"查状态恢复"，强制重新部署。
+    // 触发通道改为 autoStartVersion prop（见下方 effect）——旧实现用
+    // setTimeout(() => ref.current?.requestDeploy?.(), 0)，DeployPanel 尚未
+    // 挂载完成时 ref 为 null，可选链静默吞掉调用，点击被无声丢弃。
     const requestedRef = useRef(false);
     const requestDeploy = useCallback(() => {
         requestedRef.current = true;
@@ -145,9 +185,23 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
     }, [startRun]);
     useImperativeHandle(ref, () => ({ requestDeploy }), [requestDeploy]);
 
+    // autoStartVersion：父组件"Deploy"按钮自增，本组件以它为 key 重挂载。
+    // 挂载 effect 里直接 startRun——挂载与发起在同一生命周期内，无 ref 时序
+    // 竞态。必须在挂载恢复 effect 之前声明（先置 requestedRef 才能跳过恢复）。
+    const lastAutoStartRef = useRef(0);
+    useEffect(() => {
+        if (!autoStartVersion || autoStartVersion === lastAutoStartRef.current) return;
+        lastAutoStartRef.current = autoStartVersion;
+        requestDeploy();
+    }, [autoStartVersion, requestDeploy]);
+
     // 挂载先查该 session 的部署状态：有进行中/已完成的 kind='deploy' 则恢复展示，不重复触发。
     // 主动部署（requestedRef=true，由 requestDeploy 触发）时跳过本逻辑。
     // 无该 session 的部署记录 → 保持 idle 空态，等用户点"Deploy"再部署，绝不自动重新部署。
+    // 新鲜度守卫：只恢复"最近 RECOVER_FRESH_MS 内有更新"的记录——更早的终态
+    // （比如一小时前手动停掉的孤儿）不展示，避免打开页面就看到莫名的"已中止"。
+    const RECOVER_FRESH_MS = 5 * 60 * 1000;
+    const isFresh = (d) => (Date.now() - Number(d.updated_at || d.created_at || 0)) < RECOVER_FRESH_MS;
     useEffect(() => {
         if (requestedRef.current) return;
         let cancelled = false;
@@ -161,12 +215,12 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 const deployRows = list
                     .filter((d) => d.kind === 'deploy' && (!sessionId || d.session_id === sessionId))
                     .sort((a, b) => b.created_at - a.created_at);
-                const active = deployRows.find((d) => d.status === 'building' || d.status === 'pending');
+                const active = deployRows.find((d) => (d.status === 'building' || d.status === 'pending') && isFresh(d));
                 if (active) {
                     setRunState('running');
                     setPhase(active.stage === 'B' ? 'B' : active.stage === 'preview' ? 'preview' : 'A');
                     setRecoveredId(active.id);
-                } else if (deployRows.length > 0) {
+                } else if (deployRows.length > 0 && isFresh(deployRows[0])) {
                     const last = deployRows[0];
                     if (last.status === 'running') {
                         setRunState('success');
@@ -179,7 +233,7 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                         setResult({ ok: false, aborted: true, code: last.last_error_code || undefined, error: last.last_error_message || undefined });
                     }
                 }
-                // 无该 session 记录 → 保持 idle（空态）
+                // 无该 session 记录，或最新记录已过新鲜度窗口 → 保持 idle（空态）
             } catch {
                 // 查状态失败 → 保持 idle（空态），不自动部署
             }
@@ -200,8 +254,12 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 if (row.status === 'building' || row.status === 'pending') {
                     setPhase(row.stage === 'B' ? 'B' : row.stage === 'preview' ? 'preview' : 'A');
                 } else if (row.status === 'running') {
-                    setRunState('success');
-                    setResult({ ok: true, deploymentId: row.id, elapsedMs: (row.updated_at - row.created_at) || 0 });
+                    // runStateRef 守卫：SSE result 已接管（success）时不重复触发
+                    if (runStateRef.current === 'running') {
+                        setRunState('success');
+                        setResult({ ok: true, deploymentId: row.id, elapsedMs: (row.updated_at - row.created_at) || 0 });
+                        jumpTimerRef.current = setTimeout(() => onSuccess?.({ ok: true, deploymentId: row.id }), 800);
+                    }
                     setRecoveredId(null);
                 } else if (row.status === 'failed') {
                     setRunState('failed'); setResult({ ok: false, error: row.stage_message || '部署失败', stage: row.stage }); setRecoveredId(null);
@@ -213,42 +271,38 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
             } catch { /* ignore */ }
         }, 3000);
         return () => clearInterval(id);
-    }, [recoveredId, projectId, sessionId]);
+    }, [recoveredId, projectId, sessionId, onSuccess]);
 
-    // 部署中轮询兜底：SSE 断开/verify 卡死时也能感知部署终态（running/failed/stopped），
-    // 避免前端一直卡在 running（右上角 Stop deploy 停不下来）。SSE 正常时由 result 事件接管。
-    const runStateRef = useRef(runState);
-    runStateRef.current = runState;
+    // 确认轮询：SSE started 事件是主确认通道；这里轮询兜底——只认"本次点击之后
+    // 创建"的 building/pending 记录（created_at >= startedAt）。确认前绝不把任何
+    // 旧记录的状态当成本次部署的终态（旧实现取"最新一条"判断终态，点击后到
+    // 服务端创建记录之间的窗口里会误读上一条 stopped 记录，显示"已中止"）。
+    // 确认后交给 recoveredId 轮询（按精确 id 跟踪）+ SSE result 接管终态。
     useEffect(() => {
         if (runState !== 'running') return undefined;
         const id = setInterval(async () => {
+            if (confirmedIdRef.current) return;
             try {
                 const res = await apiFetch(withSessionId(`/api/v1/deployments?project_id=${encodeURIComponent(projectId)}`));
                 const data = await res.json();
                 const list = Array.isArray(data) ? data : (data?.deployments || []);
-                const rows = list.filter((d) => d.kind === 'deploy' && (!sessionId || d.session_id === sessionId)).sort((a, b) => b.created_at - a.created_at);
-                if (!rows.length) return;
-                const latest = rows[0];
-                if (latest.status !== 'running' && latest.status !== 'failed' && latest.status !== 'stopped') return;
-                if (runStateRef.current !== 'running') return; // 已被 SSE 结果接管
-                if (latest.status === 'running') {
-                    setRunState('success');
-                    setResult({ ok: true, deploymentId: latest.id, elapsedMs: (latest.updated_at - latest.created_at) || 0 });
-                    jumpTimerRef.current = setTimeout(() => onSuccess?.(latest), 800);
-                } else if (latest.status === 'failed') {
-                    setRunState('failed');
-                    setResult({ ok: false, error: latest.stage_message || '部署失败', stage: latest.stage });
-                } else if (latest.status === 'stopped') {
-                    setRunState('aborted');
-                    setResult({ ok: false, aborted: true, code: latest.last_error_code || undefined, error: latest.last_error_message || undefined });
+                const mine = list.find((d) => d.kind === 'deploy'
+                    && (!sessionId || d.session_id === sessionId)
+                    && Number(d.created_at) >= startedAtRef.current
+                    && (d.status === 'building' || d.status === 'pending'));
+                if (mine) {
+                    confirmedIdRef.current = mine.id;
+                    if (confirmTimerRef.current) { clearTimeout(confirmTimerRef.current); confirmTimerRef.current = null; }
+                    setRecoveredId(mine.id);
                 }
             } catch { /* ignore */ }
-        }, 5000);
+        }, 2000);
         return () => clearInterval(id);
-    }, [runState, projectId, sessionId, onSuccess]);
+    }, [runState, projectId, sessionId]);
 
     useEffect(() => () => {
         if (jumpTimerRef.current) clearTimeout(jumpTimerRef.current);
+        if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
     }, []);
 
     return (
@@ -312,7 +366,9 @@ function FailureView({ result }) {
             {(() => {
                 const line = result?.code === 'quota_exceeded'
                     ? t('deploy:error.quota_exceeded', { current: result?.current, limit: result?.limit })
-                    : (result?.error || result?.verify?.warning || '');
+                    : result?.code === 'deploy_stopping'
+                        ? t('deploy:error.deploy_stopping')
+                        : (result?.error || result?.verify?.warning || '');
                 return line ? (
                     <div className="text-xs text-zinc-600 max-w-md break-words px-4">{line}</div>
                 ) : null;

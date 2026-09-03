@@ -101,7 +101,9 @@
     "load_preview_failed": "加载预览失败",
     "preview_deploy_failed": "预览部署失败",
     "auto_deploy_failed": "自动部署失败 ({{status}})",
-    "quota_exceeded": "已达并发部署上限（{{current}}/{{limit}}）"
+    "quota_exceeded": "已达并发部署上限（{{current}}/{{limit}}）",
+    "deploy_not_effective": "部署请求未生效，请重试",
+    "deploy_stopping": "上次部署正在停止，请几秒后重试"
   },
   "toast": {
     "finished": "部署完成",

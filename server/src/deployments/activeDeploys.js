@@ -19,6 +19,13 @@ function registerDeploy(projectId, userId, sessionId) {
     return created;
 }
 
+// 只读查看注册条目（不创建、不覆盖）。可重入判定用：先 peek 再决定
+// 重入复用/拒绝/新注册，避免 registerDeploy 的覆盖语义把在飞部署的
+// aborted 标志意外重置。
+function peekDeploy(projectId, sessionId) {
+    return activeDeploys.get(deployKey(projectId, sessionId)) || null;
+}
+
 function unregisterDeploy(projectId, sessionId) {
     activeDeploys.delete(deployKey(projectId, sessionId));
 }
@@ -75,4 +82,4 @@ function cleanupStale(maxAgeMs) {
     }
 }
 
-module.exports = { deployKey, registerDeploy, unregisterDeploy, isAborted, abortDeploy, countByUser, listProjectIdsByUser, listByUser, cleanupStale };
+module.exports = { deployKey, registerDeploy, peekDeploy, unregisterDeploy, isAborted, abortDeploy, countByUser, listProjectIdsByUser, listByUser, cleanupStale };

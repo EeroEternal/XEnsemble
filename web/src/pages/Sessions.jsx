@@ -210,7 +210,6 @@ export default React.forwardRef(function Sessions({
     return () => window.removeEventListener('xensemble:deploy_finished', onDeployFinished);
   }, [showToast]);
   const panelRef = useRef(null);
-  const deployPanelRef = useRef(null);
   const shellRef = useRef(null);
   // 每次点小火箭自增，用于强制 DeployPanel remount（重新分析），而不是复用上次内容
   const [deployVersion, setDeployVersion] = useState(0);
@@ -1371,7 +1370,7 @@ export default React.forwardRef(function Sessions({
                   {activeSession.projectId ? (
                     <>
                       <div className="mx-0.5 h-5 w-px bg-zinc-200" />
-                      <PreviewControlGroup {...preview} deployStatus={deployStatus} onCancelDeploy={handleCancelDeploy} onAnalyze={() => { setAbortRequested(false); panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); setTimeout(() => deployPanelRef.current?.requestDeploy?.(), 0); }} />
+                      <PreviewControlGroup {...preview} deployStatus={deployStatus} onCancelDeploy={handleCancelDeploy} onAnalyze={() => { setAbortRequested(false); panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); }} />
                     </>
                   ) : null}
                   {activeSession && (
@@ -1506,7 +1505,7 @@ export default React.forwardRef(function Sessions({
                     deployContent={activeSession?.projectId ? (
                        <DeployPanel
                          key={`${activeSession.projectId}-${activeSession.sessionId}-${deployVersion}`}
-                         ref={deployPanelRef}
+                         autoStartVersion={deployVersion}
                          projectId={activeSession.projectId}
                          sessionId={activeSession.sessionId}
                          onSuccess={onDeploySuccess}
