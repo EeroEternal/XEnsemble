@@ -11,7 +11,8 @@ const MAX_POLL_ATTEMPTS = 150;
 const CLOSED_POPUP_GRACE_ATTEMPTS = 3;
 
 function isNotConnectedError(err) {
-  return err?.message?.toLowerCase().includes('not connected');
+  return err?.code === 'provider_not_connected'
+    || err?.message?.toLowerCase().includes('not connected');
 }
 
 function openOAuthPopup(url) {
