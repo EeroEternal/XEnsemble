@@ -194,3 +194,38 @@ test('getConversation returns null for missing row', async () => {
     const missing = await svc.getConversation('sess_does_not_exist');
     assert.equal(missing, null);
 });
+
+test('summarizeSession persists all turns but caps the LLM prompt to last 100', async () => {
+    const { id } = await makeSession();
+    // 聊天源：120 条 user 消息 → 120 turns
+    const history = [];
+    for (let i = 1; i <= 120; i += 1) {
+        history.push({ seq: i, ts: 1000 + i, role: 'user', content: `msg${i}` });
+    }
+    const chatTranscript = require('../llm/chatTranscript');
+    for (const e of history) {
+        await db.insert(schema.sessionChatMessages).values({
+            sessionId: id,
+            seq: e.seq,
+            ts: e.ts,
+            role: e.role,
+            content: e.content,
+        });
+    }
+
+    let prompt = '';
+    analyzeClient.chatJson = async (params) => { prompt = params.user; return GOOD_SUMMARY; };
+
+    await svc.summarizeSession(id);
+
+    // 落库全量：session_conversations.turns 存满 120 条
+    const row = await db.select().from(schema.sessionConversations)
+        .where(eq(schema.sessionConversations.sessionId, id));
+    assert.equal(Array.isArray(row[0].turns) ? row[0].turns.length : 0, 120);
+
+    // prompt 只喂最近 100 条（msg21..msg120），不包含最早的 msg1..msg20
+    assert.ok(prompt.includes('user: msg120'));
+    assert.ok(prompt.includes('user: msg21'));
+    assert.ok(!prompt.includes('user: msg1\n'));
+    assert.ok(!prompt.includes('user: msg20\n'));
+});

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Plus, Pencil, CheckCircle, Archive, Play, Trash2, UploadCloud, ArrowDownToLine,
-  Loader2, RefreshCw, Search,
+  Loader2, RefreshCw, Search, ArrowUpCircle,
 } from 'lucide-react';
 
 import Button from '../components/Button';
@@ -27,7 +27,7 @@ import {
 
 import {
   listMySkills, createSkill, updateSkill, changeStatus, deleteSkill, publishSkill, unpublishSkill,
-  importSkillFromFiles,
+  importSkillFromFiles, syncSkill,
 } from '../lib/skillsApi';
 
 const STATUS_META = {
@@ -188,6 +188,13 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
     t('skills:toast_action_failed', { defaultValue: 'Action failed.' }),
   );
 
+  // 同步已安装技能到源的最新版本
+  const handleSync = (skill) => act(
+    () => syncSkill(skill.id),
+    t('skills:toast_synced', { defaultValue: 'Synced to latest.' }),
+    t('skills:toast_action_failed', { defaultValue: 'Action failed.' }),
+  );
+
   // 删除前二次确认（对齐 ConfirmDialog 规范）
   const handleDelete = async (skill) => {
     const ok = await confirm({
@@ -300,6 +307,7 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
                           s.status === 'active' && { icon: Archive, label: t('skills:action_archive', { defaultValue: 'Archive' }), onClick: () => act(() => changeStatus(s.id, 'archive'), t('skills:toast_updated', { defaultValue: 'Done.' })) },
                           s.status === 'archived' && { icon: Play, label: t('skills:action_restore', { defaultValue: 'Restore' }), onClick: () => act(() => changeStatus(s.id, 'restore'), t('skills:toast_updated', { defaultValue: 'Done.' })) },
                           { icon: s.visibility === 'public' ? ArrowDownToLine : UploadCloud, label: t(s.visibility === 'public' ? 'skills:action_unpublish' : 'skills:action_publish', { defaultValue: 'Toggle market' }), onClick: () => togglePublish(s) },
+                          s.updateInfo?.hasUpdate && { icon: ArrowUpCircle, label: t('skills:action_sync', { defaultValue: 'Sync to latest' }), onClick: () => handleSync(s) },
                           { icon: Trash2, label: t('common:action.delete'), danger: true, onClick: () => handleDelete(s) },
                         ].filter(Boolean)}
                       />

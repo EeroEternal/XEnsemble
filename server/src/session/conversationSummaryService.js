@@ -187,6 +187,9 @@ async function summarizeSession(sessionId, { force = false } = {}) {
         readStateDir: () => readStateDirJsonl(session),
         readChatHistory: () => chatTranscript.getHistory(sessionId),
         afterSeq: 0,
+        // 落库/历史读取全量（不截断），支持会话历史真正分页；
+        // LLM prompt 的截断在下方单独控制。
+        maxTurns: null,
     });
 
     const headSeq = source === 'chat'
@@ -210,7 +213,11 @@ async function summarizeSession(sessionId, { force = false } = {}) {
         return getConversation(sessionId);
     }
 
-    const user = buildFullPrompt(turns);
+    // LLM prompt 单独截断：只喂最近 MAX_TURNS 条，避免超长会话 token 溢出
+    const promptTurns = turns.length > extractor.MAX_TURNS
+        ? turns.slice(turns.length - extractor.MAX_TURNS)
+        : turns;
+    const user = buildFullPrompt(promptTurns);
     const system = 'You are a precise technical conversation summarizer.';
 
     let summary;
@@ -338,9 +345,15 @@ async function persistTurns(sessionId, turns, lastSummarizedSeq, source) {
  * sessions). The summary (overview / keyDecisions / filesTouched) comes from
  * the stored row (B).
  *
- * Returns null only when there is neither a stored row nor any chat turns.
+ * P3：真正分页——offset/limit 对 turns 切片，返回 total/hasMore，前端可逐页加载。
+ *
+ * @param {string} sessionId
+ * @param {object} [opts]
+ * @param {number} [opts.offset]
+ * @param {number} [opts.limit]
+ * @returns {Promise<object|null>} null only when there is neither a stored row nor any chat turns.
  */
-async function getConversation(sessionId) {
+async function getConversation(sessionId, { offset = 0, limit = null } = {}) {
     const row = await loadConversationRow(sessionId);
 
     let turns = [];
@@ -348,7 +361,8 @@ async function getConversation(sessionId) {
     try {
         const history = await chatTranscript.getHistory(sessionId);
         if (Array.isArray(history) && history.length > 0) {
-            const chat = extractor.extractFromChat(history);
+            // 不在此处截断（maxTurns=null 关闭 100 条 cap），分页由下方统一处理
+            const chat = extractor.extractFromChat(history, 0, { maxTurns: null });
             if (chat.turns.length > 0) {
                 turns = chat.turns;
                 source = 'chat';
@@ -363,11 +377,19 @@ async function getConversation(sessionId) {
 
     if (!row && turns.length === 0) return null;
 
+    const total = turns.length;
+    const start = Math.max(0, Number(offset) || 0);
+    const pageLimit = limit == null ? null : Math.max(1, Number(limit) || 50);
+    const sliced = pageLimit == null ? turns.slice(start) : turns.slice(start, start + pageLimit);
+
     return {
         sessionId,
         source,
         summary: row?.summary || {},
-        turns,
+        turns: sliced,
+        total,
+        offset: start,
+        hasMore: pageLimit == null ? false : start + sliced.length < total,
         lastSummarizedSeq: row?.lastSummarizedSeq || 0,
         updatedAt: row?.updatedAt,
     };

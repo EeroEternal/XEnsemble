@@ -223,6 +223,69 @@ test('extractFromTranscript caps turns at 100 (drops oldest)', () => {
     assert.equal(turns[99].text, 'msg120');
 });
 
+test('extractFromTranscript maxTurns=null disables the 100-turn cap', () => {
+    const frames = [];
+    for (let i = 1; i <= 120; i += 1) {
+        frames.push({ seq: i, ts: i * 5000, kind: 'in', data: `msg${i}` });
+    }
+    const store = fakeTranscriptStore(frames);
+    const { turns } = extractor.extractFromTranscript(store, 's1', 0, { maxTurns: null });
+    assert.equal(turns.length, 120);
+    assert.equal(turns[0].text, 'msg1');
+    assert.equal(turns[119].text, 'msg120');
+});
+
+test('extractFromTranscript maxTurns=N keeps only the newest N turns', () => {
+    const frames = [];
+    for (let i = 1; i <= 30; i += 1) {
+        frames.push({ seq: i, ts: i * 5000, kind: 'in', data: `msg${i}` });
+    }
+    const store = fakeTranscriptStore(frames);
+    const { turns } = extractor.extractFromTranscript(store, 's1', 0, { maxTurns: 10 });
+    assert.equal(turns.length, 10);
+    assert.equal(turns[0].text, 'msg21');
+});
+
+test('extractFromStateDir maxTurns=null keeps all turns', () => {
+    const lines = [];
+    for (let i = 1; i <= 120; i += 1) {
+        lines.push(JSON.stringify({
+            type: 'user',
+            message: { role: 'user', content: `msg${i}` },
+            timestamp: `2025-07-04T10:00:${String(i).padStart(2, '0')}.000Z`,
+        }));
+    }
+    const { turns } = extractor.extractFromStateDir(lines.join('\n'), { maxTurns: null });
+    assert.equal(turns.length, 120);
+    assert.equal(turns[0].text, 'msg1');
+});
+
+test('extract() passes maxTurns through to each source', async () => {
+    const store = fakeTranscriptStore([
+        { seq: 1, ts: 1000, kind: 'in', data: 'from transcript' },
+    ]);
+    const viaTranscript = await extractor.extract({
+        transcriptStore: store,
+        streamRef: 's1',
+    });
+    assert.equal(viaTranscript.source, 'transcript');
+    assert.equal(viaTranscript.turns.length, 1);
+
+    // chat source honors maxTurns=null
+    const viaChat = await extractor.extract({
+        transcriptStore: store,
+        streamRef: 's1',
+        readChatHistory: async () => [
+            { seq: 1, ts: 1000, role: 'user', content: 'a' },
+            { seq: 2, ts: 1100, role: 'user', content: 'b' },
+        ],
+        maxTurns: 1,
+    });
+    assert.equal(viaChat.source, 'chat');
+    assert.equal(viaChat.turns.length, 1);
+    assert.equal(viaChat.turns[0].text, 'b');
+});
+
 test('extractFromStateDir parses Claude JSONL with tools', () => {
     const jsonl = [
         JSON.stringify({

@@ -92,6 +92,15 @@ export async function unpublishSkill(id) {
 }
 
 /**
+ * 同步已安装技能到源的最新版本。
+ */
+export async function syncSkill(id) {
+  const res = await apiFetch(`/api/v1/skills/${encodeURIComponent(id)}/sync`, { method: 'POST' });
+  if (!res.ok) throw new Error('Failed to sync skill');
+  return res.json();
+}
+
+/**
  * 从会话手动提炼 skill（US-3，直跳 L4）。
  * @param {string} sessionId
  * @returns {Promise<object>} skill 全量
@@ -119,26 +128,6 @@ export async function markDraftsSeen() {
   const res = await apiFetch('/api/v1/skills/drafts/mark-seen', { method: 'POST' });
   if (!res.ok && res.status !== 204) throw new Error('Failed to mark drafts seen');
   return { ok: true };
-}
-
-/**
- * 0022：从本地目录导入外部开源技能（扫描 <name>/SKILL.md 结构）。
- * @param {string} dirPath 服务端可见的本地目录绝对路径
- * @returns {Promise<{ imported: number, skills: object[] }>}
- */
-export async function importSkillFromPath(dirPath) {
-  const res = await apiFetch('/api/v1/skills/import-local', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: dirPath }),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    const err = new Error(body?.error || 'Failed to import skills');
-    if (body?.code) err.code = body.code;
-    throw err;
-  }
-  return res.json();
 }
 
 /**

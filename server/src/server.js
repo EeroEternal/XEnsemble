@@ -976,6 +976,8 @@ function mapSessionRow(row) {
         title: row.title || null,
         titleManual: Boolean(row.title_manual),
         createdAt: Number(row.created_at),
+        exitCode: row.exit_code ?? sessionManager.getSession(row.id)?.exitCode ?? null,
+        exitedAt: row.exited_at ? Number(row.exited_at) : null,
         updatedAt: null,
     };
 }
@@ -995,6 +997,7 @@ fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async
         const result = await db.execute(sql`
             SELECT s.id, s.project_id, s.agent_id, s.status, s.recoverable,
                    s.custom_image_id, s.title, s.title_manual, s.created_at,
+                   s.exit_code, s.exited_at,
                    p.name AS project_name,
                    s.provisioning_error
             FROM sessions s
@@ -1015,22 +1018,25 @@ fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async
     if (query.status) filters.push(sql`s.status = ${String(query.status)}`);
     if (query.agentId) filters.push(sql`s.agent_id = ${String(query.agentId)}`);
     if (query.projectId) filters.push(sql`s.project_id = ${String(query.projectId)}`);
-    if (query.q) {
+    const hasSearch = Boolean(query.q);
+    if (hasSearch) {
         const escaped = String(query.q).replace(/[\\%_]/g, (m) => `\\${m}`);
-        filters.push(sql`(s.title ILIKE ${`%${escaped}%`} OR s.agent_id ILIKE ${`%${escaped}%`})`);
+        filters.push(sql`(s.title ILIKE ${`%${escaped}%`} OR s.agent_id ILIKE ${`%${escaped}%`} OR sc.summary::text ILIKE ${`%${escaped}%`})`);
     }
     const whereClause = sql`WHERE s.user_id = ${request.user.id}${filters.length ? sql` AND ${sql.join(filters, sql` AND `)}` : sql``}`;
 
     const statsSelect = withStats
         ? sql`, sc.turns AS conversation_turns, sc.summary AS conversation_summary`
         : sql``;
-    const statsJoin = withStats
+    // withStats 或搜索时都需 join session_conversations（搜索命中 summary 字段）
+    const statsJoin = (withStats || hasSearch)
         ? sql`LEFT JOIN session_conversations sc ON sc.session_id = s.id`
         : sql``;
 
     const listResult = await db.execute(sql`
         SELECT s.id, s.project_id, s.agent_id, s.status, s.recoverable,
                s.custom_image_id, s.title, s.title_manual, s.created_at,
+               s.exit_code, s.exited_at,
                p.name AS project_name, s.provisioning_error
                ${statsSelect}
         FROM sessions s
@@ -1043,6 +1049,7 @@ fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async
     const countResult = await db.execute(sql`
         SELECT COUNT(*)::int AS total
         FROM sessions s
+        ${statsJoin}
         ${whereClause}
     `);
 
@@ -1051,7 +1058,6 @@ fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async
 
     const items = rows.map((row) => {
         const item = mapSessionRow(row);
-        item.exitCode = sessionManager.getSession(row.id)?.exitCode ?? null;
         if (withStats) {
             item.stats = conversationStats(row.conversation_turns, row.conversation_summary);
         }
@@ -1096,7 +1102,10 @@ fastify.get('/api/v1/sessions/:sessionId/conversation', { preValidation: [fastif
     if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
 
     const { getConversation } = require('./session/conversationSummaryService');
-    const view = await getConversation(sessionId);
+    const offset = Math.max(0, Number.parseInt(request.query?.offset, 10) || 0);
+    const limitRaw = request.query?.limit != null ? Number.parseInt(request.query.limit, 10) : null;
+    const limit = limitRaw == null || Number.isNaN(limitRaw) ? null : Math.min(200, Math.max(1, limitRaw));
+    const view = await getConversation(sessionId, { offset, limit });
     if (!view) return reply.code(404).send({ code: 'conversation_not_found' });
     return view;
 });
@@ -1253,7 +1262,7 @@ fastify.delete('/api/v1/sessions/:sessionId', { preValidation: [fastify.authenti
 
     // Mark exited first so in-flight provisioning observes cancellation.
     await db.update(schema.sessions)
-        .set({ status: 'exited' })
+        .set({ status: 'exited', exitedAt: Date.now() })
         .where(eq(schema.sessions.id, sessionId));
 
     const live = sessionManager.getSession(sessionId);

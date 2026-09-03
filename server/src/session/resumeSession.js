@@ -47,7 +47,7 @@ async function registerSessionLifecycle({
     if (live?.lifecycleRegistered) return;
     if (live) live.lifecycleRegistered = true;
 
-    sessionManager.onExit(sessionId, () => {
+    sessionManager.onExit(sessionId, (exitCode) => {
         const current = sessionManager.getSession(sessionId);
         if (current && !current.hibernating) {
             const uptime = Date.now() - (current.spawnedAt || 0);
@@ -59,8 +59,14 @@ async function registerSessionLifecycle({
         }
         const circuitTripped = current && (current.crashCount || 0) >= CRASH_THRESHOLD;
         const nextStatus = current && !current.hibernating && !circuitTripped && isSessionRecoverable(current) ? 'idle' : 'exited';
+        // P1：退出码/退出时间落库（此前仅存内存，重启即丢，历史页无法回溯）
+        const patch = { status: nextStatus };
+        if (nextStatus === 'exited') {
+            patch.exitCode = typeof exitCode === 'number' ? exitCode : null;
+            patch.exitedAt = Date.now();
+        }
         db.update(schema.sessions)
-            .set({ status: nextStatus })
+            .set(patch)
             .where(eq(schema.sessions.id, sessionId))
             .catch((err) => fastifyLog.error(err, 'Failed to persist session exit status'));
     });

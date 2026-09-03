@@ -71,7 +71,7 @@ async function reconcileRunningSessions(db, schema, opts = {}) {
     if (staleExitedIds.length > 0) {
         await db
             .update(schema.sessions)
-            .set({ status: 'exited' })
+            .set({ status: 'exited', exitedAt: Date.now() })
             .where(inArray(schema.sessions.id, staleExitedIds));
     }
 

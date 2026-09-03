@@ -45,17 +45,6 @@ function registerSkillRoutes(fastify) {
         }
     });
 
-    // 0022：本地目录导入（外部开源技能安装——扫描 <name>/SKILL.md 结构）
-    fastify.post('/api/v1/skills/import-local', { preValidation: authPre }, async (request, reply) => {
-        try {
-            const dirPath = String(request.body?.path ?? '').trim();
-            const skills = await skillService.importSkillFromPath(request.user.id, dirPath);
-            return reply.code(201).send({ imported: skills.length, skills });
-        } catch (err) {
-            return sendPublicError(reply, err, 'Failed to import skills', 500, request.locale || 'en');
-        }
-    });
-
     // 0024：浏览器文件夹上传导入（webkitdirectory → 相对路径+内容 JSON，服务端临时重建）
     fastify.post('/api/v1/skills/import-upload', { preValidation: authPre }, async (request, reply) => {
         try {
@@ -154,6 +143,15 @@ function registerSkillRoutes(fastify) {
             return await skillService.unpublishSkill(request.user.id, request.params.id);
         } catch (err) {
             return sendPublicError(reply, err, 'Failed to unpublish skill', 500, request.locale || 'en');
+        }
+    });
+
+    // 同步安装技能到源的最新版本
+    fastify.post('/api/v1/skills/:id/sync', { preValidation: authPre }, async (request, reply) => {
+        try {
+            return await skillService.syncSkillFromSource(request.user.id, request.params.id);
+        } catch (err) {
+            return sendPublicError(reply, err, 'Failed to sync skill', 500, request.locale || 'en');
         }
     });
 

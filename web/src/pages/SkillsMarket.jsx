@@ -3,15 +3,15 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  Sparkles, Search, Download, User, Clock, Eye, X, Loader2, Flag,
+  Sparkles, Search, Download, User, Clock, Eye, X, Loader2,
   Database, GitBranch, Bug, ShieldCheck, Cloud, Puzzle, Layers, CheckCircle, FileEdit, Check, Copy,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { getSkill } from '../lib/skillsApi';
 import SelectMenu from '../components/SelectMenu';
 import Button from '../components/Button';
 import { useToast } from '../components/Toast';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
-import { getSkillDescription } from '../lib/skillFormat';
 import {
   consoleButtonFocusClass,
   consoleEmptyStateClass,
@@ -206,7 +206,7 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {data.items.map((s) => {
               const isMine = s.isMine;
-              const description = getSkillDescription(s.content, 120);
+              const description = s.description || '';
               const tint = CATEGORY_TINTS[s.category] || 'bg-zinc-100 text-zinc-700';
               return (
                 <div
@@ -317,6 +317,15 @@ function SkillDetailDrawer({ skill, onClose }) {
   const [installing, setInstalling] = useState(false);
   const [installed, setInstalled] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [full, setFull] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getSkill(skill.id)
+      .then((data) => { if (!cancelled) setFull(data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [skill.id]);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setMounted(true));
@@ -327,6 +336,8 @@ function SkillDetailDrawer({ skill, onClose }) {
       window.removeEventListener('keydown', onKey);
     };
   }, [onClose]);
+
+  const detail = full || skill;
 
   const doInstall = async () => {
     if (installing || installed) return;
@@ -347,7 +358,8 @@ function SkillDetailDrawer({ skill, onClose }) {
     return opt ? t(`skills:${opt.labelKey}`) : '';
   };
 
-  const SigIcon = CATEGORY_ICONS[skill.category] || Sparkles;
+  const SigIcon = CATEGORY_ICONS[detail.category] || Sparkles;
+  const authorName = detail.authorName || (detail.userId ? detail.userId.slice(0, 8) : null);
 
   return (
     <div className="fixed inset-0 z-[120]" role="dialog" aria-modal="true">
@@ -360,11 +372,11 @@ function SkillDetailDrawer({ skill, onClose }) {
               <SigIcon className="w-5 h-5 text-zinc-700" strokeWidth={1.75} />
             </div>
             <div className="min-w-0">
-              <h2 className="truncate text-sm font-semibold text-zinc-900">{skill.title}</h2>
+              <h2 className="truncate text-sm font-semibold text-zinc-900">{detail.title}</h2>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-zinc-500">
-                <span className="inline-flex items-center gap-1"><User className="w-3 h-3" /> {skill.userId?.slice(0, 8)}</span>
-                <span className="inline-flex items-center gap-1"><Download className="w-3 h-3" /> {t('skills:installs', { count: skill.installCount ?? 0 })}</span>
-                <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" /> {formatRelativeTime(skill.publishedAt)}</span>
+                <span className="inline-flex items-center gap-1"><User className="w-3 h-3" /> {authorName}</span>
+                <span className="inline-flex items-center gap-1"><Download className="w-3 h-3" /> {t('skills:installs', { count: detail.installCount ?? 0 })}</span>
+                <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" /> {formatRelativeTime(detail.publishedAt)}</span>
               </div>
             </div>
           </div>
@@ -375,37 +387,37 @@ function SkillDetailDrawer({ skill, onClose }) {
 
         {/* body */}
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-4">
-          {skill.signals && (
+          {detail.signals && (
             <div className="flex items-center gap-3 text-[11px] text-zinc-600 bg-zinc-50 border border-zinc-200 rounded-lg p-3">
-              {skill.clusterSize > 1 && (
-                <span className="inline-flex items-center gap-1"><Layers className="w-3.5 h-3.5" /> {t('skills:from_sessions', { count: skill.clusterSize })}</span>
+              {detail.clusterSize > 1 && (
+                <span className="inline-flex items-center gap-1"><Layers className="w-3.5 h-3.5" /> {t('skills:from_sessions', { count: detail.clusterSize })}</span>
               )}
               <span className="inline-flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" /> {t('skills:success_exit')}</span>
-              <span className="inline-flex items-center gap-1"><FileEdit className="w-3.5 h-3.5" /> {t('skills:files_touched', { count: skill.signals.filesTouched ?? 0 })}</span>
+              <span className="inline-flex items-center gap-1"><FileEdit className="w-3.5 h-3.5" /> {t('skills:files_touched', { count: detail.signals.filesTouched ?? 0 })}</span>
             </div>
           )}
 
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">{t('skills:detail_scenario')}</div>
-            <p className="text-sm text-zinc-700 leading-relaxed">{skill.content}</p>
+            <p className="text-sm text-zinc-700 leading-relaxed whitespace-pre-wrap">{detail.content}</p>
           </div>
 
-          {skill.tags?.length > 0 && (
+          {detail.tags?.length > 0 && (
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">{t('skills:detail_steps')}</div>
               <div className="flex flex-wrap gap-1.5">
-                {skill.tags.map((tag, i) => (
+                {detail.tags.map((tag, i) => (
                   <span key={i} className="text-[10px] bg-zinc-100 text-zinc-600 rounded px-1.5 py-0.5">{tag}</span>
                 ))}
               </div>
             </div>
           )}
 
-          {Array.isArray(skill.scripts) && skill.scripts.length > 0 && (
+          {Array.isArray(detail.scripts) && detail.scripts.length > 0 && (
             <div className="border border-zinc-200 rounded-lg p-3 bg-zinc-50">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">{t('skills:field_scripts', { defaultValue: 'Scripts (optional, JSON array)' })}</div>
               <div className="space-y-2">
-                {skill.scripts.map((sc, i) => (
+                {detail.scripts.map((sc, i) => (
                   <div key={i} className="border border-zinc-200 rounded-md bg-surface overflow-hidden">
                     <div className="px-2.5 py-1 bg-zinc-100 text-[10px] font-mono text-zinc-500 border-b border-zinc-200 truncate">{sc.path}</div>
                     <pre className="px-2.5 py-2 text-xs text-zinc-700 whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">{sc.content}</pre>
@@ -417,7 +429,7 @@ function SkillDetailDrawer({ skill, onClose }) {
 
           <div className="border border-zinc-200 rounded-lg p-3 bg-zinc-50">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">{t('skills:detail_inject_preview')}</div>
-            <pre className="text-xs text-zinc-600 leading-relaxed whitespace-pre-wrap font-mono">{`# 用户 AGENTS.md（仅一行引导指针，不污染 git）\n<!-- xe-skills-pointer:start -->\nXEnsemble Skills 索引详见 \`.xensemble/AGENTS.md\`（技能列表按需加载）\n<!-- xe-skills-pointer:end -->\n\n# 平台索引 .xensemble/AGENTS.md（gitignore 内）\n<!-- xe-skills:start -->\n## XEnsemble Skills\n\n### ${skill.title}\n${skill.description || ''}\n\n详见 .xensemble/skills/${(skill.title || '').toLowerCase().replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60)}/SKILL.md\n<!-- xe-skills:end -->`}</pre>
+            <pre className="text-xs text-zinc-600 leading-relaxed whitespace-pre-wrap font-mono">{`# 用户 AGENTS.md（仅一行引导指针，不污染 git）\n<!-- xe-skills-pointer:start -->\nXEnsemble Skills 索引详见 \`.xensemble/AGENTS.md\`（技能列表按需加载）\n<!-- xe-skills-pointer:end -->\n\n# 平台索引 .xensemble/AGENTS.md（gitignore 内）\n<!-- xe-skills:start -->\n## XEnsemble Skills\n\n### ${detail.title}\n${detail.description || ''}\n\n详见 .xensemble/skills/${(detail.title || '').toLowerCase().replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60)}/SKILL.md\n<!-- xe-skills:end -->`}</pre>
           </div>
         </div>
 
@@ -431,10 +443,6 @@ function SkillDetailDrawer({ skill, onClose }) {
           >
             {installed ? <Check className="w-4 h-4" /> : installing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Copy className="w-4 h-4" />}
             {installed ? t('skills:install_done') : installing ? t('skills:install_loading') : t('skills:install_private')}
-          </button>
-          <button type="button" className={`inline-flex items-center gap-1.5 rounded-md border border-zinc-300 text-zinc-700 text-sm font-medium h-9 px-3 hover:bg-zinc-50 ${consoleButtonFocusClass}`}>
-            <Flag className="w-4 h-4" />
-            {t('skills:report')}
           </button>
         </div>
       </div>

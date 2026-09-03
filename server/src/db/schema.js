@@ -100,6 +100,8 @@ const sessions = pgTable('sessions', {
   titleManual: boolean('title_manual').default(false),
   customImageId: text('custom_image_id'),
   provisioningError: text('provisioning_error'),
+  exitCode: integer('exit_code'),
+  exitedAt: bigint('exited_at', { mode: 'number' }),
   // 0018: P3 技能提炼——该会话已被漏斗处理过（extracted/rejected/expired 均算），防重复入池
   skillExtractedAt: bigint('skill_extracted_at', { mode: 'number' }),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
@@ -277,6 +279,7 @@ const skills = pgTable('skills', {
   installCount: integer('install_count').notNull().default(0),
   category: text('category'),
   forkedFrom: text('forked_from'),
+  sourceHash: text('source_hash'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 }, (table) => ({

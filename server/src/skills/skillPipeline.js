@@ -459,6 +459,13 @@ async function extractFromSession(sessionId, { userId, log = console } = {}) {
         err.statusCode = 404;
         throw err;
     }
+    // 越权防护：仅允许会话所有者提炼；否则任何登录用户可按 sessionId 读取他人对话。
+    if (userId && session.userId !== userId) {
+        const err = new Error('session not found');
+        err.code = 'session_not_found';
+        err.statusCode = 404;
+        throw err;
+    }
 
     let conversation = null;
     try {

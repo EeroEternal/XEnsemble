@@ -20,7 +20,7 @@ import {
 } from '../lib/consoleTokens';
 
 const PAGE_SIZE = 20;
-const GROUPS_PER_BATCH = 10;
+const CONVERSATION_PAGE_TURNS = 40;
 
 const STATUS_OPTIONS = [
   { value: '', labelKey: 'all' },
@@ -173,7 +173,10 @@ function ConversationDrawer({ session, onClose }) {
   const [error, setError] = useState(null);
   const [decisionsOpen, setDecisionsOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
-  const [visibleGroups, setVisibleGroups] = useState(GROUPS_PER_BATCH);
+  const [allTurns, setAllTurns] = useState([]);
+  const [totalTurns, setTotalTurns] = useState(0);
+  const [hasMoreTurns, setHasMoreTurns] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [mounted, setMounted] = useState(false);
   const sessionId = session.id;
 
@@ -181,8 +184,11 @@ function ConversationDrawer({ session, onClose }) {
     setLoading(true);
     setError(null);
     setView(null);
+    setAllTurns([]);
+    setTotalTurns(0);
+    setHasMoreTurns(false);
     try {
-      const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/conversation`);
+      const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/conversation?limit=${CONVERSATION_PAGE_TURNS}`);
       if (res.status === 404) {
         setNotFound(true);
         return;
@@ -193,6 +199,10 @@ function ConversationDrawer({ session, onClose }) {
       }
       const data = await res.json();
       setView(data);
+      const turns = Array.isArray(data.turns) ? data.turns : [];
+      setAllTurns(turns);
+      setTotalTurns(Number(data.total) || turns.length);
+      setHasMoreTurns(Boolean(data.hasMore));
       setNotFound(false);
     } catch {
       setError(t('sessions:conversation.load_failed', { defaultValue: 'Failed to load conversation' }));
@@ -201,7 +211,27 @@ function ConversationDrawer({ session, onClose }) {
     }
   }, [sessionId, t]);
 
-  useEffect(() => { void load(); }, [load]);
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMoreTurns) return;
+    setLoadingMore(true);
+    try {
+      const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/conversation?offset=${allTurns.length}&limit=${CONVERSATION_PAGE_TURNS}`);
+      if (!res.ok) throw new Error('load_more_failed');
+      const data = await res.json();
+      const more = Array.isArray(data.turns) ? data.turns : [];
+      setAllTurns((prev) => [...prev, ...more]);
+      setTotalTurns(Number(data.total) || (allTurns.length + more.length));
+      setHasMoreTurns(Boolean(data.hasMore));
+    } catch {
+      // keep hasMore so the user can retry
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMoreTurns, allTurns.length, sessionId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   // Live updates: re-fetch when the backend broadcasts a summary update for
   // this session (P2 Scheduler / manual refresh). Silent, no toast.
@@ -236,10 +266,6 @@ function ConversationDrawer({ session, onClose }) {
       es?.close();
     };
   }, [sessionId, load]);
-
-  useEffect(() => {
-    setVisibleGroups(GROUPS_PER_BATCH);
-  }, [sessionId]);
 
   // Mount animation + Escape to close.
   useEffect(() => {
@@ -334,13 +360,9 @@ function ConversationDrawer({ session, onClose }) {
   const keyDecisions = Array.isArray(summary.keyDecisions) ? summary.keyDecisions : [];
   const filesTouched = Array.isArray(summary.filesTouched) ? summary.filesTouched : [];
   const summaryTurns = Array.isArray(summary.turns) ? summary.turns : [];
-  const rawTurns = Array.isArray(view?.turns) ? view.turns : [];
-  // A+B: turns come live from the structured chat transcript (view.turns);
-  // legacy summary.turns kept only as a fallback for old rows.
-  const turns = rawTurns.length > 0 ? rawTurns : summaryTurns;
+  // 真正分页：渲染累计加载的 turns（首页 + 后续页）；老数据无 chat transcript 时回退 summary.turns
+  const turns = allTurns.length > 0 ? allTurns : summaryTurns;
   const groups = useMemo(() => groupTurns(turns), [turns]);
-  const shownGroups = groups.slice(0, visibleGroups);
-  const remaining = groups.length - visibleGroups;
 
   return (
     <div className="fixed inset-0 z-[120]" role="dialog" aria-modal="true" aria-label={title}>
@@ -464,25 +486,26 @@ function ConversationDrawer({ session, onClose }) {
               {/* Grouped turns */}
               {groups.length > 0 ? (
                 <div className="flex flex-col gap-4">
-                  {groups.length > GROUPS_PER_BATCH && (
+                  {totalTurns > 0 && (
                     <p className="text-[11px] text-zinc-400">
-                      {t('sessions:conversation.showing_groups', { shown: shownGroups.length, total: groups.length, defaultValue: 'Showing {{shown}} of {{total}} exchanges' })}
+                      {t('sessions:conversation.showing_groups', { shown: turns.length, total: totalTurns, defaultValue: 'Showing {{shown}} of {{total}} exchanges' })}
                     </p>
                   )}
-                  {shownGroups.map((g, i) => (
+                  {groups.map((g, i) => (
                     <div key={i} className="flex flex-col gap-2 border-l-2 border-zinc-200 pl-3">
                       {g.user && <TurnBubble turn={g.user} isUser />}
                       {g.replies.map((r, j) => <TurnBubble key={j} turn={r} isUser={false} />)}
                     </div>
                   ))}
-                  {remaining > 0 && (
+                  {hasMoreTurns && (
                     <button
                       type="button"
-                      onClick={() => setVisibleGroups((v) => v + GROUPS_PER_BATCH)}
-                      className={`inline-flex items-center justify-center gap-1.5 rounded-md border border-zinc-200 bg-surface px-3 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 ${consoleButtonFocusClass}`}
+                      onClick={loadMore}
+                      disabled={loadingMore}
+                      className={`inline-flex items-center justify-center gap-1.5 rounded-md border border-zinc-200 bg-surface px-3 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-50 ${consoleButtonFocusClass}`}
                     >
-                      <ChevronsDown className="h-3.5 w-3.5" strokeWidth={1.75} />
-                      {t('sessions:conversation.load_more', { count: Math.min(GROUPS_PER_BATCH, remaining), defaultValue: 'Show {{count}} more turns' })}
+                      {loadingMore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronsDown className="h-3.5 w-3.5" strokeWidth={1.75} />}
+                      {t('sessions:conversation.load_more', { count: CONVERSATION_PAGE_TURNS, defaultValue: 'Show more turns' })}
                     </button>
                   )}
                 </div>

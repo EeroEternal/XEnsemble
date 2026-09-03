@@ -165,7 +165,8 @@ test('getSkill forbids cross-user access to private skill', async () => {
 
 test('publish/unpublish toggles market visibility', async () => {
     const userId = await makeUser();
-    const skill = await svc.createSkill({ userId, title: 'public skill', content: 'c', category: 'workflow' });
+    const skill = await svc.createSkill({ userId, title: 'public skill', content: '---\nname: public-skill\ndescription: d\n---\nbody', category: 'workflow' });
+    await svc.changeStatus(userId, skill.id, 'activate');
 
     const published = await svc.publishSkill(userId, skill.id);
     assert.equal(published.visibility, 'public');
@@ -185,8 +186,10 @@ test('publish/unpublish toggles market visibility', async () => {
 
 test('listMarket filters by category and q, paginates', async () => {
     const userId = await makeUser();
-    const a = await svc.createSkill({ userId, title: 'DB 迁移', content: 'migration', category: 'database' });
-    const b = await svc.createSkill({ userId, title: 'Git 规范', content: 'commit', category: 'workflow' });
+    const a = await svc.createSkill({ userId, title: 'DB 迁移', content: '---\nname: db-migration\ndescription: migration\n---\nbody', category: 'database' });
+    const b = await svc.createSkill({ userId, title: 'Git 规范', content: '---\nname: git-convention\ndescription: commit\n---\nbody', category: 'workflow' });
+    await svc.changeStatus(userId, a.id, 'activate');
+    await svc.changeStatus(userId, b.id, 'activate');
     await svc.publishSkill(userId, a.id);
     await svc.publishSkill(userId, b.id);
 
@@ -206,7 +209,8 @@ test('listMarket filters by category and q, paginates', async () => {
 test('installSkill copies a public skill to private draft and bumps install_count', async () => {
     const owner = await makeUser();
     const installer = await makeUser();
-    const source = await svc.createSkill({ userId: owner, title: '共享技能', content: 'content', tags: ['x'], category: 'debug' });
+    const source = await svc.createSkill({ userId: owner, title: '共享技能', content: '---\nname: shared-skill\ndescription: content\n---\nbody', tags: ['x'], category: 'debug' });
+    await svc.changeStatus(owner, source.id, 'activate');
     await svc.publishSkill(owner, source.id);
 
     const installed = await svc.installSkill(installer, source.id);
@@ -278,9 +282,10 @@ test('installSkill copies scripts to the new copy', async () => {
     const source = await svc.createSkill({
         userId: owner,
         title: '共享脚本技能',
-        content: 'c',
+        content: '---\nname: shared-script\ndescription: d\n---\nbody',
         scripts: [{ path: 'scripts/run.sh', content: '#!/bin/bash\nrun' }],
     });
+    await svc.changeStatus(owner, source.id, 'activate');
     await svc.publishSkill(owner, source.id);
 
     const copy = await svc.installSkill(installer, source.id);

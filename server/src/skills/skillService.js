@@ -8,9 +8,9 @@
  * - 状态机：draft → active → archived（archived 可 restore 回 active）
  */
 
-const { randomBytes } = require('crypto');
+const { randomBytes, createHash } = require('crypto');
 const path = require('path');
-const { and, eq, desc, sql, or, ilike } = require('drizzle-orm');
+const { and, eq, desc, sql, or, ilike, inArray } = require('drizzle-orm');
 const { db } = require('../db');
 const schema = require('../db/schema');
 
@@ -30,6 +30,14 @@ const MAX_SCRIPT_BYTES = 32768;
 
 function newSkillId() {
     return `skl_${randomBytes(8).toString('hex')}`;
+}
+
+/**
+ * 计算技能内容哈希（content + scripts），用于 forkedFrom 更新检测。
+ */
+function computeSourceHash(content, scripts = []) {
+    const payload = `${String(content || '')}\u0000${JSON.stringify(Array.isArray(scripts) ? scripts : [])}`;
+    return createHash('sha256').update(payload).digest('hex');
 }
 
 function parseTags(tags) {
@@ -72,6 +80,32 @@ function parseScripts(scripts) {
     return out;
 }
 
+function parseDescription(content) {
+    const m = /^---\s*\n([\s\S]*?)\n---/.exec(String(content || ''));
+    if (!m) return '';
+    const dm = /^description:\s*(.+)$/m.exec(m[1]);
+    return dm ? dm[1].trim().replace(/^["']|["']$/g, '') : '';
+}
+
+/**
+ * 市场列表裁剪：不返回 content/scripts 全文（详情走 getSkill）。
+ */
+function mapMarketRow(row) {
+    if (!row) return null;
+    return {
+        id: row.id,
+        userId: row.userId,
+        title: row.title,
+        description: parseDescription(row.content),
+        tags: Array.isArray(row.tags) ? row.tags : [],
+        category: row.category ?? null,
+        installCount: row.installCount ?? 0,
+        publishedAt: row.publishedAt ?? null,
+        createdAt: Number(row.createdAt),
+        updatedAt: Number(row.updatedAt),
+    };
+}
+
 function mapRow(row) {
     if (!row) return null;
     return {
@@ -95,6 +129,7 @@ function mapRow(row) {
         installCount: row.installCount ?? 0,
         category: row.category ?? null,
         forkedFrom: row.forkedFrom ?? null,
+        sourceHash: row.sourceHash ?? null,
         createdAt: Number(row.createdAt),
         updatedAt: Number(row.updatedAt),
     };
@@ -200,7 +235,14 @@ async function listMySkills(userId, { status = null, q = '' } = {}) {
         .from(schema.skills)
         .where(and(...conditions))
         .orderBy(desc(schema.skills.updatedAt));
-    return rows.map(mapRow);
+    const items = rows.map(mapRow);
+    // 安装技能标注源更新状态（P2 forkedFrom 更新检测）
+    for (const item of items) {
+        if (item.source !== 'installed' || !item.forkedFrom) continue;
+        const info = await checkInstallUpdate(userId, item);
+        if (info) item.updateInfo = info;
+    }
+    return items;
 }
 
 /**
@@ -220,11 +262,28 @@ async function getSkill(userId, skillId, { allowPublic = false } = {}) {
         throw err;
     }
     if (skill.userId === userId) return skill;
-    if (allowPublic && skill.visibility === 'public' && skill.publishedAt != null) return skill;
+    if (allowPublic && skill.visibility === 'public' && skill.publishedAt != null) {
+        return attachAuthorName(skill);
+    }
     const err = new Error('skill not found');
     err.code = 'skill_not_found';
     err.statusCode = 404;
     throw err;
+}
+
+/**
+ * 给 skill 附上作者展示名（displayName || username）。
+ */
+async function attachAuthorName(skill) {
+    if (!skill || !skill.userId) return skill;
+    const rows = await db
+        .select({ displayName: schema.users.displayName, username: schema.users.username })
+        .from(schema.users)
+        .where(eq(schema.users.id, skill.userId))
+        .limit(1);
+    const u = rows[0];
+    if (u) skill.authorName = u.displayName || u.username || null;
+    return skill;
 }
 
 /**
@@ -289,8 +348,14 @@ async function changeStatus(userId, skillId, action) {
         }
     }
 
+    const setData = { status: nextStatus, updatedAt: Date.now() };
+    // 归档自动下架：避免 archived 仍留在市场卖旧内容
+    if (nextStatus === 'archived') {
+        setData.visibility = 'private';
+        setData.publishedAt = null;
+    }
     await db.update(schema.skills)
-        .set({ status: nextStatus, updatedAt: Date.now() })
+        .set(setData)
         .where(and(eq(schema.skills.id, skillId), eq(schema.skills.userId, userId)));
 
     // T4.4：activate/archive/restore 后重渲染（归档 → 无 active 时标记段被移除）
@@ -318,6 +383,15 @@ async function deleteSkill(userId, skillId) {
 async function publishSkill(userId, skillId) {
     const skill = await getSkill(userId, skillId);
     requireOwner(skill, userId);
+    // 0021/P2：发布门槛——只有能落盘的技能才允许上架（格式合法 + 置信度达标），
+    // 避免低质量 auto draft 或非法格式直接进公共市场。
+    const { isLandableSkill } = require('./skillInjector');
+    if (!isLandableSkill(skill)) {
+        const err = new Error('skill does not meet landing requirements (valid SKILL.md frontmatter with name/description; auto skills need confidence >= threshold)');
+        err.code = 'skill_not_landable';
+        err.statusCode = 400;
+        throw err;
+    }
     const now = Date.now();
     await db.update(schema.skills)
         .set({ visibility: 'public', publishedAt: now, updatedAt: now })
@@ -339,10 +413,10 @@ async function unpublishSkill(userId, skillId) {
 }
 
 const MARKET_SORTS = {
-    'hot': desc(schema.skills.installCount),
-    'newest': desc(schema.skills.publishedAt),
-    'installs': desc(schema.skills.installCount),
-    'default': desc(schema.skills.publishedAt),
+    'hot': [desc(schema.skills.installCount), desc(schema.skills.publishedAt)],
+    'newest': [desc(schema.skills.publishedAt), desc(schema.skills.installCount)],
+    'installs': [desc(schema.skills.installCount), desc(schema.skills.publishedAt)],
+    'default': [desc(schema.skills.publishedAt), desc(schema.skills.installCount)],
 };
 
 /**
@@ -372,7 +446,7 @@ async function listMarket({ q = '', category = null, sort = 'hot', page = 1, pag
         .select()
         .from(schema.skills)
         .where(and(...conditions))
-        .orderBy(orderBy)
+        .orderBy(...orderBy)
         .limit(pageSize)
         .offset(offset);
 
@@ -382,12 +456,26 @@ async function listMarket({ q = '', category = null, sort = 'hot', page = 1, pag
         .where(and(...conditions));
 
     const total = Number(countResult[0]?.total ?? 0);
-    const items = listResult.map(mapRow).map((s) => {
+    const items = listResult.map(mapMarketRow).map((s) => {
         if (excludeUserId && s.userId === excludeUserId) {
             return { ...s, isMine: true };
         }
         return s;
     });
+
+    // 作者展示名（displayName || username），避免向市场暴露内部 userId
+    const authorIds = [...new Set(items.map((s) => s.userId).filter(Boolean))];
+    const authorMap = new Map();
+    if (authorIds.length > 0) {
+        const authorRows = await db
+            .select({ id: schema.users.id, displayName: schema.users.displayName, username: schema.users.username })
+            .from(schema.users)
+            .where(inArray(schema.users.id, authorIds));
+        for (const u of authorRows) authorMap.set(u.id, u.displayName || u.username || u.id);
+    }
+    for (const s of items) {
+        s.authorName = authorMap.get(s.userId) || null;
+    }
 
     return { items, total, page: Math.max(1, Number(page) || 1), pageSize };
 }
@@ -403,9 +491,27 @@ async function installSkill(userId, skillId) {
         err.statusCode = 404;
         throw err;
     }
+    // 自装拦截：不能安装自己发布的技能
+    if (source.userId === userId) {
+        const err = new Error('cannot install your own skill');
+        err.code = 'skill_cannot_install_own';
+        err.statusCode = 400;
+        throw err;
+    }
+    // 每用户去重：已安装过同一来源则直接返回副本，不重复落库/计数
+    const existing = await db
+        .select()
+        .from(schema.skills)
+        .where(and(
+            eq(schema.skills.userId, userId),
+            eq(schema.skills.forkedFrom, source.id),
+        ))
+        .limit(1);
+    if (existing[0]) return mapRow(existing[0]);
 
     const id = newSkillId();
     const now = Date.now();
+    const sourceHash = computeSourceHash(source.content, source.scripts);
     await db.transaction(async (tx) => {
         await tx.insert(schema.skills).values({
             id,
@@ -422,6 +528,7 @@ async function installSkill(userId, skillId) {
             signals: source.signals,
             category: source.category,
             forkedFrom: source.id,
+            sourceHash,
             visibility: 'private',
             installCount: 0,
             usageCount: 0,
@@ -435,6 +542,68 @@ async function installSkill(userId, skillId) {
     });
 
     return getSkill(userId, id);
+}
+
+/**
+ * 同步已安装技能到源的最新版本（内容/脚本/tags/category）。
+ * 仅允许 source='installed' 且有 forked_from 的技能。
+ */
+async function syncSkillFromSource(userId, skillId) {
+    const skill = await getSkill(userId, skillId);
+    requireOwner(skill, userId);
+    if (skill.source !== 'installed' || !skill.forkedFrom) {
+        const err = new Error('only installed skills can be synced');
+        err.code = 'skill_not_syncable';
+        err.statusCode = 400;
+        throw err;
+    }
+    const source = await getSkill(userId, skill.forkedFrom, { allowPublic: true });
+    if (source.visibility !== 'public' || source.publishedAt == null) {
+        const err = new Error('source skill is no longer public');
+        err.code = 'skill_source_unavailable';
+        err.statusCode = 404;
+        throw err;
+    }
+    const sourceHash = computeSourceHash(source.content, source.scripts);
+    await db.update(schema.skills)
+        .set({
+            title: source.title,
+            content: source.content,
+            scripts: Array.isArray(source.scripts) ? source.scripts : [],
+            tags: source.tags,
+            category: source.category,
+            sourceHash,
+            updatedAt: Date.now(),
+        })
+        .where(and(eq(schema.skills.id, skillId), eq(schema.skills.userId, userId)));
+
+    const updated = await getSkill(userId, skillId);
+    await reRenderAfterSkillChange(userId, updated.projectId || null);
+    return updated;
+}
+
+/**
+ * 检测安装技能的源是否有更新（对比 source_hash）。
+ * 返回 { hasUpdate, sourceTitle, sourceUpdatedAt } 或 null（无源/非安装技能）。
+ */
+async function checkInstallUpdate(userId, skill) {
+    if (skill.source !== 'installed' || !skill.forkedFrom) return null;
+    let source = null;
+    try {
+        source = await getSkill(userId, skill.forkedFrom, { allowPublic: true });
+    } catch (_) {
+        return { hasUpdate: false, sourceAvailable: false };
+    }
+    if (source.visibility !== 'public' || source.publishedAt == null) {
+        return { hasUpdate: false, sourceAvailable: false };
+    }
+    const sourceHash = computeSourceHash(source.content, source.scripts);
+    return {
+        hasUpdate: sourceHash !== (skill.sourceHash || null),
+        sourceAvailable: true,
+        sourceTitle: source.title,
+        sourceUpdatedAt: Number(source.updatedAt),
+    };
 }
 
 /**
@@ -681,6 +850,9 @@ module.exports = {
     unpublishSkill,
     listMarket,
     installSkill,
+    syncSkillFromSource,
+    checkInstallUpdate,
+    computeSourceHash,
     countByStatus,
     countUnseenAutoDrafts,
     getDraftsLastSeenAt,

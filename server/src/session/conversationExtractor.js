@@ -48,7 +48,7 @@ function chatHeadSeq(history) {
  * @param {number} [afterSeq] only rows with seq > afterSeq
  * @returns {{ source: 'chat', turns: Array, headSeq: number }}
  */
-function extractFromChat(history, afterSeq = 0) {
+function extractFromChat(history, afterSeq = 0, { maxTurns = MAX_TURNS } = {}) {
     const cursor = Number(afterSeq) || 0;
     const turns = [];
     // The assistant turn currently being aggregated. Tool calls attach here;
@@ -106,7 +106,8 @@ function extractFromChat(history, afterSeq = 0) {
 
     // Drop assistant turns that carry neither text nor any tool call.
     const cleaned = turns.filter((t) => !(t.role === 'assistant' && !t.text && (!t.tools || t.tools.length === 0)));
-    return { source: 'chat', turns: capTurns(cleaned), headSeq: chatHeadSeq(history) };
+    const capped = maxTurns == null ? cleaned : capTurns(cleaned, maxTurns);
+    return { source: 'chat', turns: capped, headSeq: chatHeadSeq(history) };
 }
 
 // ---------------------------------------------------------------------------
@@ -119,9 +120,11 @@ function extractFromChat(history, afterSeq = 0) {
  * @param {object} transcriptStore
  * @param {string} streamRef
  * @param {number} [afterSeq] only frames with seq > afterSeq
+ * @param {object} [opts]
+ * @param {number|null} [opts.maxTurns] 截断到最近 N 条；null 表示不截断（默认 MAX_TURNS）
  * @returns {{ source: 'transcript', turns: Array }}
  */
-function extractFromTranscript(transcriptStore, streamRef, afterSeq = 0) {
+function extractFromTranscript(transcriptStore, streamRef, afterSeq = 0, { maxTurns = MAX_TURNS } = {}) {
     const frames = transcriptStore.readFrom(streamRef, afterSeq) || [];
     const turns = [];
     let current = null; // pending assistant turn being aggregated
@@ -196,7 +199,8 @@ function extractFromTranscript(transcriptStore, streamRef, afterSeq = 0) {
     flushUser();
     flushAssistant();
 
-    return { source: 'transcript', turns: capTurns(turns) };
+    const capped = maxTurns == null ? turns : capTurns(turns, maxTurns);
+    return { source: 'transcript', turns: capped };
 }
 
 // ---------------------------------------------------------------------------
@@ -250,25 +254,28 @@ function parseStateDirLine(line) {
  * Extract turns from a Claude Code state dir JSONL payload.
  *
  * @param {string} jsonl raw file content (one JSON object per line)
+ * @param {object} [opts]
+ * @param {number|null} [opts.maxTurns] 截断到最近 N 条；null 表示不截断（默认 MAX_TURNS）
  * @returns {{ source: 'state_dir', turns: Array }}
  */
-function extractFromStateDir(jsonl) {
+function extractFromStateDir(jsonl, { maxTurns = MAX_TURNS } = {}) {
     const turns = [];
     for (const line of String(jsonl || '').split('\n')) {
         if (!line.trim()) continue;
         const turn = parseStateDirLine(line);
         if (turn) turns.push(turn);
     }
-    return { source: 'state_dir', turns: capTurns(turns) };
+    const capped = maxTurns == null ? turns : capTurns(turns, maxTurns);
+    return { source: 'state_dir', turns: capped };
 }
 
 // ---------------------------------------------------------------------------
 // Unified entry
 // ---------------------------------------------------------------------------
 
-function capTurns(turns) {
-    if (turns.length <= MAX_TURNS) return turns;
-    return turns.slice(turns.length - MAX_TURNS);
+function capTurns(turns, max = MAX_TURNS) {
+    if (turns.length <= max) return turns;
+    return turns.slice(turns.length - max);
 }
 
 /**
@@ -281,14 +288,15 @@ function capTurns(turns) {
  * @param {Function} [opts.readStateDir] async (stateDirRef) => jsonl string; injected for testability
  * @param {Function} [opts.readChatHistory] async () => chatTranscript history rows; injected for testability
  * @param {number} [opts.afterSeq] cursor (chat transcript & transcript sources only)
+ * @param {number|null} [opts.maxTurns] 各来源统一截断到最近 N 条；null 表示不截断（默认 MAX_TURNS）
  * @returns {Promise<{ source: string, turns: Array }>}
  */
-async function extract({ transcriptStore, streamRef, stateDirRef, readStateDir, readChatHistory, afterSeq = 0 }) {
+async function extract({ transcriptStore, streamRef, stateDirRef, readStateDir, readChatHistory, afterSeq = 0, maxTurns = MAX_TURNS }) {
     if (typeof readChatHistory === 'function') {
         try {
             const history = await readChatHistory();
             if (Array.isArray(history) && history.length > 0) {
-                return extractFromChat(history, afterSeq);
+                return extractFromChat(history, afterSeq, { maxTurns });
             }
         } catch {
             // fall through to state dir / transcript sources
@@ -298,14 +306,14 @@ async function extract({ transcriptStore, streamRef, stateDirRef, readStateDir, 
         try {
             const jsonl = await readStateDir(stateDirRef);
             if (jsonl) {
-                const result = extractFromStateDir(jsonl);
+                const result = extractFromStateDir(jsonl, { maxTurns });
                 if (result.turns.length > 0) return result;
             }
         } catch {
             // fall through to transcript source
         }
     }
-    return extractFromTranscript(transcriptStore, streamRef, afterSeq);
+    return extractFromTranscript(transcriptStore, streamRef, afterSeq, { maxTurns });
 }
 
 module.exports = {
