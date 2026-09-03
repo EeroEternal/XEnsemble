@@ -139,7 +139,9 @@ async function getHistory(sessionId) {
             .orderBy(desc(schema.sessionChatMessages.seq))
             .limit(MAX_EVENTS_PER_SESSION)
             .as('sub');
-        // 外层再按 seq ASC 输出，保证调用方拿到的是 旧→新 顺序
+        // 外层再按 seq ASC 输出，保证调用方拿到的是 旧→新 顺序。
+        // 关键：JOIN 必须同时带 sessionId，否则会把其他会话里相同 seq 的消息
+        // 一并拉出（跨会话数据泄漏）。此前的 innerJoin 只 on seq 即中招。
         const rows = await db
             .select({
                 seq: schema.sessionChatMessages.seq,
@@ -152,6 +154,7 @@ async function getHistory(sessionId) {
             })
             .from(schema.sessionChatMessages)
             .innerJoin(sub, eq(schema.sessionChatMessages.seq, sub.seq))
+            .where(eq(schema.sessionChatMessages.sessionId, sessionId))
             .orderBy(asc(schema.sessionChatMessages.seq));
         return rows.map(entryFromRow);
     } catch (_) {
