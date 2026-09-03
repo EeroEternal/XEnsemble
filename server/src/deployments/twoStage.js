@@ -660,16 +660,43 @@ function parseDbInfoFromPlan(plan) {
     return null;
 }
 
+// 兜底：阶段 A 没产出含 DATABASE_URL 的 configFiles 时（如 Go 后端把连接串写死在
+// start-server.sh / docker-compose.yml / main.go 里），直接扫 guest 文件提取连接信息，
+// 让系统侧照样能幂等建库建用户，免去 agent 试错。
+async function parseDbInfoFromGuest(runtimeRef, workspacePath) {
+    const runtime = getRuntime();
+    try {
+        const r = await runtime.exec.exec('sh', ['-c',
+            `grep -hoE 'postgres(ql)?://[A-Za-z_][A-Za-z0-9_]*:[^@[:space:]\"\\''@]+@[^[:space:]\"\\''/]+/[A-Za-z0-9_-]+' `
+            + `start-server.sh .env .env.example server/.env server/.env.example apps/*/.env apps/*/.env.example docker-compose*.yml Makefile `
+            + `cmd/*/*.go cmd/*/main.go internal/*/*.go server/cmd/*/*.go 2>/dev/null | head -3`,
+        ], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+        const lines = String(r.stdout || '').split('\n').map((l) => l.trim()).filter(Boolean);
+        for (const line of lines) {
+            const m = line.match(/postgres(?:ql)?:\/\/([^:\s@'\"\/]+):([^@\s'\"]+)@[^\/\s'\"]+\/([A-Za-z0-9_-]+)/);
+            if (!m) continue;
+            const [, user, pass, db] = m;
+            if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(user) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(db)) {
+                return { user, pass, db };
+            }
+        }
+    } catch { /* scan failed — fall through */ }
+    return null;
+}
+
 // 系统侧自动 provision PostgreSQL：检测项目是否需要 PG，需要则启动沙箱内 PG，
 // 并尝试从配置解析出连接信息后直接建库建用户（幂等），使 verify agent 只需跑 migration。
 async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
     const runtime = getRuntime();
     let needs = false;
     try {
+        // 检测面覆盖多语言后端：Node（package.json 里的 pg/pg-promise）、Go（pgx / postgres:// 连接串、
+        // go.mod）、docker-compose（postgres 服务）、启动脚本/Makefile（DATABASE_URL 写死在
+        // start-server.sh 这类文件里，如 AgentHarness 的 Go 后端）。
         const r = await runtime.exec.exec('sh', ['-c', `
-            grep -lE '\\"(pg|postgres)\\"|pg-promise|pgx' package.json server/package.json 2>/dev/null
+            grep -lE '\\"(pg|postgres)\\"|pg-promise|pgx|postgres://' package.json server/package.json apps/*/package.json go.mod 2>/dev/null
             find . -maxdepth 3 \\( -name 'schema.sql' -o -name 'init.sql' \\) 2>/dev/null | grep -v node_modules | head -3
-            grep -lE 'DATABASE_URL|POSTGRES_HOST|POSTGRES_DB|POSTGRES_USER' .env server/.env .env.example server/.env.example 2>/dev/null
+            grep -lE 'DATABASE_URL|POSTGRES_HOST|POSTGRES_DB|POSTGRES_USER' .env server/.env .env.example server/.env.example apps/*/.env apps/*/.env.example start-server.sh Makefile docker-compose.yml docker-compose.deploy.yml docker-compose.selfhost.yml 2>/dev/null
         `], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
         needs = Boolean(String(r.stdout || '').trim());
     } catch { needs = false; }
@@ -709,7 +736,8 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
     }
 
     // PG 已运行后，若能从配置解析出连接信息则直接建库建用户（幂等），免去 agent 试错。
-    const info = parseDbInfoFromPlan(plan);
+    // plan.configFiles 解析不到时（Go 后端等把连接串写死在脚本里），兜底扫 guest 文件。
+    const info = parseDbInfoFromPlan(plan) || await parseDbInfoFromGuest(runtimeRef, workspacePath);
     if (info) {
         const pqPass = String(info.pass || '').replace(/'/g, "''"); // SQL 单引号转义
         const create = `

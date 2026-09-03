@@ -236,14 +236,10 @@ async function probePort({ runtimeRef, workspacePath, port, boxDefaultPorts }) {
     }
 }
 
-// 系统侧独立健康检查（多端口）：verify agent 声称 ok 后，扫描 guest 实际监听端口，
-// 找到"真正 serve 应用内容"的端口（排除目录列表 / 空页 / box 默认页 / 源码树），
-// 并返回该端口供 preview tunnel 使用。agent 用哪个端口运行不写死，灵活处理端口占用。
-async function assertAppIsServed({ runtimeRef, workspacePath, preferredPort }) {
+// 列出 guest 实际监听的 TCP 端口：优先 ss；blink guest 里 ss 常不可用，
+// 退回 /proc/net/tcp（不依赖 ss）。assertAppIsServed 与后端端口监听检查共用。
+async function listGuestListenPorts(runtimeRef, workspacePath) {
     const runtime = getRuntime();
-    const preferred = Number(preferredPort) || 0;
-    let listenPorts = [];
-    // 优先用 ss；blink guest 里 ss 常不可用，退回 /proc/net/tcp（不依赖 ss）。
     try {
         const r = await runtime.exec.exec(
             'sh',
@@ -251,22 +247,30 @@ async function assertAppIsServed({ runtimeRef, workspacePath, preferredPort }) {
             {},
             { runtimeRef, cwd: workspacePath, timeoutMs: 10000 },
         );
-        listenPorts = (r.stdout || '').split('\n').map((s) => Number(s)).filter((n) => n > 0 && n < 65535);
+        const ports = (r.stdout || '').split('\n').map((s) => Number(s)).filter((n) => n > 0 && n < 65535);
+        if (ports.length) return ports;
     } catch { /* ss unavailable */ }
-    if (!listenPorts.length) {
-        try {
-            // /proc/net/tcp + /proc/net/tcp6: st=0A 是 LISTEN；local_address 端口为十六进制
-            // （如 0F30 = 3888）。必须同时读 IPv4 与 IPv6 表——serve 等进程常绑定 IPv6 通配
-            // 地址 ::（只出现在 /proc/net/tcp6），只看 IPv4 会漏掉真实应用端口。
-            const r = await runtime.exec.exec(
-                'sh',
-                ['-c', 'awk \'function h2d(h,i,c,v,r){r=0;for(i=1;i<=length(h);i++){c=tolower(substr(h,i,1));v=(c~/[0-9]/)?c:index("abcdef",c)+9;r=r*16+v;}return r;} NR>1 && $4=="0A" {split($2,a,":"); print h2d(a[2])}\' /proc/net/tcp /proc/net/tcp6 2>/dev/null | sort -un | head -60'],
-                {},
-                { runtimeRef, cwd: workspacePath, timeoutMs: 10000 },
-            );
-            listenPorts = (r.stdout || '').split('\n').map((s) => Number(s)).filter((n) => n > 0 && n < 65535);
-        } catch { /* ignore */ }
-    }
+    try {
+        // /proc/net/tcp + /proc/net/tcp6: st=0A 是 LISTEN；local_address 端口为十六进制
+        // （如 0F30 = 3888）。必须同时读 IPv4 与 IPv6 表——serve 等进程常绑定 IPv6 通配
+        // 地址 ::（只出现在 /proc/net/tcp6），只看 IPv4 会漏掉真实应用端口。
+        const r = await runtime.exec.exec(
+            'sh',
+            ['-c', 'awk \'function h2d(h,i,c,v,r){r=0;for(i=1;i<=length(h);i++){c=tolower(substr(h,i,1));v=(c~/[0-9]/)?c:index("abcdef",c)+9;r=r*16+v;}return r;} NR>1 && $4=="0A" {split($2,a,":"); print h2d(a[2])}\' /proc/net/tcp /proc/net/tcp6 2>/dev/null | sort -un | head -60'],
+            {},
+            { runtimeRef, cwd: workspacePath, timeoutMs: 10000 },
+        );
+        return (r.stdout || '').split('\n').map((s) => Number(s)).filter((n) => n > 0 && n < 65535);
+    } catch { /* ignore */ }
+    return [];
+}
+
+// 系统侧独立健康检查（多端口）：verify agent 声称 ok 后，扫描 guest 实际监听端口，
+// 找到"真正 serve 应用内容"的端口（排除目录列表 / 空页 / box 默认页 / 源码树），
+// 并返回该端口供 preview tunnel 使用。agent 用哪个端口运行不写死，灵活处理端口占用。
+async function assertAppIsServed({ runtimeRef, workspacePath, preferredPort }) {
+    const preferred = Number(preferredPort) || 0;
+    const listenPorts = await listGuestListenPorts(runtimeRef, workspacePath);
     // 常见应用端口，用于给真实监听端口的探测排序（preferred 排最前，其余常见端口次之）。
     const commonPorts = [3000, 3888, 3889, 5173, 4173, 8080, 8000, 9000, 5000, 3001, 4000, 8081];
     // box 沙箱常驻默认预览端口：3000（欢迎页）与 5173（preview.json serve . --listen 5173）。
@@ -329,6 +333,106 @@ async function assertAppIsServed({ runtimeRef, workspacePath, preferredPort }) {
     return { ok: false, reason: `未发现监听的应用端口（3 次探测均无可用端口）` };
 }
 
+// API/后端健康探测：根路径 200 不代表应用可用——前后端分离项目（前端代理到本地
+// 后端）前端单独起来也能 200，但后端没启动时浏览器里就是白屏。
+// 探测依据全部来自 verify agent 读代码后的上报，不做任何写死路径猜测：
+//   1) agent 报了 apiEndpoints（真实 API 路由）→ 在前端端口上 GET 探测：
+//      2xx/3xx/401/403/405 判活（405 = 路由存在但方法不符），5xx 判后端挂了，
+//      全 404 判 inconclusive 放行（避免路径/方法误判）
+//   2) 没报 apiEndpoints 但报了 backendPort（后端监听端口，如 next rewrites
+//      destination 里的 8080）→ 只检查该端口是否 LISTEN，不发任何 HTTP 请求
+//   3) 两者都没报 → 无法判定（纯前端站 / agent 未识别出后端）→ 放行并记录
+// 返回 { ok, verdict, reason?, probed, endpoints }。
+function sanitizeApiEndpoints(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const item of raw) {
+        const s = String(item || '').trim();
+        if (!s || s.length > 120 || !s.startsWith('/') || /\s/.test(s)) continue;
+        if (!out.includes(s)) out.push(s);
+        if (out.length >= 5) break;
+    }
+    return out;
+}
+
+function sanitizeBackendPorts(raw) {
+    const list = Array.isArray(raw) ? raw : (raw == null || raw === '' ? [] : [raw]);
+    const out = [];
+    for (const item of list) {
+        const n = Number(item);
+        if (!Number.isInteger(n) || n <= 0 || n >= 65535) continue;
+        if (!out.includes(n)) out.push(n);
+        if (out.length >= 5) break;
+    }
+    return out;
+}
+
+async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, backendPorts }) {
+    const targets = sanitizeApiEndpoints(endpoints);
+
+    // 分支 1：agent 上报了真实 API 路由 → 在前端端口上 HTTP 探测
+    if (targets.length) {
+        const p = Number(port) || 0;
+        if (!p) return { ok: true, verdict: 'skipped', probed: [], endpoints: targets };
+        const runtime = getRuntime();
+        const cmd = targets
+            .map((path) => `echo "${path} $(curl -s -o /dev/null -m 4 -w '%{http_code}' http://127.0.0.1:${p}${path} 2>/dev/null)"`)
+            .join('; ');
+        try {
+            const r = await runtime.exec.exec('sh', ['-c', cmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 40000 });
+            const probed = String(r.stdout || '').split('\n').map((l) => l.trim()).filter(Boolean);
+            const results = probed
+                .map((l) => { const m = l.match(/^(\S+) (\d{3})$/); return m ? { path: m[1], code: m[2] } : null; })
+                .filter(Boolean);
+            if (!results.length) return { ok: true, verdict: 'no_result', probed, endpoints: targets };
+            const alive = results.find((x) => x.code.startsWith('2') || x.code.startsWith('3') || ['401', '403', '405'].includes(x.code));
+            if (alive) return { ok: true, verdict: 'alive', probed, endpoints: targets };
+            const broken = results.filter((x) => x.code.startsWith('5'));
+            if (broken.length) {
+                return {
+                    ok: false,
+                    verdict: 'backend_down',
+                    reason: `API 健康探测失败：${broken.map((x) => `${x.path}=${x.code}`).join(', ')}（根路径 200 但 API 5xx —— 前端代理的后端服务大概率没启动/连不上数据库）`,
+                    probed,
+                    endpoints: targets,
+                };
+            }
+            // 全 404/000：没有可判定的 API 面（方法不符且框架回 404 / 代理前缀差异），不误判
+            return { ok: true, verdict: 'inconclusive', probed, endpoints: targets };
+        } catch (e) {
+            // 探测本身失败不阻断部署（网络抖动等），交给根路径检查兜底
+            console.error(`[analyzeVerify] api health probe error (non-fatal): ${e.message}`);
+            return { ok: true, verdict: 'probe_error', probed: [], endpoints: targets };
+        }
+    }
+
+    // 分支 2：agent 只报了后端端口 → 检查端口是否监听（不发 HTTP，零路径猜测）
+    const ports = sanitizeBackendPorts(backendPorts);
+    if (ports.length) {
+        const listening = await listGuestListenPorts(runtimeRef, workspacePath);
+        const listenSet = new Set(listening);
+        const down = ports.filter((bp) => !listenSet.has(bp));
+        if (down.length) {
+            return {
+                ok: false,
+                verdict: 'backend_not_listening',
+                reason: `后端端口未监听：${down.join(', ')}（前端正常但后端进程没起来）`,
+                probed: ports.map((bp) => `port ${bp}: ${listenSet.has(bp) ? 'listening' : 'down'}`),
+                endpoints: ports.map((bp) => `port:${bp}`),
+            };
+        }
+        return {
+            ok: true,
+            verdict: 'backend_listening',
+            probed: ports.map((bp) => `port ${bp}: listening`),
+            endpoints: ports.map((bp) => `port:${bp}`),
+        };
+    }
+
+    // 分支 3：agent 未识别出后端（纯前端站或未上报）→ 放行
+    return { ok: true, verdict: 'skipped', probed: [], endpoints: [] };
+}
+
 /**
  * Code-side post-verify constraint: re-probe the sandbox toolchain and
  * flag any tool the plan's serve step still needs but is missing. This
@@ -386,6 +490,7 @@ function buildSystemPrompt(plan, toolchain) {
         '- The serve command must start the app in the background and stay running. Use e.g. `export PORT=<port>; (cd server && npm start) > /tmp/serve.log 2>&1 & sleep 5; cat /tmp/serve.log`, then health-check with curl.',
         '- Keep the serve process alive even after your shell exits: start it with nohup / setsid and disown. Pick any free port (export PORT=<port> if the app reads it; prefer the default port when free) — the platform auto-detects the real app port for the preview, so do not waste rounds fighting over one specific port.',
         '- Verify with an actual HTTP request, not just "process started": `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:<port>/`. A 2xx/3xx/expected response means success.',
+        '- FULL-STACK requirement: a root page 200 is NOT enough. If the project is frontend+backend (the frontend proxies /api to a local backend), the backend process MUST be running and reachable, or every browser page will be blank. Before outputting final, curl a REAL API route from the code yourself: 2xx/3xx/401 (auth required) / 405 (method mismatch) means the backend is alive; 5xx means the backend is down or cannot reach its database — start it / provision the DB / migrate, then re-check. The platform re-runs this check using the apiEndpoints / backendPort you report in your final answer and will REJECT a frontend-only success.',
         '- When a command fails, DO NOT just rerun it. Read the error, inspect files (read_file/list_dir), fix the root cause (edit_file), then retry.',
         // 改动 4 配套：CRITICAL 规则改为 per-subpackage —— 之前是整项目 boolean，
         // 会让 agent 在 monorepo 里把 server/node_modules 命中当作全 CACHED、跳过 web install。
@@ -478,8 +583,9 @@ function buildSystemPrompt(plan, toolchain) {
         '- Detect: the backend reads a built frontend dir (dist / public / build) and serves it, and there is no separate frontend dev server needed for the app to be usable.',
         '- Build the frontend into the location the server expects (check its config / README for the expected output dir), then start the backend WITH the config it needs — many servers do NOT auto-load their .env, so source it or export the required DATABASE_URL etc. (e.g. `cd server && set -a && . ./.env && set +a && npm start`).',
         '- The app answers on the backend port: verify it returns real HTML for / and JSON for an API endpoint. That port IS the app — do not start a second static file server on top of it.',
+        'API ENDPOINTS REPORT (important for full-stack apps): the platform runs a code-side backend check after your final answer to detect a dead backend (root 200 but backend dead = white-screen app). It uses ONLY what you report — there is no path guessing. Include "apiEndpoints": 1-3 REAL API paths that pass through the frontend proxy to the backend — read them from the code (router definitions, next.config rewrites destination, vite proxy target, axios/fetch baseURL + routes, e.g. "/api/v1/auth/login"). GET is used for probing, so a method-restricted route answering 405 still counts as alive. If you cannot name concrete API paths but know the backend listens on a fixed port (e.g. rewrites destination http://localhost:8080, vite proxy target), include "backendPort": 8080 instead — the platform only checks that the port is LISTENING. Report neither field only if the app truly has no backend.',
         'When the app responds correctly, output your final answer:',
-        '{"action":"final","result":{"ok":true,"tested":["npm install","npm run build","curl /"],"finalStderr":"","summary":"<1-2 sentences>"}}',
+        '{"action":"final","result":{"ok":true,"tested":["npm install","npm run build","curl /"],"apiEndpoints":["/api/v1/auth/login"],"backendPort":8080,"finalStderr":"","summary":"<1-2 sentences>"}}',
         'If you cannot make it pass after exhaustive fixes, output:',
         '{"action":"final","result":{"ok":false,"tested":["..."],"finalStderr":"<the latest error output>","summary":"<what you tried and why it failed>"}}',
     ].join('\n');
@@ -549,6 +655,10 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
     const ranCmds = new Map();
     let lastEditRound = -1;
     let lastNudgeRound = -1;
+    // API 健康探测 nudge 计数：根路径 200 但 API 5xx（前端代理的后端没起）时，
+    // 先推回给 agent 自修复；超过上限才硬失败，避免纯静态站被误伤或无限循环。
+    let apiNudges = 0;
+    const MAX_API_NUDGES = 2;
     // 阶段 B 内子阶段上报（prepare/install/build/serve/check/fix）：让前端分步展示，
     // 驱动信号来自每轮实际执行的工具/命令，不影响 verify 逻辑本身。
     let lastSubstage = null;
@@ -717,7 +827,38 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
                     };
                     return { ...failedResult, source: 'ai', trail, messages: trimContext(messages), roundsUsed: round + 1 };
                 }
+                // API/后端健康探测：前端 200 但后端没起 = 前后端分离项目白屏根因。
+                // 依据全部来自 agent 上报：apiEndpoints（HTTP 探测）或 backendPort（监听检查），
+                // 无写死路径猜测。失败先 nudge 自修复（启动后端/补数据库/migrate），超限硬失败。
+                const apiEndpoints = Array.isArray(r.apiEndpoints) ? r.apiEndpoints : [];
+                const api = await probeApiHealth({ runtimeRef, workspacePath, port: probe.port, endpoints: apiEndpoints, backendPorts: r.backendPort });
+                if (!api.ok) {
+                    trail.push({ round, action: 'api_probe_failed', verdict: api.verdict, reason: api.reason, endpoints: api.endpoints, nudges: apiNudges });
+                    console.error(`[analyzeVerify] round ${round}: API probe FAILED (nudge ${apiNudges + 1}/${MAX_API_NUDGES}, verdict=${api.verdict}, endpoints=${JSON.stringify(api.endpoints)}): ${api.reason}`);
+                    if (apiNudges < MAX_API_NUDGES) {
+                        apiNudges++;
+                        const fixHint = api.verdict === 'backend_not_listening'
+                            ? `The backend port(s) ${api.endpoints.join(', ')} are NOT listening. Start the backend process first (find the entrypoint: server/, api/, go.mod main, Dockerfile CMD; e.g. nohup ./bin/server > /tmp/backend.log 2>&1 &). If the port in your backendPort was wrong, read the frontend proxy config (next.config rewrites / vite proxy / axios baseURL) for the real port and report it.`
+                            : `The API endpoints return 5xx — the backend behind the frontend is NOT running (or cannot reach its database). Fix it: (1) start the backend (server/, api/, go.mod main, Dockerfile CMD; e.g. nohup ./bin/server > /tmp/backend.log 2>&1 &); (2) if it needs PostgreSQL/MySQL, ensure the DB is running (service postgresql start), create the user/database from DATABASE_URL, and run migrations; (3) confirm with curl that the API endpoints (${api.endpoints.join(', ')}) return non-5xx — adjust apiEndpoints in your final answer if the paths were wrong.`;
+                        messages.push({
+                            role: 'user',
+                            content: `Code-side health check REJECTED your final answer: the root page serves HTTP 200, but the backend is down — ${api.reason} ${fixHint} Then output final again with ok:true.`,
+                        });
+                        messages = trimContext(messages);
+                        continue;
+                    }
+                    const failedResult = {
+                        ...lastResult,
+                        ok: false,
+                        warning: api.reason,
+                        finalStderr: `${api.reason}\n${lastResult.finalStderr || ''}`.slice(0, 4000),
+                    };
+                    return { ...failedResult, source: 'ai', trail, messages: trimContext(messages), roundsUsed: round + 1 };
+                }
                 appPort = probe.port;
+                // 探测结果统一入 trail（不推给 LLM，省 token）：agent 上报端点全 404 时的
+                // inconclusive 场景可事后排查（路径拼错 / 代理前缀不对 / GET 不可达）。
+                trail.push({ round, action: 'api_probe', verdict: api.verdict, endpoints: api.endpoints, probed: api.probed });
             }
             return { ...lastResult, appPort, source: 'ai', warning: ok ? '' : 'verify agent reported failure', trail, messages: trimContext(messages), roundsUsed: round + 1 };
         }
@@ -801,6 +942,8 @@ async function runVerifyWithoutLlm({ workspacePath, runtimeRef, plan, projectTyp
                 return { ok: false, source: 'shell', tested, finalStderr: String(log.stdout || '').slice(0, 4000), warning: 'served directory listing / box default page / empty, not the app' };
             }
             if (ok2xx) {
+                // 无 LLM 兜底路径：没有 agent 上报的 apiEndpoints/backendPort，无法做
+                // 后端探测（探测依据只来自 agent 上报，不做写死路径猜测），仅根路径检查。
                 return { ok: true, source: 'shell', tested, finalStderr: '', warning: '', appPort: port };
             }
             const log = await runtime.exec.exec('sh', ['-c', `cat /tmp/serve.log 2>&1 | tail -60`], {}, { runtimeRef, cwd: workspacePath });
