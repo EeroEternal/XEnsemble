@@ -19,11 +19,15 @@ const SHELL_TIMEOUT_MS = 240000;
 const LLM_RETRIES = 2;
 
 // 对 LLM API 的瞬时故障（5xx / 429 / 网络错误）自动重试，避免一次网关抖动直接让部署失败。
-async function callLlm(messages) {
+async function callLlm(messages, abortSignal) {
     let lastWarning = '';
     for (let attempt = 0; attempt <= LLM_RETRIES; attempt++) {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+        // If an external abort signal is provided, link it to our controller
+        if (abortSignal) {
+            abortSignal.addEventListener('abort', () => controller.abort());
+        }
         try {
             const res = await fetch(API_URL, {
                 method: 'POST',
@@ -482,6 +486,18 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
     const toolchain = await detectRuntimeToolchain(runtimeRef, workspacePath).catch(() => []);
     let messages;
     let roundStart = 0;
+
+    // Create an AbortSignal that can be triggered by isAborted()
+    const abortController = new AbortController();
+    const abortSignal = abortController.signal;
+    const checkAborted = () => {
+        if (isAborted?.()) {
+            abortController.abort();
+            return true;
+        }
+        return false;
+    };
+
     if (resume && Array.isArray(resume.messages) && resume.messages.length > 0) {
         // 断点续修：接回上次的对话历史，注入进度提示后从上次轮数继续，不从头重跑。
         messages = resume.messages.slice();
@@ -508,7 +524,16 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
             return { ok: false, source: 'ai', aborted: true, warning: '部署已中止', finalStderr: '', tested: [], trail, messages: trimContext(messages), roundsUsed: round };
         }
         if (onRound) onRound(round);
-        const llmResult = await callLlm(messages);
+        if (checkAborted()) {
+            return { ok: false, source: 'ai', aborted: true, warning: '部署已中止', finalStderr: '', tested: [], trail, messages: trimContext(messages), roundsUsed: round };
+        }
+        const llmResult = await callLlm(messages, abortSignal);
+        if (checkAborted()) {
+            return { ok: false, source: 'ai', aborted: true, warning: '部署已中止', finalStderr: '', tested: [], trail, messages: trimContext(messages), roundsUsed: round };
+        }
+        if (!llmResult.ok) {
+            return { ok: false, source: 'ai', warning: llmResult.warning, finalStderr: '', tested: [], trail, messages: trimContext(messages) };
+        }
         if (!llmResult.ok) {
             return { ok: false, source: 'ai', warning: llmResult.warning, finalStderr: '', tested: [], trail, messages: trimContext(messages) };
         }
@@ -547,8 +572,10 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
             console.error(`[analyzeVerify] round ${round}: tool=${parsed.tool} args=${JSON.stringify(summarizeArgs(parsed.args))} out_len=${String(out).length}`);
             messages.push({ role: 'user', content: `Tool "${parsed.tool}" result:\n${out}` });
             messages = trimContext(messages);
+            if (checkAborted()) {
+                return { ok: false, source: 'ai', aborted: true, warning: '部署已中止', finalStderr: '', tested: [], trail, messages: trimContext(messages), roundsUsed: round };
+            }
             continue;
-        }
         if (parsed.action === 'final') {
             const r = parsed.result || {};
             const ok = Boolean(r.ok);

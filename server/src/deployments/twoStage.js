@@ -30,7 +30,7 @@ const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 const VERIFY_STATE_TTL_MS = 30 * 60 * 1000;
 // 单次部署（阶段 1 分析 + 阶段 2 验证）整体超时：verify agent 可能因 run_shell 启动服务未正确
 // 后台化（缺少 &/nohup）而挂起，必须有总超时自动中止，否则部署永不结束、前端一直显示 running。
-const DEPLOY_TOTAL_TIMEOUT_MS = Number(process.env.DEPLOY_TOTAL_TIMEOUT_MS) || 25 * 60 * 1000;
+const DEPLOY_TOTAL_TIMEOUT_MS = Number(process.env.DEPLOY_TOTAL_TIMEOUT_MS) || 15 * 60 * 1000;
 
 // 在 stage A 之前 fetch sandbox projectDir 的 origin/main，让 stage A LLM 看到最新代码。
 // 不做 reset --hard：保留用户在工作目录的未提交改动（平台在 /var/lib/.../proj_xxx 上
@@ -59,7 +59,10 @@ async function syncProjectToLatestMain(project) {
 function withTimeout(promise, ms, fallback, onTimeout) {
     return new Promise((resolve) => {
         const timer = setTimeout(() => {
-            if (onTimeout) onTimeout();
+            if (onTimeout) {
+                try { onTimeout(); } catch (e) { process.stderr.write(`[withTimeout] onTimeout error: ${e.message}\n`); }
+            }
+            process.stderr.write(`[twoStage] deploy total timeout (${Math.round(ms / 60000)}min), cancelling verify agent project\n`);
             resolve(fallback);
         }, ms);
         promise.then(
