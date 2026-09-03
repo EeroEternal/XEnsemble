@@ -2162,6 +2162,23 @@ fastify.register(async function terminalWsRoutes(app) {
                 });
             };
 
+            // Client messages (input/resize) may arrive while the session is
+            // still provisioning: the frontend sends its fitted terminal size
+            // immediately after the WS opens, but for a freshly created
+            // session subscribeTerminal below waits (up to 120s) for the agent
+            // to spawn. Register the handler NOW and buffer those messages —
+            // with no listener registered they would be dropped, and a
+            // full-screen TUI like opencode would boot at the PTY default
+            // size (120x32), leaving the bottom of the terminal unpainted.
+            const bufferedClientMessages = [];
+            let handleClientMessage = (message) => {
+                try {
+                    const raw = typeof message === 'string' ? message : message.toString();
+                    bufferedClientMessages.push(JSON.parse(raw));
+                } catch (_) { /* ignore malformed frames */ }
+            };
+            ws.on('message', (message) => handleClientMessage(message));
+
             const sub = await subscribeTerminal(sessionId, (payload) => {
                 sendJson(payload);
                 if (payload.type === 'exit' || payload.type === 'error') {
@@ -2172,6 +2189,34 @@ fastify.register(async function terminalWsRoutes(app) {
                 ws.close();
                 return;
             }
+
+            const processTerminalClientMessage = (parsed) => {
+                if (!sessionManager.isAlive(sessionId)) return;
+                if (parsed?.type === 'input' || parsed?.type === 'resize') {
+                    const live = sessionManager.getSession(sessionId);
+                    if (parsed?.type === 'input') {
+                        sessionManager.touchActivity(sessionId, 'input');
+                    }
+                    const transcriptRef = live?.transcriptRef || live?.streamRef;
+                    if (transcriptRef) {
+                        transcriptStore.append(transcriptRef, {
+                            kind: parsed.type === 'input' ? 'in' : 'resize',
+                            data: parsed.type === 'input'
+                                ? parsed.data
+                                : { cols: parsed.cols, rows: parsed.rows },
+                        });
+                    }
+                }
+                applyTerminalMessage(sub.handle, parsed);
+            };
+
+            // Replay messages buffered while the session was provisioning
+            // (the fitted resize and any early keystrokes) now that the agent
+            // handle exists.
+            for (const parsed of bufferedClientMessages.splice(0)) {
+                try { processTerminalClientMessage(parsed); } catch (err) { req.log.error(err); }
+            }
+
             // Forward structured chat events (recorded by the LLM proxy) over
             // the same terminal channel so the chat view can render them live.
             const offChat = chatTranscript.subscribe(sessionId, (entry) => {
@@ -2179,31 +2224,15 @@ fastify.register(async function terminalWsRoutes(app) {
             });
             sendWebSocketReady(sendJson);
 
-            ws.on('message', (message) => {
-                if (!sessionManager.isAlive(sessionId)) return;
+            handleClientMessage = (message) => {
                 try {
                     const raw = typeof message === 'string' ? message : message.toString();
                     const parsed = JSON.parse(raw);
-                    if (parsed?.type === 'input' || parsed?.type === 'resize') {
-                        const live = sessionManager.getSession(sessionId);
-                        if (parsed?.type === 'input') {
-                            sessionManager.touchActivity(sessionId, 'input');
-                        }
-                        const transcriptRef = live?.transcriptRef || live?.streamRef;
-                        if (transcriptRef) {
-                            transcriptStore.append(transcriptRef, {
-                                kind: parsed.type === 'input' ? 'in' : 'resize',
-                                data: parsed.type === 'input'
-                                    ? parsed.data
-                                    : { cols: parsed.cols, rows: parsed.rows },
-                            });
-                        }
-                    }
-                    applyTerminalMessage(sub.handle, parsed);
+                    processTerminalClientMessage(parsed);
                 } catch (err) {
                     req.log.error(err);
                 }
-            });
+            };
 
             ws.on('close', () => {
                 stopHeartbeat();

@@ -796,6 +796,11 @@ function AgentConsole({
             const msg = parseMessage(event.data);
             if (msg.type === 'ready') {
               markAuthenticated();
+              // The TUI (e.g. opencode) boots inside the sandbox slightly
+              // after the session handle becomes alive; resend the fitted
+              // size so it initializes at the right dimensions even when the
+              // WS opened while the session was still provisioning.
+              scheduleResizeResends();
               return;
             }
             if (msg.type === 'output') {
