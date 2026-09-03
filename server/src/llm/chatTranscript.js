@@ -121,18 +121,38 @@ function subscribe(sessionId, cb) {
  * Full history for a session (oldest first), read from PostgreSQL so it
  * survives restarts. Falls back to the in-memory buffer if the DB is
  * unreachable.
+ *
+ * 只读最近 MAX_EVENTS_PER_SESSION 条（最新），仍按 seq 升序输出——
+ * 超长会话应看到「最近」的对话而非最早的开场白。内存 buffer 兜底
+ * 路径（buf.events 超限时 splice 丢最旧）本身即保留最新，语义一致。
  */
 async function getHistory(sessionId) {
     try {
         const { db } = require('../db/index');
         const schema = require('../db/schema');
-        const { eq, asc } = require('drizzle-orm');
-        const rows = await db
-            .select()
+        const { eq, asc, desc } = require('drizzle-orm');
+        // 子查询先按 seq DESC 取最新 MAX_EVENTS_PER_SESSION 条
+        const sub = db
+            .select({ seq: schema.sessionChatMessages.seq })
             .from(schema.sessionChatMessages)
             .where(eq(schema.sessionChatMessages.sessionId, sessionId))
-            .orderBy(asc(schema.sessionChatMessages.seq))
-            .limit(MAX_EVENTS_PER_SESSION);
+            .orderBy(desc(schema.sessionChatMessages.seq))
+            .limit(MAX_EVENTS_PER_SESSION)
+            .as('sub');
+        // 外层再按 seq ASC 输出，保证调用方拿到的是 旧→新 顺序
+        const rows = await db
+            .select({
+                seq: schema.sessionChatMessages.seq,
+                ts: schema.sessionChatMessages.ts,
+                role: schema.sessionChatMessages.role,
+                content: schema.sessionChatMessages.content,
+                callId: schema.sessionChatMessages.callId,
+                tool: schema.sessionChatMessages.tool,
+                model: schema.sessionChatMessages.model,
+            })
+            .from(schema.sessionChatMessages)
+            .innerJoin(sub, eq(schema.sessionChatMessages.seq, sub.seq))
+            .orderBy(asc(schema.sessionChatMessages.seq));
         return rows.map(entryFromRow);
     } catch (_) {
         const buf = buffers.get(sessionId);
