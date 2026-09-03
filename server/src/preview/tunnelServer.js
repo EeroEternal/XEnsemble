@@ -57,6 +57,35 @@ async function createTunnel({ deploymentId, workspacePath, runtimeRef, vmPort, p
 
     await runtime.fs.fsWrite(workspacePath, '.agents/tunnelClient.cjs', TUNNEL_CLIENT_SCRIPT, { runtimeRef });
 
+    // 写一个 supervisor 脚本：循环重启 tunnelClient，防止 BoxLiteStreamHandle 的
+    // WebSocket 断连导致 onExit 触发后子进程彻底消失。supervisor 自身是 node 进程，
+    // 不会被 blink 端的 close 事件杀掉（tty=true 的 exec attach 心跳维持）。
+    const supervisorScript = `
+#!/usr/bin/env node
+const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+const args = process.argv.slice(2);
+const [hostIp, wsPort, vmPort] = args;
+const clientPath = path.join(__dirname, 'tunnelClient.cjs');
+let attempt = 0;
+function start() {
+  const child = spawn(process.execPath, [clientPath, hostIp, wsPort, vmPort], {
+    stdio: 'inherit',
+    cwd: __dirname,
+  });
+  child.on('exit', (code) => {
+    attempt += 1;
+    const delay = Math.min(1000 * Math.pow(2, Math.min(attempt, 5)), 30000);
+    console.error('[tunnelSupervisor] client exited code=' + code + ', restart in ' + delay + 'ms (attempt ' + attempt + ')');
+    setTimeout(start, delay);
+  });
+}
+start();
+setInterval(() => {}, 1 << 30);
+`;
+    await runtime.fs.fsWrite(workspacePath, '.agents/tunnelSupervisor.cjs', supervisorScript, { runtimeRef });
+
     let vmSocket = null;
     const pendingBrowsers = new Map();
 
@@ -102,10 +131,11 @@ async function createTunnel({ deploymentId, workspacePath, runtimeRef, vmPort, p
 
     const child = await runtime.exec.spawn(
         'node',
-        ['.agents/tunnelClient.cjs', hostIp, String(wsPort), String(vmPort)],
+        ['.agents/tunnelSupervisor.cjs', hostIp, String(wsPort), String(vmPort)],
         { TERM: 'xterm-256color' },
-        { name: 'tunnel-client', cwd: workspacePath, runtimeRef },
+        { name: 'tunnel-supervisor', cwd: workspacePath, runtimeRef },
     );
+    console.error(`[tunnelServer] tunnel supervisor spawned for ${deploymentId}`);
 
     await new Promise((resolve, reject) => {
         const timeoutMs = Number(process.env.TUNNEL_CONNECT_TIMEOUT_MS) || 30000;
