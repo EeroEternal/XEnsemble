@@ -20,7 +20,7 @@ const { signBlinkToken } = require('../preview/blinkToken');
 const { resolveControlPlanePublicUrlSync } = require('../llm/publicUrl');
 const deploymentService = require('./DeploymentService');
 const workspace = require('../workspace');
-const { registerDeploy, unregisterDeploy, isAborted, countByUser, listProjectIdsByUser, listByUser } = require('./activeDeploys');
+const { registerDeploy, unregisterDeploy, isAborted, countByUser, listProjectIdsByUser, listByUser, deployKey } = require('./activeDeploys');
 const { ensureUserQuota, getUsage } = require('../auth/PolicyService');
 const { broadcastSse } = require('../session/sseManager');
 const { db } = require('../db');
@@ -1118,6 +1118,56 @@ async function startRewriteProxy({ runtimeRef, workspacePath, upstreamPort, list
     return false;
 }
 
+/**
+ * 孤儿部署记录回收。
+ *
+ * 进程被强杀（systemd 重启 / 崩溃 / SIGTERM 超时 force exit）时，进行中的
+ * kind='deploy' 记录永久停留在 building——没有进程推进它，前端永远轮询到
+ * building 显示"部署中"，且该记录永远不会被 supersede 逻辑清理（那里只处理
+ * running）。判定标准：DB 有 building 记录，但其 (projectId, sessionId) 键
+ * 不在内存 activeDeploys 注册表中——注册表随进程启动为空，本进程存活的部署
+ * 必然在册（registerDeploy 于部署开始时注册、finally 注销）。
+ *
+ * sameKeyLive：本次请求 registerDeploy 返回 created=false 时为 true，表示
+ * 同键部署已在本进程在飞——同键 building 记录可能是它的（也可能是更早请求
+ * 刚插入还没到终态），跳过不动。created=true 时本次部署的记录尚未插入，
+ * 同键的既有 building 记录必为孤儿。
+ *
+ * 返回回收的记录数；调用方据此让本次部署走 resume（断点续修：有保存的
+ * verify 对话则接回继续修，没有则自动回退到计划缓存/全新分析）。
+ */
+async function reclaimOrphanedDeployRecords({ projectId, userId, ourKey, sameKeyLive }) {
+    try {
+        const rows = await db.select({
+            id: schema.deployments.id,
+            sessionId: schema.deployments.sessionId,
+            userId: schema.deployments.userId,
+        })
+            .from(schema.deployments)
+            .where(and(
+                eq(schema.deployments.projectId, projectId),
+                eq(schema.deployments.kind, 'deploy'),
+                eq(schema.deployments.status, 'building'),
+            ));
+        const orphanIds = rows
+            .filter((r) => {
+                if (userId && r.userId && r.userId !== userId) return false; // 不动其他用户的记录
+                if (sameKeyLive && deployKey(projectId, r.sessionId) === ourKey) return false; // 同键活部署
+                return true;
+            })
+            .map((r) => r.id);
+        if (!orphanIds.length) return 0;
+        await db.update(schema.deployments)
+            .set({ status: 'stopped', stoppedBy: 'orphan_reclaim', updatedAt: Date.now() })
+            .where(inArray(schema.deployments.id, orphanIds));
+        console.error(`[twoStage] reclaimed ${orphanIds.length} orphaned building deploy record(s) project=${projectId}: ${orphanIds.join(',')}`);
+        return orphanIds.length;
+    } catch (e) {
+        console.error('[twoStage] orphan reclaim failed:', e?.message || e);
+        return 0;
+    }
+}
+
 async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUser, onProgress, resume, sessionId }) {
     const project = await getProjectForUser(userId, projectId);
     if (!project) return { ok: false, error: 'Project not found' };
@@ -1127,7 +1177,18 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
     // per-user 并发闸门：进行中的部署 + 运行中的预览 ≤ 该用户个人配额（admin 同普通用户，
     // 均在用户管理/个人配额里配置，避免无限制并发部署同时跑多个 VM 耗尽沙箱资源）。
     // 先注册（内存计数原子）再校验，避免多个并发请求同时通过；超限则注销并拒绝。
-    registerDeploy(project.id, userId, sessionId);
+    const registerCreated = registerDeploy(project.id, userId, sessionId);
+    // 孤儿 building 记录回收（进程被杀遗留）：清理后让本次部署自动走 resume，
+    // 有保存的 verify 状态则断点续修，没有则回退到计划缓存/全新分析。
+    let reclaimedOrphans = 0;
+    try {
+        reclaimedOrphans = await reclaimOrphanedDeployRecords({
+            projectId: project.id,
+            userId,
+            ourKey: deployKey(project.id, sessionId),
+            sameKeyLive: !registerCreated,
+        });
+    } catch (_) { /* reclaim 内部已兜底 */ }
     // 真正的中止通道：用户中止（activeDeploys.aborted）或部署总超时（deployState.cancelled）
     // 都使该函数返回 true，让阶段 A/B 的 agent 循环在下一轮退出，而不是只丢弃结果继续跑。
     const deployState = { cancelled: false };
@@ -1194,7 +1255,7 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
     };
     let result;
     try {
-        result = await runDeployInner({ project, userId, projectId, sessionId, resume, report, startedAt, deployRef, isAborted: aborted, deployState });
+        result = await runDeployInner({ project, userId, projectId, sessionId, resume: Boolean(resume) || reclaimedOrphans > 0, report, startedAt, deployRef, isAborted: aborted, deployState });
         return result;
     } finally {
         unregisterDeploy(project.id, sessionId);

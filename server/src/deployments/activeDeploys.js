@@ -10,7 +10,13 @@ function deployKey(projectId, sessionId) {
 }
 
 function registerDeploy(projectId, userId, sessionId) {
-    activeDeploys.set(deployKey(projectId, sessionId), { userId, aborted: false, startedAt: Date.now() });
+    const key = deployKey(projectId, sessionId);
+    // 返回是否新建了键：false 表示同键部署已在本进程在飞（并发二次请求）。
+    // 调用方（孤儿记录回收）据此区分"同键 building 记录属于活部署"还是
+    // "上一进程被杀留下的孤儿"。
+    const created = !activeDeploys.has(key);
+    activeDeploys.set(key, { userId, aborted: false, startedAt: Date.now() });
+    return created;
 }
 
 function unregisterDeploy(projectId, sessionId) {
@@ -69,4 +75,4 @@ function cleanupStale(maxAgeMs) {
     }
 }
 
-module.exports = { registerDeploy, unregisterDeploy, isAborted, abortDeploy, countByUser, listProjectIdsByUser, listByUser, cleanupStale };
+module.exports = { deployKey, registerDeploy, unregisterDeploy, isAborted, abortDeploy, countByUser, listProjectIdsByUser, listByUser, cleanupStale };
