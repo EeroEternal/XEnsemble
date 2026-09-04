@@ -30,7 +30,7 @@ async function createRefreshToken(userId, deviceName = null, tx = null) {
     return raw;
 }
 
-async function rotateRefreshToken(oldRawToken, userId, deviceName = null) {
+async function useRefreshToken(oldRawToken, userId, deviceName = null) {
     const oldHash = auth.hashToken(oldRawToken);
     const now = Date.now();
     return db.transaction(async (tx) => {
@@ -44,11 +44,11 @@ async function rotateRefreshToken(oldRawToken, userId, deviceName = null) {
         if (rows.length === 0) {
             return null;
         }
-        const tokenRow = rows[0];
-        await tx.update(schema.refreshTokens)
-            .set({ revokedAt: now })
-            .where(eq(schema.refreshTokens.id, tokenRow.id));
-        return createRefreshToken(userId, deviceName, tx);
+        // 不轮换：并发 refresh 友好。refresh token 一直有效到 expiresAt 或被主动撤销
+        //（如改密码）。原 raw token 原样返回，access token 重新签发。安全 trade-off：
+        // refresh token 泄露后最长影响至 expiresAt（30 天），但 race condition 根除
+        // —— 多标签页/多 SSE 并发 refresh 不再互踢。
+        return oldRawToken;
     });
 }
 
@@ -562,6 +562,6 @@ module.exports = {
     loginUser,
     getMe,
     createRefreshToken,
-    rotateRefreshToken,
+    useRefreshToken,
     revokeAllUserRefreshTokens,
 };

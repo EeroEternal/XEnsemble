@@ -61,14 +61,15 @@ test('refresh token creation and hash verification', async () => {
     assert.ok(rows[0].expiresAt > Date.now());
 });
 
-test('refresh token rotation invalidates old token', async () => {
+test('refresh token is reused (no rotation) for concurrent-refresh safety', async () => {
     await userAdmin.revokeAllUserRefreshTokens(userId);
     const raw1 = await userAdmin.createRefreshToken(userId, 'test-device');
-    const raw2 = await userAdmin.rotateRefreshToken(raw1, userId, 'test-device');
-    assert.ok(raw2, 'rotation returned a new token');
-    assert.notStrictEqual(raw2, raw1);
-    const raw3 = await userAdmin.rotateRefreshToken(raw1, userId, 'test-device');
-    assert.strictEqual(raw3, null, 'old token cannot be reused');
+    // 不轮换：同一个 refresh token 可以被并发使用
+    const raw2 = await userAdmin.useRefreshToken(raw1, userId, 'test-device');
+    assert.strictEqual(raw2, raw1, 'refresh token is reused unchanged');
+    // 并发场景：另一个标签页用同一个 token refresh 也成功
+    const raw3 = await userAdmin.useRefreshToken(raw1, userId, 'test-device');
+    assert.strictEqual(raw3, raw1, 'concurrent refresh returns same token');
 });
 
 test('revoked or expired refresh token returns null', async () => {
@@ -76,7 +77,7 @@ test('revoked or expired refresh token returns null', async () => {
 
     const revokedRaw = await userAdmin.createRefreshToken(userId, 'test-device');
     await userAdmin.revokeAllUserRefreshTokens(userId);
-    const rotatedFromRevoked = await userAdmin.rotateRefreshToken(revokedRaw, userId, 'test-device');
+    const rotatedFromRevoked = await userAdmin.useRefreshToken(revokedRaw, userId, 'test-device');
     assert.strictEqual(rotatedFromRevoked, null, 'revoked token cannot be rotated');
 
     const expiredRaw = auth.generateRefreshTokenValue();
@@ -89,7 +90,7 @@ test('revoked or expired refresh token returns null', async () => {
         createdAt: Date.now() - 2 * 30 * 24 * 60 * 60 * 1000,
         expiresAt: Date.now() - 30 * 24 * 60 * 60 * 1000,
     });
-    const rotatedFromExpired = await userAdmin.rotateRefreshToken(expiredRaw, userId, 'test-device');
+    const rotatedFromExpired = await userAdmin.useRefreshToken(expiredRaw, userId, 'test-device');
     assert.strictEqual(rotatedFromExpired, null, 'expired token cannot be rotated');
 });
 
@@ -98,8 +99,8 @@ test('revokeAllUserRefreshTokens revokes all tokens', async () => {
     const raw1 = await userAdmin.createRefreshToken(userId, 'device-a');
     const raw2 = await userAdmin.createRefreshToken(userId, 'device-b');
     await userAdmin.revokeAllUserRefreshTokens(userId);
-    assert.strictEqual(await userAdmin.rotateRefreshToken(raw1, userId, 'device-a'), null);
-    assert.strictEqual(await userAdmin.rotateRefreshToken(raw2, userId, 'device-b'), null);
+    assert.strictEqual(await userAdmin.useRefreshToken(raw1, userId, 'device-a'), null);
+    assert.strictEqual(await userAdmin.useRefreshToken(raw2, userId, 'device-b'), null);
 });
 
 test('password hash upgrade', () => {

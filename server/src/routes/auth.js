@@ -80,7 +80,7 @@ function registerAuthRoutes(fastify) {
             if (!user || user.status !== 'active') {
                 return reply.code(403).send({ error: t('errors:account_inactive', {}, request.locale || 'en'), code: 'account_inactive' });
             }
-            const newRefreshToken = await userAdmin.rotateRefreshToken(refresh_token, user.id, deviceName);
+            const newRefreshToken = await userAdmin.useRefreshToken(refresh_token, user.id, deviceName);
             if (!newRefreshToken) {
                 return reply.code(401).send({ error: t('errors:invalid_refresh_token', { defaultValue: 'Invalid or expired refresh token' }, request.locale || 'en') });
             }
