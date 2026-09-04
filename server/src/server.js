@@ -2012,9 +2012,17 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
 
 const WS_BUFFERED_LIMIT = 16 * 1024 * 1024;
 const WS_PING_INTERVAL_MS = Number(process.env.WS_PING_INTERVAL_MS) || 30000;
+// 拥塞自杀：客户端主线程冻结时，浏览器网络栈仍会自动 pong（协议层），现有
+// 心跳永远踢不掉它——连接会一直恶化到 bufferedAmount 超过 WS_BUFFERED_LIMIT，
+// 进入"createWsSender 静默丢帧"的降级态：TUI 字节流出现破洞、渲染状态失步、
+// 视觉永久冻结。自杀阈值刻意低于丢帧阈值——在丢帧发生**之前**断开，保证
+// 重连重放的数据流是干净的（无破洞），客户端走 delta/锚点重放无感自愈。
+const WS_CONGEST_KILL_BYTES = Number(process.env.WS_CONGEST_KILL_BYTES) || 4 * 1024 * 1024;
+const WS_CONGEST_KILL_MS = Number(process.env.WS_CONGEST_KILL_MS) || 15000;
 
 function startWsHeartbeat(ws) {
     let alive = true;
+    let congestedSince = 0;
     ws.on('pong', () => { alive = true; });
     const timer = setInterval(() => {
         if (ws.readyState !== WebSocket.OPEN) return;
@@ -2023,6 +2031,16 @@ function startWsHeartbeat(ws) {
             return;
         }
         alive = false;
+        // 拥塞检测：持续超限（心跳间隔粒度）即自杀，触发客户端干净重连
+        if (ws.bufferedAmount > WS_CONGEST_KILL_BYTES) {
+            if (!congestedSince) congestedSince = Date.now();
+            if (Date.now() - congestedSince >= WS_CONGEST_KILL_MS) {
+                ws.terminate();
+                return;
+            }
+        } else {
+            congestedSince = 0;
+        }
         try { ws.ping(); } catch (_) { ws.terminate(); }
     }, WS_PING_INTERVAL_MS);
     timer.unref();

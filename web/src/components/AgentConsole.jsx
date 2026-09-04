@@ -98,6 +98,10 @@ function setCachedSeq(sessionId, seq) {
   } catch { /* ignore */ }
 }
 
+// 客户端写入积压上限：超过即放弃失步数据、走锚点重放自愈。必须大于服务端
+// delta/锚点重放上限（4MB），保证一次有界重放不会反过来触发自愈循环。
+const MAX_WRITE_BUFFER_BYTES = 8 * 1024 * 1024;
+
 function AgentConsole({
   sessionId,
   reconnectVersion = 0,
@@ -119,6 +123,10 @@ function AgentConsole({
   const onSessionConnectedRef = useRef(onSessionConnected);
   const connectedRef = useRef(false);
   const firstConnectRef = useRef(true);
+  // 自愈重同步标记：客户端写入积压超限时置位，下次 connect 用 after=0 走
+  // 锚点重放（有界），丢弃与实时流之间已经失步的增量。配合服务端的
+  // 拥塞自杀 + delta 封顶，把卡死变成 ≤30s 的无感自愈。
+  const resyncRef = useRef(false);
 
   const replayDoneRef = useRef(true);
   const shouldConnect = sessionLive;
@@ -156,6 +164,7 @@ function AgentConsole({
 
   useEffect(() => {
     firstConnectRef.current = true;
+    resyncRef.current = false;
     const host = hostRef.current;
     if (!host) return undefined;
 
@@ -472,7 +481,10 @@ function AgentConsole({
           // the tail replay. On reconnect (WS drop), use cached seq for delta.
           const isFirstConnect = firstConnectRef.current;
           firstConnectRef.current = false;
-          const cachedSeq = isFirstConnect ? 0 : getCachedSeq(sessionId);
+          // 自愈重同步（resyncRef）或首次连接都用 after=0：服务端会做锚点
+          // 重放（最近完整重绘 → EOF，有界），终端直接落在最新画面。
+          const cachedSeq = (isFirstConnect || resyncRef.current) ? 0 : getCachedSeq(sessionId);
+          resyncRef.current = false;
           const ws = new WebSocket(getWsUrl(sessionId, getAccessToken(), cachedSeq));
           wsRef.current = ws;
           let failureHandled = false;
@@ -806,6 +818,20 @@ function AgentConsole({
             if (msg.type === 'output') {
               if (msg.seq != null) pendingSeq = msg.seq;
               writeBuffer += msg.data;
+              // 积压封顶自愈：渲染跟不上时 writeBuffer 无界增长会把主线程
+              // 拖死（页面冻结的触发层）。超限即放弃这批已失步的数据——
+              // 置 resync 标记并断开，重连走 after=0 锚点重放（服务端有界，
+              // 4MB），终端直接恢复到最新画面。线程冻结期间本检查不会执行，
+              // 那种情况由服务端拥塞自杀（WS_CONGEST_KILL_MS）兜底。
+              if (writeBuffer.length > MAX_WRITE_BUFFER_BYTES) {
+                writeBuffer = '';
+                if (!resyncRef.current) {
+                  resyncRef.current = true;
+                  console.warn(`[AgentConsole] write buffer overflow (> ${MAX_WRITE_BUFFER_BYTES} bytes), resyncing via anchored replay`);
+                  try { ws.close(); } catch { /* ignore */ }
+                }
+                return;
+              }
               if (writeRafId === null) {
                 // Backpressure: lengthen the flush interval when xterm is
                 // still rendering earlier writes (pendingWrites > 0), giving

@@ -2,6 +2,11 @@ const sessionManager = require('./SessionManager');
 const transcriptStore = require('../runtime/TranscriptStore');
 const { readScrollback } = require('../runtime/LocalScrollbackBuffer');
 
+// 断线重连 delta 重放的字节上限：超限自动回退 readTail 锚点重放（终端直接
+// 落在最新画面）。必须小于客户端 writeBuffer 积压上限（8MB），保证一次有界
+// 重放永远不会撑爆客户端、不会触发二次自愈循环。
+const DELTA_REPLAY_MAX_BYTES = Number(process.env.TRANSCRIPT_DELTA_REPLAY_MAX_BYTES) || 4 * 1024 * 1024;
+
 function normalizeCursor(after) {
     const value = Number(after);
     return Number.isInteger(value) && value >= 0 ? value : 0;
@@ -210,6 +215,22 @@ async function subscribeTerminal(sessionId, send, options = {}) {
         if (transcriptRef) {
             if (after > 0) {
                 transcriptFrames = transcriptStore.readFrom(transcriptRef, after);
+                // Delta 重放封顶：断线期间 agent 可能已产出大量输出（实测可到
+                // 92KB/s），无上限的 delta 会把恢复中的客户端 tab 再次淹没
+                // （"冻结→重连洪泛→再冻结"死循环）。超限即放弃 delta，改用
+                // readTail 锚点重放——对全屏重绘 TUI，正确画面由"最近一次完整
+                // 重绘 + 之后增量"决定，中间字节无关紧要，终端直接落在最新状态。
+                let deltaBytes = 0;
+                for (const f of transcriptFrames) {
+                    deltaBytes += typeof f.data === 'string' ? f.data.length : 64;
+                    if (deltaBytes > DELTA_REPLAY_MAX_BYTES) break;
+                }
+                if (deltaBytes > DELTA_REPLAY_MAX_BYTES) {
+                    console.error(`[terminalBridge] delta replay from seq=${after} exceeds ${DELTA_REPLAY_MAX_BYTES} bytes, falling back to anchored tail replay`);
+                    const tail = transcriptStore.readTail(transcriptRef);
+                    transcriptFrames = tail.frames;
+                    omittedCount = tail.omittedCount;
+                }
             } else {
                 const tail = transcriptStore.readTail(transcriptRef);
                 transcriptFrames = tail.frames;
