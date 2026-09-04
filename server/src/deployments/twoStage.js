@@ -18,6 +18,7 @@ const { analyzeProjectVerify } = require('./analyzeVerify');
 const { createTunnel, stopTunnel } = require('../preview/tunnelServer');
 const { signBlinkToken } = require('../preview/blinkToken');
 const { resolveControlPlanePublicUrlSync } = require('../llm/publicUrl');
+const { DEPENDENCY_EXCLUDE_SCRIPT } = require('../git/dependencyExclude');
 const deploymentService = require('./DeploymentService');
 const workspace = require('../workspace');
 const { registerDeploy, peekDeploy, unregisterDeploy, isAborted, countByUser, listProjectIdsByUser, listByUser, deployKey } = require('./activeDeploys');
@@ -407,6 +408,86 @@ async function getGuestFreePort(runtimeRef) {
     } catch { return 0; }
 }
 
+function setprivPrefix(uid, gid) {
+    return `setpriv --reuid=${uid} --regid=${gid} --clear-groups `;
+}
+
+// devDir 可能是 './web' 之类的相对路径（相对 /workspace）——归一为 guest 内绝对路径。
+function workspaceAbsPath(targetDir) {
+    const t = String(targetDir || '.').trim();
+    if (t.startsWith('/')) return t.replace(/\/+$/, '') || '/';
+    return '/workspace' + (t === '.' || t === '' ? '' : `/${t.replace(/^\.\//, '').replace(/\/+$/, '')}`);
+}
+
+// vite 沙箱内的身份/写权限适配（preview 白屏修复）：
+// 沙箱里源码树（git clone，root）与 node_modules（npm install，agent uid）常常属主不同，
+// 而 workspace 是 virtiofs idmapped 挂载——root 没有 DAC override，任何单一身份都有一半
+// 目录不可写：root 写得了 vite.config.js 加载临时文件（bundle 落在 config 同目录）但写不了
+// node_modules/.vite（依赖预构建产物），agent uid 反之。结果是 vite re-optimize 一直
+// EACCES，deps 请求全部 504（Outdated Optimize Dep），preview 白屏。
+// 解法：以 node_modules 属主身份跑 vite；ESM config（type:module / .mjs）额外生成"桥接
+// config"——把 __dirname/__filename 静态替换为 devDir 绝对路径后落到 node_modules 内，
+// --config 指向它（这样 bundle 临时文件也写在 node_modules，属主可写）。CJS config 由
+// vite 直接 require、无临时文件，降权即可。属主为 root/当前身份时零开销直跑；setpriv
+// 缺失或任何一步失败都回退原命令，行为不劣化。返回 { prefix, configArg }。
+async function prepareVitePrivilegedRun({ runtimeRef, targetDir, onLog }) {
+    const runtime = getRuntime();
+    const dirAbs = workspaceAbsPath(targetDir);
+    const nmAbs = `${dirAbs}/node_modules`;
+    try {
+        const id = await runtime.exec.exec('sh', [
+            '-c', 'id -u; stat -c "%u:%g" "$1/node_modules" 2>/dev/null || echo -; command -v setpriv || echo -', 'sh', nmAbs,
+        ], {}, { runtimeRef, cwd: '/workspace', timeoutMs: 10000 });
+        const lines = String(id.stdout || '').trim().split('\n');
+        const curUid = parseInt(lines[0], 10) || 0;
+        const owner = (lines[1] || '-').trim();
+        const setprivPath = (lines[2] || '-').trim();
+        if (!/^\d+:\d+$/.test(owner) || setprivPath === '-') {
+            return { prefix: '', configArg: '' };
+        }
+        const [ownerUid, ownerGid] = owner.split(':');
+        if (ownerUid === '0' || Number(ownerUid) === curUid) {
+            return { prefix: '', configArg: '' };
+        }
+        const prefix = setprivPrefix(ownerUid, ownerGid);
+        // 找 config；CJS（.js 且包非 type:module）无 bundle 临时文件，无需 bridge
+        const ls = await runtime.exec.exec('sh', [
+            '-c', 'ls "$1"/vite.config.* 2>/dev/null | head -1; grep -o \'"type": *"module"\' "$1"/package.json 2>/dev/null | head -1', 'sh', dirAbs,
+        ], {}, { runtimeRef, cwd: '/workspace', timeoutMs: 10000 });
+        const lsLines = String(ls.stdout || '').trim().split('\n');
+        const configPath = (lsLines[0] || '').trim();
+        const pkgTypeModule = Boolean((lsLines[1] || '').trim());
+        if (!configPath || (!configPath.endsWith('.mjs') && !pkgTypeModule)) {
+            return { prefix, configArg: '' };
+        }
+        const cat = await runtime.exec.exec('sh', ['-c', 'cat "$1"', 'sh', configPath], {}, { runtimeRef, cwd: '/workspace', timeoutMs: 10000 });
+        const orig = String(cat.stdout || '');
+        if (!orig || !/defineConfig|export default|module\.exports/.test(orig)) {
+            return { prefix, configArg: '' };
+        }
+        const patched = orig
+            .replace(/__dirname/g, JSON.stringify(dirAbs))
+            .replace(/__filename/g, JSON.stringify(configPath));
+        const b64 = Buffer.from(patched, 'utf8').toString('base64');
+        const bridgePath = `${nmAbs}/.vite-xe-config.mjs`;
+        // 文件必须以属主身份落盘（重定向发生在降权 shell 内，root 在 idmapped 挂载上
+        // 对属主目录没有写权限），因此 setpriv + 内层 sh 完成写入。
+        const cp = await runtime.exec.exec('sh', [
+            '-c',
+            'setpriv --reuid="$1" --regid="$2" --clear-groups sh -c \'printf %s "$1" | base64 -d > "$2" && echo BRIDGE_OK\' xe "$3" "$4"',
+            'sh', ownerUid, ownerGid, b64, bridgePath,
+        ], {}, { runtimeRef, cwd: '/workspace', timeoutMs: 10000 });
+        if (!String(cp.stdout || '').includes('BRIDGE_OK')) {
+            if (onLog) onLog(`vite bridge config write failed: ${String(cp.stdout || cp.stderr || '').slice(0, 200)}`);
+            return { prefix, configArg: '' };
+        }
+        return { prefix, configArg: ` --config ${bridgePath}` };
+    } catch (e) {
+        if (onLog) onLog(`vite privileged-run detection failed, fallback: ${e.message}`);
+        return { prefix: '', configArg: '' };
+    }
+}
+
 // 实时预览（live 模式）：在 guest 内常驻启动 dev server（HMR / 文件感知），
 // 改文件后刷新即可见，无需重新 build。尽力而为：起不来返回 ok:false，由调用方回退静态 serve。
 async function startLiveDevServer({ runtimeRef, workspacePath, devKind, devDir, defaultPort, base, onLog }) {
@@ -423,7 +504,16 @@ async function startLiveDevServer({ runtimeRef, workspacePath, devKind, devDir, 
     const apiBaseArg = base ? `VITE_API_BASE=${base}` : '';
     let startCmd;
     if (devKind === 'vite') {
-        startCmd = `cd ${targetDir} && ${apiBaseArg} npx vite --host 0.0.0.0 --port ${livePort} --strictPort${baseArg}`;
+        // 沙箱身份/写权限适配：源码树与 node_modules 属主不同时以 node_modules 属主跑
+        // vite（见 prepareVitePrivilegedRun 注释）；失败回退 root 原命令。
+        let vitePrefix = '';
+        let viteConfigArg = '';
+        try {
+            const priv = await prepareVitePrivilegedRun({ runtimeRef, targetDir, onLog });
+            vitePrefix = priv.prefix;
+            viteConfigArg = priv.configArg;
+        } catch { /* fallback below */ }
+        startCmd = `cd ${targetDir} && ${vitePrefix}env HOME=/tmp ${apiBaseArg} npx vite${viteConfigArg} --host 0.0.0.0 --port ${livePort} --strictPort${baseArg}`;
     } else if (devKind === 'next') {
         startCmd = `cd ${targetDir} && PORT=${livePort} npx next dev -H 0.0.0.0 -p ${livePort}`;
     } else if (devKind === 'nuxt') {
@@ -733,6 +823,25 @@ echo MIRRORS_DONE
         }
     } catch (e) {
         onLog?.(`guest 镜像源配置失败（非致命）: ${String(e.message || e).slice(0, 120)}`);
+    }
+}
+
+// 把依赖/构建产物目录写入 workspace 的 .git/info/exclude（幂等、非致命）。
+// 必须在 verify agent 执行任何 install 之前完成：node_modules/dist 等装进
+// 项目目录后对 git 隐身——git 变更面板不再被上万依赖文件淹没（干扰 + 卡顿）。
+// 写在 .git/ 内部，不碰用户工作区文件，也不会被 commit 带走。
+// 同时兼容旧 workspace（clone 早于此功能上线的）：每次部署幂等重跑自动补齐。
+async function ensureDependencyExcludeInGuest(runtimeRef, workspacePath, onLog) {
+    const runtime = getRuntime();
+    try {
+        const r = await runtime.exec.exec('sh', ['-c', DEPENDENCY_EXCLUDE_SCRIPT], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+        if (String(r.stdout || '').includes('EXCLUDE_OK')) {
+            onLog?.('依赖/构建产物已写入 .git/info/exclude（变更面板不再显示依赖文件）');
+        } else {
+            onLog?.('.git/info/exclude 写入未完成（非致命，变更面板可能显示依赖目录）');
+        }
+    } catch (e) {
+        onLog?.(`.git/info/exclude 写入失败（非致命）: ${String(e.message || e).slice(0, 120)}`);
     }
 }
 
@@ -1599,6 +1708,9 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         // 镜像源提速：apt/npm/pip/go/cargo/maven 统一切国内源（幂等、best-effort），
         // 必须在 verify agent 执行任何 install 之前完成——这是首次部署超时的主要性能杠杆。
         await configureGuestMirrors(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
+        // 依赖目录写入 .git/info/exclude（幂等、非致命），同样必须在 install 之前：
+        // install 一旦落盘 node_modules，git 变更面板立即被污染。
+        await ensureDependencyExcludeInGuest(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
         // 改动 2：把 stack (detected) 传进去，让 detectDepsCached 选对应语言的探测脚本
         const depsRes = await detectDepsCached(ref, wsPath, detected);
         depsCached = depsRes.overallCached;
