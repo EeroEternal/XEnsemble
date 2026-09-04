@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { apiFetch, getAccessToken, getWsUrl } from '../../lib/api';
 import { consoleInputClass, consoleButtonFocusClass } from '../../lib/consoleTokens';
+import MarkdownView from '../Markdown';
 
 // Drop the "Agent is thinking…" marker if the server has been silent for this
 // long while we're not actively sending. Catches stalled sessions (network
@@ -528,13 +529,15 @@ function ChatBubble({ message }) {
             <span className="text-zinc-400">· {message.model}</span>
           ) : null}
         </div>
-        <pre className={`whitespace-pre-wrap break-words font-sans text-[13.5px] leading-relaxed ${
-          isUser
-            ? 'bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-zinc-800'
-            : 'text-zinc-800'
-        }`}>
-          {message.content}
-        </pre>
+        {isUser ? (
+          <pre className={`whitespace-pre-wrap break-words font-sans text-[13.5px] leading-relaxed bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-zinc-800`}>
+            {message.content}
+          </pre>
+        ) : (
+          <MarkdownView className="text-[13.5px]">
+            {message.content}
+          </MarkdownView>
+        )}
         <button
           type="button"
           onClick={copyContent}
