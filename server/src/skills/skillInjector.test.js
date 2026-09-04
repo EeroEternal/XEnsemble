@@ -976,7 +976,7 @@ test('reRenderForSkillChange carrier mode lands skills across all agents main di
         // 载体：全部 agent 的主用户级目录都有该技能（每个 agent 会话 symlink 后原生发现）
         const carrier = injector.skillCarrierDir(user, proj);
         const carrierFiles = writes.get(carrier) || {};
-        for (const dir of ['.kimi/skills', '.claude/skills', '.factory/skills', '.qwen/skills', '.openclaw/skills']) {
+        for (const dir of ['.kimi/skills', '.claude/skills', '.factory/skills', '.qwen/skills', '.pi/agent/skills', '.openclaw/skills']) {
             assert.ok(carrierFiles[`${dir}/db-migrate/SKILL.md`], `skill lands in carrier ${dir}`);
             assert.ok(carrierFiles[`${dir}/db-migrate/.xensemble-managed`], `marker in carrier ${dir}`);
         }

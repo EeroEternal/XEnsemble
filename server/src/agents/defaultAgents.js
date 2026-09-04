@@ -370,6 +370,7 @@ const DEFAULT_AGENTS = [
         env_required: ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'],
         // 0021：原生技能目录（官方项目级 .pi/skills、全局 ~/.pi/agent/skills）
         nativeSkillDirs: ['.pi/skills'],
+        userSkillDirs: ['.pi/agent/skills'],
         resume: {
             level: 'L2',
             stateArgs: ['--session-dir'],
