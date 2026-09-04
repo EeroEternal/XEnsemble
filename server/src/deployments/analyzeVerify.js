@@ -655,21 +655,26 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
     const ranCmds = new Map();
     let lastEditRound = -1;
     let lastNudgeRound = -1;
-    // API 健康探测 nudge 计数：根路径 200 但 API 5xx（前端代理的后端没起）时，
-    // 先推回给 agent 自修复；超过上限才硬失败，避免纯静态站被误伤或无限循环。
-    let apiNudges = 0;
-    const MAX_API_NUDGES = 2;
-    // 阶段 B 内子阶段上报（prepare/install/build/serve/check/fix）：让前端分步展示，
-    // 驱动信号来自每轮实际执行的工具/命令，不影响 verify 逻辑本身。
-    let lastSubstage = null;
-    const reportSubstage = (s, hint) => {
-        if (s && s !== lastSubstage) {
-            lastSubstage = s;
-            if (onSubstage) onSubstage(s, hint);
-        }
-    };
+// API 健康探测 nudge 计数：根路径 200 但 API 5xx（前端代理的后端没起）时，
+        // 先推回给 agent 自修复；超过上限才硬失败，避免纯静态站被误伤或无限循环。
+        let apiNudges = 0;
+        const MAX_API_NUDGES = 2;
+        // 健康检查失败重试计数：防止 check -> build -> check 无限循环。
+        // 统计健康检查类命令（curl/wget/health check/nc -z/pgrep/ps aux/ss -t）失败次数，
+        // 超过限制后强制要求 agent 诊断日志或输出 final 失败，避免盲目重新构建循环。
+        let healthCheckFailures = 0;
+        const MAX_HEALTH_CHECK_FAILURES = 3;
+        // 阶段 B 内子阶段上报（prepare/install/build/serve/check/fix）：让前端分步展示，
+        // 驱动信号来自每轮实际执行的工具/命令，不影响 verify 逻辑本身。
+        let lastSubstage = null;
+        const reportSubstage = (s, hint) => {
+            if (s && s !== lastSubstage) {
+                lastSubstage = s;
+                if (onSubstage) onSubstage(s, hint);
+            }
+        };
 
-    for (let round = roundStart; round < MAX_AGENT_ROUNDS; round++) {
+        for (let round = roundStart; round < MAX_AGENT_ROUNDS; round++) {
         if (isAborted?.()) {
             return { ok: false, source: 'ai', aborted: true, warning: '部署已中止', finalStderr: '', tested: [], trail, messages: trimContext(messages), roundsUsed: round };
         }
@@ -762,6 +767,23 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
                 repeatCount = 0;
             }
             const out = await runTool(parsed.tool, parsed.args || {}, runtimeRef, workspacePath);
+            // 健康检查失败重试计数：检测健康检查类命令失败，防止 check -> build -> check 无限循环
+            if (parsed.tool === 'run_shell') {
+                const norm = String(parsed.args?.cmd || '').toLowerCase();
+                const isHealthCheck = /(curl|wget|health|check|nc -z|pgrep|ps aux|ss -t)/.test(norm);
+                const m = String(out).match(/^exit=(\d+)/);
+                const exitCode = m ? parseInt(m[1], 10) : 0;
+                if (isHealthCheck && exitCode !== 0) {
+                    healthCheckFailures++;
+                    if (healthCheckFailures >= MAX_HEALTH_CHECK_FAILURES) {
+                        messages.push({
+                            role: 'user',
+                            content: `Health check has failed ${healthCheckFailures} times (limit ${MAX_HEALTH_CHECK_FAILURES}). STOP blindly rebuilding. READ the app log / error output to find the ROOT CAUSE (port conflict, missing env, build error, wrong path, DB connection, etc.) and fix it with edit_file. Do NOT just rerun build commands. If you cannot fix it, output final with ok:false and the REAL error in finalStderr.`,
+                        });
+                        messages = trimContext(messages);
+                    }
+                }
+            }
             // 记录命令结果：exit=0 视为成功（用于后续去重提示"已成功过"）
             if (parsed.tool === 'run_shell' && dupSig) {
                 const m = String(out).match(/^exit=(\d+)/);
