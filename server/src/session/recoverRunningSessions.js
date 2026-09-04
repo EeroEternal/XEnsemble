@@ -19,7 +19,6 @@ async function recoverRunningSessions({
         await db.update(schema.sessions).set({
             status: 'failed',
             provisioningError: 'Server restarted during session provisioning',
-            updatedAt: Date.now(),
         }).where(eq(schema.sessions.id, session.id));
         fastifyLog.warn({ sessionId: session.id }, '[sessions] marked pending session as failed after restart');
     }
@@ -46,7 +45,7 @@ async function recoverRunningSessions({
     const settleUnrecovered = async (session) => {
         const status = isSessionRecoverable(session) ? 'idle' : 'exited';
         await db.update(schema.sessions)
-            .set({ status, updatedAt: Date.now() })
+            .set({ status })
             .where(eq(schema.sessions.id, session.id));
     };
 
@@ -135,7 +134,6 @@ async function recoverRunningSessions({
                     status: 'running',
                     streamRef: handle.streamRef || session.streamRef || null,
                     recoverable: true,
-                    updatedAt: Date.now(),
                 })
                 .where(eq(schema.sessions.id, session.id));
             recovered.push({

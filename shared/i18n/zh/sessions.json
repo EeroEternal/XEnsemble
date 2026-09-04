@@ -145,11 +145,7 @@
     "total": "{{total}} 个会话",
     "prev": "上一页",
     "next": "下一页",
-    "open_detail": "查看对话",
-    "sort_label": "排序",
-    "sort_updated_desc": "最近活跃",
-    "sort_created_desc": "最近创建",
-    "sort_created_asc": "最早创建"
+    "open_detail": "查看对话"
   },
   "guide": {
     "title": "告诉 Agent 你想构建什么",

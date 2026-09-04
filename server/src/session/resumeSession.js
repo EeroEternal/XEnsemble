@@ -65,7 +65,6 @@ async function registerSessionLifecycle({
             patch.exitCode = typeof exitCode === 'number' ? exitCode : null;
             patch.exitedAt = Date.now();
         }
-        patch.updatedAt = Date.now();
         db.update(schema.sessions)
             .set(patch)
             .where(eq(schema.sessions.id, sessionId))
@@ -116,7 +115,7 @@ async function resumeSession({
             });
 
             await db.update(schema.sessions)
-                .set({ status: 'running', updatedAt: Date.now() })
+                .set({ status: 'running' })
                 .where(eq(schema.sessions.id, session.id));
 
             return {
@@ -363,7 +362,7 @@ async function resumeSession({
                                     db, schema, sessionManager, sessionId: session.id, project, fastifyLog,
                                 });
                                 await db.update(schema.sessions)
-                                    .set({ status: 'running', recoverable: true, updatedAt: Date.now() })
+                                    .set({ status: 'running', recoverable: true })
                                     .where(eq(schema.sessions.id, session.id));
                                 return {
                                     session_id: session.id,
@@ -472,7 +471,7 @@ async function resumeSession({
             );
         } catch (err) {
             await db.update(schema.sessions)
-                .set({ status: session.status, updatedAt: Date.now() })
+                .set({ status: session.status })
                 .where(eq(schema.sessions.id, session.id));
             throw err;
         }
@@ -502,7 +501,6 @@ async function resumeSession({
                 streamRef: handle.streamRef || null,
                 stateDirRef: session.stateDirRef || null,
                 recoverable: true,
-                updatedAt: Date.now(),
             })
             .where(eq(schema.sessions.id, session.id));
 
