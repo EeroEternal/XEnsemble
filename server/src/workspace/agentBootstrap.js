@@ -158,15 +158,42 @@ function refreshAgentsMd(workspacePath) {
 }
 
 /**
- * Idempotent: ensure workspace root `.gitignore` contains entries for platform-managed dirs.
+ * 0030：解析 git 排除文件路径（.git/info/exclude）。
+ * - `.git` 是目录（普通仓库）→ `<git>/info/exclude`
+ * - `.git` 是指针文件（worktree，内容 `gitdir: <path>`）→ 主仓库 `<path>/info/exclude`
+ * - 无 `.git` → null（非 git 仓库，无污染顾虑）
+ * 用 info/exclude 而非 .gitignore：它是仓库本地、永不提交、git status 永不显示，
+ * 平台隐藏自有目录时不修改用户受跟踪的 .gitignore。
+ */
+function resolveGitExcludePath(workspacePath) {
+    const gitPath = path.join(workspacePath, '.git');
+    try {
+        const st = fs.statSync(gitPath);
+        if (st.isDirectory()) {
+            return path.join(gitPath, 'info', 'exclude');
+        }
+        const content = fs.readFileSync(gitPath, 'utf8');
+        const m = content.match(/^gitdir:\s*(.+)$/m);
+        if (m) {
+            const gitDir = path.resolve(workspacePath, m[1].trim());
+            return path.join(gitDir, 'info', 'exclude');
+        }
+    } catch { /* no .git */ }
+    return null;
+}
+
+/**
+ * Idempotent: ensure workspace git ignore excludes platform-managed dirs.
  * Appends missing entries without removing existing content.
+ *
+ * 0030：优先写 `.git/info/exclude`（本地排除，不污染受跟踪的 .gitignore）；
+ * 非 git 仓库回落 `.gitignore`（此时无 git 污染顾虑）。
  *
  * 0025（方案 B）：除 .agents/ 与 .xensemble/ 外，把全部 Agent 原生技能目录也加入忽略——
  * 技能落盘不污染用户 git changes（claude/qwen/codebuddy/kimi/pi/qoder/opencode/openclaw 等）。
  * 与 skillInjector 的 DEFAULT_AGENT_NATIVE_DIRS 保持同步。
  */
 function ensureGitignoreEntries(workspacePath) {
-    const ignorePath = path.join(workspacePath, '.gitignore');
     const entries = [
         '.agents/',
         '.xensemble/',
@@ -182,18 +209,23 @@ function ensureGitignoreEntries(workspacePath) {
         'skills/',
     ];
 
+    // 0030：优先 .git/info/exclude（本地、不提交），避免改用户 .gitignore
+    const excludePath = resolveGitExcludePath(workspacePath);
+    const targetPath = excludePath || path.join(workspacePath, '.gitignore');
+
     let content = '';
-    if (fs.existsSync(ignorePath)) {
-        content = fs.readFileSync(ignorePath, 'utf8');
+    if (fs.existsSync(targetPath)) {
+        content = fs.readFileSync(targetPath, 'utf8');
     }
 
     const existingLines = new Set(content.split('\n').map((l) => l.trim()));
     const missing = entries.filter((e) => !existingLines.has(e));
     if (missing.length === 0) return;
 
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
     const block = `\n# XEnsemble platform metadata - do not commit\n${missing.join('\n')}\n`;
     const prefix = content.length > 0 && !content.endsWith('\n') ? '\n' : '';
-    fs.writeFileSync(ignorePath, content + prefix + block, 'utf8');
+    fs.writeFileSync(targetPath, content + prefix + block, 'utf8');
 }
 
 /**

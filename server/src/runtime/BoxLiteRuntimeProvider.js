@@ -15,6 +15,89 @@ function buildWorkspaceMountKey(hostPath, guestPath) {
     return `${hostPath}=>${guestPath}`;
 }
 
+/**
+ * 0030（.git 搭车）：技能载体 guest 根路径。
+ *
+ * 背景：2026-09-03 journal 对照实验定论——libkrun 单 VM 的 virtio-fs 硬预算 = 2 个卷
+ * （+ 块设备 + 网络）。worktree 会话已占满（workspace + .git），任何第 3 个 FS 卷
+ * 必触发 RegisterNetDevice/RegisterBlockDevice(IrqsExhausted) → open session 500
+ * "mkdir memory dir"（blink HTTP 层统一文案，真实原因看 journalctl）。0026/0028 的
+ * 挂载型技能卷方案因此对 worktree 会话物理不可行（2f62fa3 回退的真实根因）。
+ *
+ * 方案：技能落宿主 projectDir/.git/xe-skills/（git 对内部未知目录完全无视——
+ * 不出现在 git status / changes，无需 .gitignore），随现有两个卷之一进沙箱：
+ * - worktree 会话：经 .git 卷暴露为 /workspace.git/xe-skills
+ * - 默认会话：经 workspace 卷暴露为 /workspace/.git/xe-skills（工程为 git 仓库时）
+ * 零新增挂载设备。buildSkillSymlinkScript 在 VM 引导期把 agent 的各 userSkillDirs
+ * symlink 到载体路径（/root/<dir>），Agent 原生发现 + 反向安装落宿主持久化。
+ * SKILL_CARRIER_ENABLED=false 可整体停用（回落工程内 .xensemble 模式）。
+ */
+
+/**
+ * 0030（.git 搭车）：生成 VM 引导期的技能目录 symlink 脚本（POSIX sh，busybox 兼容）。
+ * 对 agent 声明的全部 userSkillDirs 逐个建立 /root/<dir> → <carrierRoot>/<dir>：
+ * - 已是 symlink → 刷新（rm 后重建，指向当前载体路径）
+ * - 是镜像内置的实体目录 → 若载体对应目录为空，先把镜像内容种子合并进载体
+ *   （cp -a，避免 agent 随镜像自带的技能被 symlink 替换后丢失），再替换为 symlink
+ * - 不存在 → 直接建链
+ * 每步 best-effort（|| true），单目录失败不影响其余目录；整体为 best-effort 引导步骤。
+ * symlink 位于 VM 本地 /root（非挂载卷），VM 销毁即失，须在每个新 VM 引导期重建；
+ * VM 复用（reused）时 guest FS 保留，无需重跑。
+ * @param {string} agentId
+ * @param {string|null} carrierGuestRoot 载体 guest 根（如 /workspace.git/xe-skills）；
+ *   null（载体停用 / 工程非 git 仓库 / agent 无 userSkillDirs）时不生成
+ * @returns {string|null} 脚本内容
+ */
+function buildSkillSymlinkScript(agentId, carrierGuestRoot) {
+    if (process.env.SKILL_CARRIER_ENABLED === 'false') return null;
+    if (!carrierGuestRoot) return null;
+    const { DEFAULT_AGENTS } = require('../agents/defaultAgents');
+    const agent = agentId ? DEFAULT_AGENTS.find((a) => a.id === agentId) : null;
+    const dirs = agent?.userSkillDirs || [];
+    if (dirs.length === 0) return null;
+    const parts = [];
+    for (const dir of dirs) {
+        const carrier = `${carrierGuestRoot}/${dir}`;
+        const link = `/root/${dir}`;
+        const linkParent = path.posix.dirname(link);
+        parts.push(
+            `mkdir -p ${JSON.stringify(carrier)} ${JSON.stringify(linkParent)}; `
+            + `if [ -L ${JSON.stringify(link)} ]; then rm -f ${JSON.stringify(link)}; `
+            + `elif [ -d ${JSON.stringify(link)} ]; then `
+            + `if [ -z "$(ls -A ${JSON.stringify(carrier)} 2>/dev/null)" ]; then `
+            + `cp -a ${JSON.stringify(link)}/. ${JSON.stringify(carrier)}/ 2>/dev/null || true; fi; `
+            + `rm -rf ${JSON.stringify(link)}; fi; `
+            + `ln -s ${JSON.stringify(carrier)} ${JSON.stringify(link)} 2>/dev/null || true`,
+        );
+    }
+    return parts.join('; ');
+}
+
+/**
+ * 0030：解析本次会话的技能载体 guest 根路径。
+ * - worktree 会话（gitVolume 存在）：.git 卷内 → /workspace.git/xe-skills
+ * - 默认会话：workspace 卷内 → /workspace/.git/xe-skills（仅当工程为 git 仓库）
+ * - 载体停用（SKILL_CARRIER_ENABLED=false）或工程非 git → null（技能走工程内回落）
+ * @param {object} workspaceVolume buildWorkspaceVolume 产物
+ * @param {string} hostWorkspacePath 宿主侧 workspace 路径（worktree 或 projectDir）
+ * @param {string} guestWorkspacePath 沙箱内 workspace 路径
+ * @returns {string|null}
+ */
+function resolveSkillCarrierGuestRoot(workspaceVolume, hostWorkspacePath, guestWorkspacePath) {
+    if (process.env.SKILL_CARRIER_ENABLED === 'false') return null;
+    if (workspaceVolume.gitVolume) {
+        // worktree 会话：.git 卷必然存在（worktree 依赖 .git）
+        return `${workspaceVolume.gitVolume.guest_path}/xe-skills`;
+    }
+    // 默认会话：仅当工程是 git 仓库（宿主 projectDir/.git 存在）才搭 workspace 卷的车
+    try {
+        if (fs.existsSync(path.join(hostWorkspacePath, '.git'))) {
+            return `${guestWorkspacePath}/.git/xe-skills`;
+        }
+    } catch { /* best-effort */ }
+    return null;
+}
+
 function resolveAgentProbeCommand(agentId) {
     if (!agentId) return null;
     const { DEFAULT_AGENTS } = require('../agents/defaultAgents');
@@ -165,7 +248,7 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
      *
      * @returns {Promise<{probeOk: boolean, initError: Error|null}>}
      */
-    async _initFreshSessionExecs(name, { probeCmd, guestWorkspacePath, project, hostWorkspacePath, withBootstrap, skillDirs }) {
+    async _initFreshSessionExecs(name, { probeCmd, guestWorkspacePath, project, hostWorkspacePath, withBootstrap, skillSymlinkScript = null }) {
         let bootstrapError = null;
         const bootstrapPromise = withBootstrap
             ? (async () => {
@@ -183,6 +266,17 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
             initError = e;
         }
 
+        // 0030（.git 搭车）：技能载体 symlink 引导——把 agent 的各 userSkillDirs 链到
+        // /root/<dir>（指向 .git 内的载体目录）。必须发生在 agent spawn 之前
+        //（Agent 启动即扫描技能目录）。best-effort：失败不阻断会话（技能不可用但会话正常）。
+        if (skillSymlinkScript && !initError) {
+            try {
+                await this.client.execForResult(name, 'sh', ['-c', skillSymlinkScript]);
+            } catch (_) {
+                // Best-effort: skill symlink setup failure does not block the session.
+            }
+        }
+
         let probeOk = true;
         if (probeCmd && !initError) {
             probeOk = await probeAgentCommand(this.client, name, probeCmd, guestWorkspacePath)
@@ -195,22 +289,6 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
             ]);
         } catch (_) {
             // Best-effort: cache cleanup failure does not block the session.
-        }
-
-        // 技能卷符号链接：skills 已合并为单卷挂载在 /root/.xensemble-skills。
-        // 为每个 Agent 的原生技能路径（如 /root/.kimi/skills）建符号链接指向共享卷内对应目录，
-        // 让各 Agent 仍能从其标准 HOME 路径发现技能，且避免 13+ 独立卷打爆 libkrun IRQ。
-        // 串行 exec（与其它 init exec 一起），避免 guest zygote 竞争。
-        if (skillDirs && skillDirs.length) {
-            try {
-                const cmds = skillDirs.map((dir) => {
-                    const parent = dir.split('/')[0];
-                    return `mkdir -p /root/${parent}; ln -sfn /root/.xensemble-skills/${dir} /root/${dir};`;
-                }).join(' ');
-                await this.client.execForResult(name, 'sh', ['-c', cmds]);
-            } catch (_) {
-                // Best-effort: 符号链接失败不阻断（技能目录会因 mount 本身可访问而存在）
-            }
         }
 
         // Fix git worktree .git pointer for VM access: the worktree's .git file
@@ -268,6 +346,11 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         const workspaceVolume = this.buildWorkspaceVolume(project, worktreePath);
         const { host_path: hostWorkspacePath, guest_path: guestWorkspacePath, mountKey } = workspaceVolume;
         workspace.createProjectDirectory(project.userId, project.id);
+        // 0030（.git 搭车）：技能载体 guest 根——worktree 会话在 .git 卷内，
+        // 默认会话在 workspace 卷内的 .git 下；工程非 git / 载体停用 → null。
+        // symlink 引导脚本在每个新 VM 引导期执行（见 _initFreshSessionExecs）。
+        const skillCarrierGuestRoot = resolveSkillCarrierGuestRoot(workspaceVolume, hostWorkspacePath, guestWorkspacePath);
+        const skillSymlinkScript = buildSkillSymlinkScript(opts.agentId, skillCarrierGuestRoot);
         const storedImage = opts.storedImage || null;
         const storedMount = opts.storedMount || null;
         const imageMismatch = storedImage !== image;
@@ -406,7 +489,7 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
             // hit a freshly-booted VM concurrently. ensureAgentBootstrap is
             // host-side FS only and is overlapped inside _initFreshSessionExecs.
             const { probeOk, initError } = await this._initFreshSessionExecs(
-                name, { probeCmd, guestWorkspacePath, project, hostWorkspacePath, withBootstrap, skillDirs: (workspaceVolume.skillsVolumes || []).length ? workspaceVolume.skillDirs : undefined },
+                name, { probeCmd, guestWorkspacePath, project, hostWorkspacePath, withBootstrap, skillSymlinkScript },
             );
 
             if (probeCmd && !probeOk) {
@@ -415,7 +498,7 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
                 // Re-run init execs on the recreated VM (a fresh VM usually
                 // clears the transient race), then probe once more.
                 const recreate = await this._initFreshSessionExecs(
-                    name, { probeCmd: null, guestWorkspacePath, project, hostWorkspacePath, withBootstrap },
+                    name, { probeCmd: null, guestWorkspacePath, project, hostWorkspacePath, withBootstrap, skillSymlinkScript },
                 );
                 if (recreate.initError) throw recreate.initError;
                 if (!(await probeAgentCommand(this.client, name, probeCmd, guestWorkspacePath))) {
@@ -516,3 +599,5 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
 
 module.exports = BoxLiteRuntimeProvider;
 module.exports.buildWorkspaceMountKey = buildWorkspaceMountKey;
+module.exports.buildSkillSymlinkScript = buildSkillSymlinkScript;
+module.exports.resolveSkillCarrierGuestRoot = resolveSkillCarrierGuestRoot;

@@ -10,6 +10,8 @@ const DEFAULT_AGENTS = [
         env_required: [],
         // 0021：原生技能目录（项目级 .kimi-code/skills，官方确认）
         nativeSkillDirs: ['.kimi-code/skills'],
+        // 0030：用户级技能目录（HOME 相对路径；沙箱内由 .git 载体 symlink 暴露）
+        userSkillDirs: ['.kimi/skills', '.claude/skills', '.agents/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'KIMI_CODE_HOME',
@@ -48,6 +50,7 @@ const DEFAULT_AGENTS = [
         instructionFile: 'CLAUDE.md',
         // 0021：原生技能目录（项目级 .claude/skills，官方确认）
         nativeSkillDirs: ['.claude/skills'],
+        userSkillDirs: ['.claude/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'CLAUDE_CONFIG_DIR',
@@ -75,6 +78,7 @@ const DEFAULT_AGENTS = [
         cmd: 'agent',
         args: [],
         env_required: [],
+        userSkillDirs: ['.cursor/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'CURSOR_DATA_DIR',
@@ -89,6 +93,7 @@ const DEFAULT_AGENTS = [
         env_required: [],
         // 0021：原生技能目录（官方支持 .opencode/skills、.claude/skills、.agents/skills）
         nativeSkillDirs: ['.opencode/skills', '.agents/skills'],
+        userSkillDirs: ['.config/opencode/skills', '.claude/skills', '.agents/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'XDG_DATA_HOME',
@@ -128,6 +133,7 @@ const DEFAULT_AGENTS = [
         cmd: 'amp',
         args: [],
         env_required: [],
+        userSkillDirs: ['.amp/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'XDG_CONFIG_HOME',
@@ -141,6 +147,7 @@ const DEFAULT_AGENTS = [
         cmd: 'cline',
         args: ['-i'],
         env_required: ['ANTHROPIC_API_KEY'],
+        userSkillDirs: ['.claude/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'CLINE_DATA_DIR',
@@ -166,6 +173,7 @@ const DEFAULT_AGENTS = [
         env_required: [],
         // 0021：原生技能目录（.codebuddy/skills，腾讯官方文档确认）
         nativeSkillDirs: ['.codebuddy/skills'],
+        userSkillDirs: ['.codebuddy/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'CODEBUDDY_CONFIG_DIR',
@@ -178,6 +186,7 @@ const DEFAULT_AGENTS = [
         cmd: 'droid',
         args: [],
         env_required: [],
+        userSkillDirs: ['.factory/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'FACTORY_HOME_OVERRIDE',
@@ -253,6 +262,7 @@ const DEFAULT_AGENTS = [
         env_required: ['QODER_PERSONAL_ACCESS_TOKEN'],
         // 0021：原生技能目录（.qoder/r/s/skills，官方确认）
         nativeSkillDirs: ['.qoder/r/s/skills'],
+        userSkillDirs: ['.qoder/skills'],
         resume: {
             level: 'L2',
             stateArgs: ['--config-dir'],
@@ -302,6 +312,7 @@ const DEFAULT_AGENTS = [
         env_required: ['DASHSCOPE_API_KEY'],
         // 0021：原生技能目录（项目级 .qwen/skills，官方文档确认）
         nativeSkillDirs: ['.qwen/skills'],
+        userSkillDirs: ['.qwen/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'QWEN_HOME',
@@ -394,6 +405,11 @@ const DEFAULT_AGENTS = [
         cmd: 'copilot',
         args: [],
         env_required: [],
+        // 0030：用户级技能目录（Microsoft 官方文档确认 ~/.copilot/skills/、~/.claude/skills/、
+        // ~/.agents/skills/；见 learn.microsoft.com copilot-agent-skills）。
+        // 故意不声明 nativeSkillDirs: ['.github/skills'] —— 该目录设计上就是提交进仓库的，
+        // 平台写入会污染用户 git。
+        userSkillDirs: ['.copilot/skills', '.claude/skills', '.agents/skills'],
     },
     {
         id: 'commandcode',
@@ -413,6 +429,7 @@ const DEFAULT_AGENTS = [
         cmd: 'hermes',
         args: ['chat'],
         env_required: [],
+        userSkillDirs: ['.hermes/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'HERMES_HOME',
@@ -448,6 +465,7 @@ const DEFAULT_AGENTS = [
         env_required: [],
         // 0021：原生技能目录（workspace 级 skills/，官方 ClawHub 文档确认）
         nativeSkillDirs: ['skills'],
+        userSkillDirs: ['.openclaw/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'OPENCLAW_STATE_DIR',
@@ -529,4 +547,17 @@ function getSkillTargets(agentId) {
     };
 }
 
-module.exports = { DEFAULT_AGENTS, getInstructionFile, getNativeSkillDirs, getSkillTargets };
+/**
+ * 0030（.git 搭车）：解析某 agent 的用户级技能目录（HOME 相对路径，如 .claude/skills）。
+ * BoxLite 下载体把技能写进 projectDir/.git/xe-skills/<dir>，沙箱内由 symlink 引导
+ * 映射为 /root/<dir>——Agent 原生扫描发现（零新增挂载设备）。未声明（github-copilot
+ * 等）→ 空数组，注入回落工程内 .xensemble/skills。
+ * @param {string} agentId
+ * @returns {string[]}
+ */
+function getUserSkillDirs(agentId) {
+    const agent = DEFAULT_AGENTS.find((a) => a.id === agentId);
+    return agent?.userSkillDirs || [];
+}
+
+module.exports = { DEFAULT_AGENTS, getInstructionFile, getNativeSkillDirs, getSkillTargets, getUserSkillDirs };

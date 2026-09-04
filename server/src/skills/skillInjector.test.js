@@ -3,8 +3,19 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('crypto');
 const { eq } = require('drizzle-orm');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
+
+// 0030：本文件既有断言基于 Local 回落路径（技能落工程内）。默认 RUNTIME_PROVIDER
+// 是 boxlite（载体模式），这里显式钉住 local；载体模式用 useSkillCarrier 覆盖单独测。
+// skillCarrierDir 触达真实宿主目录 → WORKSPACE_ROOT 指向临时目录（须在任何 src require 前设置）。
+process.env.RUNTIME_PROVIDER = 'local';
+const WORKSPACE_ROOT_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'xe-injector-test-'));
+process.env.WORKSPACE_ROOT = WORKSPACE_ROOT_TMP;
 
 const { bootstrapTestDb } = require('../test/db');
+
+const workspace = require('../workspace');
 
 let ctx;
 let schema;
@@ -17,6 +28,8 @@ before(async () => {
         '../db/schema',
         '../agents/defaultAgents',
         '../events/recordEvent',
+        '../workspace',
+        '../workspace/agentBootstrap',
         './skillInjector',
     ], __dirname);
     ({ db, schema } = ctx);
@@ -25,6 +38,7 @@ before(async () => {
 
 after(async () => {
     if (ctx) await ctx.teardown();
+    fs.rmSync(WORKSPACE_ROOT_TMP, { recursive: true, force: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -259,7 +273,12 @@ test('getSkillTargets resolves instructionFile + nativeSkillDirs per agent', () 
     assert.deepEqual(defs.getSkillTargets('opencode').nativeSkillDirs, ['.opencode/skills', '.agents/skills']);
     assert.deepEqual(defs.getSkillTargets('pi').nativeSkillDirs, ['.pi/skills']);
     // 未确认的 Agent → 空数组（AGENTS.md 兜底）
+    // 0030：github-copilot 已确认支持 skills（~/.copilot/skills/ 等，Microsoft 官方文档）
     assert.deepEqual(defs.getSkillTargets('github-copilot').nativeSkillDirs, []);
+    assert.deepEqual(defs.getUserSkillDirs('github-copilot'), ['.copilot/skills', '.claude/skills', '.agents/skills']);
+    // glm-agent / minimax-cli：工具型 CLI，无 SKILL.md 发现机制 → 全空（AGENTS.md 兜底）
+    assert.deepEqual(defs.getUserSkillDirs('glm-agent'), []);
+    assert.deepEqual(defs.getUserSkillDirs('minimax-cli'), []);
 });
 
 test('isLandableSkill requires valid frontmatter and confidence threshold', () => {
@@ -552,9 +571,11 @@ test('cleanupSkillDirectories removes dirs not in activeSlugs', async () => {
     const files = {
         '.xensemble/skills/keep/SKILL.md': 'x',
         '.xensemble/skills/old/SKILL.md': 'y',
+        '.xensemble/skills/old/.xensemble-managed': 'managed\n',
     };
     const removed = [];
     const fsAdapter = {
+        async readFile(rootDir, rel) { return files[rel] ?? null; },
         async rmrf(rootDir, rel) {
             removed.push(rel);
             for (const k of Object.keys(files)) {
@@ -571,6 +592,32 @@ test('cleanupSkillDirectories removes dirs not in activeSlugs', async () => {
     assert.deepEqual(removed, ['.xensemble/skills/old']);
     assert.ok(!files['.xensemble/skills/old/SKILL.md']);
     assert.ok(files['.xensemble/skills/keep/SKILL.md']);
+});
+
+test('cleanupSkillDirectories skips unmarked dirs (0029 P0 fix: 用户/Agent 自建技能不被误删)', async () => {
+    const files = {
+        '.claude/skills/my-own-skill/SKILL.md': 'user content', // 用户自建，无标记
+        '.claude/skills/stale-managed/SKILL.md': 'platform old', // 平台写入，有标记
+        '.claude/skills/stale-managed/.xensemble-managed': 'managed\n',
+    };
+    const removed = [];
+    const fsAdapter = {
+        async readFile(rootDir, rel) { return files[rel] ?? null; },
+        async rmrf(rootDir, rel) {
+            removed.push(rel);
+            for (const k of Object.keys(files)) {
+                if (k === rel || k.startsWith(`${rel}/`)) delete files[k];
+            }
+        },
+        async readDir(rootDir, rel) {
+            return Object.keys(files)
+                .filter((k) => k.startsWith(`${rel}/`))
+                .map((k) => ({ name: k.slice(rel.length + 1).split('/')[0], isDirectory: true }));
+        },
+    };
+    await injector.cleanupSkillDirectories(fsAdapter, '/ws', [], ['.claude/skills']);
+    assert.deepEqual(removed, ['.claude/skills/stale-managed']);
+    assert.ok(files['.claude/skills/my-own-skill/SKILL.md'], 'unmarked user skill survives');
 });
 
 // ---------------------------------------------------------------------------
@@ -749,6 +796,195 @@ test('0025 injection matrix: every registered agent receives platform index + po
 
         const failed = results.filter((r) => !r.ok);
         assert.deepEqual(failed.map((r) => ({ agent: r.agent, problems: r.problems })), [], 'all agents must inject correctly');
+    } finally {
+        if (prev === undefined) delete process.env.SKILL_INJECT_ENABLED;
+        else process.env.SKILL_INJECT_ENABLED = prev;
+    }
+});
+
+// ---------------------------------------------------------------------------
+// 0030（.git 搭车）：技能载体模式（projectDir/.git/xe-skills，零新增挂载设备）
+// ---------------------------------------------------------------------------
+
+function makeWritesAdapter() {
+    const writes = new Map();
+    return {
+        writes,
+        fsAdapter: {
+            async readFile(rootDir, rel) { return (writes.get(rootDir) || {})[rel] ?? null; },
+            async writeFile(rootDir, rel, content) {
+                const bucket = writes.get(rootDir) || {};
+                bucket[rel] = content;
+                writes.set(rootDir, bucket);
+            },
+            async chmod() {},
+            async rmrf() {},
+            async readDir(rootDir, rel) {
+                return Object.keys(writes.get(rootDir) || {})
+                    .filter((k) => k.startsWith(`${rel}/`))
+                    .map((k) => ({ name: k.slice(rel.length + 1).split('/')[0], isDirectory: true }));
+            },
+        },
+    };
+}
+
+test('isSkillCarrierEnabled: boxlite 默认开、local 关、显式 false 停用', () => {
+    const prevProvider = process.env.RUNTIME_PROVIDER;
+    const prevCarrier = process.env.SKILL_CARRIER_ENABLED;
+    try {
+        delete process.env.SKILL_CARRIER_ENABLED;
+        delete process.env.RUNTIME_PROVIDER;
+        assert.equal(injector.isSkillCarrierEnabled(), true, 'default provider is boxlite → carrier ON');
+
+        process.env.RUNTIME_PROVIDER = 'local';
+        assert.equal(injector.isSkillCarrierEnabled(), false, 'local never uses carrier');
+
+        process.env.RUNTIME_PROVIDER = 'boxlite';
+        assert.equal(injector.isSkillCarrierEnabled(), true);
+
+        process.env.SKILL_CARRIER_ENABLED = 'false';
+        assert.equal(injector.isSkillCarrierEnabled(), false, 'explicit opt-out');
+    } finally {
+        if (prevProvider === undefined) delete process.env.RUNTIME_PROVIDER;
+        else process.env.RUNTIME_PROVIDER = prevProvider;
+        if (prevCarrier === undefined) delete process.env.SKILL_CARRIER_ENABLED;
+        else process.env.SKILL_CARRIER_ENABLED = prevCarrier;
+    }
+});
+
+test('skillCarrierDir: git 工程返回 .git/xe-skills，非 git 工程返回 null', async () => {
+    const user = await makeUser();
+    const gitProj = await makeProject(user, 'Git');
+    const plainProj = await makeProject(user, 'Plain');
+
+    const gitProjectDir = workspace.projectDir(user, gitProj);
+    fs.mkdirSync(path.join(gitProjectDir, '.git'), { recursive: true });
+    // 非 git 工程：仅创建目录（无 .git）
+    fs.mkdirSync(workspace.projectDir(user, plainProj), { recursive: true });
+
+    assert.equal(injector.skillCarrierDir(user, gitProj), path.join(gitProjectDir, '.git', 'xe-skills'));
+    assert.equal(injector.skillCarrierDir(user, plainProj), null);
+    assert.equal(injector.skillCarrierDir(user, null), null);
+});
+
+test('injectForSession carrier mode writes into .git/xe-skills with managed markers (0030)', async () => {
+    const user = await makeUser();
+    const proj = await makeProject(user, 'Car');
+    await makeActiveSkill(user, {
+        title: 'DB migrate',
+        content: '---\nname: DB migrate\ndescription: run migration\n---\n## Steps\n1. migrate',
+        projectId: proj,
+    });
+
+    // git 工程（载体前提）
+    const projectDir = workspace.projectDir(user, proj);
+    fs.mkdirSync(path.join(projectDir, '.git'), { recursive: true });
+
+    const { writes, fsAdapter } = makeWritesAdapter();
+    const prev = process.env.SKILL_INJECT_ENABLED;
+    process.env.SKILL_INJECT_ENABLED = 'true';
+    try {
+        const result = await injector.injectForSession({
+            userId: user, projectId: proj, agentId: 'kimi-code',
+            workspacePath: '/ws', fsAdapter, bumpUsage: false, useSkillCarrier: true,
+        });
+        assert.equal(result.injected, true);
+
+        // 载体（projectDir/.git/xe-skills）：kimi-code 主目录落技能 + 平台标记
+        const carrier = injector.skillCarrierDir(user, proj);
+        const carrierFiles = writes.get(carrier) || {};
+        assert.ok(carrierFiles['.kimi/skills/db-migrate/SKILL.md'], 'skill lands in carrier .kimi/skills');
+        assert.ok(carrierFiles['.kimi/skills/db-migrate/.xensemble-managed'], 'managed marker written');
+        // 载体与工作树隔离：不写工程内技能目录
+        const wsFiles = writes.get('/ws') || {};
+        assert.ok(!wsFiles['.xensemble/skills/db-migrate/SKILL.md'], 'no skills in working tree');
+        assert.ok(!wsFiles['.kimi-code/skills/db-migrate/SKILL.md'], 'no skills in native dirs');
+
+        // 0030：载体模式（原生发现）不再写索引/指针，git 工作区零污染
+        assert.ok(!wsFiles['.xensemble/AGENTS.md'], 'no platform index in workspace (native discovery)');
+        assert.ok(!wsFiles['AGENTS.md'], 'no pointer into user AGENTS.md');
+    } finally {
+        if (prev === undefined) delete process.env.SKILL_INJECT_ENABLED;
+        else process.env.SKILL_INJECT_ENABLED = prev;
+    }
+});
+
+test('injectForSession carrier mode falls back to workspace for non-git projects / agents without userSkillDirs', async () => {
+    const user = await makeUser();
+    const plainProj = await makeProject(user, 'PlainC');
+    const gitProj = await makeProject(user, 'GitC');
+    await makeActiveSkill(user, {
+        title: 'DB migrate',
+        content: '---\nname: DB migrate\ndescription: run migration\n---\n## Steps\n1. migrate',
+        projectId: plainProj,
+    });
+    await makeActiveSkill(user, {
+        title: 'DB migrate',
+        content: '---\nname: DB migrate\ndescription: run migration\n---\n## Steps\n1. migrate',
+        projectId: gitProj,
+    });
+    // plainProj 无 .git；gitProj 有 .git
+    fs.mkdirSync(workspace.projectDir(user, plainProj), { recursive: true });
+    fs.mkdirSync(path.join(workspace.projectDir(user, gitProj), '.git'), { recursive: true });
+
+    const prev = process.env.SKILL_INJECT_ENABLED;
+    process.env.SKILL_INJECT_ENABLED = 'true';
+    try {
+        // 非 git 工程 → 载体不可用，回落工程内平台根
+        const plain = makeWritesAdapter();
+        const r1 = await injector.injectForSession({
+            userId: user, projectId: plainProj, agentId: 'kimi-code',
+            workspacePath: '/ws', fsAdapter: plain.fsAdapter, bumpUsage: false, useSkillCarrier: true,
+        });
+        assert.equal(r1.injected, true);
+        const ws1 = plain.writes.get('/ws') || {};
+        assert.ok(ws1['.xensemble/skills/db-migrate/SKILL.md'], 'non-git project falls back to platform root');
+        assert.ok(ws1['.xensemble/skills/db-migrate/.xensemble-managed'], 'fallback write also marked');
+
+        // git 工程 + 无 userSkillDirs 的 agent（glm-agent，工具型 CLI）→ 回落工程内
+        const cop = makeWritesAdapter();
+        const r2 = await injector.injectForSession({
+            userId: user, projectId: gitProj, agentId: 'glm-agent',
+            workspacePath: '/ws', fsAdapter: cop.fsAdapter, bumpUsage: false, useSkillCarrier: true,
+        });
+        assert.equal(r2.injected, true);
+        const ws2 = cop.writes.get('/ws') || {};
+        assert.ok(ws2['.xensemble/skills/db-migrate/SKILL.md'], 'agent without userSkillDirs falls back');
+        assert.ok(!cop.writes.has(injector.skillCarrierDir(user, gitProj)), 'no carrier writes');
+    } finally {
+        if (prev === undefined) delete process.env.SKILL_INJECT_ENABLED;
+        else process.env.SKILL_INJECT_ENABLED = prev;
+    }
+});
+
+test('reRenderForSkillChange carrier mode lands skills across all agents main dirs in .git/xe-skills (0030)', async () => {
+    const user = await makeUser();
+    const proj = await makeProject(user, 'CarR');
+    await makeActiveSkill(user, {
+        title: 'DB migrate',
+        content: '---\nname: DB migrate\ndescription: run migration\n---\n## Steps\n1. migrate',
+        projectId: proj,
+    });
+    fs.mkdirSync(path.join(workspace.projectDir(user, proj), '.git'), { recursive: true });
+
+    const { writes, fsAdapter } = makeWritesAdapter();
+    const prev = process.env.SKILL_INJECT_ENABLED;
+    process.env.SKILL_INJECT_ENABLED = 'true';
+    try {
+        await injector.reRenderForSkillChange({ userId: user, projectId: proj, fsAdapter, useSkillCarrier: true });
+
+        // 载体：全部 agent 的主用户级目录都有该技能（每个 agent 会话 symlink 后原生发现）
+        const carrier = injector.skillCarrierDir(user, proj);
+        const carrierFiles = writes.get(carrier) || {};
+        for (const dir of ['.kimi/skills', '.claude/skills', '.factory/skills', '.qwen/skills', '.openclaw/skills']) {
+            assert.ok(carrierFiles[`${dir}/db-migrate/SKILL.md`], `skill lands in carrier ${dir}`);
+            assert.ok(carrierFiles[`${dir}/db-migrate/.xensemble-managed`], `marker in carrier ${dir}`);
+        }
+        // 0030：载体模式（原生发现）不写索引/指针，工作树零污染
+        const wsFiles = writes.get(workspace.projectDir(user, proj)) || {};
+        assert.ok(!wsFiles['.xensemble/AGENTS.md'], 'no platform index in workspace (native discovery)');
+        assert.ok(!wsFiles['AGENTS.md'] && !wsFiles['CLAUDE.md'], 'no pointer into user instruction files');
+        assert.ok(!wsFiles['.xensemble/skills/db-migrate/SKILL.md'], 'no skill dirs in working tree');
     } finally {
         if (prev === undefined) delete process.env.SKILL_INJECT_ENABLED;
         else process.env.SKILL_INJECT_ENABLED = prev;
