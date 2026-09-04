@@ -325,7 +325,7 @@ test('importSkillFromPath imports valid skill dirs with scripts (0022)', async (
     const userId = await makeUser();
     const root = await makeTempSkillRoot();
     try {
-        const imported = await svc.importSkillFromPath(userId, root);
+        const { imported } = await svc.importSkillFromPath(userId, root);
         assert.equal(imported.length, 1);
         const skill = imported[0];
         assert.equal(skill.title, 'fix-pool');
@@ -370,12 +370,13 @@ test('importSkillFromPath requires dirPath and rejects empty (0022)', async () =
 
 test('importSkillFromUpload imports skills from browser file list (0024)', async () => {
     const userId = await makeUser();
-    const imported = await svc.importSkillFromUpload(userId, [
+    const { imported, blocked } = await svc.importSkillFromUpload(userId, [
         { path: 'fix-pool/SKILL.md', content: '---\nname: fix-pool\ndescription: fix db pool leak\n---\n## Steps\n1. inspect' },
         { path: 'fix-pool/scripts/run.sh', content: '#!/bin/bash\necho fix' },
         { path: 'fix-pool/scripts/ignore.txt', content: 'not a script' },
     ]);
     assert.equal(imported.length, 1);
+    assert.deepEqual(blocked, []);
     const skill = imported[0];
     assert.equal(skill.title, 'fix-pool');
     assert.equal(skill.source, 'external');

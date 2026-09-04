@@ -4,6 +4,15 @@ import { apiFetch } from './api';
  * Skills API 封装（对齐 gitApi.js 风格）。
  */
 
+// 统一错误抛出：透传后端 error message / code / findings（安全扫描明细）
+async function throwApiError(res, fallback) {
+  const body = await res.json().catch(() => ({}));
+  const err = new Error(body?.error || fallback);
+  if (body?.code) err.code = body.code;
+  if (Array.isArray(body?.findings)) err.findings = body.findings;
+  throw err;
+}
+
 export async function listMarket({ q = '', category = '', sort = 'hot', page = 1, pageSize = 20 } = {}) {
   const params = new URLSearchParams();
   if (q) params.set('q', q);
@@ -43,7 +52,7 @@ export async function createSkill({ title, content, tags = [], category = '', pr
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, content, tags, category: category || null, projectId, scripts }),
   });
-  if (!res.ok) throw new Error('Failed to create skill');
+  if (!res.ok) await throwApiError(res, 'Failed to create skill');
   return res.json();
 }
 
@@ -53,7 +62,7 @@ export async function updateSkill(id, patch) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
   });
-  if (!res.ok) throw new Error('Failed to update skill');
+  if (!res.ok) await throwApiError(res, 'Failed to update skill');
   return res.json();
 }
 
@@ -81,7 +90,7 @@ export async function deleteSkill(id) {
 
 export async function publishSkill(id) {
   const res = await apiFetch(`/api/v1/skills/${encodeURIComponent(id)}/publish`, { method: 'POST' });
-  if (!res.ok) throw new Error('Failed to publish skill');
+  if (!res.ok) await throwApiError(res, 'Failed to publish skill');
   return res.json();
 }
 
@@ -141,11 +150,6 @@ export async function importSkillFromFiles(files) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ files }),
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    const err = new Error(body?.error || 'Failed to import skills');
-    if (body?.code) err.code = body.code;
-    throw err;
-  }
+  if (!res.ok) await throwApiError(res, 'Failed to import skills');
   return res.json();
 }

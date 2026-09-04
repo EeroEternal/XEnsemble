@@ -13,6 +13,7 @@ const path = require('path');
 const { and, eq, desc, sql, or, ilike, inArray } = require('drizzle-orm');
 const { db } = require('../db');
 const schema = require('../db/schema');
+const { assertSkillSafe } = require('./skillScriptScanner');
 
 const CATEGORIES = ['workflow', 'convention', 'debug', 'database', 'devops', 'codegen'];
 
@@ -101,6 +102,7 @@ function mapMarketRow(row) {
         category: row.category ?? null,
         installCount: row.installCount ?? 0,
         publishedAt: row.publishedAt ?? null,
+        sourceHash: row.sourceHash ?? null,
         createdAt: Number(row.createdAt),
         updatedAt: Number(row.updatedAt),
     };
@@ -190,6 +192,8 @@ function validateCreate({ title, content }) {
  */
 async function createSkill({ userId, title, content, tags = [], category = null, projectId = null, sessionId = null, source = 'manual', signals = null, confidence = null, scripts = null }) {
     const { title: t, content: c } = validateCreate({ title, content });
+    // P0 安全治理：创建入口静态扫描（error 级阻断，warning 级随返回值提示）
+    const scriptWarnings = assertSkillSafe({ content: c, scripts: parseScripts(scripts) });
     const id = newSkillId();
     const now = Date.now();
     await db.insert(schema.skills).values({
@@ -214,7 +218,9 @@ async function createSkill({ userId, title, content, tags = [], category = null,
         createdAt: now,
         updatedAt: now,
     });
-    return getSkill(userId, id);
+    const skill = await getSkill(userId, id);
+    if (scriptWarnings.length > 0) skill.scriptWarnings = scriptWarnings;
+    return skill;
 }
 
 /**
@@ -308,6 +314,12 @@ async function updateSkill(userId, skillId, patch = {}) {
     if (patch.projectId !== undefined) next.projectId = patch.projectId || null;
     next.updatedAt = Date.now();
 
+    // P0 安全治理：编辑入口按合并后的最终内容扫描
+    const scriptWarnings = assertSkillSafe({
+        content: next.content ?? skill.content,
+        scripts: next.scripts ?? skill.scripts,
+    });
+
     const oldProjectId = skill.projectId || null;
     await db.update(schema.skills)
         .set(next)
@@ -315,6 +327,7 @@ async function updateSkill(userId, skillId, patch = {}) {
 
     // T4.4：内容/作用域变更后重渲染指令文件（无 running session 的项目）
     const newSkill = await getSkill(userId, skillId);
+    if (scriptWarnings.length > 0) newSkill.scriptWarnings = scriptWarnings;
     await reRenderAfterSkillChange(userId, oldProjectId);
     await reRenderAfterSkillChange(userId, newSkill.projectId || null);
     return newSkill;
@@ -378,11 +391,19 @@ async function deleteSkill(userId, skillId) {
 }
 
 /**
- * 发布到市场（本人）。任何状态均可发布，发布后 visibility=public。
+ * 发布到市场（本人）。仅 active 技能可发布，发布后 visibility=public。
  */
 async function publishSkill(userId, skillId) {
     const skill = await getSkill(userId, skillId);
     requireOwner(skill, userId);
+    // P0-2：draft/archived 不得直接上架——半成品（LLM 提炼失败的 draft）或
+    // 已归档技能必须先走 activate 流程，保证市场内容都经过落盘门槛。
+    if (skill.status !== 'active') {
+        const err = new Error('only active skills can be published to the market (activate the skill first)');
+        err.code = 'skill_publish_requires_active';
+        err.statusCode = 400;
+        throw err;
+    }
     // 0021/P2：发布门槛——只有能落盘的技能才允许上架（格式合法 + 置信度达标），
     // 避免低质量 auto draft 或非法格式直接进公共市场。
     const { isLandableSkill } = require('./skillInjector');
@@ -392,6 +413,9 @@ async function publishSkill(userId, skillId) {
         err.statusCode = 400;
         throw err;
     }
+    // P0-1：发布时对最终内容+脚本再做一次静态扫描（防御纵深：创建/导入后的
+    // 编辑可能引入新载荷）。
+    assertSkillSafe({ content: skill.content, scripts: skill.scripts });
     const now = Date.now();
     await db.update(schema.skills)
         .set({ visibility: 'public', publishedAt: now, updatedAt: now })
@@ -462,6 +486,25 @@ async function listMarket({ q = '', category = null, sort = 'hot', page = 1, pag
         }
         return s;
     });
+
+    // P2：当前用户已安装/有更新标记——市场卡片展示「已安装」「有更新」角标。
+    // hasUpdate = 已安装副本的 sourceHash ≠ 源当前 sourceHash（源发布后被编辑过）。
+    if (excludeUserId && items.length > 0) {
+        const sourceIds = items.map((s) => s.id);
+        const forkRows = await db
+            .select({ forkedFrom: schema.skills.forkedFrom, sourceHash: schema.skills.sourceHash })
+            .from(schema.skills)
+            .where(and(
+                eq(schema.skills.userId, excludeUserId),
+                inArray(schema.skills.forkedFrom, sourceIds),
+            ));
+        const forkMap = new Map(forkRows.map((f) => [f.forkedFrom, f.sourceHash]));
+        for (const s of items) {
+            if (!forkMap.has(s.id)) continue;
+            s.isInstalled = true;
+            s.hasUpdate = forkMap.get(s.id) !== s.sourceHash;
+        }
+    }
 
     // 作者展示名（displayName || username），避免向市场暴露内部 userId
     const authorIds = [...new Set(items.map((s) => s.userId).filter(Boolean))];
@@ -726,6 +769,7 @@ async function importSkillFromPath(userId, dirPath) {
     }
 
     const imported = [];
+    const blocked = [];
     for (const skillDir of skillDirs) {
         const skillMdPath = path.join(skillDir, 'SKILL.md');
         const content = await readFile(skillMdPath, 'utf8').catch(() => null);
@@ -753,24 +797,40 @@ async function importSkillFromPath(userId, dirPath) {
             if (scripts.length >= IMPORT_MAX_SCRIPTS) break;
         }
 
-        const skill = await createSkill({
-            userId,
-            title: fm.name,
-            content,
-            scripts,
-            category: null,
-            source: 'external',
-            confidence: null,
-        });
-        imported.push(skill);
+        try {
+            const skill = await createSkill({
+                userId,
+                title: fm.name,
+                content,
+                scripts,
+                category: null,
+                source: 'external',
+                confidence: null,
+            });
+            imported.push(skill);
+        } catch (err) {
+            // P0 安全治理：安全扫描命中的技能跳过（不中断整批导入），明细随返回值告知用户
+            if (err.code === 'skill_script_blocked') {
+                blocked.push({ name: fm.name, findings: err.details || [] });
+                continue;
+            }
+            throw err;
+        }
     }
     if (imported.length === 0) {
+        if (blocked.length > 0) {
+            const err = new Error(`all imported skills blocked by security scan (${blocked.map((b) => b.name).join(', ')})`);
+            err.code = 'skill_import_blocked';
+            err.statusCode = 400;
+            err.details = blocked;
+            throw err;
+        }
         const err = new Error('no valid skills found (need SKILL.md with name+description, dir name matching)');
         err.code = 'skill_import_invalid';
         err.statusCode = 400;
         throw err;
     }
-    return imported;
+    return { imported, blocked };
 }
 
 async function walkSkillDirs(dir, depth, acc) {

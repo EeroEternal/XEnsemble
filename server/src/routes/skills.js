@@ -49,9 +49,17 @@ function registerSkillRoutes(fastify) {
     fastify.post('/api/v1/skills/import-upload', { preValidation: authPre }, async (request, reply) => {
         try {
             const files = request.body?.files;
-            const skills = await skillService.importSkillFromUpload(request.user.id, files);
-            return reply.code(201).send({ imported: skills.length, skills });
+            const { imported, blocked } = await skillService.importSkillFromUpload(request.user.id, files);
+            return reply.code(201).send({ imported: imported.length, skills: imported, blocked });
         } catch (err) {
+            // P0 安全治理：安全扫描明细透传（让用户知道哪个文件命中哪条规则）
+            if (err.code === 'skill_script_blocked' || err.code === 'skill_import_blocked') {
+                return reply.code(err.statusCode || 400).send({
+                    error: err.message,
+                    code: err.code,
+                    findings: err.details || [],
+                });
+            }
             return sendPublicError(reply, err, 'Failed to import skills', 500, request.locale || 'en');
         }
     });
@@ -133,6 +141,14 @@ function registerSkillRoutes(fastify) {
         try {
             return await skillService.publishSkill(request.user.id, request.params.id);
         } catch (err) {
+            // P0 安全治理：发布时安全扫描命中的明细透传
+            if (err.code === 'skill_script_blocked') {
+                return reply.code(err.statusCode || 400).send({
+                    error: err.message,
+                    code: err.code,
+                    findings: err.details || [],
+                });
+            }
             return sendPublicError(reply, err, 'Failed to publish skill', 500, request.locale || 'en');
         }
     });

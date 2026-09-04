@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Sparkles, Search, Download, User, Clock, Eye, X, Loader2,
-  Database, GitBranch, Bug, ShieldCheck, Cloud, Puzzle, Layers, CheckCircle, FileEdit, Check, Copy,
+  Database, GitBranch, Bug, ShieldCheck, Cloud, Puzzle, Layers, CheckCircle, FileEdit, Check, Copy, RefreshCw,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { getSkill } from '../lib/skillsApi';
@@ -158,7 +160,7 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
           </div>
           <Button size="md" className="shrink-0" onClick={() => navigate('/skills/mine')}>
             <Sparkles className="w-4 h-4" />
-            {t('skills:publish')}
+            {t('skills:my_skills', { defaultValue: 'My Skills' })}
           </Button>
         </div>
       </div>
@@ -221,6 +223,18 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
                           {t('skills:mine_badge')}
                         </span>
                       )}
+                      {/* P2：已安装 / 有更新 角标（isInstalled/hasUpdate 由市场接口标注） */}
+                      {s.isInstalled && !s.hasUpdate && (
+                        <span className="text-[10px] font-medium text-zinc-600 bg-zinc-100 rounded-full px-2 py-0.5">
+                          {t('skills:installed_badge', { defaultValue: 'Installed' })}
+                        </span>
+                      )}
+                      {s.isInstalled && s.hasUpdate && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 bg-amber-50 rounded-full px-2 py-0.5">
+                          <RefreshCw className="w-2.5 h-2.5" />
+                          {t('skills:update_badge', { defaultValue: 'Update available' })}
+                        </span>
+                      )}
                       {s.category && (
                         <span className={`text-[10px] font-medium rounded-full px-2 py-0.5 ${tint}`}>
                           {categoryLabel(s.category)}
@@ -255,16 +269,29 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
                         <Eye className="w-3 h-3" />
                         {t('skills:preview')}
                       </button>
-                      <button
-                        type="button"
-                        disabled={isMine || installingId === s.id}
-                        title={t('skills:install')}
-                        onClick={() => quickInstall(s)}
-                        className={`inline-flex items-center gap-1 text-[11px] font-medium text-zinc-50 bg-zinc-900 rounded-md px-2.5 py-1 hover:bg-zinc-800 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`}
-                      >
-                        {installingId === s.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Copy className="w-3 h-3" />}
-                        {installingId === s.id ? t('skills:install_loading', { defaultValue: 'Copying…' }) : t('skills:install')}
-                      </button>
+                      {/* P2：已安装 → 禁用；有更新 → 引导去「我的技能」同步 */}
+                      {s.isInstalled ? (
+                        <button
+                          type="button"
+                          onClick={() => navigate('/skills/mine')}
+                          title={t('skills:install_go_manage', { defaultValue: 'Manage in My Skills' })}
+                          className={`inline-flex items-center gap-1 text-[11px] font-medium text-zinc-700 border border-zinc-300 rounded-md px-2.5 py-1 hover:bg-zinc-50 ${consoleButtonFocusClass}`}
+                        >
+                          {s.hasUpdate ? <RefreshCw className="w-3 h-3" /> : <Check className="w-3 h-3" />}
+                          {s.hasUpdate ? t('skills:update_badge', { defaultValue: 'Update available' }) : t('skills:installed_badge', { defaultValue: 'Installed' })}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={isMine || installingId === s.id}
+                          title={t('skills:install')}
+                          onClick={() => quickInstall(s)}
+                          className={`inline-flex items-center gap-1 text-[11px] font-medium text-zinc-50 bg-zinc-900 rounded-md px-2.5 py-1 hover:bg-zinc-800 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`}
+                        >
+                          {installingId === s.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Copy className="w-3 h-3" />}
+                          {installingId === s.id ? t('skills:install_loading', { defaultValue: 'Copying…' }) : t('skills:install')}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -387,19 +414,70 @@ function SkillDetailDrawer({ skill, onClose }) {
 
         {/* body */}
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-4">
-          {detail.signals && (
-            <div className="flex items-center gap-3 text-[11px] text-zinc-600 bg-zinc-50 border border-zinc-200 rounded-lg p-3">
-              {detail.clusterSize > 1 && (
-                <span className="inline-flex items-center gap-1"><Layers className="w-3.5 h-3.5" /> {t('skills:from_sessions', { count: detail.clusterSize })}</span>
-              )}
-              <span className="inline-flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" /> {t('skills:success_exit')}</span>
-              <span className="inline-flex items-center gap-1"><FileEdit className="w-3.5 h-3.5" /> {t('skills:files_touched', { count: detail.signals.filesTouched ?? 0 })}</span>
-            </div>
-          )}
+          {detail.signals && (() => {
+            // P2：信号条 = 自动提炼的溯源证据。无任何可展示项时整体隐藏，
+            // 避免出现只剩标题的空壳条；置信度补充展示（auto 技能均有）。
+            const items = [];
+            if (detail.clusterSize > 1) {
+              items.push(
+                <span key="cluster" className="inline-flex items-center gap-1"><Layers className="w-3.5 h-3.5" /> {t('skills:from_sessions', { count: detail.clusterSize })}</span>,
+              );
+            }
+            if (detail.signals.successExit) {
+              items.push(
+                <span key="exit" className="inline-flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" /> {t('skills:success_exit')}</span>,
+              );
+            }
+            if ((detail.signals.filesTouched ?? 0) > 0) {
+              items.push(
+                <span key="files" className="inline-flex items-center gap-1"><FileEdit className="w-3.5 h-3.5" /> {t('skills:files_touched', { count: detail.signals.filesTouched })}</span>,
+              );
+            }
+            if (Number.isFinite(detail.confidence)) {
+              items.push(
+                <span key="confidence" className="inline-flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5" /> {t('skills:confidence', { percent: Math.round(detail.confidence * 100) })}</span>,
+              );
+            }
+            if (items.length === 0) return null;
+            return (
+              <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-600 bg-zinc-50 border border-zinc-200 rounded-lg p-3">
+                <span className="font-semibold uppercase tracking-wider text-zinc-400">{t('skills:signals_evidence', { defaultValue: 'Distilled from sessions' })}</span>
+                {items}
+              </div>
+            );
+          })()}
 
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">{t('skills:detail_scenario')}</div>
-            <p className="text-sm text-zinc-700 leading-relaxed whitespace-pre-wrap">{detail.content}</p>
+            {/* P2：SKILL.md 是 markdown，按 markdown 渲染（标题/列表/代码块/表格） */}
+            <div className="skill-md text-sm text-zinc-700 leading-relaxed">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  h1: ({ node, ...props }) => <h2 className="mt-3 mb-1.5 text-base font-semibold text-zinc-900 first:mt-0" {...props} />,
+                  h2: ({ node, ...props }) => <h3 className="mt-3 mb-1.5 text-sm font-semibold text-zinc-900 first:mt-0" {...props} />,
+                  h3: ({ node, ...props }) => <h4 className="mt-2.5 mb-1 text-sm font-semibold text-zinc-800 first:mt-0" {...props} />,
+                  p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
+                  ul: ({ node, ...props }) => <ul className="mb-2 list-disc pl-5 space-y-0.5 last:mb-0" {...props} />,
+                  ol: ({ node, ...props }) => <ol className="mb-2 list-decimal pl-5 space-y-0.5 last:mb-0" {...props} />,
+                  a: ({ node, ...props }) => <a className="text-blue-600 underline break-all" target="_blank" rel="noreferrer" {...props} />,
+                  code: ({ node, className, children, ...props }) => {
+                    // react-markdown v10：无 inline prop，含 language-* 的代码块由 pre 兜底样式渲染
+                    const isBlock = /language-/.test(className || '');
+                    if (isBlock) return <code className="block font-mono text-xs" {...props}>{children}</code>;
+                    return <code className="px-1 py-0.5 rounded bg-zinc-100 text-[12px] font-mono text-zinc-800" {...props}>{children}</code>;
+                  },
+                  pre: ({ node, ...props }) => <pre className="mb-2 p-2.5 rounded-md bg-zinc-100 border border-zinc-200 text-xs font-mono overflow-x-auto last:mb-0" {...props} />,
+                  blockquote: ({ node, ...props }) => <blockquote className="mb-2 border-l-2 border-zinc-300 pl-3 text-zinc-500" {...props} />,
+                  table: ({ node, ...props }) => <table className="mb-2 w-full text-xs border-collapse" {...props} />,
+                  th: ({ node, ...props }) => <th className="border border-zinc-200 bg-zinc-50 px-2 py-1 text-left font-medium" {...props} />,
+                  td: ({ node, ...props }) => <td className="border border-zinc-200 px-2 py-1" {...props} />,
+                  hr: () => <hr className="my-3 border-zinc-200" />,
+                }}
+              >
+                {detail.content || ''}
+              </ReactMarkdown>
+            </div>
           </div>
 
           {detail.tags?.length > 0 && (

@@ -134,6 +134,12 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
       closeDialog();
       fetchSkills({ silent: true });
     } catch (err) {
+      // P0 安全治理：安全扫描拦截 → 专用提示（含命中规则明细）
+      if (err?.code === 'skill_script_blocked') {
+        const detail = (err.findings || []).map((f) => `${f.path}: ${f.rule}`).join('; ');
+        showToast('error', detail ? `${t('skills:error_script_blocked')} (${detail})` : t('skills:error_script_blocked'));
+        return;
+      }
       showToast('error', err.message);
     } finally {
       setSaving(false);
@@ -149,6 +155,17 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
       // 0021：激活未过落盘门槛 → 明确提示原因
       if (err?.code === 'skill_not_landable') {
         showToast('error', t('skills:error_not_landable', { defaultValue: 'Skill cannot be activated (frontmatter/confidence not satisfied).' }));
+        return;
+      }
+      // P0-2：draft/archived 直接发布 → 引导先激活
+      if (err?.code === 'skill_publish_requires_active') {
+        showToast('error', t('skills:error_publish_requires_active', { defaultValue: 'Only active skills can be published. Activate the skill first.' }));
+        return;
+      }
+      // P0-1：发布时安全扫描拦截
+      if (err?.code === 'skill_script_blocked') {
+        const detail = (err.findings || []).map((f) => `${f.path}: ${f.rule}`).join('; ');
+        showToast('error', detail ? `${t('skills:error_script_blocked')} (${detail})` : t('skills:error_script_blocked'));
         return;
       }
       showToast('error', err.message || errMsg);
@@ -175,10 +192,23 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
     Promise.all(readers)
       .then((files) => importSkillFromFiles(files))
       .then((res) => {
+        // P0 安全治理：部分技能被扫描拦截时提示（导入成功的照常展示）
+        const blockedCount = Array.isArray(res.blocked) ? res.blocked.length : 0;
         showToast('success', t('skills:import_done', { count: res.imported, defaultValue: '{{count}} skill(s) imported.' }));
+        if (blockedCount > 0) {
+          const names = res.blocked.map((b) => b.name).join(', ');
+          showToast('error', `${t('skills:error_import_blocked', { defaultValue: 'Some imported skills were blocked by the security scan.' })} (${names})`);
+        }
         fetchSkills({ silent: true });
       })
-      .catch((err) => showToast('error', err.message || t('skills:toast_action_failed', { defaultValue: 'Action failed.' })))
+      .catch((err) => {
+        if (err?.code === 'skill_import_blocked' || err?.code === 'skill_script_blocked') {
+          const detail = (err.findings || []).map((f) => `${f.path ?? f.name}: ${f.rule}`).join('; ');
+          showToast('error', detail ? `${t('skills:error_script_blocked')} (${detail})` : t('skills:error_script_blocked'));
+          return;
+        }
+        showToast('error', err.message || t('skills:toast_action_failed', { defaultValue: 'Action failed.' }));
+      })
       .finally(() => setImporting(false));
   };
 
@@ -306,7 +336,8 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
                           s.status === 'draft' && { icon: CheckCircle, label: t('skills:action_activate', { defaultValue: 'Activate' }), onClick: () => act(() => changeStatus(s.id, 'activate'), t('skills:toast_updated', { defaultValue: 'Done.' })) },
                           s.status === 'active' && { icon: Archive, label: t('skills:action_archive', { defaultValue: 'Archive' }), onClick: () => act(() => changeStatus(s.id, 'archive'), t('skills:toast_updated', { defaultValue: 'Done.' })) },
                           s.status === 'archived' && { icon: Play, label: t('skills:action_restore', { defaultValue: 'Restore' }), onClick: () => act(() => changeStatus(s.id, 'restore'), t('skills:toast_updated', { defaultValue: 'Done.' })) },
-                          { icon: s.visibility === 'public' ? ArrowDownToLine : UploadCloud, label: t(s.visibility === 'public' ? 'skills:action_unpublish' : 'skills:action_publish', { defaultValue: 'Toggle market' }), onClick: () => togglePublish(s) },
+                          // P0-2：仅 active 技能可上架（后端 skill_publish_requires_active 兜底）
+                          s.status === 'active' && { icon: s.visibility === 'public' ? ArrowDownToLine : UploadCloud, label: t(s.visibility === 'public' ? 'skills:action_unpublish' : 'skills:action_publish', { defaultValue: 'Toggle market' }), onClick: () => togglePublish(s) },
                           s.updateInfo?.hasUpdate && { icon: ArrowUpCircle, label: t('skills:action_sync', { defaultValue: 'Sync to latest' }), onClick: () => handleSync(s) },
                           { icon: Trash2, label: t('common:action.delete'), danger: true, onClick: () => handleDelete(s) },
                         ].filter(Boolean)}
