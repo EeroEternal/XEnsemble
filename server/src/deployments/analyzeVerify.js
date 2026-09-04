@@ -663,7 +663,7 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
         // 统计健康检查类命令（curl/wget/health check/nc -z/pgrep/ps aux/ss -t）失败次数，
         // 超过限制后强制要求 agent 诊断日志或输出 final 失败，避免盲目重新构建循环。
         let healthCheckFailures = 0;
-        const MAX_HEALTH_CHECK_FAILURES = 3;
+        const MAX_HEALTH_CHECK_FAILURES = 1;
         // 阶段 B 内子阶段上报（prepare/install/build/serve/check/fix）：让前端分步展示，
         // 驱动信号来自每轮实际执行的工具/命令，不影响 verify 逻辑本身。
         let lastSubstage = null;
