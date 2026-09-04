@@ -49,6 +49,17 @@ const DEPENDENCY_EXCLUDE_ENTRIES = [
     '.vite/',
     '.turbo/',
     '.parcel-cache/',
+    // pnpm 8+ 项目本地 store（pnpm config set store-dir ./.pnpm-store）
+    '.pnpm-store/',
+    // Yarn Berry PnP 缓存与解析映射
+    '.yarn/cache/',
+    '.pnp.cjs',
+    // mise 版本管理器 installs_path（MISE_INSTALLS_DIR=.tools）
+    '.tools/',
+    // Elm 编译产物
+    'elm-stuff/',
+    // Angular 构建缓存
+    '.angular/cache/',
     // 缓存 / 杂项
     '.cache/',
     'coverage/',
