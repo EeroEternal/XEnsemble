@@ -408,86 +408,6 @@ async function getGuestFreePort(runtimeRef) {
     } catch { return 0; }
 }
 
-function setprivPrefix(uid, gid) {
-    return `setpriv --reuid=${uid} --regid=${gid} --clear-groups `;
-}
-
-// devDir 可能是 './web' 之类的相对路径（相对 /workspace）——归一为 guest 内绝对路径。
-function workspaceAbsPath(targetDir) {
-    const t = String(targetDir || '.').trim();
-    if (t.startsWith('/')) return t.replace(/\/+$/, '') || '/';
-    return '/workspace' + (t === '.' || t === '' ? '' : `/${t.replace(/^\.\//, '').replace(/\/+$/, '')}`);
-}
-
-// vite 沙箱内的身份/写权限适配（preview 白屏修复）：
-// 沙箱里源码树（git clone，root）与 node_modules（npm install，agent uid）常常属主不同，
-// 而 workspace 是 virtiofs idmapped 挂载——root 没有 DAC override，任何单一身份都有一半
-// 目录不可写：root 写得了 vite.config.js 加载临时文件（bundle 落在 config 同目录）但写不了
-// node_modules/.vite（依赖预构建产物），agent uid 反之。结果是 vite re-optimize 一直
-// EACCES，deps 请求全部 504（Outdated Optimize Dep），preview 白屏。
-// 解法：以 node_modules 属主身份跑 vite；ESM config（type:module / .mjs）额外生成"桥接
-// config"——把 __dirname/__filename 静态替换为 devDir 绝对路径后落到 node_modules 内，
-// --config 指向它（这样 bundle 临时文件也写在 node_modules，属主可写）。CJS config 由
-// vite 直接 require、无临时文件，降权即可。属主为 root/当前身份时零开销直跑；setpriv
-// 缺失或任何一步失败都回退原命令，行为不劣化。返回 { prefix, configArg }。
-async function prepareVitePrivilegedRun({ runtimeRef, targetDir, onLog }) {
-    const runtime = getRuntime();
-    const dirAbs = workspaceAbsPath(targetDir);
-    const nmAbs = `${dirAbs}/node_modules`;
-    try {
-        const id = await runtime.exec.exec('sh', [
-            '-c', 'id -u; stat -c "%u:%g" "$1/node_modules" 2>/dev/null || echo -; command -v setpriv || echo -', 'sh', nmAbs,
-        ], {}, { runtimeRef, cwd: '/workspace', timeoutMs: 10000 });
-        const lines = String(id.stdout || '').trim().split('\n');
-        const curUid = parseInt(lines[0], 10) || 0;
-        const owner = (lines[1] || '-').trim();
-        const setprivPath = (lines[2] || '-').trim();
-        if (!/^\d+:\d+$/.test(owner) || setprivPath === '-') {
-            return { prefix: '', configArg: '' };
-        }
-        const [ownerUid, ownerGid] = owner.split(':');
-        if (ownerUid === '0' || Number(ownerUid) === curUid) {
-            return { prefix: '', configArg: '' };
-        }
-        const prefix = setprivPrefix(ownerUid, ownerGid);
-        // 找 config；CJS（.js 且包非 type:module）无 bundle 临时文件，无需 bridge
-        const ls = await runtime.exec.exec('sh', [
-            '-c', 'ls "$1"/vite.config.* 2>/dev/null | head -1; grep -o \'"type": *"module"\' "$1"/package.json 2>/dev/null | head -1', 'sh', dirAbs,
-        ], {}, { runtimeRef, cwd: '/workspace', timeoutMs: 10000 });
-        const lsLines = String(ls.stdout || '').trim().split('\n');
-        const configPath = (lsLines[0] || '').trim();
-        const pkgTypeModule = Boolean((lsLines[1] || '').trim());
-        if (!configPath || (!configPath.endsWith('.mjs') && !pkgTypeModule)) {
-            return { prefix, configArg: '' };
-        }
-        const cat = await runtime.exec.exec('sh', ['-c', 'cat "$1"', 'sh', configPath], {}, { runtimeRef, cwd: '/workspace', timeoutMs: 10000 });
-        const orig = String(cat.stdout || '');
-        if (!orig || !/defineConfig|export default|module\.exports/.test(orig)) {
-            return { prefix, configArg: '' };
-        }
-        const patched = orig
-            .replace(/__dirname/g, JSON.stringify(dirAbs))
-            .replace(/__filename/g, JSON.stringify(configPath));
-        const b64 = Buffer.from(patched, 'utf8').toString('base64');
-        const bridgePath = `${nmAbs}/.vite-xe-config.mjs`;
-        // 文件必须以属主身份落盘（重定向发生在降权 shell 内，root 在 idmapped 挂载上
-        // 对属主目录没有写权限），因此 setpriv + 内层 sh 完成写入。
-        const cp = await runtime.exec.exec('sh', [
-            '-c',
-            'setpriv --reuid="$1" --regid="$2" --clear-groups sh -c \'printf %s "$1" | base64 -d > "$2" && echo BRIDGE_OK\' xe "$3" "$4"',
-            'sh', ownerUid, ownerGid, b64, bridgePath,
-        ], {}, { runtimeRef, cwd: '/workspace', timeoutMs: 10000 });
-        if (!String(cp.stdout || '').includes('BRIDGE_OK')) {
-            if (onLog) onLog(`vite bridge config write failed: ${String(cp.stdout || cp.stderr || '').slice(0, 200)}`);
-            return { prefix, configArg: '' };
-        }
-        return { prefix, configArg: ` --config ${bridgePath}` };
-    } catch (e) {
-        if (onLog) onLog(`vite privileged-run detection failed, fallback: ${e.message}`);
-        return { prefix: '', configArg: '' };
-    }
-}
-
 // 实时预览（live 模式）：在 guest 内常驻启动 dev server（HMR / 文件感知），
 // 改文件后刷新即可见，无需重新 build。尽力而为：起不来返回 ok:false，由调用方回退静态 serve。
 async function startLiveDevServer({ runtimeRef, workspacePath, devKind, devDir, defaultPort, base, onLog }) {
@@ -502,18 +422,12 @@ async function startLiveDevServer({ runtimeRef, workspacePath, devKind, devDir, 
     // next/nuxt 用各自 dev 命令；CRA/webpack 等通用 npm 项目用 PORT 环境变量。
     const baseArg = base ? ` --base ${base}` : '';
     const apiBaseArg = base ? `VITE_API_BASE=${base}` : '';
+    // 沙箱内 exec 现在以 uid 1000 为默认（见 BoxLiteExecAdapter.exec / boxliteExecUid.js），
+    // 源码与 node_modules 属同一个身份，vite 不再需要按属主降权/桥接 config——直接以 1000 跑即可。
+    // home 走 /tmp（npx/npm 默认 cache 路径不可写为 root-owned /root）。
     let startCmd;
     if (devKind === 'vite') {
-        // 沙箱身份/写权限适配：源码树与 node_modules 属主不同时以 node_modules 属主跑
-        // vite（见 prepareVitePrivilegedRun 注释）；失败回退 root 原命令。
-        let vitePrefix = '';
-        let viteConfigArg = '';
-        try {
-            const priv = await prepareVitePrivilegedRun({ runtimeRef, targetDir, onLog });
-            vitePrefix = priv.prefix;
-            viteConfigArg = priv.configArg;
-        } catch { /* fallback below */ }
-        startCmd = `cd ${targetDir} && ${vitePrefix}env HOME=/tmp ${apiBaseArg} npx vite${viteConfigArg} --host 0.0.0.0 --port ${livePort} --strictPort${baseArg}`;
+        startCmd = `cd ${targetDir} && env HOME=/tmp ${apiBaseArg} npx vite --host 0.0.0.0 --port ${livePort} --strictPort${baseArg}`;
     } else if (devKind === 'next') {
         startCmd = `cd ${targetDir} && PORT=${livePort} npx next dev -H 0.0.0.0 -p ${livePort}`;
     } else if (devKind === 'nuxt') {
@@ -658,7 +572,8 @@ async function startBlinkForwarder(runtimeRef, workspacePath, blinkApiUrl, blink
     }
     try {
         // 先清理旧转发器（重新部署时残留，占着 8787 端口）；沙箱 guest 无 pkill，用 fuser 按端口杀。
-        await runtime.exec.exec('sh', ['-c', 'fuser -k 8787/tcp 2>/dev/null; sleep 1; true'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => {});
+        // fuser/kill 跨用户进程必须 root（POSIX：非 root 只能 kill 同/低权限进程）。
+        await runtime.exec.exec('sh', ['-c', 'fuser -k 8787/tcp 2>/dev/null; sleep 1; true'], {}, { uid: 0, gid: 0, runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => {});
         // 用 spawn 起转发器（与 previewProxyServer 一致）：exec 方式起的 detached 进程会随 exec 会话
         // WS 关闭被 blink 清理，导致转发器在部署后悄悄挂掉（表现为创建 workspace 时 exec 超时）。
         await runtime.exec.spawn(
@@ -781,6 +696,8 @@ async function parseDbInfoFromGuest(runtimeRef, workspacePath) {
 // 配置全部写入持久文件而非环境变量——verify 的 run_shell 是每次全新 `sh -c`，不读 profile，
 // 文件级配置（go env -w / .npmrc / pip.conf / cargo config / maven settings）对 agent 与
 // plan 命令透明生效。任何一步失败都不阻断部署（best-effort，退回官方源只是慢）。
+// 系统级操作：写 /etc/、/root/、go env -w 等必须 root，显式 uid: 0 跳过 BoxLiteExecAdapter
+// 的 setpriv 注入（否则 1000 写不进 /root/、go env 也拒绝）。
 async function configureGuestMirrors(runtimeRef, workspacePath, onLog) {
     const runtime = getRuntime();
     const script = `
@@ -816,7 +733,7 @@ fi
 echo MIRRORS_DONE
 `;
     try {
-        const r = await runtime.exec.exec('sh', ['-c', script], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 30000 });
+        const r = await runtime.exec.exec('sh', ['-c', script], {}, { uid: 0, gid: 0, runtimeRef, cwd: workspacePath, timeoutMs: 30000 });
         if (String(r.stdout || '').includes('MIRRORS_DONE')) {
             onLog?.('guest 镜像源已配置（apt/npm/pip/go/cargo/maven → 国内源）');
         } else {
@@ -846,6 +763,31 @@ async function ensureDependencyExcludeInGuest(runtimeRef, workspacePath, onLog) 
     }
 }
 
+// 把 workspace 整树 chown 到 uid 1000，让后续所有默认身份的 exec（uid 1000）创建
+// 的文件（node_modules/、.vite/、.xensemble/ 等）都归 1000 一个身份。virtiofs idmap
+// （host 0 ↔ guest 1000）下，跨身份写永远 EACCES——这是 2b749bc 修了一半的根因。
+// 必须在 verify agent 任何 install 之前完成；幂等，跨部署重跑不破坏已有文件。
+// chown 本身需要 root（idmap 下只有 root 能跨身份改 owner），显式 uid: 0。
+async function chownWorkspaceToUser(runtimeRef, workspacePath, onLog) {
+    const runtime = getRuntime();
+    try {
+        // id 1000 不存在（精简镜像可能没有）→ 用 useradd 兜底建一个；存在则跳过。
+        // chown 失败也继续：node_modules 已存在的部分留原样，新建的部分由 uid 1000 跑。
+        const r = await runtime.exec.exec('sh', ['-c',
+            'id 1000 >/dev/null 2>&1 || useradd -u 1000 -M -s /bin/bash xe 2>/dev/null || true; ' +
+            `chown -R 1000:1000 ${JSON.stringify(workspacePath)} 2>/dev/null || true; ` +
+            'echo CHOWN_OK',
+        ], {}, { uid: 0, gid: 0, runtimeRef, cwd: workspacePath, timeoutMs: 120000 });
+        if (String(r.stdout || '').includes('CHOWN_OK')) {
+            onLog?.(`workspace 已 chown 到 1000:1000（virtiofs idmap 下统一身份，避免跨属主 EACCES）`);
+        } else {
+            onLog?.('workspace chown 未完成（非致命，新建文件将由 uid 1000 默认创建）');
+        }
+    } catch (e) {
+        onLog?.(`workspace chown 失败（非致命）: ${String(e.message || e).slice(0, 120)}`);
+    }
+}
+
 // 系统侧自动 provision PostgreSQL：检测项目是否需要 PG，需要则启动沙箱内 PG，
 // 并尝试从配置解析出连接信息后直接建库建用户（幂等），使 verify agent 只需跑 migration。
 async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
@@ -859,7 +801,7 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
             grep -lE '\\"(pg|postgres)\\"|pg-promise|pgx|postgres://' package.json server/package.json apps/*/package.json go.mod 2>/dev/null
             find . -maxdepth 3 \\( -name 'schema.sql' -o -name 'init.sql' \\) 2>/dev/null | grep -v node_modules | head -3
             grep -lE 'DATABASE_URL|POSTGRES_HOST|POSTGRES_DB|POSTGRES_USER' .env server/.env .env.example server/.env.example apps/*/.env apps/*/.env.example start-server.sh Makefile docker-compose.yml docker-compose.deploy.yml docker-compose.selfhost.yml 2>/dev/null
-        `], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+        `], {}, { uid: 0, gid: 0, runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
         needs = Boolean(String(r.stdout || '').trim());
     } catch { needs = false; }
     if (!needs) return { ready: false };
@@ -867,6 +809,7 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
     try {
         // base 镜像可能未装 PostgreSQL（Debian bookworm 默认无）→ 先 apt 安装。
         // 幂等：已装则跳过，避免重复 update/install 浪费时间。
+        // pkill apt-get / dpkg、apt-get install、service start 都必须 root。
         const install = `
             pkill -9 apt-get 2>/dev/null; pkill -9 dpkg 2>/dev/null; sleep 1
             rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock
@@ -877,13 +820,13 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
             fi
             (service postgresql start 2>/dev/null || pg_ctlcluster $(ls /etc/postgresql 2>/dev/null | head -1) main start 2>/dev/null) || true
         `;
-        await runtime.exec.exec('sh', ['-c', install], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 240000 });
+        await runtime.exec.exec('sh', ['-c', install], {}, { uid: 0, gid: 0, runtimeRef, cwd: workspacePath, timeoutMs: 240000 });
         // 等 PG 真正就绪（最多 30s，apt 安装后首次启动可能偏慢）
         let pgReady = false;
         for (let i = 0; i < 30; i++) {
             await new Promise((r) => setTimeout(r, 1000));
             try {
-                const chk = await runtime.exec.exec('sh', ['-c', 'pg_isready -q 2>/dev/null && echo UP || echo DOWN'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 8000 });
+                const chk = await runtime.exec.exec('sh', ['-c', 'pg_isready -q 2>/dev/null && echo UP || echo DOWN'], {}, { uid: 0, gid: 0, runtimeRef, cwd: workspacePath, timeoutMs: 8000 });
                 if (String(chk.stdout || '').trim() === 'UP') { pgReady = true; break; }
             } catch { /* retry */ }
         }
@@ -909,7 +852,7 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
               || su postgres -c "createdb -O ${info.user} ${info.db}"
         `;
         try {
-            await runtime.exec.exec('sh', ['-c', create], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
+            await runtime.exec.exec('sh', ['-c', create], {}, { uid: 0, gid: 0, runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
             console.error(`[twoStage] postgres db provisioned user=${info.user} db=${info.db}`);
             return { ready: true, dbUser: info.user, dbName: info.db };
         } catch (e) {
@@ -938,12 +881,12 @@ async function ensureSandboxPostgres(runtimeRef, workspacePath, { user, pass, db
             fi
             (service postgresql start 2>/dev/null || pg_ctlcluster $(ls /etc/postgresql 2>/dev/null | head -1) main start 2>/dev/null) || true
         `;
-        await runtime.exec.exec('sh', ['-c', install], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 240000 });
+        await runtime.exec.exec('sh', ['-c', install], {}, { uid: 0, gid: 0, runtimeRef, cwd: workspacePath, timeoutMs: 240000 });
         let ready = false;
         for (let i = 0; i < 30; i++) {
             await new Promise((r) => setTimeout(r, 1000));
             try {
-                const chk = await runtime.exec.exec('sh', ['-c', 'pg_isready -q 2>/dev/null && echo UP || echo DOWN'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 8000 });
+                const chk = await runtime.exec.exec('sh', ['-c', 'pg_isready -q 2>/dev/null && echo UP || echo DOWN'], {}, { uid: 0, gid: 0, runtimeRef, cwd: workspacePath, timeoutMs: 8000 });
                 if (String(chk.stdout || '').trim() === 'UP') { ready = true; break; }
             } catch { /* retry */ }
         }
@@ -955,7 +898,7 @@ async function ensureSandboxPostgres(runtimeRef, workspacePath, { user, pass, db
             su postgres -c "psql -tAc \\"SELECT 1 FROM pg_database WHERE datname='${d}'\\"" 2>/dev/null | grep -q 1 \\
               || su postgres -c "createdb -O ${u} ${d}"
         `;
-        await runtime.exec.exec('sh', ['-c', create], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
+        await runtime.exec.exec('sh', ['-c', create], {}, { uid: 0, gid: 0, runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
         return { ok: true };
     } catch (e) {
         return { ok: false, reason: e.message };
@@ -1146,7 +1089,7 @@ async function ensureFrontendServed({ runtimeRef, workspacePath, port, base, onL
     } catch { /* ignore */ }
 
     if (backendEntry) {
-        await runtime.exec.exec('sh', ['-c', `pkill -f "server/index.js" 2>/dev/null; sleep 1; true`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 }).catch(() => {});
+        await runtime.exec.exec('sh', ['-c', `pkill -f "server/index.js" 2>/dev/null; sleep 1; true`], {}, { uid: 0, gid: 0, runtimeRef, cwd: workspacePath, timeoutMs: 20000 }).catch(() => {});
         try {
             await runtime.exec.spawn(
                 'node',
@@ -1202,7 +1145,7 @@ done
     const distAbs = dist.startsWith('/') ? dist : `${workspacePath}/${dist}`;
     let servedOk = false;
     for (let attempt = 0; attempt < 2 && !servedOk; attempt++) {
-        await runtime.exec.exec('sh', ['-c', `pkill -f previewProxyServer 2>/dev/null; fuser -k ${listenPort}/tcp 2>/dev/null; sleep 1; true`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 }).catch(() => {});
+        await runtime.exec.exec('sh', ['-c', `pkill -f previewProxyServer 2>/dev/null; fuser -k ${listenPort}/tcp 2>/dev/null; sleep 1; true`], {}, { uid: 0, gid: 0, runtimeRef, cwd: workspacePath, timeoutMs: 20000 }).catch(() => {});
         try {
             if (proxyPath) {
                 await runtime.exec.spawn(
@@ -1723,6 +1666,10 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         // 镜像源提速：apt/npm/pip/go/cargo/maven 统一切国内源（幂等、best-effort），
         // 必须在 verify agent 执行任何 install 之前完成——这是首次部署超时的主要性能杠杆。
         await configureGuestMirrors(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
+        // workspace 整树 chown 到 1000:1000（幂等、非致命）——virtiofs idmap 下统一身份，
+        // 让后续所有默认 1000 exec 创建的 node_modules/.vite 等都归 1000，
+        // 避开 2b749bc 修了一半的"root 写源码 vs 1000 写 node_modules"分裂 EACCES。
+        await chownWorkspaceToUser(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
         // 依赖目录写入 .git/info/exclude（幂等、非致命），同样必须在 install 之前：
         // install 一旦落盘 node_modules，git 变更面板立即被污染。
         await ensureDependencyExcludeInGuest(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
@@ -1929,7 +1876,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         // 改文件后 iframe 刷新即可见，无需重新 build。起不来回退到下面的静态/反代逻辑。
         if (detected.devKind) {
             // 清理上一轮部署残留的 live 进程（vite/聚合代理），避免端口污染导致 appPort 误判
-            await runtime.exec.exec('sh', ['-c', 'pkill -f previewProxyServer 2>/dev/null; pkill -f "vite --host" 2>/dev/null; pkill -f "npx vite" 2>/dev/null; pkill -f "next dev" 2>/dev/null; pkill -f "nuxt dev" 2>/dev/null; sleep 1; true'], {}, { runtimeRef: ref, cwd: wsPath, timeoutMs: 15000 }).catch(() => {});
+            await runtime.exec.exec('sh', ['-c', 'pkill -f previewProxyServer 2>/dev/null; pkill -f "vite --host" 2>/dev/null; pkill -f "npx vite" 2>/dev/null; pkill -f "next dev" 2>/dev/null; pkill -f "nuxt dev" 2>/dev/null; sleep 1; true'], {}, { uid: 0, gid: 0, runtimeRef: ref, cwd: wsPath, timeoutMs: 15000 }).catch(() => {});
             const live = await startLiveDevServer({
                 runtimeRef: ref, workspacePath: wsPath,
                 devKind: detected.devKind, devDir: detected.devDir || '.', defaultPort: detected.defaultPort,

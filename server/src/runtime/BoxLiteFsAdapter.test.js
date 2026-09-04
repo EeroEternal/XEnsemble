@@ -11,8 +11,18 @@ class MockBoxLiteClient {
         this.calls = [];
     }
 
-    async execForResult(sessionName, command, args = [], env = {}, workingDir = null) {
-        this.calls.push({ sessionName, command, args, workingDir });
+    async execForResult(sessionName, command, args = [], env = {}, workingDir = null, options = {}) {
+        // 适配 uid 注入：_exec 用 applyUidToExec 把命令包成 setpriv 前缀。
+        // mock 解析后仍以原始 command/args 处理，保证既有断言不受影响。
+        // 记录 opts（uid/gid）供 uid 相关断言使用。
+        const opts = options || {};
+        if (command === 'setpriv') {
+            const dash = args.indexOf('--clear-groups');
+            const next = dash >= 0 ? dash + 1 : (args[0] && args[0].startsWith('--') ? 3 : 0);
+            command = args[next];
+            args = args.slice(next + 1);
+        }
+        this.calls.push({ sessionName, command, args, workingDir, opts });
         if (command === 'test' && args[0] === '-e') {
             return { exitCode: (this.paths.has(args[1]) || this.dirs.has(args[1]) || this.files.has(args[1])) ? 0 : 1, stdout: '', stderr: '' };
         }
@@ -195,6 +205,12 @@ test('BoxLite fsList skips the listed directory itself (find returns self)', asy
     adapter.client = client;
     // 模拟真实 find src -maxdepth 1 的输出（第一行是 src 自身）
     client.execForResult = async (sessionName, command, args = []) => {
+        // 适配 uid 注入：_exec 把命令包成 setpriv，解析回原始 command/args
+        if (command === 'setpriv') {
+            const dash = args.indexOf('--clear-groups');
+            command = args[dash + 1];
+            args = args.slice(dash + 2);
+        }
         client.calls.push({ sessionName, command, args });
         if (command === 'sh' && args[0] === '-c' && args[1].includes('find')) {
             return {
@@ -269,6 +285,26 @@ test('BoxLite fsWrite creates file via base64 pipe (no heredoc)', async () => {
     assert.ok(shCall, 'should call sh');
     assert.ok(!shCall.args[1].includes('<<'), 'must not use heredoc');
     assert.ok(shCall.args[1].includes('base64 -d'), 'should use base64 pipe');
+});
+
+test('BoxLite fsWrite chowns parent directory to 1000:1000 as root after write', async () => {
+    const adapter = new BoxLiteFsAdapter();
+    const client = new MockBoxLiteClient();
+    adapter.client = client;
+    client.dirs.add('/workspace');
+    await adapter.fsWrite('/workspace', 'sub/new.js', 'const x = 1;', { runtimeRef: 'sess1' });
+    assert.strictEqual(client.files.get('/workspace/sub/new.js'), 'const x = 1;');
+    // 写入完成后，父目录 /workspace/sub 必须被 chown 到 1000:1000（以 uid=0 执行）
+    const chownCall = client.calls.find(c => c.command === 'chown');
+    assert.ok(chownCall, 'should call chown on parent directory');
+    assert.deepEqual(chownCall.args, ['1000:1000', '/workspace/sub']);
+    // chown 必须以 uid: 0, gid: 0 执行（root 才能跨 idmap 改 owner）
+    assert.strictEqual(chownCall.opts.uid, 0, 'chown must run as root (uid=0)');
+    assert.strictEqual(chownCall.opts.gid, 0, 'chown must run as root (gid=0)');
+    // chown 必须在写入之后执行
+    const writeIdx = client.calls.findIndex(c => c.command === 'sh' && c.args[1].includes('base64 -d'));
+    const chownIdx = client.calls.findIndex(c => c.command === 'chown');
+    assert.ok(writeIdx >= 0 && chownIdx >= 0 && chownIdx > writeIdx, 'chown must execute after write');
 });
 
 test('BoxLite fsDelete removes file via rm', async () => {
