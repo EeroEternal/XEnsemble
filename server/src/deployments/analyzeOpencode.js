@@ -1,6 +1,7 @@
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { detectBackendSignature } = require('./detectStack');
 
 function resolveOpencodeBin() {
     if (process.env.OPENCODE_BIN && fs.existsSync(process.env.OPENCODE_BIN)) return process.env.OPENCODE_BIN;
@@ -146,7 +147,15 @@ async function analyzeProjectWithOpencode(workspacePath, isAborted) {
         NO_COLOR: '1',
         TERM: 'dumb',
     };
-    const prompt = buildPrompt(workspacePath);
+    // 后端签名证据注入：确定性扫描的结果作为权威上下文喂给 LLM，
+    // 让它第一遍就把"启动后端"写进计划（否则 self-check 会拒掉重来，多花一轮）。
+    let prompt = buildPrompt(workspacePath);
+    try {
+        const backendSig = detectBackendSignature(workspacePath);
+        if (backendSig.hasBackend) {
+            prompt += `\n\nDETERMINISTIC BACKEND SCAN (authoritative — the platform self-check enforces this):\n${backendSig.evidence.map((e) => `- ${e}`).join('\n')}\n${backendSig.suggestCmd ? `Suggested backend start: \`${backendSig.suggestCmd}\`\n` : ''}Your plan MUST include a serve step starting this backend (start it in the background, then run the frontend in the foreground). A frontend-only plan or a static-serve plan (npx serve / python3 -m http.server) will be REJECTED and replaced by a heuristic plan.`;
+        }
+    } catch { /* 扫描失败不影响分析流程 */ }
     return new Promise((resolve) => {
         let stdout = '';
         let stderr = '';

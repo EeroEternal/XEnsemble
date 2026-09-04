@@ -34,15 +34,27 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
     // 长任务期间有心跳复报；无 substage 时保持步骤顺序推进。
     // 注意：verify agent 是迭代式工作（check 失败 → fix → 重新 build → 再 check），
     // 子阶段信号会来回跳。进度条必须"只进不退"——记录最远到达的步骤，新 substage 比它靠后才前进。
-    const SUBSTAGE_ORDER = ['prepare', 'build', 'serve', 'check', 'fix'];
-    const [furthestSubstep, setFurthestSubstep] = useState(null);
-    const advanceSubstep = (s) => {
-        setFurthestSubstep((prev) => {
-            const cur = prev ? SUBSTAGE_ORDER.indexOf(prev) : -1;
-            const next = SUBSTAGE_ORDER.indexOf(s);
-            return next > cur ? s : prev;
-        });
-    };
+    // 部署进度：7 步统一索引，任何事件只允许前进（含 analyze/preview 全序）。
+    // 之前只对 substage 做"只进不退"，仍有四处倒退：
+    // ① startRun 不重置上次的最远步骤（重试时先跳回旧步骤再卡住）；
+    // ② 迟到/重放的 stage A 事件把 currentStep 拉回 analyze；
+    // ③ 恢复轮询用 DB stage 反复 setPhase，可把已到 preview 的界面拉回 B；
+    // ④ 切走再切回 session 时组件重挂载，恢复播种只有 DB 的粗粒度阶段（B→build），
+    //    会把已到 fix 的进度拉回 build（长部署中途切 session 必现）。
+    // 统一为单调 furthestStep：事件只前进，startRun（新一次部署）时重置；
+    // 并持久化到 sessionStorage，重挂载恢复时取 max(存储值, DB 阶段播种)。
+    const STEP_ORDER = ['analyze', 'prepare', 'build', 'serve', 'check', 'fix', 'preview'];
+    const stepIndex = (id) => STEP_ORDER.indexOf(id);
+    const stepStoreKey = `xe_deploy_step_${projectId || 'p'}_${sessionId || 's'}`;
+    const [furthestStep, setFurthestStep] = useState(null);
+    const advanceTo = (id) => setFurthestStep((prev) => {
+        const ni = stepIndex(id);
+        if (ni < 0) return prev;
+        const pi = prev ? stepIndex(prev) : -1;
+        if (ni <= pi) return prev;
+        try { sessionStorage.setItem(stepStoreKey, id); } catch { /* ignore */ }
+        return id;
+    });
     const [runState, setRunState] = useState('idle');
     const [result, setResult] = useState(null);
     // 当前部署阶段：null（初始）| 'A'（分析）| 'B'（部署/验证）| 'preview'（开预览）
@@ -133,14 +145,13 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 }
                 if (evt.type === 'progress') {
                     if (evt.stage === 'A') {
-                        setPhase('A');
+                        advanceTo('analyze');
                     } else if (evt.stage === 'B') {
-                        setPhase('B'); // 阶段 1 结束 → 阶段 2，界面显示完成提示
                         // 后端透传子阶段（prepare/build/serve/check/fix），驱动更细的步骤高亮。
-                        // 只进不退：取最远到达的步骤，避免 agent 修复回跳导致进度倒退。
-                        if (evt.substage) advanceSubstep(evt.substage);
+                        // 单调前进：迟到/重放的事件不会把进度拉回去。
+                        advanceTo(evt.substage || 'prepare');
                     } else if (evt.stage === 'preview') {
-                        setPhase('preview');
+                        advanceTo('preview');
                     }
                 } else if (evt.type === 'result') {
                     finish(evt.result);
@@ -218,7 +229,15 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 const active = deployRows.find((d) => (d.status === 'building' || d.status === 'pending') && isFresh(d));
                 if (active) {
                     setRunState('running');
-                    setPhase(active.stage === 'B' ? 'B' : active.stage === 'preview' ? 'preview' : 'A');
+                    // 恢复时 DB 只有阶段（A/B/preview），没有子阶段；按阶段下限播种，
+                    // 再与 sessionStorage 里持久化的最远步骤取 max（同标签页切走再切回的场景），
+                    // advanceTo 单调，后续轮询不会把进度拉回。
+                    let seed = active.stage === 'B' ? 'build' : active.stage === 'preview' ? 'preview' : 'analyze';
+                    try {
+                        const stored = sessionStorage.getItem(stepStoreKey);
+                        if (stored && stepIndex(stored) > stepIndex(seed)) seed = stored;
+                    } catch { /* ignore */ }
+                    advanceTo(seed);
                     setRecoveredId(active.id);
                 } else if (deployRows.length > 0 && isFresh(deployRows[0])) {
                     const last = deployRows[0];
@@ -252,7 +271,7 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 const row = list.find((d) => d.kind === 'deploy' && d.id === recoveredId);
                 if (!row) return;
                 if (row.status === 'building' || row.status === 'pending') {
-                    setPhase(row.stage === 'B' ? 'B' : row.stage === 'preview' ? 'preview' : 'A');
+                    advanceTo(row.stage === 'B' ? 'build' : row.stage === 'preview' ? 'preview' : 'analyze');
                 } else if (row.status === 'running') {
                     // runStateRef 守卫：SSE result 已接管（success）时不重复触发
                     if (runStateRef.current === 'running') {
@@ -324,12 +343,7 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                     <div className="flex flex-col items-center justify-center gap-3 px-6 py-8">
                         <CreationProgress
                             steps={deploySteps}
-                            currentStep={
-                                phase === 'preview' ? 'preview'
-                                    : phase === 'B'
-                                        ? (furthestSubstep && SUBSTAGE_ORDER.includes(furthestSubstep) ? furthestSubstep : 'build')
-                                        : 'analyze'
-                            }
+                            currentStep={furthestStep || 'analyze'}
                         />
                     </div>
                 )}

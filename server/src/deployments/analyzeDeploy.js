@@ -2,7 +2,7 @@ const { getRuntime } = require('../runtime/registry');
 const { RuntimeError } = require('../runtime/interfaces');
 const { analyzeProjectWithOpencode } = require('./analyzeOpencode');
 const { detectRuntimeToolchain } = require('./runtimeToolchain');
-const { detectStack, stackToPreviewContract } = require('./detectStack');
+const { detectStack, stackToPreviewContract, detectBackendSignature } = require('./detectStack');
 
 const API_KEY = process.env.LLM_ANALYZE_API_KEY;
 // OpenAI 兼容端点：配置可能给 base URL（如 …/api/v1）或完整 chat/completions URL；
@@ -436,6 +436,37 @@ async function runSelfCheck({ steps, configFiles, runtimeRef, workspacePath, hos
         }
     }
 
+    // 后端签名一致性：确定性扫描发现后端证据，但计划没有任何 serve 步骤，
+    // 或所有 serve 步骤都是静态托管 —— 后端永远不会被启动，属于结构性错误
+    // （fatal → 调用方走 detectStack 兜底计划）。
+    // 注意：serve 步骤存在但"看起来只是前端 dev server"不作 fatal ——
+    // 根脚本（turbo dev / concurrently）可能同时启动前后端，误杀会破坏正常计划；
+    // 这种情况降级为 issue 反馈给 LLM 修正。
+    try {
+        const backendSig = detectBackendSignature(hostWorkspacePath || workspacePath);
+        if (backendSig.hasBackend) {
+            const serveSteps = steps.filter((s) => s.kind === 'serve');
+            const allStatic = serveSteps.length > 0 && serveSteps.every((s) => STATIC_SERVE_RE.test(s.command || ''));
+            const ev = backendSig.evidence.join('; ');
+            if (serveSteps.length === 0) {
+                fatal.push(`Deterministic scan found backend evidence (${ev}) but the plan has NO serve step at all — the backend would never start. The plan MUST include a serve step starting it${backendSig.suggestCmd ? ` (e.g. \`${backendSig.suggestCmd}\`)` : ''}.`);
+            } else if (allStatic) {
+                fatal.push(`Deterministic scan found backend evidence (${ev}) but every serve step is static-serve (npx serve / python3 -m http.server), which cannot run a backend. Replace with a real backend start command${backendSig.suggestCmd ? ` (e.g. \`${backendSig.suggestCmd}\`)` : ''}.`);
+            } else {
+                const backendServed = serveSteps.some((s) => {
+                    const cmd = String(s.command || '');
+                    return backendSig.evidence.some((e) => {
+                        const m = e.match(/in ([\w/.-]+)\/package\.json/);
+                        return m && cmd.includes(m[1].split('/').pop());
+                    }) || /gunicorn|uvicorn|manage\.py|go run|cargo run|nohup.*server|node .*server/i.test(cmd);
+                });
+                if (!backendServed) {
+                    issues.push(`Deterministic scan found backend evidence (${ev}). If your serve steps only start the frontend, the backend will never run — make sure a serve step starts it${backendSig.suggestCmd ? ` (e.g. \`${backendSig.suggestCmd}\`)` : ''}.`);
+                }
+            }
+        }
+    } catch { /* 签名扫描失败不阻塞 self-check */ }
+
     return { passed: issues.length === 0, issues, fatal };
 }
 
@@ -675,11 +706,20 @@ async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeR
         return { steps: normalizeSteps(fallbackSteps(fileContentsText)), configFiles: [], source: 'fallback', contextTree: treeText };
     }
 
+    // 后端签名证据：喂给 agent，让它第一遍就把后端启动写进计划（self-check 会强制校验）
+    let backendNote = '';
+    try {
+        const backendSig = detectBackendSignature(hostWorkspacePath || workspacePath);
+        if (backendSig.hasBackend) {
+            backendNote = `\n\nDETERMINISTIC BACKEND SCAN (authoritative — self-check enforces this):\n${backendSig.evidence.map((e) => `- ${e}`).join('\n')}\n${backendSig.suggestCmd ? `Suggested backend start: \`${backendSig.suggestCmd}\`\n` : ''}The plan MUST include a serve step starting this backend. A frontend-only or static-serve plan will be REJECTED.`;
+        }
+    } catch { /* ignore */ }
+
     const messages = [
         { role: 'system', content: AGENT_SYSTEM_PROMPT },
         {
             role: 'user',
-            content: `Project workspace: /workspace (project root). Here is a preliminary file tree and some key files to help you start. Use the tools to explore deeper and understand the project fully, then output the deploy plan.\n\nFile tree:\n${treeText.slice(0, 12000)}\n\nKey files:\n${fileContentsText.slice(0, 20000)}`,
+            content: `Project workspace: /workspace (project root). Here is a preliminary file tree and some key files to help you start. Use the tools to explore deeper and understand the project fully, then output the deploy plan.\n\nFile tree:\n${treeText.slice(0, 12000)}\n\nKey files:\n${fileContentsText.slice(0, 20000)}${backendNote}`,
         },
     ];
 
@@ -722,7 +762,7 @@ async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeR
             const result = parseResponse(JSON.stringify(parsed.result || {}));
             if (result && result.steps.length) {
                 lastResult = { steps: normalizeSteps(result.steps), configFiles: result.configFiles };
-                const check = await runSelfCheck({ ...lastResult, runtimeRef, workspacePath });
+                const check = await runSelfCheck({ ...lastResult, runtimeRef, workspacePath, hostWorkspacePath });
                 if (check.passed) {
                     return { ...lastResult, source: 'ai', checked: true };
                 }

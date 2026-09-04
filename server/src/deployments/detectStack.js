@@ -281,6 +281,22 @@ function detectMonorepo(dir) {
 
 function detectPythonStack(dir) {
     if (hasFile(dir, 'requirements.txt')) {
+        const reqs = String(readTextSafe(path.join(dir, 'requirements.txt')) || '');
+        // Django 有确定性的启动入口（manage.py runserver）；其余 Python 框架
+        // 入口模块不可猜测，保持静态兜底（阶段 A 的 LLM 计划才是主路径）。
+        if (hasFile(dir, 'manage.py') || /django/i.test(reqs)) {
+            return {
+                type: 'python',
+                defaultPort: 8000,
+                packageManager: 'pip',
+                installCmd: 'pip install -r requirements.txt',
+                buildCmd: null,
+                startCmd: 'python3 manage.py runserver 0.0.0.0:$PORT',
+                framework: 'django',
+                monorepoApps: null,
+                confidence: ['python', 'django'],
+            };
+        }
         return {
             type: 'python',
             defaultPort: resolvePort(dir, null, 'python'),
@@ -352,6 +368,111 @@ function detectStaticStack(dir) {
         monorepoApps: null,
         confidence: ['static'],
     };
+}
+
+// 后端签名确定性扫描：毫秒级、纯文件读取，为阶段 A 提供权威后端证据。
+// 目的：LLM 把带后端的项目误判成纯前端静态站时，self-check 能依据这里的证据拦截。
+const BACKEND_DIR_CANDIDATES = [
+    'server', 'api', 'backend', 'srv', 'apps/server', 'apps/api', 'apps/backend',
+    'packages/server', 'packages/api', 'packages/backend', 'src/server', 'src/api',
+];
+const NODE_BACKEND_DEPS = [
+    'express', 'fastify', 'koa', '@nestjs/core', 'hono', 'socket.io',
+    'apollo-server', 'apollo-server-express', '@apollo/server', 'restify', 'egg',
+];
+const PY_BACKEND_RE = /\b(django|flask|fastapi|uvicorn|gunicorn|tornado|starlette|litestar)\b/i;
+
+function readPkgBackendInfo(subDir, { rootMode = false } = {}) {
+    const pkg = readJsonSafe(path.join(subDir, 'package.json'));
+    if (!pkg) return null;
+    const allDeps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+    const backendDep = NODE_BACKEND_DEPS.find((d) => allDeps[d]);
+    const scripts = pkg.scripts || {};
+    const hasStart = Boolean(scripts.start || scripts.dev || scripts.serve);
+    const fw = detectNodeFramework(pkg);
+    const frontendOnly = Boolean(fw?.framework && ['vite', 'next', 'nuxt', 'sveltekit'].includes(fw.framework) && !backendDep);
+    // 根目录：仅有 start/dev 脚本不足以作为后端证据（纯前端项目同样有 dev 脚本），
+    // 必须命中后端依赖。后端命名的子目录（server/、api/...）：start 脚本即可作证据。
+    if (!backendDep) return null;
+    if (frontendOnly) return null;
+    const pm = detectPackageManager(subDir);
+    const scriptName = scripts.start ? 'start' : (scripts.dev ? 'dev' : null);
+    const cmd = scriptName ? `cd ${path.basename(subDir) || subDir} && ${pm} run ${scriptName}` : null;
+    return {
+        evidence: `${backendDep} in ${rootMode ? 'root' : `${path.basename(subDir) || subDir}/`}package.json`,
+        suggestCmd: cmd,
+    };
+}
+
+/**
+ * 确定性后端签名扫描（不调用 LLM）。扫描根目录与常见后端子目录：
+ * - Node 后端依赖（express/fastify/koa/nest/hono/socket.io/...）
+ * - 后端子目录自带 package.json（含 start/dev 且非纯前端框架）
+ * - Python：requirements.txt / pyproject.toml 含 django/flask/fastapi/uvicorn/gunicorn
+ * - go.mod、pom.xml、build.gradle（JVM/Go 项目默认含服务端）
+ * - manage.py（Django）
+ *
+ * @param {string} workspacePath - 宿主侧项目根目录
+ * @returns {{ hasBackend: boolean, evidence: string[], suggestCmd: string|null }}
+ */
+function detectBackendSignature(workspacePath) {
+    const evidence = [];
+    let suggestCmd = null;
+    if (!workspacePath) return { hasBackend: false, evidence, suggestCmd };
+    const dir = workspacePath;
+    try {
+        // 1) 根 package.json
+        const root = readPkgBackendInfo(dir);
+        if (root) {
+            evidence.push(root.evidence);
+            if (!suggestCmd) suggestCmd = root.suggestCmd;
+        }
+        // 2) 常见后端子目录
+        for (const sub of BACKEND_DIR_CANDIDATES) {
+            const subDir = path.join(dir, sub);
+            if (!fs.existsSync(subDir)) continue;
+            // python 后端子目录
+            if (hasFile(subDir, 'requirements.txt') || hasFile(subDir, 'pyproject.toml')) {
+                const reqs = String(readTextSafe(path.join(subDir, 'requirements.txt')) || '')
+                    + String(readTextSafe(path.join(subDir, 'pyproject.toml')) || '');
+                if (PY_BACKEND_RE.test(reqs)) {
+                    evidence.push(`python backend deps in ${sub}/`);
+                    if (!suggestCmd) suggestCmd = `cd ${sub} && python3 -m gunicorn --bind 0.0.0.0:$PORT app:app`;
+                }
+            }
+            const info = readPkgBackendInfo(subDir);
+            if (info) {
+                evidence.push(info.evidence);
+                if (!suggestCmd) suggestCmd = info.suggestCmd;
+            }
+        }
+        // 3) Python 根目录
+        const rootPy = String(readTextSafe(path.join(dir, 'requirements.txt')) || '')
+            + String(readTextSafe(path.join(dir, 'pyproject.toml')) || '');
+        if (rootPy && PY_BACKEND_RE.test(rootPy)) {
+            const fw = (PY_BACKEND_RE.exec(rootPy) || [])[1] || 'python';
+            evidence.push(`python backend framework: ${fw.toLowerCase()}`);
+            if (!suggestCmd && hasFile(dir, 'manage.py')) {
+                suggestCmd = 'python3 manage.py runserver 0.0.0.0:$PORT';
+            }
+        }
+        // 4) 其他语言（Go/JVM 默认视为含服务端）
+        if (hasFile(dir, 'go.mod')) {
+            evidence.push('go.mod (go service)');
+            if (!suggestCmd) suggestCmd = 'go run .';
+        }
+        if (hasFile(dir, 'pom.xml') || hasFile(dir, 'build.gradle') || hasFile(dir, 'build.gradle.kts')) {
+            evidence.push('JVM build file (maven/gradle service)');
+        }
+        // 5) Django 入口
+        if (hasFile(dir, 'manage.py')) {
+            evidence.push('manage.py (django)');
+            if (!suggestCmd) suggestCmd = 'python3 manage.py runserver 0.0.0.0:$PORT';
+        }
+    } catch {
+        // 扫描失败不阻塞：按无后端处理（保守，不产生 fatal）
+    }
+    return { hasBackend: evidence.length > 0, evidence, suggestCmd };
 }
 
 /**
@@ -459,6 +580,7 @@ const STACK_DEPS_RULES = {
 module.exports = {
     detectStack,
     stackToPreviewContract,
+    detectBackendSignature,
     // Internal helpers exposed for tests.
     _internal: {
         detectPackageManager,

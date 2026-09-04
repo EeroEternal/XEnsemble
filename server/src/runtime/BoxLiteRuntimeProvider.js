@@ -165,7 +165,7 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
      *
      * @returns {Promise<{probeOk: boolean, initError: Error|null}>}
      */
-    async _initFreshSessionExecs(name, { probeCmd, guestWorkspacePath, project, hostWorkspacePath, withBootstrap }) {
+    async _initFreshSessionExecs(name, { probeCmd, guestWorkspacePath, project, hostWorkspacePath, withBootstrap, skillDirs }) {
         let bootstrapError = null;
         const bootstrapPromise = withBootstrap
             ? (async () => {
@@ -195,6 +195,22 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
             ]);
         } catch (_) {
             // Best-effort: cache cleanup failure does not block the session.
+        }
+
+        // 技能卷符号链接：skills 已合并为单卷挂载在 /root/.xensemble-skills。
+        // 为每个 Agent 的原生技能路径（如 /root/.kimi/skills）建符号链接指向共享卷内对应目录，
+        // 让各 Agent 仍能从其标准 HOME 路径发现技能，且避免 13+ 独立卷打爆 libkrun IRQ。
+        // 串行 exec（与其它 init exec 一起），避免 guest zygote 竞争。
+        if (skillDirs && skillDirs.length) {
+            try {
+                const cmds = skillDirs.map((dir) => {
+                    const parent = dir.split('/')[0];
+                    return `mkdir -p /root/${parent}; ln -sfn /root/.xensemble-skills/${dir} /root/${dir};`;
+                }).join(' ');
+                await this.client.execForResult(name, 'sh', ['-c', cmds]);
+            } catch (_) {
+                // Best-effort: 符号链接失败不阻断（技能目录会因 mount 本身可访问而存在）
+            }
         }
 
         // Fix git worktree .git pointer for VM access: the worktree's .git file
@@ -390,7 +406,7 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
             // hit a freshly-booted VM concurrently. ensureAgentBootstrap is
             // host-side FS only and is overlapped inside _initFreshSessionExecs.
             const { probeOk, initError } = await this._initFreshSessionExecs(
-                name, { probeCmd, guestWorkspacePath, project, hostWorkspacePath, withBootstrap },
+                name, { probeCmd, guestWorkspacePath, project, hostWorkspacePath, withBootstrap, skillDirs: (workspaceVolume.skillsVolumes || []).length ? workspaceVolume.skillDirs : undefined },
             );
 
             if (probeCmd && !probeOk) {

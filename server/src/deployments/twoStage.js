@@ -722,6 +722,7 @@ async function detectDepsCached(runtimeRef, workspacePath, stack) {
     }
 }
 
+
 // 从阶段 A 产出的 configFiles（.env 模板）里解析 PostgreSQL 连接信息，供系统侧直接建库建用户，
 // 避免 verify agent 用 su/runuser/sudo 变体反复试错（历史 3 轮≈60s 的浪费点）。
 // 只接受安全字符（user/db 为字母数字下划线），host 一律由 agent 强制 127.0.0.1。
@@ -1050,6 +1051,20 @@ async function ensureXensembleBackend({ runtimeRef, workspacePath, preferredPort
         await runtime.exec.exec('sh', ['-c', 'cd server && npm run db:migrate'], spawnEnv, { runtimeRef, cwd: workspacePath, timeoutMs: 240000 });
     } catch (e) {
         if (onLog) onLog(`nested db:migrate failed (continuing): ${e.message}`);
+    }
+    // 确保 server/ 依赖就绪：verify agent 常只装根目录依赖并静态 serve web/dist，从不安装
+    // server/ 子包依赖，导致 node src/server.js 因缺 fastify 等模块无法启动 → 回退静态 →
+    // /api 返回 404 HTML（登录界面 "Unexpected token '<' ... is not valid JSON"）。
+    // 这里兜底装一次（幂等；失败不阻断，让下方 spawn 自己抛更真实的错误）。
+    try {
+        const nm = await runtime.exec.exec('sh', ['-c', 'test -d server/node_modules && echo YES || echo NO'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+        const hasServerDeps = String(nm.stdout || '').trim() === 'YES';
+        if (!hasServerDeps) {
+            if (onLog) onLog('server/ deps missing, installing before spawning nested backend');
+            await runtime.exec.exec('sh', ['-c', 'cd server && npm ci --no-audit --no-fund > /tmp/server-deps.log 2>&1; echo EXIT=$?; tail -3 /tmp/server-deps.log'], spawnEnv, { runtimeRef, cwd: workspacePath, timeoutMs: 600000 });
+        }
+    } catch (e) {
+        if (onLog) onLog(`nested server deps install failed (continuing): ${e.message}`);
     }
     try {
         await runtime.exec.spawn('node', ['src/server.js'], spawnEnv, { runtimeRef, cwd: `${workspacePath}/server` });
