@@ -155,9 +155,9 @@ describe('GitOperationService (mock exec)', () => {
         assert.ok(fetchCall.env.GIT_ASKPASS, 'fetch should receive credential env');
         assert.strictEqual(fetchCall.env.GIT_ASKPASS_TOKEN, 'mock_token');
 
-        const checkoutCall = findCall(exec.calls, 'checkout', '-b', 'main');
+        const checkoutCall = findCall(exec.calls, 'checkout', '-f', '-b', 'main');
         assert.ok(checkoutCall);
-        assert.strictEqual(checkoutCall.args[3], 'origin/main');
+        assert.strictEqual(checkoutCall.args[4], 'origin/main');
     });
 
     it('cloneRepo updates existing remote origin', async () => {
@@ -244,7 +244,7 @@ describe('GitOperationService (mock exec)', () => {
         const responses = new Map([
             [JSON.stringify(['rev-parse', '--abbrev-ref', 'HEAD']), 'dev\n'],
             [JSON.stringify(['rev-parse', 'HEAD']), 'status-sha\n'],
-            [JSON.stringify(['status', '--porcelain=v1', '-uall']), 'M  staged.txt\n?? untracked.txt\n'],
+            [JSON.stringify(['--no-optional-locks', 'status', '--porcelain=v1', '-unormal']), 'M  staged.txt\n?? untracked.txt\n'],
             [JSON.stringify(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']), '2\t3\n'],
         ]);
         const exec = makeMockExec((args) => responses.get(JSON.stringify(args)) ?? '');
@@ -261,6 +261,7 @@ describe('GitOperationService (mock exec)', () => {
             merging: false,
             ahead: 2,
             behind: 3,
+            truncated: false,
             files: [
                 { path: 'staged.txt', status: 'M ', type: 'staged' },
                 { path: 'untracked.txt', status: '??', type: 'untracked' },
@@ -279,7 +280,7 @@ describe('GitOperationService (mock exec)', () => {
         const responses = new Map([
             [JSON.stringify(['rev-parse', '--abbrev-ref', 'HEAD']), 'main\n'],
             [JSON.stringify(['rev-parse', 'HEAD']), 'sha\n'],
-            [JSON.stringify(['status', '--porcelain=v1', '-uall']), '?? nested-repo/\n'],
+            [JSON.stringify(['--no-optional-locks', 'status', '--porcelain=v1', '-unormal']), '?? nested-repo/\n'],
             [JSON.stringify(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']), '0\t0\n'],
         ]);
         const exec = makeMockExec((args) => responses.get(JSON.stringify(args)) ?? '');
@@ -299,7 +300,7 @@ describe('GitOperationService (mock exec)', () => {
         const responses = new Map([
             [JSON.stringify(['rev-parse', '--abbrev-ref', 'HEAD']), 'HEAD\n'],
             [JSON.stringify(['rev-parse', 'HEAD']), 'detached-sha\n'],
-            [JSON.stringify(['status', '--porcelain=v1', '-uall']), ''],
+            [JSON.stringify(['--no-optional-locks', 'status', '--porcelain=v1', '-unormal']), ''],
             [JSON.stringify(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']), '7\t0\n'],
             [JSON.stringify(['rev-list', '--left-right', '--count', 'HEAD...origin/main']), '0\t0\n'],
         ]);
@@ -318,7 +319,7 @@ describe('GitOperationService (mock exec)', () => {
         // and "0 unpushed" (the old --not --remotes behavior).
         const responses = new Map([
             [JSON.stringify(['rev-parse', '--abbrev-ref', 'HEAD']), 'agentharness/session-abc1\n'],
-            [JSON.stringify(['status', '--porcelain=v1', '-uall']), ''],
+            [JSON.stringify(['--no-optional-locks', 'status', '--porcelain=v1', '-unormal']), ''],
             [JSON.stringify(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']), '17\t0\n'],
             [JSON.stringify(['rev-list', '--left-right', '--count', 'HEAD...origin/agentharness/session-abc1']), '17\t0\n'],
             [JSON.stringify(['rev-list', '--count', 'HEAD', '--not', '--remotes']), '0\n'],
@@ -330,6 +331,65 @@ describe('GitOperationService (mock exec)', () => {
         assert.strictEqual(status.branch, 'agentharness/session-abc1');
         assert.strictEqual(status.ahead, 17, 'light must agree with full status basis');
         assert.strictEqual(status.behind, 0);
+    });
+
+    it('getStatusLight collapses large untracked directories with a file count', async () => {
+        // node_modules 这类上万文件的 untracked 目录必须保持折叠（一行）并
+        // 统计文件数下发，否则 status 响应和前端渲染都会被拖垮。
+        const responses = new Map([
+            [JSON.stringify(['rev-parse', '--abbrev-ref', 'HEAD']), 'main\n'],
+            [JSON.stringify(['--no-optional-locks', 'status', '--porcelain=v1', '-unormal']), '?? node_modules/\n?? src/app.js\n'],
+            [JSON.stringify(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']), '0\t0\n'],
+        ]);
+        const exec = makeMockExec((args) => {
+            // sh -c 调用：args = ['-c', script, 'sh', dir]
+            if (args[0] === '-c') {
+                if (args[3] === 'node_modules' && args[1].includes('head -n 51')) {
+                    return Array.from({ length: 51 }, (_, i) => `node_modules/pkg_${i}/index.js`).join('\n') + '\n';
+                }
+                if (args[3] === 'node_modules' && args[1].includes('wc -l')) {
+                    return '30000\n';
+                }
+                return '';
+            }
+            return responses.get(JSON.stringify(args)) ?? '';
+        });
+        const service = createService(exec);
+
+        const status = await service.getStatusLight({ id: 'p1', userId: 'u1' });
+        const dirEntry = status.files.find((f) => f.path === 'node_modules/');
+        assert.ok(dirEntry, 'large untracked dir should stay collapsed');
+        assert.strictEqual(dirEntry.type, 'untracked-dir');
+        assert.strictEqual(dirEntry.count, 30000);
+        assert.strictEqual(dirEntry.status, '??');
+        assert.strictEqual(status.files.find((f) => f.path === 'src/app.js').type, 'untracked');
+        assert.strictEqual(status.dirty, true);
+        assert.strictEqual(status.truncated, false);
+    });
+
+    it('getStatusLight marks truncated and stops expanding beyond the entry cap', async () => {
+        // 11 个 50 文件的目录：前 10 个展开（10×50=500 达到上限），第 11 个保持折叠
+        const dirNames = Array.from({ length: 11 }, (_, i) => `gen_${i}`);
+        const statusLines = dirNames.map((d) => `?? ${d}/`).join('\n');
+        const exec = makeMockExec((args) => {
+            if (args[0] === '-c') {
+                if (args[3] && args[3].startsWith('gen_') && args[1].includes('head -n 51')) {
+                    return Array.from({ length: 50 }, (_, i) => `${args[3]}/f${i}.txt`).join('\n') + '\n';
+                }
+                return '';
+            }
+            if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'main\n';
+            if (args[0] === '--no-optional-locks' && args[1] === 'status') return statusLines;
+            return '';
+        });
+        const service = createService(exec);
+
+        const status = await service.getStatusLight({ id: 'p1', userId: 'u1' });
+        assert.strictEqual(status.truncated, true);
+        assert.strictEqual(status.files.filter((f) => f.type === 'untracked').length, 500);
+        const collapsed = status.files.find((f) => f.path === 'gen_10/');
+        assert.ok(collapsed, 'the 11th directory must stay collapsed');
+        assert.strictEqual(collapsed.type, 'untracked-dir');
     });
 
     it('commitAll stages and commits', async () => {
@@ -482,7 +542,7 @@ describe('GitOperationService (mock exec)', () => {
         const responses = new Map([
             [JSON.stringify(['rev-parse', '--abbrev-ref', 'HEAD']), 'main\n'],
             [JSON.stringify(['rev-parse', 'HEAD']), 'sha\n'],
-            [JSON.stringify(['status', '--porcelain=v1', '-uall']), ' M modified.txt\n'],
+            [JSON.stringify(['--no-optional-locks', 'status', '--porcelain=v1', '-unormal']), ' M modified.txt\n'],
             [JSON.stringify(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']), '0\t0\n'],
         ]);
         const exec = makeMockExec((args) => responses.get(JSON.stringify(args)) ?? '');

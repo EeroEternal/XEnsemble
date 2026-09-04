@@ -8,6 +8,7 @@ const { assertRepoRelativePath, assertGitRef, assertGitBranch } = require('../gi
 const { withProjectGitLock } = require('../git/gitMutationLock');
 const { limitDiffText, limitFileSide } = require('../git/diffUtils');
 const { hostGit, usesHostWorkspace } = require('../git/hostGit');
+const { DEPENDENCY_EXCLUDE_SCRIPT } = require('../git/dependencyExclude');
 
 class GitError extends Error {
     constructor(message, code) {
@@ -22,6 +23,13 @@ const REMOTE_GIT_COMMANDS = new Set(['fetch', 'push', 'pull', 'ls-remote', 'clon
 const aheadBehindCache = new Map();
 const AHEAD_BEHIND_TTL_MS = 60_000;
 const CONFLICT_STATUSES = new Set(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU']);
+
+// untracked 目录展开策略：文件数 ≤ 此值才展开为逐文件条目；超过则保持折叠
+// （`?? dir/` 一行）并统计文件数随条目下发，避免 node_modules 这类上万文件
+// 的目录把 status 响应和前端渲染拖垮。
+const DIR_EXPAND_FILE_LIMIT = 50;
+// 展开后条目总量软上限：达到后剩余 untracked 目录一律保持折叠并标记 truncated。
+const MAX_EXPANDED_ENTRIES = 500;
 
 async function defaultGetToken(project) {
     const provider = project.repoProvider;
@@ -236,8 +244,33 @@ class GitOperationService {
         await this._execGit(project, ['config', 'user.email', 'xensemble@local']);
         await this._execGit(project, ['config', 'user.name', 'XEnsemble']);
 
+        // 依赖/构建产物写入 .git/info/exclude（幂等，非致命）：node_modules 等
+        // 装进项目目录后不再污染 git 变更面板。best-effort，失败不影响 clone。
+        await this.ensureDependencyExclude(project);
+
         const sha = await this._revParse(project, 'HEAD');
         return { sha, branch: localBranch };
+    }
+
+    /**
+     * 幂等确保 workspace 的 `.git/info/exclude` 覆盖依赖/构建产物目录
+     * （node_modules、dist、__pycache__ 等，见 dependencyExclude.js）。
+     * 写在 .git/ 内部：不碰用户工作区文件、不产生 git 变更、不会被提交。
+     * 任何失败都只告警，不影响调用方主流程。
+     */
+    async ensureDependencyExclude(project) {
+        try {
+            const ready = await this.ensureProjectRuntime(project);
+            const runtimeRef = ready.runtime ? ready.runtime.runtimeRef : undefined;
+            const exec = this._execFn();
+            const result = await exec('sh', ['-c', DEPENDENCY_EXCLUDE_SCRIPT], {}, {
+                cwd: ready.workspacePath, runtimeRef, timeoutMs: 15_000,
+            });
+            return String(result?.stdout || '').includes('EXCLUDE_OK');
+        } catch (err) {
+            console.warn('[GitOperationService] ensureDependencyExclude failed (non-fatal):', err.message);
+            return false;
+        }
     }
 
     async createBranch(project, branchName, baseBranch) {
@@ -303,24 +336,59 @@ class GitOperationService {
             .filter(Boolean);
     }
 
+    /**
+     * 展开 status 输出中的 untracked 目录条目（`?? dir/`）。
+     *
+     * 策略（配合 status -unormal 使用）：
+     * - 文件数 ≤ DIR_EXPAND_FILE_LIMIT 的小目录 → 展开为逐文件 `?? path`；
+     * - 大目录（如 node_modules）→ 保持折叠一行，统计文件数放入 dirCounts，
+     *   由调用方作为 entry.count 下发，前端显示"目录（N 个文件）"；
+     * - 展开条目达到 MAX_EXPANDED_ENTRIES 后停止继续展开，置 truncated=true；
+     * - find 失败/为空（嵌套 git 仓库等）→ 保留原条目并去掉尾斜杠（旧行为）。
+     *
+     * 返回 { lines, dirCounts, truncated }。
+     */
     async _expandDirEntries(project, lines) {
         const expanded = [];
+        const dirCounts = new Map();
+        let truncated = false;
         for (const line of lines) {
             if (line.length < 3) { expanded.push(line); continue; }
             const filePath = line.slice(3).trim();
-            if (!filePath.endsWith('/')) { expanded.push(line); continue; }
+            if (!filePath.endsWith('/') || line[0] !== '?' || line[1] !== '?') {
+                expanded.push(line);
+                continue;
+            }
+            if (truncated || expanded.length >= MAX_EXPANDED_ENTRIES) {
+                truncated = true;
+                expanded.push(line);
+                continue;
+            }
             const dir = filePath.replace(/\/$/, '');
             try {
                 const ready = await this.ensureProjectRuntime(project);
                 const runtimeRef = ready.runtime ? ready.runtime.runtimeRef : undefined;
                 const exec = this._execFn();
-                const result = await exec('find', [dir, '-type', 'f', '-not', '-path', '*/.git/*'], {}, {
-                    cwd: ready.workspacePath, runtimeRef, timeoutMs: 10_000,
-                });
-                if (result.exitCode === 0 && result.stdout.trim()) {
-                    for (const f of result.stdout.split('\n').filter(Boolean)) {
+                // head -n (LIMIT+1)：输出有界，51 行即代表 >50 个文件
+                const result = await exec('sh', ['-c',
+                    'find "$1" -type f -not -path "*/.git/*" 2>/dev/null | head -n 51',
+                    'sh', dir], {}, { cwd: ready.workspacePath, runtimeRef, timeoutMs: 10_000 });
+                const fileList = String(result.stdout || '').split('\n').filter(Boolean);
+                if (result.exitCode === 0 && fileList.length > 0 && fileList.length <= DIR_EXPAND_FILE_LIMIT) {
+                    for (const f of fileList) {
                         expanded.push(`?? ${f}`);
                     }
+                } else if (fileList.length > DIR_EXPAND_FILE_LIMIT) {
+                    let count = null;
+                    try {
+                        const c = await exec('sh', ['-c',
+                            'find "$1" -type f -not -path "*/.git/*" 2>/dev/null | wc -l',
+                            'sh', dir], {}, { cwd: ready.workspacePath, runtimeRef, timeoutMs: 10_000 });
+                        const n = parseInt(String(c.stdout || '').trim(), 10);
+                        if (Number.isFinite(n)) count = n;
+                    } catch { /* count unavailable */ }
+                    dirCounts.set(filePath, count);
+                    expanded.push(line);
                 } else {
                     expanded.push(line.replace(/\/$/, ''));
                 }
@@ -328,7 +396,7 @@ class GitOperationService {
                 expanded.push(line.replace(/\/$/, ''));
             }
         }
-        return expanded;
+        return { lines: expanded, dirCounts, truncated };
     }
 
     async getStatusLight(project) {
@@ -336,9 +404,15 @@ class GitOperationService {
     }
 
     async _getStatusLight(project) {
-        const statusOut = await this._execGit(project, ['--no-optional-locks', 'status', '--porcelain=v1', '-uall']).catch(() => ({ stdout: '' }));
+        // -unormal：untracked 目录折叠为 `?? dir/` 一行，由 _expandDirEntries
+        // 按小目录展开 / 大目录折叠带计数处理。原 -uall 会把 node_modules 等
+        // 目录里上万个文件逐行列出，是变更面板卡死的根源。
+        const statusOut = await this._execGit(project, ['--no-optional-locks', 'status', '--porcelain=v1', '-unormal']).catch(() => ({ stdout: '' }));
         let lines = statusOut.stdout.split('\n').filter(Boolean);
-        lines = await this._expandDirEntries(project, lines);
+        const expanded = await this._expandDirEntries(project, lines);
+        lines = expanded.lines;
+        const dirCounts = expanded.dirCounts;
+        const truncated = expanded.truncated;
         const files = [];
         let dirty = false;
         const stagedFiles = [];
@@ -351,7 +425,13 @@ class GitOperationService {
             const entry = { path: filePath, status: x + y };
             if (x === '?' && y === '?') {
                 dirty = true;
-                entry.type = 'untracked';
+                if (filePath.endsWith('/')) {
+                    // 保持折叠的大目录：带文件数下发，前端渲染为目录行
+                    entry.type = 'untracked-dir';
+                    entry.count = dirCounts.get(filePath) ?? null;
+                } else {
+                    entry.type = 'untracked';
+                }
             } else {
                 if (x !== ' ') dirty = true;
                 if (y !== ' ') dirty = true;
@@ -374,7 +454,7 @@ class GitOperationService {
 
         const divergence = await this._resolveAheadBehind(project, branch);
 
-        return { files, stagedFiles, unstagedFiles, dirty, branch, ...divergence };
+        return { files, stagedFiles, unstagedFiles, dirty, branch, truncated, ...divergence };
     }
 
     /**
@@ -421,7 +501,7 @@ class GitOperationService {
                 console.warn('[GitOperationService] getStatus rev-parse HEAD failed:', err.message);
                 return { stdout: '' };
             }),
-            this._execGit(project, ['--no-optional-locks', 'status', '--porcelain=v1', '-uall']).catch((err) => {
+            this._execGit(project, ['--no-optional-locks', 'status', '--porcelain=v1', '-unormal']).catch((err) => {
                 console.warn('[GitOperationService] getStatus status failed:', err.message);
                 return { stdout: '' };
             }),
@@ -434,7 +514,10 @@ class GitOperationService {
         const sha = shaOut.stdout.trim() || null;
 
         let lines = statusOut.stdout.split('\n').filter(Boolean);
-        lines = await this._expandDirEntries(project, lines);
+        const expanded = await this._expandDirEntries(project, lines);
+        lines = expanded.lines;
+        const dirCounts = expanded.dirCounts;
+        const truncated = expanded.truncated;
 
         // check-ignore 只对 untracked 文件有意义（已跟踪文件不受 .gitignore 影响）
         const untrackedPaths = lines
@@ -484,7 +567,13 @@ class GitOperationService {
             } else if (x === '?' && y === '?') {
                 untracked = true;
                 dirty = true;
-                entry.type = 'untracked';
+                if (filePath.endsWith('/')) {
+                    // 保持折叠的大目录：带文件数下发，前端渲染为目录行
+                    entry.type = 'untracked-dir';
+                    entry.count = dirCounts.get(filePath) ?? null;
+                } else {
+                    entry.type = 'untracked';
+                }
             } else {
                 if (x !== ' ') {
                     staged = true;
@@ -512,7 +601,7 @@ class GitOperationService {
             }
         }
 
-        return { branch, sha, dirty, staged, unstaged, untracked, merging, ahead, behind, files, stagedFiles, unstagedFiles, conflicts };
+        return { branch, sha, dirty, staged, unstaged, untracked, merging, ahead, behind, truncated, files, stagedFiles, unstagedFiles, conflicts };
     }
 
     async commitAll(project, message) {

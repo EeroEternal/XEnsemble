@@ -352,6 +352,8 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     }
   }, [expandedFiles, fileDiffs, projectId, normalizeDiffEntry]);
 
+  const isDirEntry = (f) => f?.type === 'untracked-dir' || (typeof f?.path === 'string' && f.path.endsWith('/'));
+
   const allFiles = useMemo(() => {
     const map = new Map();
     for (const f of [...gitStagedFiles, ...gitUnstagedFiles]) {
@@ -359,16 +361,18 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     }
     return [...map.values()];
   }, [gitStagedFiles, gitUnstagedFiles]);
-  const allExpanded = allFiles.length > 0 && allFiles.every((f) => expandedFiles.has(f.path));
+  // 目录条目（如折叠的 node_modules）没有 diff，不参与逐文件展开
+  const expandableFiles = useMemo(() => allFiles.filter((f) => !isDirEntry(f)), [allFiles]);
+  const allExpanded = expandableFiles.length > 0 && expandableFiles.every((f) => expandedFiles.has(f.path));
 
   const toggleExpandAll = useCallback(async () => {
     if (allExpanded) {
       setExpandedFiles(new Set());
       return;
     }
-    const newExpanded = new Set(allFiles.map((f) => f.path));
+    const newExpanded = new Set(expandableFiles.map((f) => f.path));
     setExpandedFiles(newExpanded);
-    const toFetch = allFiles.filter((f) => !fileDiffs[f.path]).map((f) => f.path);
+    const toFetch = expandableFiles.filter((f) => !fileDiffs[f.path]).map((f) => f.path);
     if (toFetch.length === 0) return;
     setLoadingDiff('batch');
     try {
@@ -385,13 +389,16 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     } finally {
       setLoadingDiff(null);
     }
-  }, [allExpanded, allFiles, fileDiffs, projectId, normalizeDiffEntry]);
+  }, [allExpanded, expandableFiles, fileDiffs, projectId, normalizeDiffEntry]);
 
   // Build a directory tree from the deduped changed files.
   const changesTree = useMemo(() => {
     const root = { dirs: {}, files: [] };
     for (const f of allFiles) {
-      const parts = f.path.split('/');
+      // 目录条目（node_modules/ 等）：尾斜杠剥离后整体作为一个"文件节点"
+      // 渲染为目录行，不能再按 / 切分建目录树，否则会展开出上万子节点
+      const p = isDirEntry(f) ? f.path.replace(/\/$/, '') : f.path;
+      const parts = p.split('/');
       let node = root;
       for (let i = 0; i < parts.length - 1; i++) {
         const part = parts[i];
@@ -413,6 +420,29 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   }, []);
 
   const renderFileRow = (f, depth) => {
+    // 折叠的 untracked 大目录（服务端下发 type=untracked-dir + count）：
+    // 渲染为目录行 + 文件数徽标，无 diff/展开/丢弃操作
+    if (isDirEntry(f)) {
+      const dirName = f.path.replace(/\/$/, '');
+      return (
+        <div key={f.path}>
+          <div className="flex items-center group hover:bg-zinc-50" style={{ paddingLeft: depth * 12 }}>
+            <span className="shrink-0 p-0.5 w-4" aria-hidden="true" />
+            <div className="flex items-center gap-2 flex-1 min-w-0 px-1.5 py-1.5" title={f.path}>
+              <span className="w-3.5 text-center font-mono text-[11px] font-semibold text-emerald-600 shrink-0" title={t('git:status.untracked')}>U</span>
+              <Folder className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+              <span className="truncate text-zinc-900 text-xs">{dirName.split('/').pop()}/</span>
+              <span className="truncate text-zinc-400 text-[10px]">{dirName.includes('/') ? dirName.slice(0, dirName.lastIndexOf('/')) : ''}</span>
+              {f.count != null && (
+                <span className="shrink-0 px-1.5 py-0.5 rounded-full bg-zinc-100 border border-zinc-200 text-[10px] text-zinc-500" data-testid="untracked-dir-count">
+                  {t('workspace:label.untracked_dir_files', { count: f.count })}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
     const label = GIT_STATUS_LABELS[f.status] || f.status;
     const colorCls = GIT_STATUS_COLORS[f.status] || 'text-zinc-400';
     const desc = getGitStatusDesc(f.status, t);
@@ -638,6 +668,11 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               </div>
             ) : (
               <div className="flex flex-col">
+                {gitChanges?.truncated && (
+                  <div className="px-2 py-1 text-[10px] text-amber-700 bg-amber-50 border-b border-amber-200" data-testid="git-changes-truncated">
+                    {t('workspace:label.changes_truncated')}
+                  </div>
+                )}
                 {renderNodes(changesTree, 0, '')}
               </div>
             )}

@@ -67,7 +67,9 @@
     "unpushed_title": "{{count}} 个提交未推送",
     "binary_file": "二进制文件，无法显示文本差异",
     "content_truncated": "内容过大，已截断",
-    "no_author": "未设置作者信息"
+    "no_author": "未设置作者信息",
+    "untracked_dir_files_other": "{{count}} 个文件",
+    "changes_truncated": "变更过多，仅显示部分变更；其余目录已折叠"
   },
   "dialog": {
     "stage_commit_title": "暂存并提交更改",
