@@ -1,7 +1,6 @@
 const { FsAdapter, RuntimeError } = require('./interfaces');
 const BoxLiteClient = require('./BoxLiteClient');
 const { isHiddenWorkspacePath } = require('../workspace/hiddenPaths');
-const { applyUidToExec } = require('./boxliteExecUid');
 
 // 递归列举时剪枝的重目录（find 用 -name 匹配 basename，任何层级都生效）：
 // 保留目录条目本身（供文件浏览器展示），但不递归进入其内容。
@@ -33,27 +32,6 @@ class BoxLiteFsAdapter extends FsAdapter {
         this.client = new BoxLiteClient();
     }
 
-    /**
-     * 沙箱内 exec 统一过 uid 注入（与 BoxLiteExecAdapter.exec 同一策略）：
-     * workspace 路径默认 uid 1000，让 1000 拥有它创建的所有文件，避开
-     * virtiofs idmap 下"root 写的源码 vs 1000 写的产物"分裂。系统级操作
-     * 显式 uid: 0 跳过注入（boxlite 默认 exec 用户即 root）。
-     */
-    async _exec(name, command, args, opts = {}) {
-        const { command: finalCmd, args: finalArgs } = applyUidToExec(
-            { command, args },
-            { uid: opts.uid, gid: opts.gid },
-        );
-        return this.client.execForResult(
-            name,
-            finalCmd,
-            finalArgs,
-            opts.env || {},
-            opts.cwd || '/workspace',
-            { uid: opts.uid, gid: opts.gid, maxBuffer: opts.maxBuffer, timeoutMs: opts.timeoutMs },
-        );
-    }
-
     async fsList(rootDir, relativePath = '.', opts = {}) {
         const name = opts.runtimeRef;
         if (!name) return [];
@@ -65,7 +43,7 @@ class BoxLiteFsAdapter extends FsAdapter {
         try {
             const pruneExpr = buildFindPruneExpr(SKIP_WALK_DIR_NAMES);
             const cmd = `cd ${JSON.stringify(cwd)} && find ${JSON.stringify(rel)} -maxdepth ${maxdepth} ${pruneExpr} 2>/dev/null | head -${limit + 50}`;
-            const r = await this._exec(name, 'sh', ['-c', cmd], { cwd });
+            const r = await this.client.execForResult(name, 'sh', ['-c', cmd], {}, cwd);
             const out = (r.stdout || '').trim();
             if (!out) return [];
             const res = [];
@@ -107,7 +85,7 @@ class BoxLiteFsAdapter extends FsAdapter {
         try {
             const target = rel.startsWith('/') ? rel : (cwd.replace(/\/$/, '') + '/' + rel);
             const command = encoding === 'buffer' ? 'base64' : 'cat';
-            const r = await this._exec(name, command, [target], { cwd });
+            const r = await this.client.execForResult(name, command, [target], {}, cwd);
             if (r.exitCode !== 0) throw new RuntimeError('read failed', 404);
             return r.stdout || '';
         } catch (e) {
@@ -121,7 +99,7 @@ class BoxLiteFsAdapter extends FsAdapter {
         const target = this.boxTarget(rootDir, relativePath);
         const cwd = '/workspace';
         try {
-            const r = await this._exec(name, 'stat', ['-c', '%F %s %Y', target], { cwd });
+            const r = await this.client.execForResult(name, 'stat', ['-c', '%F %s %Y', target], {}, cwd);
             if (r.exitCode !== 0) throw new RuntimeError('File not found', 404);
             const parts = r.stdout.trim().split(/\s+/);
             const type = parts[0] === 'directory' ? 'directory' : 'file';
@@ -160,7 +138,7 @@ class BoxLiteFsAdapter extends FsAdapter {
         const target = this.boxTarget(rootDir, relativePath);
         const cwd = '/workspace';
         try {
-            const r = await this._exec(name, 'test', ['-e', target], { cwd });
+            const r = await this.client.execForResult(name, 'test', ['-e', target], {}, cwd);
             return r.exitCode === 0;
         } catch (_) {
             return false;
@@ -174,7 +152,7 @@ class BoxLiteFsAdapter extends FsAdapter {
         }
         const target = this.boxTarget(rootDir, relativePath);
         const cwd = '/workspace';
-        const r = await this._exec(name, 'mkdir', ['-p', target], { cwd });
+        const r = await this.client.execForResult(name, 'mkdir', ['-p', target], {}, cwd);
         if (r.exitCode !== 0) {
             throw new RuntimeError('mkdir failed', 500);
         }
@@ -195,14 +173,8 @@ class BoxLiteFsAdapter extends FsAdapter {
         // 用户输入不经 shell 解析。base64 字符串只含 A-Za-z0-9+/=，无 shell 元字符。
         const b64 = Buffer.from(content).toString('base64');
         const script = 'mkdir -p "$3" && printf \'%s\' "$1" | base64 -d > "$2"';
-        // 写入默认以 uid 1000 执行（与 BoxLiteExecAdapter.exec 一致），让产物归 1000。
-        // 写完后再用 root 把 parentDir chown 到 1000:1000——跨身份写场景下（旧的 root-owned
-        // 父目录）1000 写不进，chown 兜底；幂等且廉价。
-        const writeR = await this._exec(name, 'sh', ['-c', script, 'sh', b64, target, parentDir], { cwd });
-        if (writeR.exitCode !== 0) throw new RuntimeError('write failed', 500);
-        if (parentDir && parentDir !== '/') {
-            await this._exec(name, 'chown', ['1000:1000', parentDir], { cwd, uid: 0, gid: 0 }).catch(() => { /* best-effort */ });
-        }
+        const r = await this.client.execForResult(name, 'sh', ['-c', script, 'sh', b64, target, parentDir], {}, cwd);
+        if (r.exitCode !== 0) throw new RuntimeError('write failed', 500);
         const size = Buffer.byteLength(content);
         return { path: relativePath.replace(/\\/g, '/'), size };
     }
@@ -213,9 +185,9 @@ class BoxLiteFsAdapter extends FsAdapter {
         const rel = safeRel(relativePath);
         const cwd = '/workspace';
         const target = rel.startsWith('/') ? rel : (cwd.replace(/\/$/, '') + '/' + rel);
-        const testR = await this._exec(name, 'test', ['-d', target], { cwd });
+        const testR = await this.client.execForResult(name, 'test', ['-d', target], {}, cwd);
         if (testR.exitCode === 0) throw new RuntimeError('Cannot delete directory via file endpoint', 400);
-        const r = await this._exec(name, 'rm', [target], { cwd });
+        const r = await this.client.execForResult(name, 'rm', [target], {}, cwd);
         if (r.exitCode !== 0) throw new RuntimeError('File not found', 404);
     }
 
@@ -227,9 +199,9 @@ class BoxLiteFsAdapter extends FsAdapter {
         const cwd = '/workspace';
         const fromTarget = from.startsWith('/') ? from : (cwd.replace(/\/$/, '') + '/' + from);
         const toTarget = to.startsWith('/') ? to : (cwd.replace(/\/$/, '') + '/' + to);
-        const existR = await this._exec(name, 'test', ['-e', toTarget], { cwd });
+        const existR = await this.client.execForResult(name, 'test', ['-e', toTarget], {}, cwd);
         if (existR.exitCode === 0) throw new RuntimeError('Target path already exists', 409);
-        const r = await this._exec(name, 'mv', [fromTarget, toTarget], { cwd });
+        const r = await this.client.execForResult(name, 'mv', [fromTarget, toTarget], {}, cwd);
         if (r.exitCode !== 0) throw new RuntimeError('move failed', 500);
     }
 
@@ -243,7 +215,7 @@ class BoxLiteFsAdapter extends FsAdapter {
         const cwd = '/workspace';
         const target = rel.startsWith('/') ? rel : (cwd.replace(/\/$/, '') + '/' + rel);
         // 安全约束：用 args 数组传参，不走 sh -c 字符串拼接（命令注入风险）。
-        await this._exec(name, 'rm', ['-r', target], { cwd });
+        await this.client.execForResult(name, 'rm', ['-r', target], {}, cwd);
     }
 }
 

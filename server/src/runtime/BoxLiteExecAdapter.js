@@ -1,7 +1,6 @@
 const { ExecAdapter, AgentSpawnError, StreamHandle } = require('./interfaces');
 const BoxLiteClient = require('./BoxLiteClient');
 const { decodeExecutionFrameRaw } = BoxLiteClient;
-const { applyUidToExec } = require('./boxliteExecUid');
 
 function quotePosixArg(input) {
     const s = String(input ?? '');
@@ -328,19 +327,10 @@ class BoxLiteExecAdapter extends ExecAdapter {
             throw new AgentSpawnError('BoxLite exec requires runtimeRef');
         }
         const working = options.cwd || '/workspace';
-        // 沙箱内 exec 统一身份：workspace 路径默认以 uid 1000（VM 用户）执行，让
-        // node_modules / .vite / 源码 全部归一个身份，避开 virtiofs idmap（host 0 ↔
-        // guest 1000）下"root 写的源码 vs 1000 写的 node_modules"这种属主分裂。
-        // 系统级操作（apt-get、pkill、/etc/ 写入、postgres service 等）需显式 uid: 0
-        // 跳过注入，仍以 root 跑。
-        const { command, args: finalArgs } = applyUidToExec(
-            { command: cmd, args },
-            { uid: options.uid, gid: options.gid },
-        );
         return this.client.execForResult(
             blinkName,
-            command,
-            finalArgs,
+            String(cmd || 'sh'),
+            Array.isArray(args) ? args : [],
             env || {},
             working,
             {
