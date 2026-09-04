@@ -15,7 +15,7 @@ import AppSidebar from './components/AppSidebar';
 import BrandMark from './components/BrandMark';
 import ConfirmDialog from './components/ConfirmDialog';
 import WorkspaceSwitcher from './components/WorkspaceSwitcher';
-import SettingsTabSidebar from './components/SettingsTabSidebar';
+import SettingsTabSidebar, { defaultSettingsSection } from './components/SettingsTabSidebar';
 import SettingsShell from './components/settings/SettingsShell';
 import { useWorkspaces } from './hooks/useWorkspaces';
 import { cn } from './lib/utils';
@@ -48,7 +48,9 @@ function AuthenticatedLayout({
   const { t } = useTranslation();
   const sessionsRef = useRef(null);
   const [launchPanelOpen, setLaunchPanelOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState('general');
+  const [settingsSection, setSettingsSection] = useState(
+    () => defaultSettingsSection(user?.role === 'admin'),
+  );
   const handleSettingsSectionChange = useCallback((section) => {
     setSettingsSection(section);
     if (location.pathname !== '/settings') navigate('/settings');

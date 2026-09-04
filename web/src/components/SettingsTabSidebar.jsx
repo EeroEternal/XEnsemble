@@ -28,6 +28,11 @@ const ALL_TABS = [
   { id: 'gateway', labelKey: 'gateway:title', icon: Globe, route: '/admin/gateway', adminOnly: true },
 ];
 
+// 默认 section：按角色取侧边栏第一个可见 tab。
+export function defaultSettingsSection(isAdmin = false) {
+  return ALL_TABS.find((tab) => !tab.adminOnly || isAdmin)?.id;
+}
+
 export default function SettingsTabSidebar({ activeTab, onSectionChange, user, onOpenSettings, onLogout }) {
   const navigate = useNavigate();
   const { t } = useTranslation();
