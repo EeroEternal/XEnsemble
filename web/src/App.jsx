@@ -191,6 +191,7 @@ function AuthenticatedLayout({
         <History
           agents={agents}
           projects={projects}
+          active={isHistory}
           className={cn(
             'flex h-full min-h-0 flex-1 flex-col',
             isHistory ? 'relative z-20' : offRouteClass,

@@ -201,7 +201,8 @@ function ConversationDrawer({ session, onClose }) {
       setView(data);
       const turns = Array.isArray(data.turns) ? data.turns : [];
       setAllTurns(turns);
-      setTotalTurns(Number(data.total) || turns.length);
+      // total 为对话轮数（user 消息条数）；fallback 保持同口径
+      setTotalTurns(Number(data.total) || turns.filter((t) => t && t.role === 'user').length);
       setHasMoreTurns(Boolean(data.hasMore));
       setNotFound(false);
     } catch {
@@ -220,7 +221,8 @@ function ConversationDrawer({ session, onClose }) {
       const data = await res.json();
       const more = Array.isArray(data.turns) ? data.turns : [];
       setAllTurns((prev) => [...prev, ...more]);
-      setTotalTurns(Number(data.total) || (allTurns.length + more.length));
+      // total 为对话轮数（user 消息条数）；fallback 保持同口径
+      setTotalTurns(Number(data.total) || more.filter((t) => t && t.role === 'user').length + allTurns.filter((t) => t && t.role === 'user').length);
       setHasMoreTurns(Boolean(data.hasMore));
     } catch {
       // keep hasMore so the user can retry
@@ -488,7 +490,7 @@ function ConversationDrawer({ session, onClose }) {
                 <div className="flex flex-col gap-4">
                   {totalTurns > 0 && (
                     <p className="text-[11px] text-zinc-400">
-                      {t('sessions:conversation.showing_groups', { shown: turns.length, total: totalTurns, defaultValue: 'Showing {{shown}} of {{total}} exchanges' })}
+                      {t('sessions:conversation.showing_groups', { shown: groups.filter((g) => g.user).length, total: totalTurns, defaultValue: 'Showing {{shown}} of {{total}} exchanges' })}
                     </p>
                   )}
                   {groups.map((g, i) => (
@@ -522,7 +524,7 @@ function ConversationDrawer({ session, onClose }) {
   );
 }
 
-export default function History({ agents, projects, className = '', 'aria-hidden': ariaHidden }) {
+export default function History({ agents, projects, active = true, className = '', 'aria-hidden': ariaHidden }) {
   const { t } = useTranslation();
 
   const [status, setStatus] = useState('');
@@ -555,7 +557,7 @@ export default function History({ agents, projects, className = '', 'aria-hidden
       params.set('withStats', 'true');
       params.set('page', String(page));
       params.set('pageSize', String(PAGE_SIZE));
-      params.set('sort', 'created_at:desc');
+      params.set('sort', 'status_created:desc');
       if (status) params.set('status', status);
       if (agentId) params.set('agentId', agentId);
       if (projectId) params.set('projectId', projectId);
@@ -582,6 +584,17 @@ export default function History({ agents, projects, className = '', 'aria-hidden
   }, [status, agentId, projectId, debouncedSearch, page, t]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // The page stays mounted while hidden (off-route) — refetch every time the
+  // user opens it so statuses / new sessions are never stale.
+  const activeRef = useRef(active);
+  useEffect(() => {
+    if (active && !activeRef.current) {
+      setPage(1);
+      void load();
+    }
+    activeRef.current = active;
+  }, [active, load]);
 
   const resetFilters = useCallback(() => {
     setStatus('');

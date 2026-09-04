@@ -163,4 +163,46 @@ async function getHistory(sessionId) {
     }
 }
 
-module.exports = { append, subscribe, getHistory };
+/**
+ * Batch variant of getHistory for list views: returns a Map of sessionId ->
+ * history rows (oldest first), keeping the same per-session cap semantics
+ * (latest MAX_EVENTS_PER_SESSION rows per session).
+ *
+ * @param {string[]} sessionIds
+ * @returns {Promise<Map<string, Array>>}
+ */
+async function getHistoryForSessions(sessionIds) {
+    const result = new Map();
+    const ids = (sessionIds || []).filter(Boolean);
+    if (ids.length === 0) return result;
+    try {
+        const { db } = require('../db/index');
+        const schema = require('../db/schema');
+        const { sql } = require('drizzle-orm');
+        const rows = await db.execute(sql`
+            SELECT session_id, seq, ts, role, content, call_id, tool, model
+            FROM (
+                SELECT m.*, ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY seq DESC) AS rn
+                FROM session_chat_messages m
+                WHERE m.session_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
+            ) t
+            WHERE rn <= ${MAX_EVENTS_PER_SESSION}
+            ORDER BY session_id, seq ASC
+        `);
+        const raw = rows.rows || rows;
+        for (const row of raw) {
+            const list = result.get(row.session_id) || [];
+            list.push(entryFromRow(row));
+            result.set(row.session_id, list);
+        }
+    } catch (_) {
+        // DB unavailable — return whatever the in-memory buffers hold.
+        for (const id of ids) {
+            const buf = buffers.get(id);
+            if (buf) result.set(id, buf.events.slice());
+        }
+    }
+    return result;
+}
+
+module.exports = { append, subscribe, getHistory, getHistoryForSessions };

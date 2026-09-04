@@ -71,8 +71,13 @@ async function runConversationSummarize({ log = console } = {}) {
             } catch (_) { /* SSE 失败不影响主流程 */ }
         } catch (err) {
             // no_content / 瞬时 LLM 失败：本轮跳过该会话，下轮再试
-            log.warn?.(`[scheduler:conversation-summarize] skip ${sessionId}: ${err?.message || err}`)
-                ?? log?.(`[scheduler] skip ${sessionId}: ${err?.message || err}`);
+            // 注意：log.warn(...) 返回 undefined，不能用 `??` 链式 fallback——
+            // 那会总是执行 log?.(...)，而 log 默认是 console 对象（不可调用），
+            // 抛 `log is not a function` 导致整个 job 中断。
+            const message = `[scheduler:conversation-summarize] skip ${sessionId}: ${err?.message || err}`;
+            if (typeof log?.warn === 'function') log.warn(message);
+            else if (typeof log === 'function') log(message);
+            else console.warn(message);
         }
     }
     return processed;

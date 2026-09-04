@@ -110,7 +110,7 @@ const runtime = getRuntime();
 async function markSessionFailed(sessionId, errMsg, log) {
     // Never overwrite a user-cancelled / deleted session (exited) or an already-terminal row.
     const updated = await db.update(schema.sessions)
-        .set({ status: 'failed', provisioningError: errMsg })
+        .set({ status: 'failed', provisioningError: errMsg, updatedAt: Date.now() })
         .where(and(
             eq(schema.sessions.id, sessionId),
             inArray(schema.sessions.status, ['pending', 'running']),
@@ -957,7 +957,9 @@ function conversationStats(turns, summary) {
     if (timestamps.length >= 2) {
         durationMs = Math.max(0, Math.max(...timestamps) - Math.min(...timestamps));
     }
-    return { turnCount: list.length, filesTouched, durationMs };
+    // 业界口径：1 turn = 一轮问答（user 消息条数），assistant 回复与工具调用不计入
+    const turnCount = list.filter((t) => t && t.role === 'user').length;
+    return { turnCount, filesTouched, durationMs };
 }
 
 function mapSessionRow(row) {
@@ -978,11 +980,13 @@ function mapSessionRow(row) {
         createdAt: Number(row.created_at),
         exitCode: row.exit_code ?? sessionManager.getSession(row.id)?.exitCode ?? null,
         exitedAt: row.exited_at ? Number(row.exited_at) : null,
-        updatedAt: null,
+        updatedAt: row.updated_at ? Number(row.updated_at) : null,
     };
 }
 
 const SESSION_LIST_SORT_WHITELIST = {
+    // 侧边栏一致：运行中 > 空闲 > 已退出，各组内按创建时间倒序
+    'status_created:desc': "CASE s.status WHEN 'running' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END, s.created_at DESC, s.id DESC",
     'created_at:desc': 's.created_at DESC, s.id DESC',
     'created_at:asc': 's.created_at ASC, s.id ASC',
 };
@@ -1011,8 +1015,8 @@ fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async
     const withStats = query.withStats === 'true' || query.withStats === '1';
     const page = Math.max(1, Number.parseInt(query.page, 10) || 1);
     const pageSize = Math.min(100, Math.max(1, Number.parseInt(query.pageSize, 10) || 20));
-    const sortKey = String(query.sort || 'created_at:desc');
-    const orderBy = SESSION_LIST_SORT_WHITELIST[sortKey] || SESSION_LIST_SORT_WHITELIST['created_at:desc'];
+    const sortKey = String(query.sort || 'status_created:desc');
+    const orderBy = SESSION_LIST_SORT_WHITELIST[sortKey] || SESSION_LIST_SORT_WHITELIST['status_created:desc'];
 
     const filters = [];
     if (query.status) filters.push(sql`s.status = ${String(query.status)}`);
@@ -1056,10 +1060,33 @@ fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async
     const rows = listResult.rows || listResult;
     const total = Number(countResult.rows?.[0]?.total ?? countResult[0]?.total ?? 0);
 
+    // withStats: turn counts come from the live chat transcript (same source
+    // as the conversation drawer) so running sessions don't show stale numbers
+    // from the last persisted snapshot. Falls back to stored turns when a
+    // session has no chat messages (old sessions, transcript-only source).
+    let liveTurnsBySession = new Map();
+    if (withStats && rows.length > 0) {
+        try {
+            liveTurnsBySession = await chatTranscript.getHistoryForSessions(rows.map((r) => r.id));
+        } catch (_) { /* fall back to stored turns below */ }
+    }
+    const { extractFromChat } = require('./session/conversationExtractor');
+
     const items = rows.map((row) => {
         const item = mapSessionRow(row);
         if (withStats) {
-            item.stats = conversationStats(row.conversation_turns, row.conversation_summary);
+            let turns = null;
+            const history = liveTurnsBySession.get(row.id);
+            if (Array.isArray(history) && history.length > 0) {
+                try {
+                    const chat = extractFromChat(history, 0, { maxTurns: null });
+                    if (chat.turns.length > 0) turns = chat.turns;
+                } catch (_) { /* fall back to stored turns */ }
+            }
+            if (turns == null) {
+                turns = Array.isArray(row.conversation_turns) ? row.conversation_turns : [];
+            }
+            item.stats = conversationStats(turns, row.conversation_summary);
         }
         return item;
     });
@@ -1082,7 +1109,7 @@ fastify.patch('/api/v1/sessions/:sessionId/title', { preValidation: [fastify.aut
 
     const title = rawTitle || null;
     await db.update(schema.sessions)
-        .set({ title, titleManual: true })
+        .set({ title, titleManual: true, updatedAt: Date.now() })
         .where(eq(schema.sessions.id, sessionId));
 
     try {
@@ -1262,7 +1289,7 @@ fastify.delete('/api/v1/sessions/:sessionId', { preValidation: [fastify.authenti
 
     // Mark exited first so in-flight provisioning observes cancellation.
     await db.update(schema.sessions)
-        .set({ status: 'exited', exitedAt: Date.now() })
+        .set({ status: 'exited', exitedAt: Date.now(), updatedAt: Date.now() })
         .where(eq(schema.sessions.id, sessionId));
 
     const live = sessionManager.getSession(sessionId);
@@ -1579,7 +1606,10 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
             status: 'running',
             customImageId: custom_image_id || null,
             createdAt: Date.now(),
+            updatedAt: Date.now(),
         });
+
+        try { broadcastSse({ type: 'session_created', sessionId, userId: request.user.id }); } catch (_) {}
 
         return reply.code(201).send({
             session_id: sessionId,
@@ -1674,7 +1704,10 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
         status: 'pending',
         customImageId: custom_image_id || null,
         createdAt: Date.now(),
+        updatedAt: Date.now(),
     });
+
+    try { broadcastSse({ type: 'session_created', sessionId, userId: request.user.id }); } catch (_) {}
 
     // Save user-provided config files and custom env to DB
     if ((config_files?.length) || (custom_env && Object.keys(custom_env).length)) {
@@ -1842,6 +1875,7 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
         const sessionUpdate = {
             cwd: workspacePath,
             runtimeId,
+            updatedAt: Date.now(),
         };
         if (sessionStateDir?.stateDirRef) {
             sessionUpdate.stateDirRef = sessionStateDir.stateDirRef;
@@ -2002,6 +2036,7 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
         await db.update(schema.sessions).set({
             status: 'running',
             streamRef: streamRef || null,
+            updatedAt: Date.now(),
         }).where(eq(schema.sessions.id, sessionId));
         broadcastSse({ type: 'session_status', sessionId, status: 'running', userId: request.user.id });
     })().catch((err) => {

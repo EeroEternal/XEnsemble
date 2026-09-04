@@ -105,6 +105,7 @@ const sessions = pgTable('sessions', {
   // 0018: P3 技能提炼——该会话已被漏斗处理过（extracted/rejected/expired 均算），防重复入池
   skillExtractedAt: bigint('skill_extracted_at', { mode: 'number' }),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }),
 });
 const sessionStreams = pgTable('session_streams', {
   sessionId: text('session_id').primaryKey().references(() => sessions.id, { onDelete: 'cascade' }),

@@ -377,7 +377,11 @@ async function getConversation(sessionId, { offset = 0, limit = null } = {}) {
 
     if (!row && turns.length === 0) return null;
 
-    const total = turns.length;
+    // 业界口径：total 按对话轮数计（1 turn = 一轮问答 = 1 条 user 消息），
+    // 与列表 stats.turnCount 同口径；分页 offset/limit 仍对原始 turns（消息条数）
+    // 切片——hasMore 必须与 turns.length（全量消息条数）比较，若与 total（轮数）
+    // 比较会出现 sliced(40) > total(20) 导致按钮永远不出现的口径错配。
+    const total = turns.filter((t) => t && t.role === 'user').length;
     const start = Math.max(0, Number(offset) || 0);
     const pageLimit = limit == null ? null : Math.max(1, Number(limit) || 50);
     const sliced = pageLimit == null ? turns.slice(start) : turns.slice(start, start + pageLimit);
@@ -389,7 +393,7 @@ async function getConversation(sessionId, { offset = 0, limit = null } = {}) {
         turns: sliced,
         total,
         offset: start,
-        hasMore: pageLimit == null ? false : start + sliced.length < total,
+        hasMore: pageLimit == null ? false : start + sliced.length < turns.length,
         lastSummarizedSeq: row?.lastSummarizedSeq || 0,
         updatedAt: row?.updatedAt,
     };
