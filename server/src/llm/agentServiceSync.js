@@ -5,7 +5,12 @@ const unigateway = require('../gateway/unigatewayManager');
 const { parseProvidersFromToml } = require('../gateway/readProviderSecrets');
 const { upsertAgentServiceBinding } = require('./agentServiceToml');
 
-const DATA_DIR = path.join(__dirname, '../../data');
+// Must match unigatewayManager's DATA_DIR: the gateway process loads
+// UNIGATEWAY_CONFIG_PATH (default /var/lib/xensemble/unigateway/unigateway.toml)
+// and reload_from_disk reads THAT file — a second copy under server/data would
+// silently diverge and make every binding sync a no-op against the live gateway.
+const DATA_DIR = process.env.UNIGATEWAY_DATA_DIR
+    || path.join(__dirname, '../../data');
 const CONFIG_PATH = path.join(DATA_DIR, 'unigateway.toml');
 
 /**
