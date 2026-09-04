@@ -684,6 +684,58 @@ async function parseDbInfoFromGuest(runtimeRef, workspacePath) {
     return null;
 }
 
+// 沙箱内镜像源系统级配置（幂等）：apt / npm+pnpm / pip / go / cargo / maven 全部指向国内镜像。
+// 目的：guest 出国带宽受限，官方源安装动辄数分钟（go tarball 4min+、apt 大包慢、npm 全量
+// workspace install 更慢），国内镜像通常 1 分钟内完成，是首次部署超时的主要性能杠杆。
+// 配置全部写入持久文件而非环境变量——verify 的 run_shell 是每次全新 `sh -c`，不读 profile，
+// 文件级配置（go env -w / .npmrc / pip.conf / cargo config / maven settings）对 agent 与
+// plan 命令透明生效。任何一步失败都不阻断部署（best-effort，退回官方源只是慢）。
+async function configureGuestMirrors(runtimeRef, workspacePath, onLog) {
+    const runtime = getRuntime();
+    const script = `
+# 1) apt 源：deb.debian.org/security.debian.org → mirrors.aliyun.com（兼容传统 list 与 bookworm deb822）
+if [ -f /etc/apt/sources.list ]; then
+  grep -q mirrors.aliyun.com /etc/apt/sources.list 2>/dev/null || \\
+    sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com/debian|g; s|https://deb.debian.org|https://mirrors.aliyun.com/debian|g; s|http://security.debian.org|https://mirrors.aliyun.com/debian-security|g; s|https://security.debian.org|https://mirrors.aliyun.com/debian-security|g' /etc/apt/sources.list 2>/dev/null || true
+fi
+for f in /etc/apt/sources.list.d/*.sources; do
+  [ -f "$f" ] || continue
+  grep -q mirrors.aliyun.com "$f" 2>/dev/null || \\
+    sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com/debian|g; s|https://deb.debian.org|https://mirrors.aliyun.com/debian|g; s|http://security.debian.org|https://mirrors.aliyun.com/debian-security|g; s|https://security.debian.org|https://mirrors.aliyun.com/debian-security|g' "$f" 2>/dev/null || true
+done
+# 2) npm / pnpm registry（/root/.npmrc 全局生效，pnpm 同样读取）
+printf 'registry=https://registry.npmmirror.com\\n' > /root/.npmrc 2>/dev/null || true
+# 3) pip 全局源（/etc/pip.conf）
+printf '[global]\\nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple\\ntrusted-host = pypi.tuna.tsinghua.edu.cn\\n' > /etc/pip.conf 2>/dev/null || true
+# 4) Go modules 代理（go env -w 写持久配置；go 未装则跳过，装完后可再跑一次本配置）
+if command -v go >/dev/null 2>&1; then
+  go env -w GOPROXY=https://goproxy.cn,direct 2>/dev/null || true
+  go env -w GOSUMDB=sum.golang.google.cn 2>/dev/null || true
+fi
+# 5) cargo 镜像（rsproxy sparse index；仅 cargo 已存在时）
+if command -v cargo >/dev/null 2>&1 && [ ! -f /root/.cargo/config.toml ]; then
+  mkdir -p /root/.cargo 2>/dev/null || true
+  printf '[source.crates-io]\\nreplace-with = "rsproxy"\\n\\n[source.rsproxy]\\nregistry = "sparse+https://rsproxy.cn/index/"\\n\\n[registries.rsproxy]\\nindex = "sparse+https://rsproxy.cn/index/"\\n' > /root/.cargo/config.toml 2>/dev/null || true
+fi
+# 6) maven 阿里云镜像（仅 mvn 已存在时）
+if command -v mvn >/dev/null 2>&1 && [ ! -f /root/.m2/settings.xml ]; then
+  mkdir -p /root/.m2 2>/dev/null || true
+  printf '%s\\n' '<settings>' '  <mirrors>' '    <mirror>' '      <id>aliyunmaven</id>' '      <mirrorOf>*</mirrorOf>' '      <url>https://maven.aliyun.com/repository/public</url>' '    </mirror>' '  </mirrors>' '</settings>' > /root/.m2/settings.xml 2>/dev/null || true
+fi
+echo MIRRORS_DONE
+`;
+    try {
+        const r = await runtime.exec.exec('sh', ['-c', script], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 30000 });
+        if (String(r.stdout || '').includes('MIRRORS_DONE')) {
+            onLog?.('guest 镜像源已配置（apt/npm/pip/go/cargo/maven → 国内源）');
+        } else {
+            onLog?.('guest 镜像源配置未完成（非致命，退回官方源）');
+        }
+    } catch (e) {
+        onLog?.(`guest 镜像源配置失败（非致命）: ${String(e.message || e).slice(0, 120)}`);
+    }
+}
+
 // 系统侧自动 provision PostgreSQL：检测项目是否需要 PG，需要则启动沙箱内 PG，
 // 并尝试从配置解析出连接信息后直接建库建用户（幂等），使 verify agent 只需跑 migration。
 async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
@@ -1544,6 +1596,9 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             }
         }
         delete plan._tree;
+        // 镜像源提速：apt/npm/pip/go/cargo/maven 统一切国内源（幂等、best-effort），
+        // 必须在 verify agent 执行任何 install 之前完成——这是首次部署超时的主要性能杠杆。
+        await configureGuestMirrors(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
         // 改动 2：把 stack (detected) 传进去，让 detectDepsCached 选对应语言的探测脚本
         const depsRes = await detectDepsCached(ref, wsPath, detected);
         depsCached = depsRes.overallCached;
@@ -1589,7 +1644,30 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         report({ stage: 'B', substage: currentSubstage, message: `阶段 2 · ${currentSubstage}` });
     }, 5000);
 
-    const verify = await withTimeout(
+    // 总超时固定 15 分钟（DEPLOY_TOTAL_TIMEOUT_MS 可配）。超时不加时——性能问题
+    // 通过镜像源提速（configureGuestMirrors）与断点续修解决，而非延长等待。
+    const totalTimeoutMs = DEPLOY_TOTAL_TIMEOUT_MS;
+
+    // 超时语义：到点触发 cancelled 让 verify agent 在下一轮检查点优雅退出（带回
+    // messages/trail 进度）。fallback 先行返回保证前端及时收到超时结果；agent 的
+    // 收尾结果在后台落地 saveVerifyState，供“继续部署”断点续修（工具链/依赖已装
+    // 一半的进度不丢，续跑通常几分钟内完成）。
+    const verifyTimeoutPayload = {
+        ok: false,
+        aborted: true,
+        code: 'deploy_timeout',
+        error: `部署验证超时（超过 ${Math.round(totalTimeoutMs / 60000)} 分钟）已自动中止`,
+        warning: '部署验证超时已中止。可点击“继续部署”从上次进度断点续修（已完成的安装/构建不会重跑）。',
+    };
+    let verifySettled = false;
+    const verify = await new Promise((resolve) => {
+        const timer = setTimeout(() => {
+            if (verifySettled) return;
+            deployState.cancelled = true;
+            console.error(`[twoStage] deploy total timeout (${Math.round(totalTimeoutMs / 60000)}min), cancelling verify agent project=${project.id}`);
+            verifySettled = true;
+            resolve(verifyTimeoutPayload);
+        }, totalTimeoutMs);
         analyzeProjectVerify({
             workspacePath: wsPath,
             hostWorkspacePath: hostWs,
@@ -1605,23 +1683,40 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
                 lastSubstageAt = Date.now();
                 report({ stage: 'B', substage, message: hint || `阶段 2 · ${substage}` });
             },
-        }),
-        DEPLOY_TOTAL_TIMEOUT_MS,
-        {
-            ok: false,
-            aborted: true,
-            code: 'deploy_timeout',
-            error: `部署验证超时（超过 ${Math.round(DEPLOY_TOTAL_TIMEOUT_MS / 60000)} 分钟）已自动中止`,
-            warning: '部署验证卡住超时，已自动中止。常见原因是沙箱内启动服务的命令未后台化（缺少 & / nohup ... &），run_shell 一直等待。',
-        },
-        () => {
-            // 超时真正中止：置 cancelled，让仍在跑的 verify agent 在下一轮检查时退出
-            deployState.cancelled = true;
-            console.error(`[twoStage] deploy total timeout (${Math.round(DEPLOY_TOTAL_TIMEOUT_MS / 60000)}min), cancelling verify agent project=${project.id}`);
-        },
-    );
+        }).then(
+            (v) => {
+                if (verifySettled) {
+                    // 超时已先行返回：把 agent 的收尾进度异步落库供断点续修
+                    if (v && Array.isArray(v.messages) && v.messages.length) {
+                        saveVerifyState(project.id, { plan, messages: v.messages, trail: v.trail, roundsUsed: v.roundsUsed, runtimeRef: ref, workspacePath: wsPath })
+                            .then(() => console.error('[twoStage] verify progress saved after timeout (resume ready)'))
+                            .catch((e) => console.error('[twoStage] late saveVerifyState error:', e.message));
+                    }
+                    return;
+                }
+                verifySettled = true;
+                clearTimeout(timer);
+                resolve(v);
+            },
+            (e) => {
+                if (verifySettled) return;
+                verifySettled = true;
+                clearTimeout(timer);
+                resolve({ ...verifyTimeoutPayload, error: e.message || verifyTimeoutPayload.error });
+            },
+        );
+    });
     clearInterval(substageHeartbeat);
     if (verify.aborted) {
+        // 手动中止或 agent 优雅超时退出：带上进度落库，前端可“继续部署”断点续修
+        if (Array.isArray(verify.messages) && verify.messages.length) {
+            try {
+                await saveVerifyState(project.id, { plan, messages: verify.messages, trail: verify.trail, roundsUsed: verify.roundsUsed, runtimeRef: ref, workspacePath: wsPath });
+                console.error('[twoStage] aborted verify progress saved (resume ready)');
+            } catch (e) {
+                console.error('[twoStage] saveVerifyState error (aborted):', e.message);
+            }
+        }
         return { ok: false, aborted: true, code: verify.code || undefined, error: verify.error || '部署已中止', elapsedMs: Date.now() - startedAt };
     }
     report({

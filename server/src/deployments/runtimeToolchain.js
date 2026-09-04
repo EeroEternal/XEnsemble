@@ -180,13 +180,14 @@ function renderToolchainBlock(inventory) {
         }
     }
     lines.push('');
-    lines.push('If a step needs a tool listed as `missing`, you may install it with `apt-get update && apt-get install -y <package>`. The boxlite base image is Debian bookworm-slim; common package names:');
+    lines.push('If a step needs a tool listed as `missing`, install it with `apt-get update && apt-get install -y <package>` — the apt mirror is already switched to a fast CN mirror (~1 minute). MANDATORY: use apt-get ONLY. NEVER download official tarballs (go.dev/golang.org/dl), NEVER compile from source — those paths take 4-5+ minutes each and routinely blow the deploy time budget. If a specific Node version is REQUIRED (engines/.nvmrc) and apt has no matching package, use `NVM_NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node nvm install <ver>` (CN mirror) as the ONLY exception. The boxlite base image is Debian bookworm-slim; common package names:');
     lines.push('  - go:        golang-go            (or golang-1.22 for a pinned version)');
     lines.push('  - cargo:     cargo                (in /usr/bin/cargo; ~150MB)');
     lines.push('  - python3:   python3 python3-pip  (python3 is shipped but pip often missing)');
     lines.push('  - java/mvn:  default-jdk maven    (~300MB; avoid unless project is JVM-only)');
     lines.push('  - native build (for node-gyp): build-essential python3');
     lines.push('  - postgres:  postgresql postgresql-contrib   (if project has a Postgres dep)');
+    lines.push('CN MIRRORS ALREADY CONFIGURED system-wide: npm/pnpm → registry.npmmirror.com, pip → tsinghua pypi, go → goproxy.cn, cargo → rsproxy.cn, maven → aliyun. Just run the package managers normally — do NOT pass any custom registry/index flags.');
     lines.push('NEVER spend rounds trying to `command -v` or `which` the same missing tool — either install it via apt-get or pick a sub-project that does NOT need it.');
     return lines.join('\n');
 }
