@@ -145,7 +145,11 @@
     "total": "{{total}} sessions",
     "prev": "Previous page",
     "next": "Next page",
-    "open_detail": "Open conversation"
+    "open_detail": "Open conversation",
+    "sort_label": "Sort",
+    "sort_updated_desc": "Recent activity",
+    "sort_created_desc": "Newest created",
+    "sort_created_asc": "Oldest created"
   },
   "guide": {
     "title": "Tell the agent what to build",

@@ -29,6 +29,12 @@ const STATUS_OPTIONS = [
   { value: 'exited', labelKey: 'exited' },
 ];
 
+const SORT_OPTIONS = [
+  { value: 'updated_at:desc', labelKey: 'sort_updated_desc' },
+  { value: 'created_at:desc', labelKey: 'sort_created_desc' },
+  { value: 'created_at:asc', labelKey: 'sort_created_asc' },
+];
+
 function formatDuration(ms) {
   if (ms == null || !Number.isFinite(ms) || ms <= 0) return null;
   const minutes = Math.round(ms / 60000);
@@ -530,6 +536,7 @@ export default function History({ agents, projects, className = '', 'aria-hidden
   const [projectId, setProjectId] = useState('');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [sort, setSort] = useState('updated_at:desc');
   const [page, setPage] = useState(1);
   const [data, setData] = useState({ items: [], total: 0 });
   const [loading, setLoading] = useState(true);
@@ -579,9 +586,43 @@ export default function History({ agents, projects, className = '', 'aria-hidden
     } finally {
       if (id === requestIdRef.current) setLoading(false);
     }
-  }, [status, agentId, projectId, debouncedSearch, page, t]);
+  }, [status, agentId, projectId, debouncedSearch, sort, page, t]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // SSE subscription: auto-refresh when a new session is created or status changes
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return;
+    let es = null;
+    let closed = false;
+    let reconnectTimer = null;
+    const base = import.meta.env.VITE_API_BASE_URL
+      || (typeof window !== 'undefined' ? window.location.origin : '');
+    const connect = () => {
+      const token = getAccessToken();
+      es = new EventSource(`${base}/api/v1/events?access_token=${encodeURIComponent(token || '')}`);
+      es.addEventListener('message', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.type === 'session_created' || data.type === 'session_status') {
+            setPage(1);
+            void load();
+          }
+        } catch { /* ignore invalid data */ }
+      });
+      es.addEventListener('error', () => {
+        es?.close();
+        if (closed) return;
+        reconnectTimer = setTimeout(connect, 3000);
+      });
+    };
+    connect();
+    return () => {
+      closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      es?.close();
+    };
+  }, [load]);
 
   const resetFilters = useCallback(() => {
     setStatus('');
@@ -650,6 +691,14 @@ export default function History({ agents, projects, className = '', 'aria-hidden
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t('sessions:history.search_placeholder', { defaultValue: 'Search title…' })}
               className={`${consoleToolbarInputClass} pl-8`}
+            />
+          </div>
+          <div className="w-36">
+            <SelectMenu
+              value={sort}
+              onChange={(v) => { setSort(v); setPage(1); }}
+              options={SORT_OPTIONS.map((o) => ({ value: o.value, label: t(`sessions:history.${o.labelKey}`, { defaultValue: o.labelKey }) }))}
+              placeholder={t('sessions:history.sort_label', { defaultValue: 'Sort' })}
             />
           </div>
           <button

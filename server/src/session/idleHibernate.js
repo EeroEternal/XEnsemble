@@ -147,6 +147,7 @@ async function stopSession({
                             status: 'idle',
                             streamRef: session.streamRef || null,
                             stateDirRef: session.stateDirRef || null,
+                            updatedAt: Date.now(),
                         })
                         .where(eq(schema.sessions.id, sessionId));
                 } catch (err) {
@@ -183,6 +184,7 @@ async function stopSession({
                     status: 'idle',
                     streamRef: liveBefore?.streamRef || session.streamRef || null,
                     stateDirRef: liveBefore?.stateDirRef || session.stateDirRef || null,
+                    updatedAt: Date.now(),
                 })
                 .where(eq(schema.sessions.id, sessionId));
         } catch (err) {
