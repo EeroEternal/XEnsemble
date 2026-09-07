@@ -445,11 +445,32 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
             })
             .join('; ');
         try {
-            const r = await runtime.exec.exec('sh', ['-c', cmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 40000 });
-            const probed = String(r.stdout || '').split('\n').map((l) => l.trim()).filter(Boolean);
-            const results = probed
-                .map((l) => { const m = l.match(/^(\S+) (\d{3})$/); return m ? { tag: m[1], method: m[1].split(':')[0], path: m[1], code: m[2] } : null; })
-                .filter(Boolean);
+            // 5xx 冷启动 retry：server 刚起时 Drizzle/pg pool 第一次 lazy connect 偶尔抛 5xx
+            // （xensemble 16:19:11 起 server → 16:19:29 18s 后 probe 撞 5xx，但 6min 后稳定 401）。
+            // 通用修复：probe 5xx → sleep 5s → retry 1 次。retry 还 5xx 才判 backend_down。
+            // 风险：纯 retry，5xx 不变则行为不变；冷启动 5xx 自动恢复。
+            const runtime = getRuntime();
+            const ALIVE_STATUS = (method, code) => {
+                if (code.startsWith('2') || code.startsWith('3')) return true;
+                const base = ['401', '403', '405'];
+                const withBody = method !== 'GET' ? [...base, '400', '409', '422'] : base;
+                return withBody.includes(code);
+            };
+            const probeOnce = async () => {
+                const r = await runtime.exec.exec('sh', ['-c', cmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 40000 });
+                const probed = String(r.stdout || '').split('\n').map((l) => l.trim()).filter(Boolean);
+                const results = probed
+                    .map((l) => { const m = l.match(/^(\S+) (\d{3})$/); return m ? { tag: m[1], method: m[1].split(':')[0], path: m[1], code: m[2] } : null; })
+                    .filter(Boolean);
+                return { probed, results };
+            };
+            const has5xx = (results) => results.some((x) => x.code.startsWith('5'));
+            let { probed, results } = await probeOnce();
+            if (results.length && has5xx(results)) {
+                console.error(`[analyzeVerify] api probe 5xx on first try, sleep 5s and retry (cold start pool init)`);
+                await new Promise((r) => setTimeout(r, 5000));
+                ({ probed, results } = await probeOnce());
+            }
             if (!results.length) return { ok: true, verdict: 'no_result', probed, endpoints: targets };
             // 5xx 优先判死：5xx = 请求真实执行到了业务/DB 层并失败（哪怕其它端点判活），
             // "GET 401 判活 + POST signup 500"必须整体判失败，否则盲区依旧。
@@ -802,6 +823,11 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
         // 超过限制后强制要求 agent 诊断日志或输出 final 失败，避免盲目重新构建循环。
         let healthCheckFailures = 0;
         const MAX_HEALTH_CHECK_FAILURES = 1;
+        // 未知 action 计数：xensemble 16:19 后 agent 进入"空转"——LLM 输出既不是 tool
+        // 也不是 final（被 tryParseJson 成功但 action 未知），悄无声息地 continue。
+        // 监控 unknown 累计轮数，超阈值立即 break，让 MAX_ROUNDS fallback 接管。
+        let unknownActions = 0;
+        const MAX_UNKNOWN_ACTIONS = 3;
         // 阶段 B 内子阶段上报（prepare/install/build/serve/check/fix）：让前端分步展示，
         // 驱动信号来自每轮实际执行的工具/命令，不影响 verify 逻辑本身。
         let lastSubstage = null;
@@ -1046,12 +1072,35 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
             return { ...lastResult, appPort, apiVerdict, source: 'ai', warning: ok ? '' : 'verify agent reported failure', trail, messages: trimContext(messages), roundsUsed: round + 1 };
         }
         trail.push({ round, action: 'unknown', name: String(parsed.action).slice(0, 50) });
+        // 空转硬终止：连续 N 轮 LLM 输出既不是 tool 也不是 final（被 tryParseJson 成功但
+        // action 未知），悄无声息地空转 19 轮后才被 MAX_ROUNDS=60 兜底（xensemble 案例）。
+        // 加 console.error 让日志可观测（之前完全 silent），加计数 + break 让空转有界。
+        unknownActions++;
+        console.error(`[analyzeVerify] round ${round}: UNKNOWN action "${String(parsed.action).slice(0, 30)}" content_len=${String(llmResult.content || '').length} (unknownActions=${unknownActions}/${MAX_UNKNOWN_ACTIONS})`);
+        if (unknownActions >= MAX_UNKNOWN_ACTIONS) {
+            console.error(`[analyzeVerify] breaking verify loop: ${unknownActions} consecutive UNKNOWN actions (LLM output malformed or stale state)`);
+            break;
+        }
         messages.push({ role: 'user', content: 'Unknown action. Respond with a single tool call or the final answer JSON.' });
     }
 
     // 超轮数且没有 final 答案：记录完整活动轨迹，并做一次"按计划直跑"兜底，
     // 拿到真实失败步骤 + stderr（或确认服务其实可用），而不是只给一句笼统的报错。
     const fallbackResult = await runVerifyWithoutLlm({ workspacePath, runtimeRef, plan, projectType }).catch(() => null);
+    // detectStack 兜底来源拒绝：plan.source 含 'detectstack' 或 'rejected' 时，serve step 是
+    // python3 -m http.server（heuristic 启发式），不是真后端。fallback 真起了 python3 + curl
+    // 2xx → 误判 ok → 用户拿到 python 静态 server（xensemble 实测"假成功"案例）。
+    // 通用修复：fallback 判 ok 前先看 plan.source，heuristic 来源直接拒（不算真后端）。
+    // 风险：纯静态站会受影响，但纯静态站应走其他入口（npx serve/vite preview），heuristic
+    // 兜底走的是无 build pipeline 的退化路径。改：判 ok 前直接拒。
+    if (fallbackResult?.ok && /detectstack|rejected/i.test(plan?.source || '')) {
+        return {
+            ok: false, appPort: fallbackResult.appPort, source: 'ai',
+            warning: `plan.source="${plan.source}" 是 detectStack 启发式兜底（非真后端，serve step 是 python3 -m http.server）；fallback 2xx 误判 ok=true 不可信`,
+            finalStderr: 'detectStack fallback: serve step is python3 http.server, not real backend. 需要 agent 修 plan 走 LLM 路径或平台层 ensureXensembleBackend 接管。',
+            tested: fallbackResult.tested, trail, messages: trimContext(messages), roundsUsed: MAX_AGENT_ROUNDS,
+        };
+    }
     let fallbackOk = !!fallbackResult?.ok;
     let fallbackFailed = fallbackResult && !fallbackResult.ok;
     let concreteStderr = fallbackFailed
