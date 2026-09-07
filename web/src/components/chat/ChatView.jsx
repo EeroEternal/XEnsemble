@@ -470,7 +470,7 @@ export default function ChatView({ sessionId, onSessionEnd }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
       {/* Message list */}
-      <div ref={listRef} className="relative min-h-0 flex-1 overflow-y-auto console-scroll-hidden">
+      <div ref={listRef} className="relative min-h-0 flex-1 overflow-y-auto scrollbar-hover">
         {loadingHistory ? (
           <div className="flex h-full items-center justify-center text-zinc-400">
             <Loader2 className="h-5 w-5 animate-spin" />

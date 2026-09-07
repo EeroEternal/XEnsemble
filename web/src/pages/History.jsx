@@ -402,7 +402,7 @@ function ConversationDrawer({ session, onClose }) {
         </div>
 
         {/* Body */}
-        <div className="min-h-0 flex-1 overflow-y-auto console-scroll-hidden px-4 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-hover px-4 py-4">
           {loading ? (
             <div className="flex h-full items-center justify-center gap-2 text-zinc-400">
               <Loader2 className="h-5 w-5 animate-spin" />
