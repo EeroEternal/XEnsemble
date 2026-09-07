@@ -1856,6 +1856,10 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
 
 // 实际的两阶段部署逻辑（编排层负责并发闸门 + 注册表 + 持久化终态）
 async function runDeployInner({ project, userId, projectId, sessionId, resume, report, startedAt, deployRef, isAborted, deployState }) {
+    const deployStart = Date.now();
+    let stageAMs = 0;
+    let verifyStart = 0;
+    let provisionMs = 0;
 
     // A new deploy attempt supersedes any existing 'running' deployment for
     // this project. Mark them 'stopped' so a failed retry doesn't leave a
@@ -1973,9 +1977,13 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         plan = { steps: planResult.steps, configFiles: planResult.configFiles || [], source: planResult.source, warning: planResult.warning, _tree: planResult.contextTree || null };
         planFresh = true;
         report({ stage: 'A', message: `阶段 1 完成: ${plan.steps.length} 步, ${plan.configFiles.length} configs (${planResult.source || 'fallback'})` });
+        stageAMs = Date.now() - deployStart;
+        console.error(`[twoStage] project=${projectId} stage A done in ${stageAMs}ms`);
     }
 
     report({ stage: 'B', message: resumeState ? '阶段 2：续修（接回上次对话继续修复）' : '阶段 2：调用 LLM 2（agent）准备环境 + 测试 + 自动修复' });
+    verifyStart = Date.now();
+    console.error(`[twoStage] project=${projectId} verify agent START after ${verifyStart - deployStart}ms`);
     // detected 用真实 host 路径（hostPath），而非 hostWs —— boxlite 下 hostWs 可能是 undefined，
     // 用 undefined 会退化成 unknown 类型，连带使依赖缓存判断、PG 预启动、plan 缓存校验全部失效。
     const detected = hostPath ? detectProjectType(hostPath) : { type: 'unknown', defaultPort: 3000 };
@@ -2005,8 +2013,28 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         // 依赖目录写入 .git/info/exclude（幂等、非致命），同样必须在 install 之前：
         // install 一旦落盘 node_modules，git 变更面板立即被污染。
         await ensureDependencyExcludeInGuest(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
-        // 改动 2：把 stack (detected) 传进去，让 detectDepsCached 选对应语言的探测脚本
-        const depsRes = await detectDepsCached(ref, wsPath, detected);
+        // 并行前置：workspace ownership fix + deps cached check + (conditional) postgres provision。
+        // 必须在 verify agent 执行任何 install 之前完成——这是首次部署超时的主要性能杠杆。
+        const provisionStart = Date.now();
+        const needsPg = Boolean(plan?.needsPostgres);
+        console.error(`[twoStage] project=${project.id} provision parallel START (needsPostgres=${needsPg})`);
+        const results = await Promise.allSettled([
+            repairHostWorkspaceOwnership(hostPath), // host 侧 chown，同步快
+            detectDepsCached(ref, wsPath, detected), // guest 侧 deps 探测（改动 2：传入 stack 选对应语言脚本）
+            needsPg ? provisionPostgresIfNeeded(ref, wsPath, plan) : Promise.resolve({ ready: false, reason: 'not needed' }), // 条件 postgres
+        ]);
+        provisionMs = Date.now() - provisionStart;
+        console.error(`[twoStage] project=${project.id} provision parallel done in ${provisionMs}ms`);
+
+        // 解析并行结果
+        const ownershipResult = results[0];
+        const depsResult = results[1];
+        const pgResult = results[2];
+
+        if (ownershipResult.status === 'rejected') {
+            console.error(`[twoStage] ownership fix failed: ${ownershipResult.reason}`);
+        }
+        const depsRes = depsResult.status === 'fulfilled' ? depsResult.value : { overallCached: false, perPackage: {} };
         depsCached = depsRes.overallCached;
         depsStatus = depsRes.perPackage;
         if (Object.keys(depsStatus).length) {
@@ -2017,8 +2045,18 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
                 console.error(`[twoStage] deps CACHED for all ${Object.keys(depsStatus).length} sub-package(s)`);
             }
         }
-        // 系统侧预启动 PostgreSQL（检测到需要时），避免 verify agent 用 su/runuser/sudo 试错
-        const dbProvision = await provisionPostgresIfNeeded(ref, wsPath, plan);
+        // dbProvision 从上方并行 provision 的结果解析（PG 已在并行块内按 needsPg 条件启动过，
+        // 这里不再重复调用 provisionPostgresIfNeeded）。
+        let dbProvision = { ready: false, reason: 'not needed' };
+        if (needsPg) {
+            if (pgResult.status === 'fulfilled') {
+                dbProvision = pgResult.value;
+            } else {
+                console.error(`[twoStage] postgres provision failed: ${pgResult.reason}`);
+                dbProvision = { ready: false, reason: pgResult.reason?.message || String(pgResult.reason) };
+            }
+        }
+        console.error(`[twoStage] postgres provision: ready=${dbProvision.ready} reason=${dbProvision.reason}`);
         // 平台侧确定性 install（在 agent 启动前把依赖装齐）：结果注入 verify prompt，
         // agent 不再重复 install——这是部署时长最大的单项优化（实测 install 占 60%+）。
         let platformInstall = { ran: false };
@@ -2055,14 +2093,14 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, stack: { type: detected?.type, framework: detected?.framework }, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, successRun: plan._successRun || null } };
         delete plan._successRun;
         // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）。
-        // 防护：若阶段 A 把项目误判为“纯静态”（serve 根目录），但 host 检测出真实应用类型
-        // （node/python/unknown 且有后端目录），则此 plan 可疑，不写缓存，避免污染二次部署。
-        const serveStep = plan.steps?.find((s) => s.kind === 'serve');
-        const staticServe = serveStep && /(npx\s+(--yes\s+)?serve\s*\.|python3?\s+-m\s+http\.server|serve\s+-s\s*\.)/i.test(serveStep.command || '');
-        if (planFresh && staticServe && detected.type !== 'static') {
-            console.error(`[twoStage] skip caching suspicious static-serve plan (project type=${detected.type})`);
-        } else if (planFresh) {
+        // 缓存策略：只缓存真正从 LLM 出的 plan（source='opencode'/'ai'）。detectStack 兜底
+        // 的 plan（source 含 'detectstack' / 'opencode-rejected'）不缓存——兜底是纯文件探测的产物
+        // （detectStack < 100ms），重算成本几乎为零；缓存会污染二次部署（heuristic 与
+        // LLM 意图可能不一致）。
+        if (planFresh && plan.source && !/detectstack|rejected/i.test(plan.source || '')) {
             await savePlanCache(project.id, { steps: plan.steps, configFiles: plan.configFiles, source: plan.source, context: { tree, fingerprint: planFingerprint } });
+        } else if (planFresh) {
+            console.error(`[twoStage] skip caching plan (source=${plan.source || 'unknown'}) — heuristic or fallback plan, recompute on next deploy`);
         }
     }
     // 阶段 B 子阶段心跳：长任务（单条 run_shell 可能跑几十秒）期间周期复报当前子阶段，
@@ -2369,6 +2407,8 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
     }
 
     report({ stage: 'done', message: '✓ 两阶段通过，preview ready' });
+    const totalMs = Date.now() - deployStart;
+    console.error(`[twoStage] project=${projectId} TOTAL ${totalMs}ms (stageA=${stageAMs}ms provision=${provisionMs}ms verify=${Date.now() - verifyStart}ms)`);
     return {
         ok: true, plan, verify,
         previewUrl: preview.publicUrl, deploymentId: preview.deploymentId, previewToken: preview.previewToken,

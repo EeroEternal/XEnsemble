@@ -84,7 +84,7 @@ function summarizeArgs(args) {
     return out;
 }
 
-// 语义化命令签名：剥离 shell 装饰（日志重定向、tail/echo 收尾、cd 前缀、nohup/括号包裹、后台 &），
+// 语义化命令签名：剥离 shell 装饰（日志重定向、tail/echo 收尾、cd 前缀、nohup/括号包裹、后台 &，环境变量、常见 flag），
 // 只保留核心命令本身。用于跨工具调用的命令级去重——agent 换个日志文件名就绕过精确匹配的情况。
 function normalizeCmdSig(rawCmd) {
     let c = String(rawCmd || '');
@@ -99,7 +99,26 @@ function normalizeCmdSig(rawCmd) {
     c = c.replace(/\s*(?:nohup|setsid)\s+/g, ' ');
     c = c.replace(/^[([]+/, '').replace(/[)\]]+\s*$/, '');
     c = c.replace(/\s*&\s*$/, '');
-    return c.replace(/\s+/g, ' ').trim().toLowerCase();
+    // 去掉环境变量前缀：NODE_OPTIONS=... VAR=val ...
+    c = c.replace(/^\s*(?:[A-Z_][A-Z0-9_]*=[^\s;]+\s*)+/, '');
+    // 去掉常见 flag：--no-audit --no-fund --prefer-offline 等
+    c = c.replace(/\s*--(?:no-audit|no-fund|prefer-offline|legacy-peer-deps|frozen-lockfile)\b/g, ' ');
+    // 只保留核心命令：可执行名 + 第一个子命令（如 npm install、pnpm run build、go build）
+    const parts = c.replace(/\s+/g, ' ').trim().toLowerCase().split(/\s+/);
+    if (parts.length === 0) return '';
+    const main = parts[0];
+    const sub = parts[1] || '';
+    // 常见包管理器/构建工具的子命令归一化
+    if (/(npm|pnpm|yarn|bun)$/.test(main) && /^(install|ci|add|run|build)$/.test(sub)) {
+        return `${main} ${sub}`;
+    }
+    if (/(go|cargo|pip|pip3|uv|mvn|gradle)$/.test(main) && /^(build|install|run|test)$/.test(sub)) {
+        return `${main} ${sub}`;
+    }
+    if (/(make|cmake|ninja)$/.test(main)) {
+        return main;
+    }
+    return main; // 兜底只返回可执行名
 }
 
 // 泛化判定：pkill/kill 是否指向安装/构建类进程（agent 常误杀自己刚起的 install/build）。
@@ -801,7 +820,10 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
         if (checkAborted()) {
             return { ok: false, source: 'ai', aborted: true, warning: '部署已中止', finalStderr: '', tested: [], trail, messages: trimContext(messages), roundsUsed: round };
         }
+        const llmStart = Date.now();
         const llmResult = await callLlm(messages, abortSignal);
+        const llmMs = Date.now() - llmStart;
+        console.error(`[analyzeVerify] round ${round}: LLM ${llmMs}ms prompt=${llmResult.usage?.prompt_tokens} completion=${llmResult.usage?.completion_tokens} reasoning=${llmResult.usage?.completion_tokens_details?.reasoning_tokens} finish=${llmResult.finishReason}`);
         if (checkAborted()) {
             return { ok: false, source: 'ai', aborted: true, warning: '部署已中止', finalStderr: '', tested: [], trail, messages: trimContext(messages), roundsUsed: round };
         }
@@ -842,6 +864,7 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
             // 记录编辑轮次：edit_file 之后允许重新构建/重装（源已变化，重复执行是合理的）
             if (parsed.tool === 'edit_file') {
                 lastEditRound = round;
+                console.error(`[analyzeVerify] round ${round}: edit_file ${parsed.args?.path} → lastEditRound=${lastEditRound}`);
             }
             // 泛化防自杀式杀进程：pkill/kill 指向 install/build 类进程时阻止并提示等待
             if (parsed.tool === 'run_shell' && isKillingOwnInstall(parsed.args?.cmd)) {
@@ -860,11 +883,12 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                 const prev = dupSig ? ranCmds.get(dupSig) : null;
                 if (prev && lastEditRound < prev.round) {
                     trail.push({ round, action: 'repeat_cmd', cmd: dupSig, prevOk: prev.ok });
+                    const evidence = prev.evidence || '';
                     messages.push({
                         role: 'user',
                         content: prev.ok
-                            ? `You already ran \`${dupSig}\` successfully earlier and have not edited any files since. Do NOT re-run it. If its output is missing, read the build/dev script (package.json / scripts/*) to find where it outputs, then serve that; do not rebuild.`
-                            : `You already ran \`${dupSig}\` and it failed, with no file edits since. Re-running the same command won't fix it. Inspect the previous error, fix the root cause (edit_file), or start the app / output final with the real reason.`,
+                            ? `You already ran \`${dupSig}\` successfully earlier (round ${prev.round}) and have not edited any files since.${evidence} Do NOT re-run it. If its output is missing, read the build/dev script (package.json / scripts/*) to find where it outputs, then serve that; do not rebuild.`
+                            : `You already ran \`${dupSig}\` and it failed (round ${prev.round}), with no file edits since. Re-running the same command won't fix it. Inspect the previous error, fix the root cause (edit_file), or start the app / output final with the real reason.`,
                     });
                     prevToolSig = '';
                     repeatCount = 0;
@@ -885,7 +909,10 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                 prevToolSig = sig;
                 repeatCount = 0;
             }
+            const toolStart = Date.now();
             const out = await runTool(parsed.tool, parsed.args || {}, runtimeRef, workspacePath);
+            const toolMs = Date.now() - toolStart;
+            console.error(`[analyzeVerify] round ${round}: tool ${parsed.tool} ${toolMs}ms dupSig=${dupSig} prevOk=${ranCmds.get(dupSig)?.ok} lastEditRound=${lastEditRound} out_len=${String(out).length}`);
             // 健康检查失败重试计数：检测健康检查类命令失败，防止 check -> build -> check 无限循环
             if (parsed.tool === 'run_shell') {
                 const norm = String(parsed.args?.cmd || '').toLowerCase();
@@ -906,7 +933,14 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
             // 记录命令结果：exit=0 视为成功（用于后续去重提示"已成功过"）
             if (parsed.tool === 'run_shell' && dupSig) {
                 const m = String(out).match(/^exit=(\d+)/);
-                ranCmds.set(dupSig, { round, ok: !!m && m[1] === '0' });
+                const ok = !!m && m[1] === '0';
+                // 提取成功证据：包名、版本、耗时、输出尾行
+                let evidence = '';
+                if (ok) {
+                    const tail = String(out).split('\n').slice(-3).join(' | ').slice(0, 200);
+                    evidence = ` | output: ${tail}`;
+                }
+                ranCmds.set(dupSig, { round, ok, evidence });
             }
             const trailEntry = { round, action: 'tool', tool: parsed.tool, args: summarizeArgs(parsed.args), out: summarize(out) };
             // 保留完整命令，供成功后提取「成功执行轨迹」复用（summarizeArgs 会截断长命令）

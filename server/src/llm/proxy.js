@@ -316,7 +316,20 @@ function forwardToGateway(request, reply, { targetBaseUrl, gatewayKey, path, onR
         // Fastify's content-type parser already drained request.raw, so hand the
         // buffered body to http-proxy explicitly; otherwise the upstream waits
         // for a body that never arrives and the request hangs.
-        const body = request.body;
+        let body = request.body;
+        // Fastify body parser returns parsed JSON object for application/json
+        // Inject thinking_budget for chat/completions requests
+        if (body && typeof body === 'object' && (body.model || body.messages)) {
+            body.thinking_budget = 1024;
+            body = Buffer.from(JSON.stringify(body), 'utf8');
+        } else if (Buffer.isBuffer(body) && body.length > 0) {
+            // Fallback: raw buffer (if body parser disabled)
+            const parsed = JSON.parse(body.toString('utf8'));
+            if (parsed && typeof parsed === 'object' && (parsed.model || parsed.messages)) {
+                parsed.thinking_budget = 1024;
+            }
+            body = Buffer.from(JSON.stringify(parsed), 'utf8');
+        }
         if (Buffer.isBuffer(body) && body.length > 0) {
             const bodyStream = new Readable();
             bodyStream.push(body);

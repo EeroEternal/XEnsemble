@@ -242,12 +242,45 @@ function detectNodeStack(dir) {
     };
 }
 
+// 后端子目录约定（xensemble 这类"目录约定式 monorepo"的兜底识别）：
+// root 没有 pnpm-workspace.yaml / turbo.json 等显式 lockfile，但 web/ server/ desktop/ 等
+// 子目录各自有 package.json + 自己的 lockfile —— 同样说明是 monorepo。
+// 改前仅认 4 个 lockfile → 改后兜底"两个及以上子项目各带 package.json + lockfile"。
+const INDEPENDENT_SUBPROJECT_INDICATORS = ['web', 'client', 'app', 'frontend', 'server', 'api', 'backend', 'admin', 'desktop', 'mobile', 'packages', 'services', 'libs', 'tools', 'gateway', 'mock'];
+
+function hasIndependentSubProjects(dir) {
+    let count = 0;
+    const seen = new Set();
+    try {
+        for (const sub of INDEPENDENT_SUBPROJECT_INDICATORS) {
+            if (seen.has(sub)) continue;
+            const subDir = path.join(dir, sub);
+            if (!fs.existsSync(subDir)) continue;
+            // 子目录必须是 directory（避免同名文件）
+            if (!fs.statSync(subDir).isDirectory()) continue;
+            // 子目录有 package.json 才有意义
+            if (!fs.existsSync(path.join(subDir, 'package.json'))) continue;
+            count++;
+            seen.add(sub);
+        }
+    } catch { /* ignore */ }
+    return count;
+}
+
 function detectMonorepo(dir) {
     const matched = MONOREPO_ROOT_FILES.find((f) => hasFile(dir, f));
-    if (!matched) return null;
-    const confidence = ['monorepo', matched];
+    if (!matched) {
+        // 兜底：root 没有显式 lockfile，但有 ≥2 个子项目各带独立 package.json → 仍判 monorepo。
+        // xensemble（root 无 pnpm-workspace.yaml，server/ web/ desktop/ 各自 package.json）从此识别。
+        const subCount = hasIndependentSubProjects(dir);
+        if (subCount < 2) return null;
+    }
+    const confidence = matched ? ['monorepo', matched] : ['monorepo', 'directory-based'];
     const inner = detectNodeStack(dir);
-    const apps = detectMonorepoApps(dir);
+    // 兜底路径（directory-based monorepo）：detectMonorepoApps 找不到 pnpm-workspace.yaml 时返 null，
+    // 从 hasIndependentSubProjects 推导的子目录名作为 apps。detectMonorepoApps 仍会跑
+    // （兜底 null 不影响 monorepoApps 字段填充——下面合并）。
+    const apps = detectMonorepoApps(dir) || (matched ? null : collectMonorepoAppsFromSubdirs(dir));
     if (inner) {
         // Re-resolve start script with the monorepo fallback so we can
         // surface `dev:web` / `dev:server` style scripts.
@@ -279,12 +312,27 @@ function detectMonorepo(dir) {
     };
 }
 
+// Directory-based monorepo 兜底：root 无 pnpm-workspace.yaml / turbo.json 时，
+// 用 hasIndependentSubProjects 列出的子目录作为 monorepoApps。
+function collectMonorepoAppsFromSubdirs(dir) {
+    const apps = [];
+    for (const sub of INDEPENDENT_SUBPROJECT_INDICATORS) {
+        const subDir = path.join(dir, sub);
+        if (!fs.existsSync(subDir)) continue;
+        try { if (!fs.statSync(subDir).isDirectory()) continue; } catch { continue; }
+        if (!fs.existsSync(path.join(subDir, 'package.json'))) continue;
+        if (!apps.includes(sub)) apps.push(sub);
+    }
+    return apps.length ? apps : null;
+}
+
 function detectPythonStack(dir) {
-    if (hasFile(dir, 'requirements.txt')) {
-        const reqs = String(readTextSafe(path.join(dir, 'requirements.txt')) || '');
-        // Django 有确定性的启动入口（manage.py runserver）；其余 Python 框架
-        // 入口模块不可猜测，保持静态兜底（阶段 A 的 LLM 计划才是主路径）。
-        if (hasFile(dir, 'manage.py') || /django/i.test(reqs)) {
+    if (hasFile(dir, 'requirements.txt') || hasFile(dir, 'pyproject.toml')) {
+        const allText = String(readTextSafe(path.join(dir, 'requirements.txt')) || '')
+            + String(readTextSafe(path.join(dir, 'pyproject.toml')) || '');
+        const scripts = readTextSafe(path.join(dir, 'pyproject.toml')) || '';
+        // 优先级：Django（确定性入口 manage.py）> FastAPI/Flask（典型 main.py/app.py）> 兜底
+        if (hasFile(dir, 'manage.py') || /django/i.test(allText)) {
             return {
                 type: 'python',
                 defaultPort: 8000,
@@ -296,6 +344,40 @@ function detectPythonStack(dir) {
                 monorepoApps: null,
                 confidence: ['python', 'django'],
             };
+        }
+        // FastAPI / Flask / Starlette / uvicorn：startup 文件通常叫 main.py / app.py / asgi.py
+        // 优先看 pyproject.toml 的 [project.scripts]（poetry/PEP 621 项目最权威），
+        // 否则 heuristic：requirements 含 fastapi/flask/starlette → 找常见的入口文件名
+        if (/\b(fastapi|flask|starlette|uvicorn|gunicorn)\b/i.test(allText)) {
+            // 提取 pyproject [project.scripts] 的 console_scripts
+            const scriptMatch = scripts.match(/\[project\][\s\S]*?scripts\s*=\s*([^\[]+?)(?=\n\[|$)/);
+            let entryPoint = null;
+            if (scriptMatch) {
+                const m = scriptMatch[1].match(/^\s*(\S+)\s*=/m);
+                if (m) entryPoint = m[1];
+            }
+            if (!entryPoint) {
+                // 找常见入口文件
+                for (const f of ['main.py', 'app.py', 'asgi.py', 'wsgi.py', 'server.py']) {
+                    if (hasFile(dir, f)) { entryPoint = f.replace(/\.py$/, ''); break; }
+                }
+            }
+            if (entryPoint) {
+                return {
+                    type: 'python',
+                    defaultPort: 8000,
+                    packageManager: 'pip',
+                    installCmd: 'pip install -r requirements.txt',
+                    buildCmd: null,
+                    // uvicorn 是 FastAPI/Starlette 标准 server；Flask 一般用 gunicorn
+                    startCmd: /\b(gunicorn|flask)\b/i.test(allText)
+                        ? `gunicorn ${entryPoint}:app -b 0.0.0.0:$PORT`
+                        : `uvicorn ${entryPoint}:app --host 0.0.0.0 --port $PORT`,
+                    framework: /\bfastapi\b/i.test(allText) ? 'fastapi' : 'flask',
+                    monorepoApps: null,
+                    confidence: ['python', entryPoint],
+                };
+            }
         }
         return {
             type: 'python',
@@ -309,50 +391,355 @@ function detectPythonStack(dir) {
             confidence: ['python', 'requirements.txt'],
         };
     }
-    if (hasFile(dir, 'pyproject.toml')) {
-        return {
-            type: 'python',
-            defaultPort: resolvePort(dir, null, 'python'),
-            packageManager: 'pip',
-            installCmd: 'pip install -e .',
-            buildCmd: null,
-            startCmd: 'python3 -m http.server $PORT --bind 0.0.0.0',
-            framework: null,
-            monorepoApps: null,
-            confidence: ['python', 'pyproject.toml'],
-        };
-    }
     return null;
+}
+
+// 探测 Go 项目：go.mod 存在时，确认 main 包路径（避免多 main 时 go run . 选错）。
+// 优先读 Makefile/Cakefile 的 run target（项目最权威的启动入口定义），
+// 否则用 `go list -f '{{.DefaultImportPath}}'` 找 default 包，回退到 `.`（= go run .）。
+function resolveGoStartCmd(dir) {
+    if (!hasFile(dir, 'go.mod')) return null;
+    // 1) Makefile 的 run target
+    const makefile = readTextSafe(path.join(dir, 'Makefile'));
+    if (makefile) {
+        const m = makefile.match(/^run\s*:\s*([^\n]+)/m);
+        if (m) {
+            const recipe = m[1].trim();
+            if (recipe && !recipe.startsWith('@') && !recipe.startsWith('#')) {
+                return { startCmd: `make run`, confidence: ['go', 'Makefile-run'] };
+            }
+        }
+    }
+    // 2) cmd/<name>/main.go 约定（Go 项目常见布局，main 在子目录里）
+    try {
+        const cmdDirs = fs.readdirSync(path.join(dir, 'cmd')).filter((f) => {
+            try { return fs.statSync(path.join(dir, 'cmd', f)).isDirectory() && fs.existsSync(path.join(dir, 'cmd', f, 'main.go')); }
+            catch { return false; }
+        });
+        if (cmdDirs.length === 1) {
+            return { startCmd: `go run ./cmd/${cmdDirs[0]}`, confidence: ['go', 'cmd-main'] };
+        }
+    } catch { /* no cmd/ dir */ }
+    // 3) 根 main.go
+    if (hasFile(dir, 'main.go')) {
+        return { startCmd: 'go run .', confidence: ['go', 'root-main'] };
+    }
+    // 4) 兜底
+    return { startCmd: 'go run .', confidence: ['go', 'fallback'] };
 }
 
 function detectGoStack(dir) {
     if (!hasFile(dir, 'go.mod')) return null;
+    const resolved = resolveGoStartCmd(dir) || { startCmd: 'go run .', confidence: ['go', 'fallback'] };
     return {
         type: 'go',
         defaultPort: resolvePort(dir, null, 'go'),
         packageManager: 'go',
         installCmd: 'go mod download',
         buildCmd: 'go build ./...',
-        startCmd: 'go run .',
+        startCmd: resolved.startCmd,
         framework: null,
         monorepoApps: null,
-        confidence: ['go'],
+        confidence: resolved.confidence,
     };
+}
+
+// Rust 项目同 Go：识别 binary 路径。Cargo workspace 多个 bin 时不能用 `cargo run --release`
+// 一刀切（会要求选包）。优先 [[bin]] section，其次 src/main.rs，再 Makefile run target。
+function resolveRustStartCmd(dir) {
+    if (!hasFile(dir, 'Cargo.toml')) return null;
+    // 1) Cargo.toml [[bin]] name（最权威）
+    const cargo = readTextSafe(path.join(dir, 'Cargo.toml')) || '';
+    const binMatch = cargo.match(/name\s*=\s*"([^"]+)"[\s\S]*?\[\[bin\]\][\s\S]*?path\s*=\s*"([^"]+)"/);
+    if (binMatch) {
+        // binary 路径通常在 src/bin/<name>.rs 或同名根
+        return { startCmd: 'cargo run --release --bin ' + binMatch[1], confidence: ['rust', 'cargo-bin'] };
+    }
+    // 2) Makefile run target
+    const makefile = readTextSafe(path.join(dir, 'Makefile'));
+    if (makefile) {
+        const m = makefile.match(/^run\s*:\s*([^\n]+)/m);
+        if (m) {
+            const recipe = m[1].trim();
+            if (recipe && !recipe.startsWith('@') && !recipe.startsWith('#')) {
+                return { startCmd: 'make run', confidence: ['rust', 'Makefile-run'] };
+            }
+        }
+    }
+    // 3) src/main.rs 是 bin 的强信号
+    if (hasFile(dir, 'src', 'main.rs')) {
+        return { startCmd: 'cargo run --release', confidence: ['rust', 'src-main'] };
+    }
+    return { startCmd: 'cargo run --release', confidence: ['rust', 'fallback'] };
 }
 
 function detectRustStack(dir) {
     if (!hasFile(dir, 'Cargo.toml')) return null;
+    const resolved = resolveRustStartCmd(dir) || { startCmd: 'cargo run --release', confidence: ['rust', 'fallback'] };
     return {
         type: 'rust',
         defaultPort: resolvePort(dir, null, 'rust'),
         packageManager: 'cargo',
         installCmd: 'cargo fetch',
         buildCmd: 'cargo build --release',
-        startCmd: 'cargo run --release',
+        startCmd: resolved.startCmd,
         framework: null,
         monorepoApps: null,
-        confidence: ['rust'],
+        confidence: resolved.confidence,
     };
+}
+
+// JVM 检测：pom.xml / build.gradle 存在 → Spring Boot / 通用 JVM。
+// Spring Boot 的"启动入口"用 mvn spring-boot:run（开发模式）或 java -jar（产物模式）。
+function readJavaBuildFile(dir) {
+    for (const name of ['pom.xml', 'build.gradle', 'build.gradle.kts']) {
+        if (hasFile(dir, name)) return { name, content: readTextSafe(path.join(dir, name)) || '' };
+    }
+    return null;
+}
+
+function resolveJavaStartCmd(dir, isSpring) {
+    const build = readJavaBuildFile(dir);
+    if (!build) return null;
+    if (build.name === 'pom.xml') {
+        return isSpring ? 'mvn spring-boot:run' : 'mvn exec:java';
+    }
+    // build.gradle / .kts → gradle bootRun (spring) / gradle run (generic)
+    return isSpring ? 'gradle bootRun' : 'gradle run';
+}
+
+function detectJavaStack(dir) {
+    const build = readJavaBuildFile(dir);
+    if (!build) return null;
+    const isSpring = /\bspring-boot-starter\b/i.test(build.content) || /\bspring-boot\b/.test(build.content);
+    const startCmd = resolveJavaStartCmd(dir, isSpring);
+    if (!startCmd) return null;
+    return {
+        type: isSpring ? 'java-spring-boot' : 'java-maven',
+        defaultPort: 8080,
+        packageManager: build.name === 'pom.xml' ? 'maven' : 'gradle',
+        installCmd: null, // mvn/gradle 自带依赖拉取
+        buildCmd: isSpring
+            ? (build.name === 'pom.xml' ? 'mvn package -DskipTests' : 'gradle bootJar')
+            : (build.name === 'pom.xml' ? 'mvn package' : 'gradle build'),
+        startCmd,
+        framework: isSpring ? 'spring-boot' : null,
+        monorepoApps: null,
+        confidence: isSpring ? ['java', 'spring-boot'] : ['java'],
+    };
+}
+
+// Ruby 检测：Gemfile + Rails / Sinatra。
+function detectRubyStack(dir) {
+    if (!hasFile(dir, 'Gemfile')) return null;
+    const gemfile = readTextSafe(path.join(dir, 'Gemfile')) || '';
+    // Rails：bin/rails + config/application.rb 都存在
+    if (hasFile(dir, 'bin', 'rails') && hasFile(dir, 'config', 'application.rb')) {
+        return {
+            type: 'ruby-rails',
+            defaultPort: 3000,
+            packageManager: 'bundler',
+            installCmd: 'bundle install',
+            buildCmd: 'bundle exec rails assets:precompile',
+            startCmd: 'bundle exec rails server -b 0.0.0.0 -p $PORT',
+            framework: 'rails',
+            monorepoApps: null,
+            confidence: ['ruby', 'rails'],
+        };
+    }
+    // Sinatra / 其他：找常见入口文件
+    if (/\bsinatra\b/i.test(gemfile)) {
+        const entry = ['app.rb', 'config.ru', 'main.rb'].find((f) => hasFile(dir, f));
+        if (entry) {
+            const mod = entry.replace(/\.(rb|ru)$/, '');
+            return {
+                type: 'ruby-sinatra',
+                defaultPort: 4567,
+                packageManager: 'bundler',
+                installCmd: 'bundle install',
+                buildCmd: null,
+                startCmd: `bundle exec ruby ${entry} -o 0.0.0.0 -p $PORT`,
+                framework: 'sinatra',
+                monorepoApps: null,
+                confidence: ['ruby', 'sinatra', entry],
+            };
+        }
+    }
+    // 兜底：纯 rack 入口
+    if (hasFile(dir, 'config.ru')) {
+        return {
+            type: 'ruby-rack',
+            defaultPort: 9292,
+            packageManager: 'bundler',
+            installCmd: 'bundle install',
+            buildCmd: null,
+            startCmd: 'bundle exec rackup -o 0.0.0.0 -p $PORT',
+            framework: 'rack',
+            monorepoApps: null,
+            confidence: ['ruby', 'rack'],
+        };
+    }
+    return null;
+}
+
+// PHP 检测：composer.json + Laravel / Symfony / Slim。
+function detectPhpStack(dir) {
+    const composer = readTextSafe(path.join(dir, 'composer.json'));
+    if (!composer) return null;
+    let composerJson = {};
+    try { composerJson = JSON.parse(composer); } catch { /* ignore */ }
+    const require = { ...(composerJson.require || {}), ...(composerJson['require-dev'] || {}) };
+    // Laravel
+    if (/\blaravel\/framework\b/.test(JSON.stringify(require)) || hasFile(dir, 'artisan')) {
+        return {
+            type: 'php-laravel',
+            defaultPort: 8000,
+            packageManager: 'composer',
+            installCmd: 'composer install --no-dev --optimize-autoloader',
+            buildCmd: 'php artisan key:generate --force || true',
+            startCmd: 'php artisan serve --host=0.0.0.0 --port=$PORT',
+            framework: 'laravel',
+            monorepoApps: null,
+            confidence: ['php', 'laravel'],
+        };
+    }
+    // Symfony
+    if (/\bsymfony\/framework-bundle\b/.test(JSON.stringify(require)) || hasFile(dir, 'bin', 'console')) {
+        return {
+            type: 'php-symfony',
+            defaultPort: 8000,
+            packageManager: 'composer',
+            installCmd: 'composer install',
+            buildCmd: null,
+            startCmd: 'php -S 0.0.0.0:$PORT -t public',
+            framework: 'symfony',
+            monorepoApps: null,
+            confidence: ['php', 'symfony'],
+        };
+    }
+    // Slim / 通用：内置 php server
+    if (/\bslim\/slim\b/.test(JSON.stringify(require)) || hasFile(dir, 'public', 'index.php')) {
+        return {
+            type: 'php-slim',
+            defaultPort: 8000,
+            packageManager: 'composer',
+            installCmd: 'composer install',
+            buildCmd: null,
+            startCmd: 'php -S 0.0.0.0:$PORT -t public',
+            framework: 'slim',
+            monorepoApps: null,
+            confidence: ['php', 'slim'],
+        };
+    }
+    return null;
+}
+
+// Elixir 检测：mix.exs + Phoenix。
+function detectElixirStack(dir) {
+    if (!hasFile(dir, 'mix.exs')) return null;
+    const mixExs = readTextSafe(path.join(dir, 'mix.exs')) || '';
+    if (/\bphoenix\b/.test(mixExs)) {
+        return {
+            type: 'elixir-phoenix',
+            defaultPort: 4000,
+            packageManager: 'mix',
+            installCmd: 'mix deps.get',
+            buildCmd: 'mix compile',
+            startCmd: 'mix phx.server',
+            framework: 'phoenix',
+            monorepoApps: null,
+            confidence: ['elixir', 'phoenix'],
+        };
+    }
+    // 通用 Elixir：mix run
+    return {
+        type: 'elixir',
+        defaultPort: 4000,
+        packageManager: 'mix',
+        installCmd: 'mix deps.get',
+        buildCmd: 'mix compile',
+        startCmd: 'mix run --no-halt',
+        framework: null,
+        monorepoApps: null,
+        confidence: ['elixir'],
+    };
+}
+
+// 静态站点生成器：Hugo / Jekyll / Docusaurus / MkDocs / 11ty。
+// 之前 detectStaticStack 只看 index.html 兜底到 python3 -m http.server —
+// 现在各种生成器有自己的 dev server，用原生命令比通用静态服务器更准。
+function detectStaticGenerators(dir) {
+    // Hugo
+    if (hasFile(dir, 'hugo.toml') || hasFile(dir, 'config.toml')) {
+        return {
+            type: 'static-hugo',
+            defaultPort: 1313,
+            packageManager: null,
+            installCmd: null,
+            buildCmd: 'hugo --minify',
+            startCmd: 'hugo server --bind 0.0.0.0 --port $PORT',
+            framework: 'hugo',
+            monorepoApps: null,
+            confidence: ['static', 'hugo'],
+        };
+    }
+    // Jekyll
+    if (hasFile(dir, '_config.yml') || hasFile(dir, '_config.yaml')) {
+        return {
+            type: 'static-jekyll',
+            defaultPort: 4000,
+            packageManager: 'bundler',
+            installCmd: 'bundle install',
+            buildCmd: 'bundle exec jekyll build',
+            startCmd: 'bundle exec jekyll serve --host 0.0.0.0 --port $PORT',
+            framework: 'jekyll',
+            monorepoApps: null,
+            confidence: ['static', 'jekyll'],
+        };
+    }
+    // MkDocs
+    if (hasFile(dir, 'mkdocs.yml')) {
+        return {
+            type: 'static-mkdocs',
+            defaultPort: 8000,
+            packageManager: 'pip',
+            installCmd: 'pip install mkdocs',
+            buildCmd: 'mkdocs build',
+            startCmd: 'mkdocs serve -a 0.0.0.0:$PORT',
+            framework: 'mkdocs',
+            monorepoApps: null,
+            confidence: ['static', 'mkdocs'],
+        };
+    }
+    // Docusaurus
+    if (hasFile(dir, 'docusaurus.config.js') || hasFile(dir, 'docusaurus.config.ts')) {
+        return {
+            type: 'static-docusaurus',
+            defaultPort: 3000,
+            packageManager: 'npm',
+            installCmd: 'npm install',
+            buildCmd: 'npm run build',
+            startCmd: 'npm run serve -- --host 0.0.0.0 --port $PORT',
+            framework: 'docusaurus',
+            monorepoApps: null,
+            confidence: ['static', 'docusaurus'],
+        };
+    }
+    // 11ty
+    if (hasFile(dir, '.eleventy.js') || hasFile(dir, 'eleventy.config.js') || hasFile(dir, 'eleventy.config.mjs') || hasFile(dir, 'eleventy.config.cjs')) {
+        return {
+            type: 'static-11ty',
+            defaultPort: 8080,
+            packageManager: 'npm',
+            installCmd: 'npm install',
+            buildCmd: 'npx @11ty/eleventy',
+            startCmd: 'npx @11ty/eleventy --serve --port=$PORT',
+            framework: '11ty',
+            monorepoApps: null,
+            confidence: ['static', '11ty'],
+        };
+    }
+    return null;
 }
 
 function detectStaticStack(dir) {
@@ -473,9 +860,43 @@ function detectBackendSignature(workspacePath) {
                     + String(readTextSafe(path.join(subDir, 'pyproject.toml')) || '');
                 if (PY_BACKEND_RE.test(reqs)) {
                     evidence.push(`python backend deps in ${sub}/`);
-                    if (!suggestCmd) suggestCmd = `cd ${sub} && python3 -m gunicorn --bind 0.0.0.0:$PORT app:app`;
+                    if (!suggestCmd) {
+                        // 入口：优先 manage.py（django）→ main.py（fastapi）→ app.py
+                        if (hasFile(subDir, 'manage.py')) {
+                            suggestCmd = `cd ${sub} && python3 manage.py runserver 0.0.0.0:$PORT`;
+                        } else {
+                            for (const entry of ['main', 'app', 'asgi', 'wsgi', 'server']) {
+                                if (hasFile(subDir, `${entry}.py`)) {
+                                    suggestCmd = `cd ${sub} && uvicorn ${entry}:app --host 0.0.0.0 --port $PORT`;
+                                    break;
+                                }
+                            }
+                            if (!suggestCmd) suggestCmd = `cd ${sub} && python3 -m gunicorn --bind 0.0.0.0:$PORT app:app`;
+                        }
+                    }
                 }
             }
+            // Java/Ruby/PHP 后端子目录：子目录有 pom.xml/build.gradle/Gemfile/composer.json + 入口
+            const subBuild = readJavaBuildFile(subDir);
+            if (subBuild && /\bspring-boot-starter\b/i.test(subBuild.content)) {
+                evidence.push(`spring-boot in ${sub}/`);
+                if (!suggestCmd) {
+                    suggestCmd = subBuild.name === 'pom.xml'
+                        ? `cd ${sub} && mvn spring-boot:run`
+                        : `cd ${sub} && gradle bootRun`;
+                }
+            }
+            const subGemfile = readTextSafe(path.join(subDir, 'Gemfile'));
+            if (subGemfile && hasFile(subDir, 'bin', 'rails') && hasFile(subDir, 'config', 'application.rb')) {
+                evidence.push(`rails in ${sub}/`);
+                if (!suggestCmd) suggestCmd = `cd ${sub} && bundle exec rails server -b 0.0.0.0 -p $PORT`;
+            }
+            const subComposer = readTextSafe(path.join(subDir, 'composer.json'));
+            if (subComposer && hasFile(subDir, 'artisan')) {
+                evidence.push(`laravel in ${sub}/`);
+                if (!suggestCmd) suggestCmd = `cd ${sub} && php artisan serve --host=0.0.0.0 --port=$PORT`;
+            }
+            // 兜底：原 node 后端识别
             const info = readPkgBackendInfo(subDir);
             if (info) {
                 evidence.push(info.evidence);
@@ -497,8 +918,23 @@ function detectBackendSignature(workspacePath) {
             evidence.push('go.mod (go service)');
             if (!suggestCmd) suggestCmd = 'go run .';
         }
-        if (hasFile(dir, 'pom.xml') || hasFile(dir, 'build.gradle') || hasFile(dir, 'build.gradle.kts')) {
-            evidence.push('JVM build file (maven/gradle service)');
+        // Go 多 main 时优先 cmd/<name>/main.go
+        if (!suggestCmd && hasFile(dir, 'go.mod')) {
+            try {
+                const cmdDirs = fs.readdirSync(path.join(dir, 'cmd')).filter((f) => {
+                    try { return fs.statSync(path.join(dir, 'cmd', f)).isDirectory() && fs.existsSync(path.join(dir, 'cmd', f, 'main.go')); }
+                    catch { return false; }
+                });
+                if (cmdDirs.length === 1) suggestCmd = `go run ./cmd/${cmdDirs[0]}`;
+            } catch { /* no cmd/ */ }
+        }
+        const javaBuild = readJavaBuildFile(dir);
+        if (javaBuild) {
+            if (/\bspring-boot-starter\b/i.test(javaBuild.content)) {
+                evidence.push('spring-boot in root');
+            } else {
+                evidence.push(`JVM build file (${javaBuild.name})`);
+            }
         }
         // 5) Django 入口
         if (hasFile(dir, 'manage.py')) {
@@ -523,12 +959,20 @@ function detectStack(workspacePath) {
         return emptyStack('unknown', ['no_workspace_path']);
     }
     const dir = workspacePath;
+    // 顺序：具体 → 通用。monorepo 优先（xensemble 这类"目录约定"已能命中），
+    // 然后是真实项目（java/ruby/php/elixir/static-generators 全部走各自原生命令），
+    // 再是 node/python/go/rust，最后 generic static 兜底。
     const detectors = [
         detectMonorepo,
         detectNodeStack,
+        detectJavaStack,
         detectPythonStack,
+        detectRubyStack,
+        detectPhpStack,
         detectGoStack,
         detectRustStack,
+        detectElixirStack,
+        detectStaticGenerators,
         detectStaticStack,
     ];
     for (const fn of detectors) {
@@ -609,9 +1053,33 @@ const STACK_DEPS_RULES = {
     'node-react':     { pkg: 'node', detect: 'node-monorepo' },
     'node-express':   { pkg: 'node', detect: 'node-monorepo' },
     'monorepo':       { pkg: 'node', detect: 'node-monorepo' },
+    // python
     'python':         { pkg: 'python', detect: 'python' },
+    // go
     'go':             { pkg: 'go', detect: 'go' },
+    // rust
     'rust':           { pkg: 'rust', detect: 'rust' },
+    // jvm
+    'java-spring-boot': { pkg: 'java', detect: 'java-maven' },
+    'java-maven':       { pkg: 'java', detect: 'java-maven' },
+    // ruby
+    'ruby-rails':    { pkg: 'ruby', detect: 'ruby' },
+    'ruby-sinatra':  { pkg: 'ruby', detect: 'ruby' },
+    'ruby-rack':     { pkg: 'ruby', detect: 'ruby' },
+    // php
+    'php-laravel':   { pkg: 'php', detect: 'php' },
+    'php-symfony':   { pkg: 'php', detect: 'php' },
+    'php-slim':      { pkg: 'php', detect: 'php' },
+    // elixir
+    'elixir-phoenix':{ pkg: 'elixir', detect: 'elixir' },
+    'elixir':        { pkg: 'elixir', detect: 'elixir' },
+    // static generators
+    'static-hugo':     { pkg: 'hugo', detect: 'none' },
+    'static-jekyll':   { pkg: 'ruby', detect: 'ruby' },
+    'static-mkdocs':   { pkg: 'python', detect: 'python' },
+    'static-docusaurus':{ pkg: 'node', detect: 'node' },
+    'static-11ty':     { pkg: 'node', detect: 'node' },
+    // generic
     'static':         { pkg: 'none', detect: 'none' },
     'unknown':        { pkg: 'node', detect: 'node-monorepo' },
     'fallback':       { pkg: 'node', detect: 'node-monorepo' },
@@ -621,6 +1089,7 @@ module.exports = {
     detectStack,
     stackToPreviewContract,
     detectBackendSignature,
+    validatePlanAgainstProject,
     readTextSafe,
     detectNativeDeps,
     // Internal helpers exposed for tests.
@@ -628,16 +1097,122 @@ module.exports = {
         detectPackageManager,
         detectNodeFramework,
         detectMonorepoApps,
+        resolveMonorepoStartScript,
         parsePortFromViteConfig,
         parsePortFromNextConfig,
         parsePortFromEnv,
         resolvePort,
         resolveStartScript,
+        hasIndependentSubProjects,
+        resolveGoStartCmd,
+        resolveRustStartCmd,
+        resolveJavaStartCmd,
+        normalizeCmdForCompare,
     },
     STACK_DEPS_RULES,
     buildDetectScript,
     parseDepsStatus,
 };
+
+// 把命令归一化：剥掉前导 cd / setpriv wrapper / 公共 flag，便于做语义等价比较。
+// 用来判断"LLM 的 plan serve step 是否在用 detected.startCmd"。
+// 例："setpriv --reuid=1000 --regid=1000 --clear-groups npm run dev" 与
+//    "cd server && npm run dev" 与 "npm run dev" 归一化后都 == "npm run dev"。
+function normalizeCmdForCompare(raw) {
+    let c = String(raw || '').trim();
+    // 去掉前导 setpriv 包装（BoxLiteExecAdapter.exec 注入的 uid 切换）
+    c = c.replace(/^setpriv\s+(?:\S+\s+)*--clear-groups\s+/, '');
+    // 去掉前导 cd X && / cd X; 链
+    while (/^cd\s+\S+\s*(?:&&|;)\s*/.test(c)) {
+        c = c.replace(/^cd\s+\S+\s*(?:&&|;)\s*/, '');
+    }
+    // 去掉前导环境变量赋值
+    c = c.replace(/^(?:[A-Z_][A-Z0-9_]*=(?:"[^"]*"|'[^']*'|\S+)\s+)+/, '');
+    // 去掉常见的 --port / --host / --strictPort 等与启动语义无关的 flag
+    c = c.replace(/\s+--port\s+\S+/g, ' ');
+    c = c.replace(/\s+--host\s+\S+/g, ' ');
+    c = c.replace(/\s+--strictPort\b/g, ' ');
+    c = c.replace(/\s+--listen\s+\S+/g, ' ');
+    c = c.replace(/\s+--no-clipboard\b/g, ' ');
+    // 合并多余空白
+    c = c.replace(/\s+/g, ' ').trim();
+    return c;
+}
+
+/**
+ * 结构性 plan 验证：取代原先基于 STATIC_SERVE_RE regex 的 fatal 判定。
+ *
+ * 核心思路：plan 的"serve 步骤是否合理"应当由"项目结构是否支持"判定，而不是
+ * "命令名是否在黑名单里"。具体规则：
+ * - rule 1：detectStack 检测到非 static 的 startCmd，plan serve 步骤不包含 detected.startCmd
+ *   的语义（normalizeCmdForCompare 等价）→ fatal。理由：plan 没有真正启动这个项目。
+ * - rule 2：backendSig.hasBackend=true 且 plan 完全没 serve 步骤 → fatal。
+ *   后端签名证据（fastify/express in server/ 等）说明有后端要起，plan 没起 = 永远连不上。
+ * - rule 3：backendSig.hasBackend=true 但所有 serve 步骤都不像在启后端 → fatal。
+ *   后端没起，前端独活 = 浏览器 5xx / 白屏。
+ * - rule 4：detected.type='static' → 静态站 serve 合法（npx serve / hugo server 等），不报错。
+ * - rule 5：detected.startCmd 缺失（fallback 路径）→ 不判（heuristic 无法判断时保留 LLM 决定）。
+ *
+ * 保留原 runSelfCheck 的 toolchain / cd 重复 / script 存在性检查（与项目类型无关，不动）。
+ *
+ * @param {Array} steps - plan.steps
+ * @param {object|null} detected - detectStack() 输出
+ * @param {{hasBackend:boolean,evidence:string[],suggestCmd:string|null}} backendSig
+ * @returns {{fatal:string[],issues:string[]}}
+ */
+function validatePlanAgainstProject(steps, detected, backendSig) {
+    const fatal = [];
+    const issues = [];
+    if (!Array.isArray(steps) || !steps.length) return { fatal, issues };
+
+    const serveSteps = steps.filter((s) => s && s.kind === 'serve');
+    const detectedStart = detected && detected.startCmd;
+    const isStaticDetected = detected && (detected.type === 'static' || /^static-/.test(detected.type));
+
+    // rule 1：detected 有 startCmd 且非 static，但 plan serve 步骤不包含它的语义
+    if (detectedStart && !isStaticDetected) {
+        const targetCmd = normalizeCmdForCompare(detectedStart);
+        const opensWithTarget = serveSteps.some((s) => {
+            const n = normalizeCmdForCompare(s.command);
+            return n === targetCmd || n.endsWith(' ' + targetCmd) || n.startsWith(targetCmd + ' ');
+        });
+        if (serveSteps.length === 0) {
+            fatal.push(`plan has no serve step, but detectStack says project needs: ${detectedStart}`);
+        } else if (!opensWithTarget) {
+            fatal.push(`plan's serve step doesn't use the detected start command. detected: "${detectedStart}", got: [${serveSteps.map((s) => `"${s.command}"`).join(', ')}]. The plan must call the real entry point.`);
+        }
+    }
+
+    // rule 2：后端签名有 + plan 完全没 serve
+    if (backendSig && backendSig.hasBackend && serveSteps.length === 0) {
+        fatal.push(`Deterministic backend scan found evidence (${backendSig.evidence.join('; ')}) but plan has NO serve step. The backend will never start.`);
+    }
+
+    // rule 3：后端签名有 + 所有 serve 步骤都不像在启后端
+    if (backendSig && backendSig.hasBackend && serveSteps.length > 0) {
+        // 启发式：detectStack 的 startCmd 或 backendSig.suggestCmd 已经标识了后端启动入口
+        const backendMarkers = [];
+        if (detectedStart) backendMarkers.push(detectedStart);
+        if (backendSig.suggestCmd) backendMarkers.push(backendSig.suggestCmd);
+        // evidence 里的子目录名（如 "fastify in server/package.json" → "server"）也是信号
+        for (const ev of backendSig.evidence || []) {
+            const m = ev.match(/in ([\w/.-]+)\//);
+            if (m) backendMarkers.push(m[1].replace(/^.*\//, ''));
+        }
+        const hitsBackend = serveSteps.some((s) => {
+            const n = normalizeCmdForCompare(s.command);
+            return backendMarkers.some((mk) => {
+                const nm = normalizeCmdForCompare(mk);
+                return n.includes(nm) || n.includes(mk);
+            });
+        });
+        if (!hitsBackend) {
+            fatal.push(`plan has serve steps but none reference the detected backend (${backendSig.evidence.join('; ')}; markers: ${backendMarkers.slice(0, 3).join(', ')}). The backend will never run, browser will show 5xx.`);
+        }
+    }
+
+    return { fatal, issues };
+}
 
 // 改动 2 配套：每种 stack 的"依赖 stale 探测"规则
 // - node 生态：检查每个子包 directory 里 node_modules 是否比 package.json / lockfile 旧
@@ -729,14 +1304,66 @@ echo "OVERALL: STALE"
 status_cached=1
 subdir="."
 if [ ! -d "target" ] || [ ! -f "Cargo.lock" ]; then
-    echo "\$subdir: MISSING"; status_cached=0
+    echo "\${subdir}: MISSING"; status_cached=0
 elif [ "target" -ot "Cargo.lock" ]; then
-    echo "\$subdir: STALE"; status_cached=0
+    echo "\${subdir}: STALE"; status_cached=0
 else
-    echo "\$subdir: CACHED"
+    echo "\${subdir}: CACHED"
 fi
 [ "\$status_cached" = "1" ] && echo "OVERALL: CACHED" || echo "OVERALL: STALE"
 `.trim();
+        case 'java-maven':
+            // JVM 没有标准 mtime 缓存（target/ 增量编译结构复杂），永远 STALE 让 agent
+            // 跑 mvn dependency:resolve 或 gradle dependencies 验证。
+            return `
+echo ".: STALE"
+echo "OVERALL: STALE"
+`.trim();
+        case 'ruby':
+            // Gemfile.lock 存在 + vendor/ 缺失 → STALE；有 vendor/ 且比 Gemfile.lock 新 → CACHED
+            return `
+status_cached=1
+subdir="."
+if [ -f "Gemfile.lock" ] && [ ! -d "vendor/bundle" ]; then
+    echo "\${subdir}: STALE"; status_cached=0
+elif [ -d "vendor/bundle" ] && [ -f "Gemfile.lock" ] && [ "vendor/bundle" -ot "Gemfile.lock" ]; then
+    echo "\${subdir}: STALE"; status_cached=0
+else
+    echo "\${subdir}: CACHED"
+fi
+[ "\$status_cached" = "1" ] && echo "OVERALL: CACHED" || echo "OVERALL: STALE"
+`.trim();
+        case 'php':
+            // composer.lock 存在 + vendor/ 缺失 → STALE
+            return `
+status_cached=1
+subdir="."
+if [ -f "composer.lock" ] && [ ! -d "vendor" ]; then
+    echo "\${subdir}: STALE"; status_cached=0
+elif [ -d "vendor" ] && [ -f "composer.lock" ] && [ "vendor" -ot "composer.lock" ]; then
+    echo "\${subdir}: STALE"; status_cached=0
+else
+    echo "\${subdir}: CACHED"
+fi
+[ "\$status_cached" = "1" ] && echo "OVERALL: CACHED" || echo "OVERALL: STALE"
+`.trim();
+        case 'elixir':
+            // mix.lock 存在 + _build/ 缺失 → STALE
+            return `
+status_cached=1
+subdir="."
+if [ -f "mix.lock" ] && [ ! -d "_build" ]; then
+    echo "\${subdir}: STALE"; status_cached=0
+elif [ -d "_build" ] && [ -f "mix.lock" ] && [ "_build" -ot "mix.lock" ]; then
+    echo "\${subdir}: STALE"; status_cached=0
+else
+    echo "\${subdir}: CACHED"
+fi
+[ "\$status_cached" = "1" ] && echo "OVERALL: CACHED" || echo "OVERALL: STALE"
+`.trim();
+        case 'hugo':
+            // Hugo 是二进制，无依赖缓存概念
+            return `echo "OVERALL: CACHED"`;
         case 'none':
         default:
             return `echo "OVERALL: CACHED"`;

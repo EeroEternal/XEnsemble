@@ -2,7 +2,13 @@ const { getRuntime } = require('../runtime/registry');
 const { RuntimeError } = require('../runtime/interfaces');
 const { analyzeProjectWithOpencode } = require('./analyzeOpencode');
 const { detectRuntimeToolchain } = require('./runtimeToolchain');
-const { detectStack, stackToPreviewContract, detectBackendSignature } = require('./detectStack');
+const {
+    detectStack,
+    stackToPreviewContract,
+    detectBackendSignature,
+    validatePlanAgainstProject,
+    normalizeCmdForCompare,
+} = require('./detectStack');
 
 const API_KEY = process.env.LLM_ANALYZE_API_KEY;
 // OpenAI 兼容端点：配置可能给 base URL（如 …/api/v1）或完整 chat/completions URL；
@@ -178,6 +184,7 @@ function buildMessages(treeText, fileContentsText, feedback) {
         '- .agents/preview.json is a platform default hint, NOT authoritative; the project root scripts take priority.',
         '- If a build is required before serving, add the build as a prepare step.',
         '- Keep steps minimal (2-4 max). Do not include steps for writing config files (those go in configFiles).',
+        '- OPTIONAL: if the project needs PostgreSQL, add "needsPostgres": true. If it needs Redis, add "needsRedis": true. If neither, omit or set to false.',
         'No markdown fences, no explanation, only the JSON object.',
     ].join(' ');
 
@@ -227,6 +234,8 @@ function parseResponse(content) {
             kind: s.kind === 'serve' ? 'serve' : 'prepare',
         })),
         configFiles,
+        needsPostgres: Boolean(parsed.needsPostgres),
+        needsRedis: Boolean(parsed.needsRedis),
     };
 }
 
@@ -672,31 +681,59 @@ async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeR
     const opencodeResult = await analyzeProjectWithOpencode(opencodeWs, isAborted);
     if (opencodeResult && opencodeResult.ok && opencodeResult.steps && opencodeResult.steps.length) {
         const normalized = { steps: normalizeSteps(opencodeResult.steps), configFiles: opencodeResult.configFiles || [] };
-        // opencode 跑 host 只出计划，没扫 guest 文件树；这里补扫 guest 树供阶段 B（verify）复用，
-        // 避免 verify agent 重新 list_dir/read_file 探索。自查与扫描在 guest 上可并行。
-        const [check, guestCtx] = await Promise.all([
+        // 一次性并行跑：结构自查（决定 plan 是否 fatal）+ guest 文件树扫描（供 stage B 复用）。
+        // detectStack + detectBackendSignature 纯文件读取（< 100ms），结果决定要不要走兜底，
+        // 自查本身只查工具链 / script 存在性 / cd 重复（不依赖项目结构）。
+        const [check, guestCtx, detected, backendSig] = await Promise.all([
             runSelfCheck({ ...normalized, runtimeRef, workspacePath, hostWorkspacePath }),
             collectProjectContext(getRuntime().fs, workspacePath, runtimeRef).catch(() => null),
+            Promise.resolve().then(() => detectStack(hostWorkspacePath || workspacePath)),
+            Promise.resolve().then(() => detectBackendSignature(hostWorkspacePath || workspacePath)),
         ]);
-        // Fatal self-check issues (e.g. "monorepo project got a static-serve
-        // plan") cannot be salvaged by injecting toolchain steps; the opencode
-        // plan is structurally wrong. Reject it and rebuild from detectStack
-        // heuristics so the project actually starts (e.g. `pnpm dev:web`).
-        if ((check.fatal || []).length) {
-            const detected = detectStack(hostWorkspacePath || workspacePath);
-            const contract = stackToPreviewContract(detected);
-            if (contract && contract.command && !STATIC_SERVE_RE.test(contract.command)) {
-                console.error(`[analyzeDeploy] self-check rejected opencode plan (${check.fatal.length} fatal); falling back to detectStack: ${contract.command} ${contract.args.join(' ')} on :${contract.port}`);
-                const detectPlan = buildPlanFromDetectStack(detected, contract);
-                if (detectPlan) {
-                    return { ...detectPlan, source: 'opencode-rejected-detectstack', checked: true, contextTree: guestCtx?.treeText || null, warning: `opencode plan rejected: ${check.fatal.join('; ')}; using detectStack fallback` };
-                }
-            }
-            // detectStack could not produce a usable plan either — fall
-            // through to the original behavior (return opencode plan with
-            // a warning) so stage B at least gets something to try.
+
+        // 用结构（detected.startCmd / backendSig）做权威判断：LLM 的 plan 是否在用
+        // 真实入口（不靠 STATIC_SERVE_RE 黑名单匹配命令名）。
+        const structuralCheck = validatePlanAgainstProject(normalized.steps, detected, backendSig);
+        // 把 structural fatal 与 regex-style fatal 合并（两者都让 plan 不可信）
+        const allFatal = [...(check.fatal || []), ...structuralCheck.fatal];
+        // LLM 出的 serve 步骤是否与 detected.startCmd 语义一致（normalizeCmdForCompare
+        // 剥掉前导 cd / setpriv / --port 等修饰做等价比较）—— 这是 LLM plan 唯一的"通过"路径。
+        const llmPlanMatchesDetected = detected && detected.startCmd && normalized.steps.some((s) => {
+            if (!s || s.kind !== 'serve' || !s.command) return false;
+            const n = normalizeCmdForCompare(s.command);
+            const t = normalizeCmdForCompare(detected.startCmd);
+            return n === t || n.endsWith(' ' + t) || n.startsWith(t + ' ') || n.includes(t);
+        });
+
+        // 兜底条件：detectStack 真的能出可用 plan（有 startCmd；若无 startCmd 则
+        // stackToPreviewContract 会回退成 npx serve 静态服务器——那种情况不叫"能出可用
+        // plan"，不应覆盖 LLM 的正确输出）。
+        const detectedContract = stackToPreviewContract(detected);
+        const canUseDetected = detectedContract && detectedContract.command && detected && detected.startCmd;
+
+        // 决策树（优先级从高到低）：
+        // 1. LLM plan 完全匹配 detected.startCmd → 用 LLM plan（保留 LLM 价值）
+        // 2. 有 fatal（regex 或 structural）→ 强制用 detectStack fallback
+        // 3. LLM plan 跟 detected.startCmd 不匹配但 detectStack 有 startCmd → 用 detectStack fallback
+        // 4. detectStack 没有可用 plan → 用 LLM plan（heuristic 无解，保留 LLM 决定）
+        if (llmPlanMatchesDetected && allFatal.length === 0) {
+            // 路径 1：LLM 与 detected 一致且无 fatal → 保留 LLM plan
+            return { ...normalized, source: 'opencode', checked: check.passed, contextTree: guestCtx?.treeText || null, ...(check.passed ? {} : { warning: `opencode plan passed structural check but self-check found ${check.issues.length} issue(s)` }) };
         }
-        return { ...normalized, source: 'opencode', checked: check.passed, contextTree: guestCtx?.treeText || null, ...(check.passed ? {} : { warning: `opencode produced plan but self-check found ${check.issues.length} issue(s)` }) };
+        // 路径 2/3：有 fatal，或 LLM 与 detected 不一致 → detectStack 兜底
+        const fallbackSource = allFatal.length > 0 ? 'opencode-rejected-detectstack' : 'detectstack-override';
+        if (canUseDetected) {
+            const detectPlan = buildPlanFromDetectStack(detected, detectedContract);
+            if (detectPlan) {
+                const why = allFatal.length > 0
+                    ? `opencode plan rejected: ${allFatal.join('; ')}`
+                    : `opencode plan doesn't use detected startCmd ("${detected.startCmd}"); using detectStack fallback`;
+                console.error(`[analyzeDeploy] ${why}; falling back to detectStack: ${detectPlan.steps.map((s) => s.command).join(' | ')}`);
+                return { ...detectPlan, source: fallbackSource, checked: true, contextTree: guestCtx?.treeText || null, warning: why };
+            }
+        }
+        // 路径 4：detectStack 也无解（startCmd=null），保留 LLM plan + 警告
+        return { ...normalized, source: 'opencode', checked: check.passed && allFatal.length === 0, contextTree: guestCtx?.treeText || null, warning: allFatal.length > 0 ? `opencode plan has fatal issues and detectStack produced no fallback: ${allFatal.join('; ')}` : '' };
     }
 
     const fsAdapter = getRuntime().fs;
