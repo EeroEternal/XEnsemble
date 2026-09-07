@@ -90,6 +90,34 @@ function extractUpstreamErrorText(bodyBuffer, contentType) {
     return raw.replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 
+/**
+ * Detect an in-stream failure inside a 200-status SSE body. The gateway
+ * returns streaming failures with HTTP 200 and wraps the error as a
+ * `data: {"error": ...}` event (UniGateway main.rs), so a status-code check
+ * never sees it — the dialog view would keep "thinking" until the idle
+ * timeout. Returns the error message text, or '' when the stream is healthy.
+ */
+function extractSseErrorText(bodyBuffer) {
+    if (!Buffer.isBuffer(bodyBuffer) || bodyBuffer.length === 0) return '';
+    const raw = bodyBuffer.toString('utf8').slice(0, 1024 * 1024);
+    // SSE only — JSON error bodies are handled by extractUpstreamErrorText.
+    if (!raw.startsWith('data:') && !raw.includes('\ndata:')) return '';
+    for (const line of raw.split('\n')) {
+        const t = line.trim();
+        if (!t.startsWith('data:')) continue;
+        const payload = t.slice(5).trim();
+        if (!payload.startsWith('{') || !payload.includes('"error"')) continue;
+        try {
+            const obj = JSON.parse(payload);
+            const err = obj?.error ?? (obj?.type === 'error' ? obj.error : null);
+            if (!err) continue;
+            const msg = typeof err === 'string' ? err : err?.message;
+            if (msg) return String(msg).replace(/\s+/g, ' ').slice(0, 200);
+        } catch (_) { /* not JSON — skip line */ }
+    }
+    return '';
+}
+
 proxy.on('error', (err, req, res) => {
     if (res.writeHead) {
         res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -815,6 +843,13 @@ async function proxyLlmRequest(request, reply) {
     }
     const onResponseBody = (bodyBuffer, contentType) => {
         if (!isChatPath) return;
+        // 200-status SSE streams can still carry the gateway failure as an
+        // in-stream error event — surface it before anything else.
+        const sseErrorText = extractSseErrorText(bodyBuffer);
+        if (sseErrorText) {
+            recordLlmErrorEvent(claims.sid, 'upstream', sseErrorText);
+            return;
+        }
         const assistantText = extractAssistantMessage(bodyBuffer, contentType);
         if (assistantText) {
             void chatTranscript.append(claims.sid, {
@@ -936,5 +971,6 @@ module.exports = {
     extractToolCalls,
     extractToolResults,
     extractUpstreamErrorText,
+    extractSseErrorText,
     recordLlmErrorEvent,
 };

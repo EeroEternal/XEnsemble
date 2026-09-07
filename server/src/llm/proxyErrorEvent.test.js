@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { extractUpstreamErrorText, recordLlmErrorEvent } = require('./proxy');
+const { extractUpstreamErrorText, extractSseErrorText, recordLlmErrorEvent } = require('./proxy');
 const chatTranscript = require('./chatTranscript');
 
 describe('LLM proxy upstream error text extraction', () => {
@@ -17,6 +17,30 @@ describe('LLM proxy upstream error text extraction', () => {
     it('falls back to plain text and handles empty bodies', () => {
         assert.equal(extractUpstreamErrorText(Buffer.from('  too many requests\n'), 'text/plain'), 'too many requests');
         assert.equal(extractUpstreamErrorText(Buffer.alloc(0), 'application/json'), '');
+    });
+});
+
+describe('LLM proxy in-stream SSE error detection (200-status streams)', () => {
+    it('extracts the gateway error event from a failed OpenAI-style SSE stream', () => {
+        const body = Buffer.from(
+            'data: {"error":{"message":"core execution exhausted all attempts: upstream http error 401 from endpoint Tokens","type":"gateway_error"}}\n\n',
+        );
+        assert.equal(
+            extractSseErrorText(body),
+            'core execution exhausted all attempts: upstream http error 401 from endpoint Tokens',
+        );
+    });
+
+    it('extracts Anthropic-style type:error events', () => {
+        const body = Buffer.from('event: error\ndata: {"type":"error","error":{"type":"api_error","message":"boom"}}\n\n');
+        assert.equal(extractSseErrorText(body), 'boom');
+    });
+
+    it('ignores healthy streams and non-SSE bodies', () => {
+        const healthy = Buffer.from('data: {"id":"1","choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n');
+        assert.equal(extractSseErrorText(healthy), '');
+        assert.equal(extractSseErrorText(Buffer.from('plain error text')), '');
+        assert.equal(extractSseErrorText(Buffer.alloc(0)), '');
     });
 });
 
