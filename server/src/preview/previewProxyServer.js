@@ -199,6 +199,17 @@ function rewriteAndSendHtml(res, pRes, chunks) {
     res.end(html);
 }
 
+// Origin 同源改写：浏览器发来的 Origin 是预览入口地址（如 http://IP:8099），但转发给
+// 应用后端时 Host 已改写为 127.0.0.1:<port>。被部署应用若做 Origin↔Host 一致性校验
+// （DNS-rebinding / CSRF 围栏，如 deepseek-harness 的 api-request-trust：Origin host 必须
+// 等于请求 Host，否则 /api 一律 403），会因两者不一致被拒。把 Origin 同步改写为与转发
+// 目标同源，让"同源校验"类应用在预览反代下正常工作；正常应用不受影响（Origin 变为自身）。
+function sameOriginHeaders(headers, port) {
+    const out = { ...headers, host: `127.0.0.1:${port}` };
+    if (out.origin !== undefined) out.origin = `http://127.0.0.1:${port}`;
+    return out;
+}
+
 // 通用反代：把请求转发给指定端口，仅对 HTML 响应做资源路径改写 + 剥 iframe 限制头。
 // 并针对「前端 BrowserRouter」项目提供 SPA history 路由 fallback：命中 404 的浏览器导航
 // （非 /api、非静态资源）回源取 index.html，避免刷新/直接访问子路由时 404。
@@ -210,7 +221,7 @@ function proxyTo(req, res, port, allowFallback = true, overridePath = null) {
         port,
         path: targetPath,
         method: req.method,
-        headers: { ...req.headers, host: `127.0.0.1:${port}` },
+        headers: sameOriginHeaders(req.headers, port),
     }, (pRes) => {
         const isNav = /\btext\/html\b/i.test(String(req.headers.accept || ''));
         const isApi = /^\/api(\/|$)/i.test(String(targetPath || ''));
@@ -315,7 +326,7 @@ function forwardUpgrade(req, socket, head, port, targetPath) {
         port,
         path: targetPath,
         method: req.method || 'GET',
-        headers: { ...req.headers, host: `127.0.0.1:${port}` },
+        headers: sameOriginHeaders(req.headers, port),
     });
     proxy.on('upgrade', (pRes, pSocket, pHead) => {
         if (pRes.statusCode !== 101) {
@@ -390,7 +401,7 @@ const server = http.createServer((req, res) => {
             port: Number(backendPort),
             path: req.url,
             method: req.method,
-            headers: { ...req.headers, host: `127.0.0.1:${backendPort}` },
+            headers: sameOriginHeaders(req.headers, Number(backendPort)),
         }, (pRes) => {
             res.writeHead(pRes.statusCode, stripFrameBlockingHeaders(pRes.headers));
             pRes.pipe(res);

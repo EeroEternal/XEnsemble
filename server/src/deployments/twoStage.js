@@ -31,7 +31,7 @@ const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 const VERIFY_STATE_TTL_MS = 30 * 60 * 1000;
 // 单次部署（阶段 1 分析 + 阶段 2 验证）整体超时：verify agent 可能因 run_shell 启动服务未正确
 // 后台化（缺少 &/nohup）而挂起，必须有总超时自动中止，否则部署永不结束、前端一直显示 running。
-const DEPLOY_TOTAL_TIMEOUT_MS = Number(process.env.DEPLOY_TOTAL_TIMEOUT_MS) || 15 * 60 * 1000;
+const DEPLOY_TOTAL_TIMEOUT_MS = Number(process.env.DEPLOY_TOTAL_TIMEOUT_MS) || 20 * 60 * 1000;
 
 // 在 stage A 之前 fetch sandbox projectDir 的 origin/main，让 stage A LLM 看到最新代码。
 // 不做 reset --hard：保留用户在工作目录的未提交改动（平台在 /var/lib/.../proj_xxx 上
@@ -170,7 +170,35 @@ function repairHostWorkspaceOwnership(hostPath) {
 
 // 部署通过后清理可续状态，并提取「成功执行轨迹」：既跑成功又能产生实际结果的命令，
 // 供下次部署复用（去掉 ls/cat/grep 等纯探索命令和成功的 curl 健康检查）。
-function extractSuccessCommands(trail) {
+// serve/启动类命令单独把关：`nohup ... &` 永远 exit=0，exit 码无法证明服务真的活着。
+// 这类命令仅当本次 verify 的 API 探测确认后端可用（apiVerdict alive/backend_listening），
+// 或项目确无后端（纯静态站，根路径探测已足够）时才允许进入缓存——否则"前端 200
+// 后端死"的坏启动姿势会作为成功轨迹被后续部署的缓存无限继承（deepseek-harness 事故）。
+// 判定正则宁宽勿漏：误过滤的代价只是下次 verify 多执行一条命令，漏过滤的代价是坏姿势固化。
+const SERVE_CMD_RE = new RegExp([
+    '\\bnohup\\b',
+    '\\bsetsid\\b',
+    '(?:^|\\s)&\\s*$',          // 以 & 后台化结尾（排除 a && b 的 &&）
+    '\\b(?:npm|pnpm)\\s+(?:run\\s+)?(?:start|dev|serve)\\b',
+    '\\byarn\\s+(?:start|dev|serve)\\b',
+    '\\bnpx\\s+(?:--yes\\s+)?serve\\b',
+    '\\bvite\\b',
+    '\\bnext\\s+(?:start|dev)\\b',
+    '\\bng\\s+serve\\b',
+    '\\buvicorn\\b',
+    '\\bgunicorn\\b',
+    '\\bflask\\s+run\\b',
+    '\\brunserver\\b',
+    '\\bgo\\s+run\\b',
+    '\\bcargo\\s+run\\b',
+    '\\bjava\\s+-jar\\b',
+    '\\bdotnet\\s+run\\b',
+    '\\bnode\\s+\\S*(?:server|app|main|index)\\.(?:js|mjs|cjs|ts)\\b',
+    '\\bpython3?\\s+\\S*(?:app|main|server|wsgi|asgi)\\.py\\b',
+    '\\bartisan\\s+serve\\b',
+].join('|'), 'i');
+
+function extractSuccessCommands(trail, allowServeCommands = true) {
     const cmds = [];
     const seen = new Set();
     for (const t of (Array.isArray(trail) ? trail : [])) {
@@ -181,6 +209,7 @@ function extractSuccessCommands(trail) {
         if (!/^exit=0\b/.test(String(t.out || ''))) continue;
         // 跳过只读探索/健康检查命令，只留「产生实际结果」的命令
         if (/^(ls|cat|pwd|which|grep|head|tail|find|test|echo|curl|pgrep|ps)\b/i.test(cmd)) continue;
+        if (!allowServeCommands && SERVE_CMD_RE.test(cmd)) continue;
         if (seen.has(cmd)) continue;
         seen.add(cmd);
         if (cmds.length >= 12) break;
@@ -722,6 +751,251 @@ async function detectDepsCached(runtimeRef, workspacePath, stack) {
     }
 }
 
+// 探测沙箱内包管理器：pnpm workspace/lock 优先，其次 yarn/bun，默认 npm。
+async function detectGuestPackageManager(runtimeRef, workspacePath) {
+    const runtime = getRuntime();
+    try {
+        const r = await runtime.exec.exec('sh', ['-c',
+            'for f in pnpm-workspace.yaml pnpm-lock.yaml; do [ -f "$f" ] && echo pnpm && exit 0; done; [ -f yarn.lock ] && echo yarn && exit 0; [ -f bun.lockb ] && echo bun && exit 0; echo npm'],
+            {}, { runtimeRef, cwd: workspacePath, timeoutMs: 10000 });
+        const pm = String(r.stdout || '').trim().split('\n')[0];
+        return ['pnpm', 'yarn', 'bun'].includes(pm) ? pm : 'npm';
+    } catch { return 'npm'; }
+}
+
+// 平台侧确定性 install：把部署里最大的时间块（install）从 verify agent 手里拿走。
+// 动机（journal 实测）：agent 执行 install 有三类浪费——单命令 240s 超时截断后重跑（时间
+// 双倍）、workspaces 项目逐子包重复 install、以及 lockfile/依赖状态理解偏差导致的多余重装。
+// 平台按 depsStatus 确定性执行：
+//   1) 全 CACHED → 不跑；
+//   2) Node：根目录一次 install（workspaces/pnpm-workspace 自动装齐全部子包）→ 重探测 →
+//      仍非 CACHED 的子包逐个补装（上限 20，超出交给 agent 兜底）；
+//   3) Python：stack.installCmd（requirements.txt）。
+// 结果（命令 + 成败 + 失败日志尾部）写入 plan.context.platformInstall，由 analyzeVerify
+// 注入 prompt：「平台已装好，禁止重复 install」；失败的带日志让 agent 定点修复。
+// 前置条件：configureGuestMirrors 已执行（镜像源就绪）、ensureDependencyExcludeInGuest
+// 已执行（install 落盘 node_modules 前排除项先配好）——调用方保证顺序。
+async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath, stack, depsStatus, onLog }) {
+    const runtime = getRuntime();
+    const log = (m) => { if (onLog) onLog(m); };
+    const stale = Object.entries(depsStatus || {}).filter(([, v]) => v !== 'CACHED');
+    if (!stale.length) return { ran: false };
+    const type = stack?.type || 'unknown';
+    // node-express/node-vite/node-next 等 node-* 变体全部支持——之前白名单漏了
+    // node-express（xensemble 的实际类型），platform install 整个被跳过，
+    // server/web 子包依赖全靠 agent 手装（多花 4+ 分钟）。
+    if (!(type === 'monorepo' || type === 'python' || type.startsWith('node'))) {
+        return { ran: false, skipped: type };
+    }
+
+    const cmds = [];
+    // exec 的默认 PATH 可能不含 /usr/local/bin——guest 的 node/npm/pnpm（corepack 装的）
+    // 都在那里，而 agent spawn 环境有完整 PATH 不受影响。实测症状：根 pnpm install
+    // "command not found" 秒失败 exit 127，agent 会话里同一条命令却成功。
+    // 所以平台 install 的每条命令统一前置 /usr/local/bin。
+    // NODE_OPTIONS：大前端项目（katex/monaco/react-markdown 等）vite build 用 node 默认
+    // 堆（~1.7GB）会 OOM，agent 要试错 2-3 次 NODE_OPTIONS 才成功（xensemble 实测
+    // build ×3 ≈ 10 分钟）。平台命令统一预置 3GB 堆上限（DEPLOY_NODE_MAX_OLD_SPACE_MB
+    // 可覆盖）；agent 侧由 analyzeVerify 的 run_shell 同步预置。
+    const nodeMb = Number(process.env.DEPLOY_NODE_MAX_OLD_SPACE_MB) || 3072;
+    const PATH_PREFIX = `export PATH="/usr/local/bin:$PATH"; export NODE_OPTIONS="--max-old-space-size=${nodeMb}"; `;
+    const run = async (cmd, cwd) => {
+        log(`platform install: ${cmd}${cwd ? ` (cwd=${cwd})` : ''}`);
+        try {
+            const r = await runtime.exec.exec('sh', ['-c',
+                `${PATH_PREFIX}${cmd} > /tmp/_pi.log 2>&1; ec=$?; tail -15 /tmp/_pi.log; echo "__PI_EXIT__=\${ec}"`],
+                {}, { runtimeRef, cwd: cwd ? `${workspacePath}/${cwd}` : workspacePath, timeoutMs: 600000 });
+            const out = String(r.stdout || '');
+            const m = out.match(/__PI_EXIT__=(-?\d+)/);
+            const ec = m ? parseInt(m[1], 10) : (Number.isInteger(r.exitCode) ? r.exitCode : 1);
+            const tail = out.replace(/__PI_EXIT__=-?\d+\s*/, '').trim().slice(-800);
+            cmds.push({ cmd, cwd: cwd || '.', ok: ec === 0, logTail: ec === 0 ? undefined : tail });
+            return ec === 0;
+        } catch (e) {
+            cmds.push({ cmd, cwd: cwd || '.', ok: false, logTail: String(e.message).slice(0, 800) });
+            return false;
+        }
+    };
+
+    // native 编译链预装：依赖里有 node-gyp 类原生包（node-pty/bcrypt/sharp 等）时，
+    // 沙箱默认无 build-essential —— npm install 会部分失败或 agent 要自己试错 apt
+    // （xensemble 实测 1.6 分钟 + 一轮 LLM）。命中即预装（幂等：已装则跳过）。
+    try {
+        const { detectNativeDeps } = require('./detectStack');
+        const native = detectNativeDeps(hostWorkspacePath || null);
+        if (native.hit) {
+            const chk = await runtime.exec.exec('sh', ['-c', 'dpkg -s build-essential >/dev/null 2>&1 && echo YES || echo NO'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 10000 });
+            if (String(chk.stdout || '').trim() !== 'YES') {
+                log(`native compile deps detected (${native.pkgs.join(', ')}): installing build-essential + python3`);
+                await run('apt-get update -qq && apt-get install -y -qq build-essential python3', '');
+            } else {
+                log(`native compile deps detected (${native.pkgs.join(', ')}): build-essential already present`);
+            }
+        }
+    } catch (e) {
+        log(`native deps preinstall failed (non-fatal): ${e.message?.slice(0, 120)}`);
+    }
+
+    if (type === 'python') {
+        const cmd = stack.installCmd || 'pip install -r requirements.txt';
+        const ok = await run(cmd, '');
+        log(`platform install ${ok ? 'ok' : 'FAILED'} (python)`);
+        return { ran: true, ok, cmds };
+    }
+
+    // Node / monorepo：解析「沙箱内实际可用」的安装命令。
+    // 只看 lockfile 判定包管理器不够：guest 不继承宿主 nvm PATH，lockfile 是 pnpm
+    // 而沙箱没有 pnpm 二进制时命令秒失败（deepseek-harness 实测）。降级链：
+    //   pnpm → corepack pnpm（node 22 内置 corepack）→ npm i -g pnpm（镜像源，秒级）
+    //   → npm install（最后兜底，注意 npm 不识别 pnpm-workspace.yaml，覆盖不到子包，
+    //     此时依赖下方重探测补漏——但 245 子包的项目补漏上限 20 远不够，所以 pnpm 链
+    //     能走通必须走通）。
+    const cmdExists = async (c) => {
+        try {
+            const r = await runtime.exec.exec('sh', ['-c', `export PATH="/usr/local/bin:$PATH"; command -v ${c} >/dev/null 2>&1 && echo YES || echo NO`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 10000 });
+            return String(r.stdout || '').trim() === 'YES';
+        } catch { return false; }
+    };
+    const pm = await detectGuestPackageManager(runtimeRef, workspacePath);
+    let installCmd = pm === 'pnpm' ? 'pnpm install --no-frozen-lockfile'
+        : pm === 'yarn' ? 'yarn install'
+            : pm === 'bun' ? 'bun install'
+                : 'npm install --no-audit --no-fund';
+    if (pm === 'pnpm' && !(await cmdExists('pnpm'))) {
+        if (await cmdExists('corepack')) {
+            log('platform install: pnpm binary missing, using corepack pnpm');
+            installCmd = 'corepack pnpm install --no-frozen-lockfile';
+        } else {
+            log('platform install: pnpm missing, trying npm i -g pnpm');
+            const installed = await (async () => {
+                try {
+                    const r = await runtime.exec.exec('sh', ['-c', 'export PATH="/usr/local/bin:$PATH"; npm install -g pnpm --no-audit --no-fund >/dev/null 2>&1 && echo YES || echo NO'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 120000 });
+                    return String(r.stdout || '').trim() === 'YES';
+                } catch { return false; }
+            })();
+            if (installed) log('platform install: pnpm installed globally');
+            else log('platform install: npm i -g pnpm failed, will fall back to npm install');
+        }
+    }
+    let ok = await run(installCmd, '');
+    let effectiveCmd = ok ? installCmd : null;
+    if (!ok && pm !== 'npm') {
+        // pnpm/yarn/bun 二进制缺失或安装失败：回退 npm（覆盖 package.json workspaces；
+        // pnpm-only workspace 覆盖不到子包，由下方重探测补漏循环兜底）。
+        log(`platform install: ${pm} install failed, falling back to npm install`);
+        const npmOk = await run('npm install --no-audit --no-fund', '');
+        if (npmOk) { ok = true; effectiveCmd = 'npm install --no-audit --no-fund'; }
+    }
+    // 重探测补漏：根 install 不覆盖"独立子项目"（无 workspace 配置的 monorepo）。
+    // 仍非 CACHED 的子包逐个补装；超过 20 个放弃逐包（极端项目交给 agent，避免拖死总预算）。
+    // 补装命令必须用「根 install 实际成功的那条」——不能用理论上的 installCmd（可能
+    // 就是失败的那条，如 pnpm 二进制缺失时逐条秒失败，245 个子包一个都装不上）。
+    let remainingStale = 0;
+    let finalStatus = null;
+    try {
+        const { buildDetectScript, parseDepsStatus } = require('./detectStack');
+        const r = await runtime.exec.exec('sh', ['-c', buildDetectScript(stack)], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 30000 });
+        finalStatus = parseDepsStatus(r.stdout);
+        const stillStale = Object.entries(finalStatus.perPackage || {}).filter(([, v]) => v !== 'CACHED');
+        remainingStale = stillStale.length;
+        if (effectiveCmd) {
+            // 补装并行化：各子包 install 互相独立（无 workspace 依赖），串行实测
+            // web 13s + server 25s + desktop 78s = ~2min，并行后 = max(~78s)。
+            // 并发限流：沙箱内存有限（2GB），同时跑太多 npm install 会互相 OOM，
+            // 默认 3 并发，DEPLOY_INSTALL_CONCURRENCY 可覆盖。
+            const subs = stillStale.map(([sub]) => sub).filter((s) => s !== '.').slice(0, 20);
+            if (subs.length) {
+                const concurrency = Math.max(1, Math.min(Number(process.env.DEPLOY_INSTALL_CONCURRENCY) || 3, subs.length));
+                const queue = [...subs];
+                const workers = Array.from({ length: concurrency }, async () => {
+                    while (queue.length) {
+                        const sub = queue.shift();
+                        const subOk = await run(effectiveCmd, sub);
+                        if (!subOk) ok = false;
+                    }
+                });
+                await Promise.all(workers);
+            }
+        }
+        if (stillStale.length > 20) log(`platform install: ${stillStale.length} sub-packages still stale (capped at 20), rest left to verify agent`);
+    } catch (e) {
+        log(`platform install re-detect failed (non-fatal): ${e.message?.slice(0, 120)}`);
+    }
+    log(`platform install ${ok ? 'ok' : 'PARTIALLY FAILED'} (${cmds.length} command(s), ${remainingStale} sub-package(s) still stale)`);
+    return { ran: true, ok, cmds, remainingStale, finalStatus };
+}
+
+
+// Go 版本比较：go.mod "go 1.26.1" vs 沙箱 "go1.22.5" → 全量 major.minor.patch 比较。
+function goVersionSatisfies(current, required) {
+    const parse = (v) => {
+        const m = String(v || '').match(/(\d+)\.(\d+)(?:\.(\d+))?/);
+        return m ? [Number(m[1]), Number(m[2]), Number(m[3] || 0)] : [0, 0, 0];
+    };
+    const [a1, a2, a3] = parse(current);
+    const [b1, b2, b3] = parse(required);
+    if (a1 !== b1) return a1 > b1;
+    if (a2 !== b2) return a2 > b2;
+    return a3 >= b3;
+}
+
+// Go 工具链版本预检与平台预装：go.mod 要求的版本高于沙箱已装版本时（如要求 go 1.26
+// 而沙箱是 apt 的 1.19/1.22），agent 只能反复试错——实测 multica（AgentHarness）verify
+// 烧掉 30+ 分钟在「apt 装旧 Go → 降级 go.mod → 编译失败 → 恢复重来」循环上。
+// 平台在 verify 前确定性装好：从 npmmirror 的 golang 二进制镜像下载 tarball 解到
+// /usr/local/go，并软链 go/gofmt 到 /usr/local/bin（已在 exec 与 agent PATH 内）。
+// 已满足时仅补写 GOPROXY 持久配置（configureGuestMirrors 只在 go 已装时写，且装完
+// 新 Go 后也要重写一次——它不会跑第二次）。
+async function ensureGuestGoToolchain({ runtimeRef, workspacePath, hostWorkspacePath, onLog }) {
+    const runtime = getRuntime();
+    const log = (m) => { if (onLog) onLog(m); };
+    const PATH_PREFIX = 'export PATH="/usr/local/bin:$PATH"; ';
+    try {
+        // 1) 读 go.mod 要求版本（宿主侧纯文件读取；无 go.mod → 非 Go 项目跳过）
+        let required = null;
+        if (hostWorkspacePath) {
+            const { readTextSafe } = require('./detectStack');
+            const gomod = String(readTextSafe(path.join(hostWorkspacePath, 'go.mod')) || '');
+            required = gomod.match(/^go\s+(\d+\.\d+(?:\.\d+)?)/m)?.[1] || null;
+        }
+        if (!required) return { ran: false };
+        // 2) 沙箱当前 go 版本
+        let current = null;
+        try {
+            const r = await runtime.exec.exec('sh', ['-c', `${PATH_PREFIX}go version 2>/dev/null || echo NO_GO`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+            current = String(r.stdout || '').match(/go(\d+\.\d+(?:\.\d+)?)/)?.[1] || null;
+        } catch { /* go missing */ }
+        if (current && goVersionSatisfies(current, required)) {
+            await runtime.exec.exec('sh', ['-c', `${PATH_PREFIX}go env -w GOPROXY=https://goproxy.cn,direct 2>/dev/null; go env -w GOSUMDB=sum.golang.google.cn 2>/dev/null; true`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => {});
+            log(`go toolchain ok (${current} >= ${required}), GOPROXY configured`);
+            return { ran: true, ok: true, version: current, installed: false };
+        }
+        // 3) 下载并解包目标版本。go.mod 版本可能不带 patch（"go 1.21"）→ 补 .0。
+        // 镜像主备：阿里云 golang 镜像（实测 200）→ golang.google.cn（Google 中国官方镜像）。
+        const ver = /^\d+\.\d+$/.test(required) ? `${required}.0` : required;
+        const arch = (await runtime.exec.exec('sh', ['-c', 'uname -m'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 10000 }).catch(() => ({ stdout: 'x86_64' }))).stdout?.trim() || 'x86_64';
+        const goArch = arch === 'aarch64' || arch === 'arm64' ? 'arm64' : 'amd64';
+        const dlCmd = [
+            `https://mirrors.aliyun.com/golang/go${ver}.linux-${goArch}.tar.gz`,
+            `https://golang.google.cn/dl/go${ver}.linux-${goArch}.tar.gz`,
+        ].map((u) => `curl -fsSL -m 240 -o /tmp/go-toolchain.tgz "${u}"`).join(' || ');
+        log(`go toolchain ${current || 'missing'} < required ${required}: installing go${ver} from mirror (${goArch})`);
+        const r = await runtime.exec.exec('sh', ['-c',
+            `${PATH_PREFIX}set -e; ${dlCmd} && rm -rf /usr/local/go && tar -C /usr/local -xzf /tmp/go-toolchain.tgz && rm -f /usr/local/bin/go /usr/local/bin/gofmt && ln -sf /usr/local/go/bin/go /usr/local/bin/go && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt && /usr/local/bin/go version && /usr/local/bin/go env -w GOPROXY=https://goproxy.cn,direct && /usr/local/bin/go env -w GOSUMDB=sum.golang.google.cn && echo "__GO_OK__"`],
+            {}, { runtimeRef, cwd: workspacePath, timeoutMs: 600000 });
+        const ok = String(r.stdout || '').includes('__GO_OK__');
+        if (ok) {
+            log(`go toolchain installed: go${ver} (GOPROXY=goproxy.cn)`);
+            return { ran: true, ok: true, version: ver, installed: true };
+        }
+        const tail = String(r.stdout || r.stderr || '').trim().slice(-400);
+        log(`go toolchain install FAILED (non-fatal, agent will handle): ${tail}`);
+        return { ran: true, ok: false, version: null, installed: false, logTail: tail };
+    } catch (e) {
+        log(`go toolchain ensure failed (non-fatal): ${e.message?.slice(0, 200)}`);
+        return { ran: true, ok: false, installed: false };
+    }
+}
 
 // 从阶段 A 产出的 configFiles（.env 模板）里解析 PostgreSQL 连接信息，供系统侧直接建库建用户，
 // 避免 verify agent 用 su/runuser/sudo 变体反复试错（历史 3 轮≈60s 的浪费点）。
@@ -1670,7 +1944,12 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
     let planFingerprint = computeProjectFingerprint(hostPath, wsPath);
     if (!plan) {
         const cached = await loadPlanCache(project.id, planFingerprint);
-        if (cached) {
+        if (cached && cached.context?.lastVerifyFailed) {
+            // 失败降级：上次用此计划验证未通过 → 视同缓存未命中，重新走阶段 A 分析，
+            // 不再复用（成功后回写会自动清掉该标记）。
+            console.error(`[twoStage] plan cache degraded by lastVerifyFailed (${cached.context?.lastVerifyError || 'unknown'}), re-analyzing`);
+            report({ stage: 'A', message: '上次部署验证失败，跳过计划缓存重新分析' });
+        } else if (cached) {
             plan = {
                 steps: cached.steps,
                 configFiles: cached.configFiles || [],
@@ -1740,13 +2019,40 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         }
         // 系统侧预启动 PostgreSQL（检测到需要时），避免 verify agent 用 su/runuser/sudo 试错
         const dbProvision = await provisionPostgresIfNeeded(ref, wsPath, plan);
+        // 平台侧确定性 install（在 agent 启动前把依赖装齐）：结果注入 verify prompt，
+        // agent 不再重复 install——这是部署时长最大的单项优化（实测 install 占 60%+）。
+        let platformInstall = { ran: false };
+        try {
+            platformInstall = await runPlatformInstall({
+                runtimeRef: ref, workspacePath: wsPath, hostWorkspacePath: hostPath, stack: detected, depsStatus,
+                onLog: (m) => { console.error(`[twoStage] ${m}`); report({ stage: 'B', substage: 'prepare', message: m }); },
+            });
+            if (platformInstall.ran && platformInstall.finalStatus && Object.keys(platformInstall.finalStatus.perPackage || {}).length) {
+                // 用 install 后的重探测结果刷新依赖状态（prompt 拿到的是装完后的真实状态）
+                depsStatus = platformInstall.finalStatus.perPackage;
+                depsCached = platformInstall.finalStatus.overallCached;
+            }
+        } catch (e) {
+            console.error(`[twoStage] platform install error (non-fatal, agent will install): ${e.message?.slice(0, 200)}`);
+        }
+        // Go 工具链版本预检与预装：go.mod 要求版本高于沙箱时平台直接装好（npmmirror 镜像），
+        // 避免 agent 在「apt 装旧 Go / 降级 go.mod / 编译失败」循环上烧掉 30+ 分钟（multica 实测）。
+        let goToolchain = { ran: false };
+        try {
+            goToolchain = await ensureGuestGoToolchain({
+                runtimeRef: ref, workspacePath: wsPath, hostWorkspacePath: hostPath,
+                onLog: (m) => { console.error(`[twoStage] ${m}`); report({ stage: 'B', substage: 'prepare', message: m }); },
+            });
+        } catch (e) {
+            console.error(`[twoStage] go toolchain ensure error (non-fatal): ${e.message?.slice(0, 200)}`);
+        }
         // 注入 unigateway 二进制：仅对被部署应用是 xensemble 类（server/src/gateway 存在）时执行，
         // 使后端能自动拉起网关，预览里「配网关」可用。非此类项目跳过（避免无谓的 11MB 传输）。
         if (isXensemble) {
             await injectGatewayBinary(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
         }
         // 改动 2：plan.context 同时存 depsCached (boolean, 向后兼容) + depsStatus (per-subpackage)
-        plan = { ...plan, context: { tree, depsCached, depsStatus, stack: { type: detected?.type, framework: detected?.framework }, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, successRun: plan._successRun || null } };
+        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, stack: { type: detected?.type, framework: detected?.framework }, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, successRun: plan._successRun || null } };
         delete plan._successRun;
         // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）。
         // 防护：若阶段 A 把项目误判为“纯静态”（serve 根目录），但 host 检测出真实应用类型
@@ -1860,14 +2166,39 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
                 console.error('[twoStage] saveVerifyState error:', e.message);
             }
         }
+        // 失败降级：给 plan cache 打上 lastVerifyFailed 标记（覆盖写入，同时清掉旧
+        // successRun——失败的部署不应保留任何"成功轨迹"）。下次部署命中缓存时视同
+        // 未命中、重新走阶段 A 分析，切断"缓存固化的坏计划被反复复用"的继承链。
+        try {
+            await savePlanCache(project.id, {
+                steps: plan.steps,
+                configFiles: plan.configFiles || [],
+                source: plan.source,
+                context: {
+                    tree: plan.context?.tree || null,
+                    fingerprint: planFingerprint,
+                    lastVerifyFailed: true,
+                    lastVerifyError: String(verify.warning || verify.finalStderr || 'verify failed').slice(0, 300),
+                },
+            });
+            console.error(`[twoStage] plan cache marked lastVerifyFailed: ${String(verify.warning || '').slice(0, 120)}`);
+        } catch (e) {
+            console.error('[twoStage] mark plan cache failed error:', e.message);
+        }
         return { ok: false, stage: 'verify', plan, verify, error: verify.warning || '阶段 2 验证失败', finalStderr: verify.finalStderr, elapsedMs: Date.now() - startedAt };
     }
 
     // 通过 → 清理可续状态
     await clearVerifyState(project.id);
-    // 提取并回写「成功执行轨迹」，供二次部署直接把成功命令注入 verify agent 快速复现
+    // 提取并回写「成功执行轨迹」，供二次部署直接把成功命令注入 verify agent 快速复现。
+    // serve/启动类命令仅在 API 探测确认后端可用（或项目无后端）时才入缓存（见 SERVE_CMD_RE）：
+    // "根 200 但 API 死"的部署不再把坏启动命令固化为成功轨迹。
     try {
-        const successRun = extractSuccessCommands(verify.trail);
+        const { detectBackendSignature } = require('./detectStack');
+        const apiAlive = verify.apiVerdict === 'alive' || verify.apiVerdict === 'backend_listening';
+        const hasBackend = detectBackendSignature(hostPath || null).hasBackend;
+        const allowServe = apiAlive || !hasBackend;
+        const successRun = extractSuccessCommands(verify.trail, allowServe);
         if (successRun.length) {
             await savePlanCache(project.id, {
                 steps: plan.steps,
@@ -1875,7 +2206,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
                 source: plan.source,
                 context: { tree: plan.context?.tree || null, fingerprint: planFingerprint, successRun },
             });
-            console.error(`[twoStage] success run cached (${successRun.length} commands)`);
+            console.error(`[twoStage] success run cached (${successRun.length} commands, apiVerdict=${verify.apiVerdict || 'none'}, allowServe=${allowServe})`);
         }
     } catch (e) {
         console.error('[twoStage] save success run error:', e.message);

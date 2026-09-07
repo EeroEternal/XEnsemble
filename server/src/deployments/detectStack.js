@@ -370,6 +370,42 @@ function detectStaticStack(dir) {
     };
 }
 
+// 已知需要原生编译链（node-gyp / C++ 编译 / python3 预处理）的常用 npm 包。
+// 命中 → platform install 阶段先 apt 装 build-essential + python3（沙箱镜像默认无编译链），
+// 否则 npm install 部分失败或 agent 要自己试错 apt（实测 1.6 分钟 + 一轮 LLM）。
+const NATIVE_COMPILE_PKGS = new Set([
+    'node-pty', 'bcrypt', 'node-gyp', 'canvas', 'sharp', 'sqlite3',
+    'better-sqlite3', 'bufferutil', 'utf-8-validate', 'koffi', 'tree-sitter',
+    'oniguruma', 'deasync', 'serialport', 'microtime', 'grpc', 'leveldown',
+    'lmdb', 'sodium-native', 'nan',
+]);
+
+// 确定性 native 依赖扫描：读根 + 一层子目录的 package.json（纯文件读取，毫秒级）。
+// @returns {{ hit: boolean, pkgs: string[] }}
+function detectNativeDeps(hostWorkspacePath) {
+    if (!hostWorkspacePath) return { hit: false, pkgs: [] };
+    const found = new Set();
+    const check = (pkg) => {
+        if (!pkg) return;
+        const deps = {
+            ...(pkg.dependencies || {}),
+            ...(pkg.devDependencies || {}),
+            ...(pkg.optionalDependencies || {}),
+        };
+        for (const name of Object.keys(deps)) {
+            if (NATIVE_COMPILE_PKGS.has(name)) found.add(name);
+        }
+    };
+    try {
+        check(readJsonSafe(path.join(hostWorkspacePath, 'package.json')));
+        for (const ent of fs.readdirSync(hostWorkspacePath, { withFileTypes: true })) {
+            if (!ent.isDirectory() || ent.name === 'node_modules' || ent.name.startsWith('.')) continue;
+            check(readJsonSafe(path.join(hostWorkspacePath, ent.name, 'package.json')));
+        }
+    } catch { /* 扫描失败不影响部署流程 */ }
+    return { hit: found.size > 0, pkgs: [...found].slice(0, 8) };
+}
+
 // 后端签名确定性扫描：毫秒级、纯文件读取，为阶段 A 提供权威后端证据。
 // 目的：LLM 把带后端的项目误判成纯前端静态站时，self-check 能依据这里的证据拦截。
 const BACKEND_DIR_CANDIDATES = [
@@ -562,12 +598,16 @@ function stackToPreviewContract(stack) {
 // - monorepo：枚举所有子 package.json（排除 node_modules 内部），每个独立判断
 // 输出格式：每行 `<subdir>: CACHED|STALE|STALE_LOCK|STALE_PKG|MISSING`，最后 `OVERALL: CACHED|STALE`
 const STACK_DEPS_RULES = {
-    'node-vite':      { pkg: 'node', detect: 'node' },
-    'node-next':      { pkg: 'node', detect: 'node' },
-    'node-nuxt':      { pkg: 'node', detect: 'node' },
-    'node-sveltekit': { pkg: 'node', detect: 'node' },
-    'node-react':     { pkg: 'node', detect: 'node' },
-    'node-express':   { pkg: 'node', detect: 'node' },
+    // node-* 全系统一用 node-monorepo 探测（maxdepth 4 枚举根+子 package.json）：
+    // 单包 'node' 规则只查根 node_modules，导致 server/web 等子包不被探测、
+    // platform install 补装循环覆盖不到（xensemble 实测：server/web 依赖全靠 agent 手装）。
+    // node-monorepo 脚本对单包项目同样兼容（只有根 package.json → `.:MISSING`）。
+    'node-vite':      { pkg: 'node', detect: 'node-monorepo' },
+    'node-next':      { pkg: 'node', detect: 'node-monorepo' },
+    'node-nuxt':      { pkg: 'node', detect: 'node-monorepo' },
+    'node-sveltekit': { pkg: 'node', detect: 'node-monorepo' },
+    'node-react':     { pkg: 'node', detect: 'node-monorepo' },
+    'node-express':   { pkg: 'node', detect: 'node-monorepo' },
     'monorepo':       { pkg: 'node', detect: 'node-monorepo' },
     'python':         { pkg: 'python', detect: 'python' },
     'go':             { pkg: 'go', detect: 'go' },
@@ -581,6 +621,8 @@ module.exports = {
     detectStack,
     stackToPreviewContract,
     detectBackendSignature,
+    readTextSafe,
+    detectNativeDeps,
     // Internal helpers exposed for tests.
     _internal: {
         detectPackageManager,

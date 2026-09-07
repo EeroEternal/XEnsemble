@@ -7,14 +7,25 @@
 
 const { getRuntime } = require('../runtime/registry');
 const { detectRuntimeToolchain, renderToolchainBlock } = require('./runtimeToolchain');
+const { detectBackendSignature } = require('./detectStack');
 
 const API_KEY = process.env.LLM_ANALYZE_API_KEY;
 const API_URL = process.env.LLM_ANALYZE_API_URL || 'https://api.deepseek.com/chat/completions';
 const MODEL = process.env.LLM_VERIFY_MODEL || process.env.LLM_ANALYZE_MODEL || 'deepseek-chat';
 const LLM_TIMEOUT_MS = 240000;
 const MAX_AGENT_ROUNDS = Number(process.env.OPENCODE_VERIFY_MAX_ROUNDS) || 60;
-const MAX_TOOL_OUTPUT = 6000;
 const SHELL_TIMEOUT_MS = 240000;
+// install/build 类命令单独放宽：大 monorepo 冷 install 常超 240s，被截断 kill 后 agent
+// 只能重试（实测一条 npm install 打满 240s 超时后重跑，时间双倍）。这类命令"截断重来"
+// 的代价比"多等一会"高得多，故单独放宽到 600s；可经 DEPLOY_LONG_SHELL_TIMEOUT_MS 覆盖。
+const LONG_SHELL_TIMEOUT_MS = Number(process.env.DEPLOY_LONG_SHELL_TIMEOUT_MS) || 600000;
+// agent 所有 shell 命令统一预置 node 堆上限：大前端项目 vite build（katex/monaco 等）
+// 用 node 默认堆 ~1.7GB 会 OOM，agent 要试错 2-3 轮 NODE_OPTIONS 才成功（xensemble
+// 实测 build ×3 ≈ 10 分钟）。对非 node 命令无影响（curl/ps 等不读该变量）。
+const NODE_MAX_OLD_SPACE_MB = Number(process.env.DEPLOY_NODE_MAX_OLD_SPACE_MB) || 3072;
+// 识别宁宽勿漏：误放宽的代价只是上限变大（短命令照常提前结束），误截断的代价是重跑双倍时间。
+const LONG_CMD_RE = /\b(npm|pnpm|yarn|bun|pip3?|poetry|uv|composer|bundle|apt-get|apt|apk)\s+[^|;&]*(install|ci\b|add\b|update\b|upgrade\b)|\b(cargo\s+build|go\s+build|go\s+mod|go\s+install|mvn|gradle|make|cmake)\b|\bbuild\b|\bprisma\s+(generate|migrate)\b|\balembic\b|\bmigrate\b/i;
+const MAX_TOOL_OUTPUT = 6000;
 
 const LLM_RETRIES = 2;
 
@@ -160,9 +171,11 @@ async function runTool(tool, args, runtimeRef, workspacePath) {
             if (!cmd) return '(no command)';
             if (cmd.length > 4000) return '(command too long, max 4000 chars)';
             // Capture the REAL exit code: piping through head would otherwise mask it with head's own status.
-            const wrapped = `${cmd} > /tmp/_vt.log 2>&1; ec=$?; head -200 /tmp/_vt.log; echo "__EXIT_CODE__=\${ec}"`;
+            // NODE_OPTIONS 统一预置（见 NODE_MAX_OLD_SPACE_MB 注释），agent 不必逐次手加。
+            const wrapped = `export NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}"; ${cmd} > /tmp/_vt.log 2>&1; ec=$?; head -200 /tmp/_vt.log; echo "__EXIT_CODE__=\${ec}"`;
             const r = await runtime.exec.exec('sh', ['-c', wrapped], {}, {
-                runtimeRef, cwd: workspacePath, maxBuffer: 4 * 1024 * 1024, timeoutMs: SHELL_TIMEOUT_MS,
+                runtimeRef, cwd: workspacePath, maxBuffer: 4 * 1024 * 1024,
+                timeoutMs: LONG_CMD_RE.test(cmd) ? LONG_SHELL_TIMEOUT_MS : SHELL_TIMEOUT_MS,
             });
             let out = String(r.stdout || '');
             let ec = r.exitCode;
@@ -338,18 +351,33 @@ async function assertAppIsServed({ runtimeRef, workspacePath, preferredPort }) {
 // 探测依据全部来自 verify agent 读代码后的上报，不做任何写死路径猜测：
 //   1) agent 报了 apiEndpoints（真实 API 路由）→ 在前端端口上 GET 探测：
 //      2xx/3xx/401/403/405 判活（405 = 路由存在但方法不符），5xx 判后端挂了，
-//      全 404 判 inconclusive 放行（避免路径/方法误判）
+//      全 404 判 inconclusive——但若项目有确定性后端证据，inconclusive 不能放行
+//      （先查已报 backendPort 监听，再要求 agent 补报端点/端口）
 //   2) 没报 apiEndpoints 但报了 backendPort（后端监听端口，如 next rewrites
 //      destination 里的 8080）→ 只检查该端口是否 LISTEN，不发任何 HTTP 请求
-//   3) 两者都没报 → 无法判定（纯前端站 / agent 未识别出后端）→ 放行并记录
+//   3) 两者都没报 → 纯前端站放行；但项目扫描出后端证据（detectBackendSignature）
+//      时硬失败（backend_unreported）——防止"前端 200 后端死"被误判成功后固化为
+//      成功轨迹、被后续部署的缓存无限继承
 // 返回 { ok, verdict, reason?, probed, endpoints }。
+// API 端点条目："/api/v1/items"（默认 GET）或 "POST /api/v1/users/signup"（显式 method）。
+// method 语义：GET 405 判活碰不到业务层（方法不符直接被路由层拒绝），无法发现 DB 缺表 /
+// 迁移未跑这类 POST 才会炸的故障——signup 500 事故的盲区。因此写操作端点必须带 method，
+// 探测时 POST 空 JSON body：请求穿透到应用校验层（400/422）即证明业务代码+DB 可达。
 function sanitizeApiEndpoints(raw) {
     if (!Array.isArray(raw)) return [];
     const out = [];
     for (const item of raw) {
         const s = String(item || '').trim();
-        if (!s || s.length > 120 || !s.startsWith('/') || /\s/.test(s)) continue;
-        if (!out.includes(s)) out.push(s);
+        if (!s || s.length > 120) continue;
+        let entry = null;
+        const withMethod = s.match(/^(GET|POST|PUT|PATCH|DELETE)\s+(\/\S+)$/i);
+        if (withMethod) {
+            entry = `${withMethod[1].toUpperCase()} ${withMethod[2]}`;
+        } else if (s.startsWith('/') && !/\s/.test(s)) {
+            entry = `GET ${s}`;
+        }
+        if (!entry) continue;
+        if (!out.includes(entry)) out.push(entry);
         if (out.length >= 5) break;
     }
     return out;
@@ -367,37 +395,86 @@ function sanitizeBackendPorts(raw) {
     return out;
 }
 
-async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, backendPorts }) {
+async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, backendPorts, backendEvidence = null }) {
     const targets = sanitizeApiEndpoints(endpoints);
 
-    // 分支 1：agent 上报了真实 API 路由 → 在前端端口上 HTTP 探测
+    // 分支 1：agent 上报了真实 API 路由 → 在前端端口上 HTTP 探测。
+    // 端点带 method（"POST /path"）：GET 405 判活碰不到业务层；POST 空 body 让请求
+    // 穿透到应用校验层（400/409/422 = pydantic/业务校验通过），能发现 DB 缺表/迁移
+    // 未跑这类"GET 405 判活但真实 POST 500"的故障（full-stack-fastapi signup 事故）。
     if (targets.length) {
         const p = Number(port) || 0;
         if (!p) return { ok: true, verdict: 'skipped', probed: [], endpoints: targets };
         const runtime = getRuntime();
+        const ALIVE_STATUS = (method, code) => {
+            if (code.startsWith('2') || code.startsWith('3')) return true;
+            const base = ['401', '403', '405'];
+            // 写方法请求穿透到校验/业务层：400（业务校验失败）、409（冲突）、422（pydantic）
+            const withBody = method !== 'GET' ? [...base, '400', '409', '422'] : base;
+            return withBody.includes(code);
+        };
         const cmd = targets
-            .map((path) => `echo "${path} $(curl -s -o /dev/null -m 4 -w '%{http_code}' http://127.0.0.1:${p}${path} 2>/dev/null)"`)
+            .map((t) => {
+                const sp = t.indexOf(' ');
+                const method = t.slice(0, sp);
+                const path = t.slice(sp + 1);
+                const curl = method === 'GET'
+                    ? `curl -s -o /dev/null -m 4 -w '%{http_code}' http://127.0.0.1:${p}${path} 2>/dev/null`
+                    : `curl -s -o /dev/null -m 4 -X ${method} -H 'Content-Type: application/json' -d '{}' -w '%{http_code}' http://127.0.0.1:${p}${path} 2>/dev/null`;
+                // tag 用 method:path（无空格）保证单行解析
+                return `echo "${method}:${path} $( ${curl} )"`;
+            })
             .join('; ');
         try {
             const r = await runtime.exec.exec('sh', ['-c', cmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 40000 });
             const probed = String(r.stdout || '').split('\n').map((l) => l.trim()).filter(Boolean);
             const results = probed
-                .map((l) => { const m = l.match(/^(\S+) (\d{3})$/); return m ? { path: m[1], code: m[2] } : null; })
+                .map((l) => { const m = l.match(/^(\S+) (\d{3})$/); return m ? { tag: m[1], method: m[1].split(':')[0], path: m[1], code: m[2] } : null; })
                 .filter(Boolean);
             if (!results.length) return { ok: true, verdict: 'no_result', probed, endpoints: targets };
-            const alive = results.find((x) => x.code.startsWith('2') || x.code.startsWith('3') || ['401', '403', '405'].includes(x.code));
-            if (alive) return { ok: true, verdict: 'alive', probed, endpoints: targets };
+            // 5xx 优先判死：5xx = 请求真实执行到了业务/DB 层并失败（哪怕其它端点判活），
+            // "GET 401 判活 + POST signup 500"必须整体判失败，否则盲区依旧。
             const broken = results.filter((x) => x.code.startsWith('5'));
             if (broken.length) {
                 return {
                     ok: false,
                     verdict: 'backend_down',
-                    reason: `API 健康探测失败：${broken.map((x) => `${x.path}=${x.code}`).join(', ')}（根路径 200 但 API 5xx —— 前端代理的后端服务大概率没启动/连不上数据库）`,
+                    reason: `API 健康探测失败：${broken.map((x) => `${x.tag}=${x.code}`).join(', ')}（根路径 200 但 API 5xx —— 业务/DB 层执行失败：后端没启动、连不上数据库、或迁移未跑表不存在）`,
                     probed,
                     endpoints: targets,
                 };
             }
-            // 全 404/000：没有可判定的 API 面（方法不符且框架回 404 / 代理前缀差异），不误判
+            const alive = results.find((x) => ALIVE_STATUS(x.method, x.code));
+            if (alive) return { ok: true, verdict: 'alive', probed, endpoints: targets };
+            // 全 404/000：没有可判定的 API 面（方法不符且框架回 404 / 代理前缀差异）。
+            // 收紧：项目有确定性后端证据时不能无条件放行——先查 agent 已报 backendPort
+            // 是否监听（未监听 = 后端没起）；没报端口则硬失败要求补报，否则"前端 200
+            // 后端死"会作为成功固化进缓存被后续部署继承。
+            const ev = backendEvidence && backendEvidence.hasBackend;
+            const reportedPorts = sanitizeBackendPorts(backendPorts);
+            if (reportedPorts.length) {
+                const listening = await listGuestListenPorts(runtimeRef, workspacePath);
+                const listenSet = new Set(listening);
+                const down = reportedPorts.filter((bp) => !listenSet.has(bp));
+                if (down.length) {
+                    return {
+                        ok: false,
+                        verdict: 'backend_not_listening',
+                        reason: `API 端点全部 404 且后端端口未监听：${down.join(', ')}（前端正常但后端进程没起来）`,
+                        probed,
+                        endpoints: targets,
+                    };
+                }
+            }
+            if (ev) {
+                return {
+                    ok: false,
+                    verdict: 'backend_unverified',
+                    reason: `API 端点全部 404（${results.map((x) => `${x.path}=${x.code}`).join(', ')}），但项目扫描到后端证据（${(backendEvidence.evidence || []).slice(0, 3).join('; ')}）且未上报 backendPort —— 无法确认后端已启动`,
+                    probed,
+                    endpoints: targets,
+                };
+            }
             return { ok: true, verdict: 'inconclusive', probed, endpoints: targets };
         } catch (e) {
             // 探测本身失败不阻断部署（网络抖动等），交给根路径检查兜底
@@ -429,7 +506,18 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
         };
     }
 
-    // 分支 3：agent 未识别出后端（纯前端站或未上报）→ 放行
+    // 分支 3：agent 未上报任何 API 面。纯前端站放行；但项目有确定性后端证据时
+    // 硬失败——agent 必须补报 apiEndpoints 或 backendPort（推回自修复，超限真失败），
+    // 杜绝"带后端项目被当纯静态站验证通过"污染成功轨迹与部署缓存。
+    if (backendEvidence && backendEvidence.hasBackend) {
+        return {
+            ok: false,
+            verdict: 'backend_unreported',
+            reason: `项目扫描到后端证据（${(backendEvidence.evidence || []).slice(0, 3).join('; ')}），但 final 未上报任何 apiEndpoints 或 backendPort —— 无法验证后端已启动`,
+            probed: [],
+            endpoints: [],
+        };
+    }
     return { ok: true, verdict: 'skipped', probed: [], endpoints: [] };
 }
 
@@ -516,6 +604,27 @@ function buildSystemPrompt(plan, toolchain) {
         (plan?.context?.tree || '(none)'),
         '',
         (() => {
+            // 平台侧确定性 install 结果：平台已在 agent 启动前把依赖装齐（twoStage
+            // runPlatformInstall）。ok → 禁止重复 install；部分失败 → 带日志定点修复。
+            const pi = plan?.context?.platformInstall;
+            if (pi && pi.ran) {
+                const cmds = Array.isArray(pi.cmds) ? pi.cmds : [];
+                const failed = cmds.filter((c) => !c.ok);
+                if (pi.ok && !failed.length) {
+                    return [
+                        'PLATFORM INSTALL ALREADY DONE (deterministic, before your run):',
+                        ...cmds.map((c) => `  - [ok] (cwd=${c.cwd}) ${c.cmd}`),
+                        'Do NOT run any npm/pnpm/yarn/bun/pip install again — dependencies for ALL sub-packages are installed. Go straight to build/serve. Only run a targeted install if a later step fails with a SPECIFIC missing-dependency error.',
+                        '',
+                    ].join('\n');
+                }
+                return [
+                    'PLATFORM INSTALL ATTEMPTED, some steps FAILED:',
+                    ...cmds.map((c) => `  - [${c.ok ? 'ok' : 'FAILED'}] (cwd=${c.cwd}) ${c.cmd}${c.ok ? '' : `\n    log tail:\n    ${(c.logTail || '').split('\n').join('\n    ')}`}`),
+                    'Fix the FAILED installs yourself (use the log tails above to find the root cause). Do NOT redo the [ok] ones.',
+                    '',
+                ].join('\n');
+            }
             // 改动 4：per-subpackage deps 状态。优先用 depsStatus（精确到子包），
             // 退化到旧 depsCached boolean。Stale sub-package 必须 install，否则缺包 → 运行时 fail。
             const ds = plan?.context?.depsStatus;
@@ -545,10 +654,17 @@ function buildSystemPrompt(plan, toolchain) {
         '',
         'Workflow:',
         '1. Run the prepare steps one by one (install deps, build, migrate, prisma generate, etc.). If the project needs native build deps, `apt-get update && apt-get install -y python3 build-essential` first.',
+        (plan?.context?.platformInstall?.ran
+            ? '1a. DEPENDENCIES ARE ALREADY INSTALLED by the platform (see the PLATFORM INSTALL block above). SKIP every install-type prepare step in the plan (npm/yarn/pnpm/pip install, etc.) — start directly at the build/migrate/serve steps. Long-running commands (install/build) get a 10-minute timeout; short ones 4 minutes.'
+            : '1a. Long-running commands (install/build/migrate) get a 10-minute timeout; short commands 4 minutes.'),
         '2. Start the full app (frontend + backend) on a port, then CONFIRM it is actually up with ONE curl: `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:<port>/`. If it is 2xx/3xx, output your final answer IMMEDIATELY — do NOT curl the same port again.',
         '3. If you also see a `npm test` / test script that is quick, run it too and count it as tested.',
         '4. When a health check fails, READ the app log / error output to find the ROOT CAUSE (port in use, missing env/config, build or startup error) and fix it with edit_file / correct command — do not blindly rerun the same thing or keep checking the process. Iterate until the health check passes.',
         'RUNTIME ENGINE VERSION (MANDATORY): many modern repos pin a minimum runtime version (package.json "engines", .nvmrc, .tool-versions, .python-version, go.mod go directive). If install/build/start emits "Unsupported engine" / "engine ... wanted ... current ..." or the build exits 0 but produces NO output files (empty dist/), that is usually a silently-failing engine mismatch — DO NOT retry the same build. First check the pinned version (cat package.json engines / .nvmrc / .tool-versions / .python-version), then install it: for Node use `NVM_NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node nvm install <ver> && nvm use <ver>` (CN mirror, mandatory — plain nvm hits the official site and takes 4+ minutes), for Python prefer apt-get (python3.x from CN mirror) over pyenv, then rerun install + build WITH that runtime in PATH. Before declaring a build successful, verify the expected artifacts actually exist (e.g. `ls web/dist`, `ls build/`) — a 0-exit build with no artifacts is a FAILURE, not success.',
+        'RUNTIME VERSION DOWNGRADE GUARD (Python): if the project pins a NEWER Python than the sandbox has (e.g. pyproject requires-python ">=3.14" but sandbox has 3.11), the source may use 3.14-only syntax (e.g. `except A, B:` without parentheses — PEP 758). The RIGHT fix is to install the pinned Python and run everything with it. Only if that genuinely cannot work (mirror unavailable), you may lower requires-python AND fix the syntax errors with edit_file — but then you MUST run the DB migrations (alembic upgrade head / prisma migrate) against the REAL database and verify each write-path endpoint actually reaches the DB (e.g. `curl -X POST ... -d \'{}\'` returns 4xx validation, NOT 500). A 500 from a write endpoint after "fixing" means the schema/migration layer is broken — do not report ok:true.',
+        ...(plan?.context?.goToolchain?.ok ? [
+            `GO TOOLCHAIN READY: go ${plan.context.goToolchain.version} is installed and on PATH (${plan.context.goToolchain.installed ? 'platform just installed it' : 'already present'}), GOPROXY=goproxy.cn pre-configured. Do NOT install Go, do NOT downgrade the go directive in go.mod, do NOT fiddle with GOPROXY — run go build / go mod download directly.`,
+        ] : []),
         'OUTPUT SIZE RULE (MANDATORY): a TOOL CALL must be ONE compact JSON under 800 characters. NEVER paste file contents, logs or commands into your JSON — use read_file / edit_file / run_shell tools for that. If you were about to write a long reply, STOP and output the short JSON tool call instead. The FINAL answer may be up to 4000 characters so you can include the key error output in finalStderr.',
         'HEALTH CHECK (MANDATORY):',
         '- Confirm the app is up with ONE successful curl (2xx/3xx). Then IMMEDIATELY output your final answer.',
@@ -583,9 +699,9 @@ function buildSystemPrompt(plan, toolchain) {
         '- Detect: the backend reads a built frontend dir (dist / public / build) and serves it, and there is no separate frontend dev server needed for the app to be usable.',
         '- Build the frontend into the location the server expects (check its config / README for the expected output dir), then start the backend WITH the config it needs — many servers do NOT auto-load their .env, so source it or export the required DATABASE_URL etc. (e.g. `cd server && set -a && . ./.env && set +a && npm start`).',
         '- The app answers on the backend port: verify it returns real HTML for / and JSON for an API endpoint. That port IS the app — do not start a second static file server on top of it.',
-        'API ENDPOINTS REPORT (important for full-stack apps): the platform runs a code-side backend check after your final answer to detect a dead backend (root 200 but backend dead = white-screen app). It uses ONLY what you report — there is no path guessing. Include "apiEndpoints": 1-3 REAL API paths that pass through the frontend proxy to the backend — read them from the code (router definitions, next.config rewrites destination, vite proxy target, axios/fetch baseURL + routes, e.g. "/api/v1/auth/login"). GET is used for probing, so a method-restricted route answering 405 still counts as alive. If you cannot name concrete API paths but know the backend listens on a fixed port (e.g. rewrites destination http://localhost:8080, vite proxy target), include "backendPort": 8080 instead — the platform only checks that the port is LISTENING. Report neither field only if the app truly has no backend.',
+        'API ENDPOINTS REPORT (important for full-stack apps): the platform runs a code-side backend check after your final answer to detect a dead backend (root 200 but backend dead = white-screen app). It uses ONLY what you report — there is no path guessing. Include "apiEndpoints": 1-3 REAL API paths that pass through the frontend proxy to the backend — read them from the code (router definitions, next.config rewrites destination, vite proxy target, axios/fetch baseURL + routes, e.g. "/api/v1/auth/login"). PREFER WRITE ENDPOINTS with an explicit method prefix like "POST /api/v1/users/signup" — a GET probe on a POST-only route answers 405 WITHOUT touching the business/DB layer, so it cannot detect a missing migration or a dead database; POSTing an empty JSON body reaches the app validation layer and proves it works. Same for the auth/login endpoint ("POST /api/v1/login/access-token"). If you cannot name concrete API paths but know the backend listens on a fixed port (e.g. rewrites destination http://localhost:8080, vite proxy target), include "backendPort": 8080 instead — the platform only checks that the port is LISTENING. Report neither field only if the app truly has no backend.',
         'When the app responds correctly, output your final answer:',
-        '{"action":"final","result":{"ok":true,"tested":["npm install","npm run build","curl /"],"apiEndpoints":["/api/v1/auth/login"],"backendPort":8080,"finalStderr":"","summary":"<1-2 sentences>"}}',
+        '{"action":"final","result":{"ok":true,"tested":["npm install","npm run build","curl /"],"apiEndpoints":["POST /api/v1/users/signup","POST /api/v1/login/access-token"],"backendPort":8080,"finalStderr":"","summary":"<1-2 sentences>"}}',
         'If you cannot make it pass after exhaustive fixes, output:',
         '{"action":"final","result":{"ok":false,"tested":["..."],"finalStderr":"<the latest error output>","summary":"<what you tried and why it failed>"}}',
     ].join('\n');
@@ -608,8 +724,11 @@ function buildResumeHint(trail) {
     return lines.filter(Boolean).join('\n');
 }
 
-async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted }) {
+async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted }) {
     const defaultPort = projectType?.defaultPort || 3000;
+    // 确定性后端签名（宿主侧毫秒级文件扫描，只算一次）：final 通过时用于校验
+    // "agent 上报的 API 面"与"项目实际含后端"的一致性，防止后端死掉仍判成功。
+    const backendEvidence = detectBackendSignature(hostWorkspacePath || null);
     // Live-probe the sandbox toolchain so the LLM is told the truth about
     // what is and isn't installed. The previous prompt claimed
     // "node/python/go/cargo" were all available — that was a lie on
@@ -837,6 +956,7 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
                 };
             }
             let appPort = null;
+            let apiVerdict = null;
             if (ok && lastResult.ok) {
                 const probe = await assertAppIsServed({ runtimeRef, workspacePath, preferredPort: defaultPort });
                 if (!probe.ok) {
@@ -853,7 +973,7 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
                 // 依据全部来自 agent 上报：apiEndpoints（HTTP 探测）或 backendPort（监听检查），
                 // 无写死路径猜测。失败先 nudge 自修复（启动后端/补数据库/migrate），超限硬失败。
                 const apiEndpoints = Array.isArray(r.apiEndpoints) ? r.apiEndpoints : [];
-                const api = await probeApiHealth({ runtimeRef, workspacePath, port: probe.port, endpoints: apiEndpoints, backendPorts: r.backendPort });
+                const api = await probeApiHealth({ runtimeRef, workspacePath, port: probe.port, endpoints: apiEndpoints, backendPorts: r.backendPort, backendEvidence });
                 if (!api.ok) {
                     trail.push({ round, action: 'api_probe_failed', verdict: api.verdict, reason: api.reason, endpoints: api.endpoints, nudges: apiNudges });
                     console.error(`[analyzeVerify] round ${round}: API probe FAILED (nudge ${apiNudges + 1}/${MAX_API_NUDGES}, verdict=${api.verdict}, endpoints=${JSON.stringify(api.endpoints)}): ${api.reason}`);
@@ -861,7 +981,11 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
                         apiNudges++;
                         const fixHint = api.verdict === 'backend_not_listening'
                             ? `The backend port(s) ${api.endpoints.join(', ')} are NOT listening. Start the backend process first (find the entrypoint: server/, api/, go.mod main, Dockerfile CMD; e.g. nohup ./bin/server > /tmp/backend.log 2>&1 &). If the port in your backendPort was wrong, read the frontend proxy config (next.config rewrites / vite proxy / axios baseURL) for the real port and report it.`
-                            : `The API endpoints return 5xx — the backend behind the frontend is NOT running (or cannot reach its database). Fix it: (1) start the backend (server/, api/, go.mod main, Dockerfile CMD; e.g. nohup ./bin/server > /tmp/backend.log 2>&1 &); (2) if it needs PostgreSQL/MySQL, ensure the DB is running (service postgresql start), create the user/database from DATABASE_URL, and run migrations; (3) confirm with curl that the API endpoints (${api.endpoints.join(', ')}) return non-5xx — adjust apiEndpoints in your final answer if the paths were wrong.`;
+                            : api.verdict === 'backend_unreported'
+                                ? `Deterministic scan found backend evidence in this project, but your final answer reported NO apiEndpoints and NO backendPort — the backend may not be running at all. Read the code to find the backend entrypoint and its listen port, START it in the background, then output final again WITH "apiEndpoints" (real API routes reachable through the frontend proxy) or "backendPort". A frontend-only final answer will keep being REJECTED.`
+                                : api.verdict === 'backend_unverified'
+                                    ? `Your reported apiEndpoints all returned 404 and no backendPort was reported, while the project clearly has a backend. Verify the real proxy prefix/routes (read the frontend proxy config: next.config rewrites / vite proxy / axios baseURL), START the backend if it is not running, then output final again WITH correct "apiEndpoints" AND "backendPort".`
+                                    : `The API endpoints return 5xx — the backend behind the frontend is NOT running (or cannot reach its database). Fix it: (1) start the backend (server/, api/, go.mod main, Dockerfile CMD; e.g. nohup ./bin/server > /tmp/backend.log 2>&1 &); (2) if it needs PostgreSQL/MySQL, ensure the DB is running (service postgresql start), create the user/database from DATABASE_URL, and run migrations; (3) confirm with curl that the API endpoints (${api.endpoints.join(', ')}) return non-5xx — adjust apiEndpoints in your final answer if the paths were wrong.`;
                         messages.push({
                             role: 'user',
                             content: `Code-side health check REJECTED your final answer: the root page serves HTTP 200, but the backend is down — ${api.reason} ${fixHint} Then output final again with ok:true.`,
@@ -881,8 +1005,11 @@ async function runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType
                 // 探测结果统一入 trail（不推给 LLM，省 token）：agent 上报端点全 404 时的
                 // inconclusive 场景可事后排查（路径拼错 / 代理前缀不对 / GET 不可达）。
                 trail.push({ round, action: 'api_probe', verdict: api.verdict, endpoints: api.endpoints, probed: api.probed });
+                // 显式带出本次探测结论（alive/backend_listening/skipped/inconclusive），
+                // twoStage 据此决定 serve 类命令能否进入 successRun 缓存（2a 过滤）。
+                apiVerdict = api.verdict;
             }
-            return { ...lastResult, appPort, source: 'ai', warning: ok ? '' : 'verify agent reported failure', trail, messages: trimContext(messages), roundsUsed: round + 1 };
+            return { ...lastResult, appPort, apiVerdict, source: 'ai', warning: ok ? '' : 'verify agent reported failure', trail, messages: trimContext(messages), roundsUsed: round + 1 };
         }
         trail.push({ round, action: 'unknown', name: String(parsed.action).slice(0, 50) });
         messages.push({ role: 'user', content: 'Unknown action. Respond with a single tool call or the final answer JSON.' });
@@ -937,7 +1064,8 @@ async function runVerifyWithoutLlm({ workspacePath, runtimeRef, plan, projectTyp
         const steps = (plan?.steps || []).filter((s) => s.kind !== 'serve');
         for (const step of steps) {
             if (!step.command) continue;
-            const r = await runtime.exec.exec('sh', ['-c', `${step.command} > /tmp/_vt.log 2>&1; ec=$?; cat /tmp/_vt.log | head -120; echo "__EXIT_CODE__=\${ec}"`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: SHELL_TIMEOUT_MS });
+            const stepTimeout = LONG_CMD_RE.test(String(step.command || '')) ? LONG_SHELL_TIMEOUT_MS : SHELL_TIMEOUT_MS;
+            const r = await runtime.exec.exec('sh', ['-c', `export NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}"; ${step.command} > /tmp/_vt.log 2>&1; ec=$?; cat /tmp/_vt.log | head -120; echo "__EXIT_CODE__=\${ec}"`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: stepTimeout });
             let ec = r.exitCode;
             const out = String(r.stdout || '');
             const m = out.match(/__EXIT_CODE__=(-?\d+)/);
@@ -977,11 +1105,11 @@ async function runVerifyWithoutLlm({ workspacePath, runtimeRef, plan, projectTyp
     }
 }
 
-async function analyzeProjectVerify({ workspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted }) {
+async function analyzeProjectVerify({ workspacePath, hostWorkspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted }) {
     if (!API_KEY || !API_URL) {
         return runVerifyWithoutLlm({ workspacePath, runtimeRef, plan, projectType });
     }
-    return runVerifyWithAgent({ workspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted });
+    return runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted });
 }
 
 module.exports = { analyzeProjectVerify, assertAppIsServed };
