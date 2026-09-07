@@ -69,6 +69,10 @@ function recordLlmErrorEvent(sessionId, status, detail) {
     const last = lastLlmErrorBySession.get(sessionId);
     if (last && last.content === content && now - last.ts < LLM_ERROR_THROTTLE_MS) return;
     lastLlmErrorBySession.set(sessionId, { content, ts: now });
+    // Console line doubles as the deployment smoke-check: after triggering a
+    // failure on a remote box, `journalctl -u xensemble | grep 'chat error'`
+    // must show this line.
+    console.error(`[llm-proxy] chat error event recorded (session=${sessionId}): ${content}`);
     void chatTranscript.append(sessionId, { role: 'error', content });
 }
 
@@ -288,9 +292,15 @@ function forwardToGateway(request, reply, { targetBaseUrl, gatewayKey, path, onR
                     size += chunk.length;
                     if (size <= MAX_CAPTURE) chunks.push(chunk);
                 };
-                const onEnd = () => {
+                // 'end' fires on a clean stream end; 'aborted'/'close' fire when
+                // the agent CLI saw an error and destroyed the connection
+                // (opencode aborts+retries exactly like this) — without them a
+                // mid-stream failure would never reach the chat error event.
+                let captured = false;
+                const onFinish = () => {
+                    if (captured) return;
+                    captured = true;
                     proxyRes.removeListener('data', onData);
-                    proxyRes.removeListener('end', onEnd);
                     if (statusCode >= 200 && statusCode < 300 && chunks.length) {
                         try {
                             const body = Buffer.concat(chunks);
@@ -307,7 +317,9 @@ function forwardToGateway(request, reply, { targetBaseUrl, gatewayKey, path, onR
                     }
                 };
                 proxyRes.on('data', onData);
-                proxyRes.on('end', onEnd);
+                proxyRes.on('end', onFinish);
+                proxyRes.on('aborted', onFinish);
+                proxyRes.on('close', onFinish);
             }
         };
         proxy.on('proxyRes', onProxyRes);
