@@ -1068,8 +1068,12 @@ for f in /etc/apt/sources.list.d/*.sources; do
   grep -q mirrors.aliyun.com "$f" 2>/dev/null || \\
     sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com/debian|g; s|https://deb.debian.org|https://mirrors.aliyun.com/debian|g; s|http://security.debian.org|https://mirrors.aliyun.com/debian-security|g; s|https://security.debian.org|https://mirrors.aliyun.com/debian-security|g' "$f" 2>/dev/null || true
 done
-# 2) npm / pnpm registry（/root/.npmrc 全局生效，pnpm 同样读取）
+# 2) npm / pnpm registry
 printf 'registry=https://registry.npmmirror.com\\n' > /root/.npmrc 2>/dev/null || true
+# pnpm 专用配置：corepack pnpm 可能不读取 /root/.npmrc，显式写 pnpm config
+if command -v pnpm >/dev/null 2>&1 || command -v corepack >/dev/null 2>&1; then
+  pnpm config set registry https://registry.npmmirror.com --global 2>/dev/null || true
+fi
 # 3) pip 全局源（/etc/pip.conf）
 printf '[global]\\nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple\\ntrusted-host = pypi.tuna.tsinghua.edu.cn\\n' > /etc/pip.conf 2>/dev/null || true
 # 4) Go modules 代理（go env -w 写持久配置；go 未装则跳过，装完后可再跑一次本配置）
