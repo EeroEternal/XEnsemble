@@ -60,16 +60,31 @@ function entryFromRow(row) {
     };
 }
 
+// Per-session serialization of append(): seq must be reserved in call order.
+// The first append of a session awaits seedSeq (a DB round-trip); without
+// chaining, appends issued concurrently (LLM error events, tool results from
+// parallel requests) would overtake it and invert seq order, scrambling the
+// dialog view's transcript.
+const appendChains = new Map();
+
 /**
  * Append a chat event for a session, persist it, and notify subscribers.
- * event: { role: 'user'|'assistant'|'tool_call'|'tool_result', content, callId?, tool?, model? }
+ * event: { role: 'user'|'assistant'|'tool_call'|'tool_result'|'error', content, callId?, tool?, model? }
  *
  * seq is assigned synchronously (after optional first-use seeding) so call
  * order is preserved; DB persistence is fire-and-forget and never blocks the
- * LLM proxy hot path.
+ * LLM proxy hot path. Calls are serialized per session to keep that order
+ * guarantee under concurrency.
  */
-async function append(sessionId, event) {
-    if (!sessionId || !event) return null;
+function append(sessionId, event) {
+    if (!sessionId || !event) return Promise.resolve(null);
+    const prev = appendChains.get(sessionId) || Promise.resolve();
+    const next = prev.catch(() => {}).then(() => appendInner(sessionId, event));
+    appendChains.set(sessionId, next.catch(() => {}));
+    return next;
+}
+
+async function appendInner(sessionId, event) {
     const buf = getBuffer(sessionId);
     await seedSeq(buf, sessionId);
     const entry = {

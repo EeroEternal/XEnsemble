@@ -50,6 +50,46 @@ function isNewToolResult(sessionId, callId) {
     return true;
 }
 
+// Last LLM failure recorded per session, used to throttle chat-transcript
+// error events: agent CLIs retry 429/5xx responses in loops (with backoff),
+// and without throttling the dialog view would flood with identical errors.
+const lastLlmErrorBySession = new Map();
+const LLM_ERROR_THROTTLE_MS = 30000;
+
+/**
+ * Record an LLM failure as a chat event (`role: 'error'`) so the dialog view
+ * can show "request failed" immediately instead of "Agent is thinking…"
+ * until the idle timeout. Throttled per session: identical consecutive
+ * errors (retry loops) record at most once per LLM_ERROR_THROTTLE_MS;
+ * a different error always records (the state changed).
+ */
+function recordLlmErrorEvent(sessionId, status, detail) {
+    const content = detail ? `${status}: ${detail}` : `${status}`;
+    const now = Date.now();
+    const last = lastLlmErrorBySession.get(sessionId);
+    if (last && last.content === content && now - last.ts < LLM_ERROR_THROTTLE_MS) return;
+    lastLlmErrorBySession.set(sessionId, { content, ts: now });
+    void chatTranscript.append(sessionId, { role: 'error', content });
+}
+
+/**
+ * Pull a short single-line message out of an upstream error body (JSON or
+ * plain text) for the chat-transcript error event.
+ */
+function extractUpstreamErrorText(bodyBuffer, contentType) {
+    if (!Buffer.isBuffer(bodyBuffer) || bodyBuffer.length === 0) return '';
+    const raw = bodyBuffer.toString('utf8').slice(0, 2000);
+    const isJson = typeof contentType === 'string' && contentType.includes('json');
+    if (isJson || raw.trim().startsWith('{')) {
+        try {
+            const parsed = JSON.parse(raw);
+            const msg = parsed?.error?.message ?? parsed?.error ?? parsed?.message ?? parsed?.detail;
+            if (msg != null) return String(msg).replace(/\s+/g, ' ').slice(0, 200);
+        } catch (_) { /* fall through to plain text */ }
+    }
+    return raw.replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
 proxy.on('error', (err, req, res) => {
     if (res.writeHead) {
         res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -193,7 +233,7 @@ async function resolveGatewayTarget(log) {
     };
 }
 
-function forwardToGateway(request, reply, { targetBaseUrl, gatewayKey, path, onResponseBody }) {
+function forwardToGateway(request, reply, { targetBaseUrl, gatewayKey, path, onResponseBody, onErrorResponse }) {
     return new Promise((resolve, reject) => {
         reply.hijack();
         request.raw.url = path;
@@ -227,6 +267,14 @@ function forwardToGateway(request, reply, { targetBaseUrl, gatewayKey, path, onR
                         try {
                             const body = Buffer.concat(chunks);
                             onResponseBody(body, proxyRes.headers['content-type'] || '');
+                        } catch (_) { /* ignore */ }
+                    } else if (statusCode >= 400 && chunks.length && typeof onErrorResponse === 'function') {
+                        // Upstream rejected the request (429 rate limit, 5xx, ...):
+                        // surface a short error text so the chat view can show
+                        // "request failed" instead of "Agent is thinking…".
+                        try {
+                            const body = Buffer.concat(chunks);
+                            onErrorResponse(body, proxyRes.headers['content-type'] || '', statusCode);
                         } catch (_) { /* ignore */ }
                     }
                 };
@@ -660,6 +708,11 @@ async function proxyLlmRequest(request, reply) {
 
     const path = stripLlmPrefix(request.url);
     const quotaExempt = isQuotaExemptPath(path);
+    // Chat-transcription interest is needed before the quota/gateway error
+    // branches too (they record chat `error` events), so compute it up front.
+    const pathName = path.split('?', 1)[0];
+    const isChatPath = pathName === '/v1/chat/completions' || pathName === '/chat/completions'
+        || pathName === '/v1/messages' || pathName.endsWith('/chat/completions');
 
     // /v1/models discovery: answer locally with the agent's configured models so
     // every OpenAI-compatible CLI's /model offers exactly the configured subset.
@@ -675,6 +728,10 @@ async function proxyLlmRequest(request, reply) {
     const [quota, gateway] = await Promise.all([quotaPromise, gatewayPromise]);
 
     if (!quota.ok) {
+        // The user prompt above this point was already recorded in the chat
+        // transcript — record the failure too so the dialog view shows
+        // "request failed" instead of "Agent is thinking…".
+        if (isChatPath) recordLlmErrorEvent(claims.sid, quota.status, quota.error);
         return reply.code(quota.status).send({
             error: quota.error,
             limit: quota.limit,
@@ -683,6 +740,7 @@ async function proxyLlmRequest(request, reply) {
     }
 
     if (gateway.error) {
+        if (isChatPath) recordLlmErrorEvent(claims.sid, gateway.status, gateway.error);
         return reply.code(gateway.status).send({ error: gateway.error });
     }
     const started = Date.now();
@@ -736,9 +794,6 @@ async function proxyLlmRequest(request, reply) {
     // anthropic-messages endpoints are identified by their pathname only;
     // beta / stream / version flags live in the query and don't change
     // whether the request is one we should transcribe.
-    const pathName = path.split('?', 1)[0];
-    const isChatPath = pathName === '/v1/chat/completions' || pathName === '/chat/completions'
-        || pathName === '/v1/messages' || pathName.endsWith('/chat/completions');
     if (isChatPath && userPrompt && lastUserPromptBySession.get(claims.sid) !== userPrompt) {
         lastUserPromptBySession.set(claims.sid, userPrompt);
         void chatTranscript.append(claims.sid, { role: 'user', content: userPrompt });
@@ -796,6 +851,7 @@ async function proxyLlmRequest(request, reply) {
 
     let forwardResult = null;
     let forwardError = null;
+    let upstreamErrorText = null;
     try {
         const agentGatewayKey = await serviceRouter.getAgentGatewayKey(claims.aid, request.log);
         forwardResult = await forwardToGateway(request, reply, {
@@ -803,6 +859,9 @@ async function proxyLlmRequest(request, reply) {
             gatewayKey: agentGatewayKey,
             path,
             onResponseBody,
+            onErrorResponse: (bodyBuffer, contentType) => {
+                upstreamErrorText = extractUpstreamErrorText(bodyBuffer, contentType);
+            },
         });
     } catch (err) {
         forwardError = err;
@@ -828,6 +887,17 @@ async function proxyLlmRequest(request, reply) {
                 quota_exempt: quotaExempt,
             },
         }).catch((err) => request.log.warn(err, '[llm-proxy] failed to record event'));
+        // Chat-view visibility for LLM failures (429 rate limit, 5xx, gateway
+        // down): the terminal shows the CLI's error output, but without this
+        // event the dialog view keeps flashing "Agent is thinking…" until the
+        // 60s idle timeout. Throttled — CLI retry loops must not flood it.
+        if (isChatPath && (forwardError || (forwardResult?.statusCode ?? 0) >= 400)) {
+            const status = forwardError ? 502 : forwardResult.statusCode;
+            const detail = forwardError
+                ? String(forwardError.message || forwardError).slice(0, 200)
+                : (upstreamErrorText || '');
+            recordLlmErrorEvent(claims.sid, status, detail);
+        }
     }
 }
 
@@ -865,4 +935,6 @@ module.exports = {
     extractAssistantMessage,
     extractToolCalls,
     extractToolResults,
+    extractUpstreamErrorText,
+    recordLlmErrorEvent,
 };
