@@ -127,7 +127,7 @@
     "copied": "Copied"
   },
   "history": {
-    "view_all": "View all history",
+    "view_all": "Session history",
     "load_failed": "Failed to load history",
     "empty": "No sessions found",
     "untitled": "Untitled session",
