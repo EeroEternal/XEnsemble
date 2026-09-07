@@ -43,7 +43,7 @@ async function callLlm(messages, abortSignal) {
             const res = await fetch(API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
-                body: JSON.stringify({ model: MODEL, messages, max_tokens: 16000, temperature: 0.2, response_format: { type: 'json_object' } }),
+                body: JSON.stringify({ model: MODEL, messages, max_tokens: 16000, temperature: 0.2, response_format: { type: 'json_object' }, thinking: { type: 'disabled' } }),
                 signal: controller.signal,
             });
             if (!res.ok) {
@@ -60,7 +60,7 @@ async function callLlm(messages, abortSignal) {
             const choice = data.choices?.[0];
             const content = choice?.message?.content;
             console.error('[analyzeVerify] model:', MODEL, 'finish_reason:', choice?.finish_reason, 'usage:', JSON.stringify(data.usage), 'content_len:', String(content || '').length);
-            return { ok: true, content, finishReason: choice?.finish_reason };
+            return { ok: true, content, finishReason: choice?.finish_reason, usage: data.usage || null };
         } catch (e) {
             lastWarning = `LLM unavailable: ${e.message}`;
             if (attempt < LLM_RETRIES) {

@@ -625,14 +625,46 @@ const STATIC_SERVE_RE = /(?:npx\s+(?:--yes\s+)?serve\b|python3?\s+-m\s+http\.ser
  * backend. Two-step layout:
  *   - step_1 (prepare): install dependencies at the project root
  *     (monorepo: this is what fills every workspace)
- *   - step_2 (serve): the resolved start command from the contract,
- *     with $PORT substituted for the real port
- *
- * @param {object} stack - detectStack() result
- * @param {{command:string,args:string[],port:number}} contract - stackToPreviewContract()
- * @returns {{steps: any[], configFiles: any[]} | null}
- */
-function buildPlanFromDetectStack(stack, contract) {
+  *   - step_2 (serve): the resolved start command from the contract,
+  *     with $PORT substituted for the real port
+  *
+  * @param {object} stack - detectStack() result
+  * @param {{command:string,args:string[],port:number}} contract - stackToPreviewContract()
+  * @param {string} [hostWorkspacePath] - host 端 workspace 路径；用于轻量探测
+  *   项目是否需要 PG/Redis（.env / docker-compose 关键字），让 fallback plan 也能
+  *   携带 needsPostgres/needsRedis 走 twoStage 并行 provision
+  * @returns {{steps: any[], configFiles: any[], needsPostgres?: boolean, needsRedis?: boolean} | null}
+  */
+function detectBackendFlags(hostWorkspacePath) {
+    if (!hostWorkspacePath) return { needsPostgres: false, needsRedis: false };
+    let needsPostgres = false;
+    let needsRedis = false;
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const candidates = ['.env', '.env.example', 'docker-compose.yml', 'docker-compose.yaml', 'docker-compose.deploy.yml', 'docker-compose.selfhost.yml'];
+        const PG_RE = /postgres(?:ql)?:\/\/|POSTGRES_(?:HOST|DB|USER|PASSWORD|PORT)|DATABASE_URL/;
+        const REDIS_RE = /redis:\/\/|REDIS_(?:HOST|URL|PORT|PASSWORD)|SESSION_.*REDIS|REDIS_URL/;
+        const seen = new Set();
+        // 根 + 浅层子目录（与 detectStack 探测范围一致，毫秒级纯文件读取）
+        const dirs = [hostWorkspacePath, ...['server', 'api', 'backend', 'app', 'src'].map((d) => path.join(hostWorkspacePath, d))];
+        for (const d of dirs) {
+            for (const f of candidates) {
+                const p = path.join(d, f);
+                if (seen.has(p)) continue;
+                seen.add(p);
+                let content = null;
+                try { content = fs.readFileSync(p, 'utf8'); } catch { continue; }
+                if (!needsPostgres && PG_RE.test(content)) needsPostgres = true;
+                if (!needsRedis && REDIS_RE.test(content)) needsRedis = true;
+                if (needsPostgres && needsRedis) return { needsPostgres, needsRedis };
+            }
+        }
+    } catch { /* ignore: 探测失败保持 false（不影响 fallback 计划生成） */ }
+    return { needsPostgres, needsRedis };
+}
+
+function buildPlanFromDetectStack(stack, contract, hostWorkspacePath) {
     if (!stack || !contract || !contract.command) return null;
     if (!contract.args || !contract.args.length) return null;
     const steps = [];
@@ -670,7 +702,12 @@ function buildPlanFromDetectStack(stack, contract) {
         description: `Run on port ${port} (auto-detected from detectStack)`,
         kind: 'serve',
     });
-    return { steps, configFiles: [] };
+    // 兜底计划也带上 needsPostgres/needsRedis：LLM 输出被 reject/override 时
+    // 走 detectStack fallback，原路径丢失这两个字段会导致 twoStage 并行 provision
+    // 永远跳过 PG，verify 阶段后端无 DB 报错（xensemble 实测：fallback plan
+    // → needsPg=false → POST /api/v1/auth/login 500）。
+    const flags = detectBackendFlags(hostWorkspacePath);
+    return { steps, configFiles: [], ...flags };
 }
 
 async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeRef, isAborted }) {
@@ -723,7 +760,7 @@ async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeR
         // 路径 2/3：有 fatal，或 LLM 与 detected 不一致 → detectStack 兜底
         const fallbackSource = allFatal.length > 0 ? 'opencode-rejected-detectstack' : 'detectstack-override';
         if (canUseDetected) {
-            const detectPlan = buildPlanFromDetectStack(detected, detectedContract);
+            const detectPlan = buildPlanFromDetectStack(detected, detectedContract, hostWorkspacePath);
             if (detectPlan) {
                 const why = allFatal.length > 0
                     ? `opencode plan rejected: ${allFatal.join('; ')}`

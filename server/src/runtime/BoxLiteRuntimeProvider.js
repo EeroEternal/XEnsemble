@@ -520,6 +520,11 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
                 // snapshot may not exist yet or first provision; continue
             }
         }
+        // 记录 host workspace path → runtimeRef 映射，供 attach(runtimeRef) 查询
+        // （analyzeDeploy 依赖此值做 detectStack：fallback 到 sandbox /workspace
+        // 会让 index.html 误触发 detectStaticStack → plan 走 python3 -m http.server
+        // → 后端永不启动 → POST 5xx）。仅 boxlite 路径写，local/k8s 不受影响。
+        this._hostWorkspacePaths.set(name, workspaceVolume.host_path);
         return { runtimeRef: name, workspacePath: guestWorkspacePath, image, mountKey, hostWorkspacePath };
     }
 
