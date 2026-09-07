@@ -298,23 +298,21 @@ async function subscribeTerminal(sessionId, send, options = {}) {
         maybeFinalizeExit();
     };
 
-    const offOutput = chatOnly
-        ? () => {}
-        : sessionManager.subscribeOutput(sessionId, (frame) => {
-            if (cleaned) return;
-            if (replaying) {
-                pendingLiveFrames.push(frame);
-                return;
-            }
-            if (frame.seq != null && frame.seq <= lastSentSeq) {
-                return;
-            }
-            liveBatch.push(frame);
-            if (!liveBatchScheduled) {
-                liveBatchScheduled = true;
-                liveFlushTimer = setTimeout(flushLiveBatch, LIVE_FLUSH_DELAY_MS);
-            }
-        });
+    const offOutput = sessionManager.subscribeOutput(sessionId, (frame) => {
+        if (cleaned) return;
+        if (replaying) {
+            pendingLiveFrames.push(frame);
+            return;
+        }
+        if (frame.seq != null && frame.seq <= lastSentSeq) {
+            return;
+        }
+        liveBatch.push(frame);
+        if (!liveBatchScheduled) {
+            liveBatchScheduled = true;
+            liveFlushTimer = setTimeout(flushLiveBatch, LIVE_FLUSH_DELAY_MS);
+        }
+    });
 
     const offExit = sessionManager.onExit(sessionId, (exitCode, exitSeq) => {
         pendingExit = {
@@ -327,11 +325,17 @@ async function subscribeTerminal(sessionId, send, options = {}) {
     });
 
     if (chatOnly) {
-        // Chat-only mode: don't replay/send terminal output; only track exit so
-        // the chat view can mark the session ended. The handle stays available
-        // for sending input (applyTerminalMessage) via the returned handle.
-        replayComplete = true;
+        // Chat-only mode: skip the history replay (the chat view renders no
+        // terminal and the full scrollback would be a pointless flood), but
+        // keep streaming LIVE output frames. TUI confirmation/selection
+        // prompts (permission pickers, plan approval, y/n questions) never
+        // surface as chat events — they exist only on the terminal screen —
+        // so the chat view watches this stream to detect "agent is waiting
+        // for the user" states and offer confirm/cancel actions. Exit
+        // tracking still ends the chat view when the agent stops.
         replaying = false;
+        replayComplete = true;
+        drainPendingLive();
         return { ok: true, cleanup, handle };
     }
 

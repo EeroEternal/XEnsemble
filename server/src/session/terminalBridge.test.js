@@ -141,6 +141,65 @@ test('subscribeTerminal replays from cursor and continues live without duplicate
     }
 });
 
+test('subscribeTerminal chatOnly skips history replay but streams live output', async () => {
+    const sessionId = `sess_chatonly_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const streamRef = `local:pty:${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const userId = `usr_chatonly_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const handle = new FakeHandle(streamRef);
+    const payloads = [];
+    try {
+        await db.insert(schema.users).values({
+            id: userId,
+            username: `chatonly_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+            passwordHash: 'hash',
+            role: 'user',
+            status: 'active',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+        });
+        await db.insert(schema.sessions).values({
+            id: sessionId,
+            userId,
+            agentId: 'kimi-code',
+            cwd: '/tmp',
+            status: 'running',
+            streamRef,
+            createdAt: Date.now(),
+        });
+
+        sessionManager.createSession(sessionId, handle, 'kimi-code');
+        // History produced BEFORE the chat subscriber attaches must not be
+        // replayed — the chat view renders no terminal.
+        handle.emitData('history-line\n');
+
+        const sub = await subscribeTerminal(sessionId, (payload) => {
+            payloads.push(payload);
+        }, { after: 0, chatOnly: true });
+        assert.equal(sub.ok, true);
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(payloads.some((p) => p.type === 'output'), false);
+
+        // Live output still streams: the chat view watches it for TUI
+        // confirmation/selection prompts that never surface as chat events.
+        handle.emitData('live-line\n');
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        const outputs = payloads.filter((p) => p.type === 'output');
+        assert.deepEqual(outputs.map((p) => p.data), ['live-line\n']);
+
+        // Exit still ends the chat subscription.
+        handle.emitExit(0);
+        await new Promise((resolve) => setImmediate(resolve));
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        assert.ok(payloads.some((p) => p.type === 'exit'));
+
+        sub.cleanup();
+    } finally {
+        sessionManager.deleteSession(sessionId);
+        await db.delete(schema.sessions).where(eq(schema.sessions.id, sessionId));
+        await db.delete(schema.users).where(eq(schema.users.id, userId));
+    }
+});
+
 test('subscribeTerminal replay skips input and resize frames while advancing cursor', async () => {
     const sessionId = `sess_bridge_replay_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const streamRef = `local:pty:${Date.now()}_${Math.random().toString(16).slice(2)}`;
