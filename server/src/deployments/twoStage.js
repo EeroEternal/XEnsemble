@@ -997,6 +997,199 @@ async function ensureGuestGoToolchain({ runtimeRef, workspacePath, hostWorkspace
     }
 }
 
+/**
+ * 统一运行时版本预装：Node / Python / Rust / Java。
+ * 读取宿主项目的版本锁定文件，比对沙箱现有版本，不满足时从 CN 镜像下载安装。
+ * 与 ensureGuestGoToolchain 同理：在 verify agent 之前确定性完成，避免 agent 试错。
+ */
+async function ensureGuestRuntimeVersions({ runtimeRef, workspacePath, hostWorkspacePath, onLog }) {
+    const runtime = getRuntime();
+    const log = (m) => { if (onLog) onLog(m); };
+    const PATH_PREFIX = 'export PATH="/usr/local/bin:$PATH"; ';
+    const results = { node: null, python: null, rust: null, java: null };
+
+    // 通用：读取宿主文件
+    const { readTextSafe } = require('./detectStack');
+    const readHost = (rel) => hostWorkspacePath ? String(readTextSafe(path.join(hostWorkspacePath, rel)) || '') : '';
+    const readGuest = (rel) => String(readTextSafe(path.join(workspacePath, rel)) || '');
+
+    // 通用：沙箱执行命令
+    const execGuest = async (cmd, timeoutMs = 30000) => {
+        try {
+            const r = await runtime.exec.exec('sh', ['-c', `${PATH_PREFIX}${cmd}`], {}, { runtimeRef, cwd: workspacePath, timeoutMs });
+            return { ok: true, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') };
+        } catch (e) {
+            return { ok: false, error: String(e.message || e) };
+        }
+    };
+
+    // 版本比较：major.minor.patch 数值比较
+    const versionSatisfies = (current, required) => {
+        const parse = (v) => (String(v || '').match(/(\d+)\.(\d+)(?:\.(\d+))?/) || []).slice(1, 4).map(Number);
+        const [c1, c2, c3] = parse(current);
+        const [r1, r2, r3] = parse(required);
+        if (c1 !== r1) return c1 > r1;
+        if (c2 !== r2) return c2 > r2;
+        return c3 >= r3;
+    };
+
+    // ============ 1) Node.js ============
+    // 版本来源：package.json engines.node / .nvmrc / .node-version / .tool-versions
+    let nodeRequired = null;
+    const pkgJson = readHost('package.json');
+    if (pkgJson) {
+        try {
+            const pkg = JSON.parse(pkgJson);
+            nodeRequired = pkg?.engines?.node || null;
+        } catch { }
+    }
+    if (!nodeRequired) {
+        const nvmrc = readHost('.nvmrc') || readHost('.node-version');
+        if (nvmrc) nodeRequired = nvmrc.trim().replace(/^v/, '');
+    }
+    if (!nodeRequired) {
+        const toolVersions = readHost('.tool-versions');
+        if (toolVersions) {
+            const m = toolVersions.match(/^nodejs\s+(\S+)/m);
+            if (m) nodeRequired = m[1].replace(/^v/, '');
+        }
+    }
+    if (nodeRequired) {
+        const current = await execGuest('node --version 2>/dev/null || echo NO_NODE', 10000);
+        const curVer = current.stdout?.match(/v?(\d+\.\d+\.\d+)/)?.[1] || null;
+        if (!curVer || !versionSatisfies(curVer, nodeRequired)) {
+            log(`node ${curVer || 'missing'} < required ${nodeRequired}: installing via nvm (npmmirror)`);
+            // 使用 nvm + npmmirror 镜像（~2-3 分钟）
+            const installCmd = `export NVM_NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node; ` +
+                `if [ ! -s "$HOME/.nvm/nvm.sh" ]; then curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash; fi; ` +
+                `source "$HOME/.nvm/nvm.sh"; nvm install ${nodeRequired} && nvm use ${nodeRequired} && nvm alias default ${nodeRequired} && node --version && echo "__NODE_OK__"`;
+            const r = await execGuest(installCmd, 300000);
+            results.node = { required: nodeRequired, current: curVer, installed: r.stdout?.includes('__NODE_OK__') };
+        } else {
+            log(`node ok (${curVer} >= ${nodeRequired})`);
+            results.node = { required: nodeRequired, current: curVer, installed: false };
+        }
+    }
+
+    // ============ 2) Python ============
+    // 版本来源：pyproject.toml [project] requires-python / .python-version / .tool-versions
+    let pythonRequired = null;
+    const pyproject = readHost('pyproject.toml');
+    if (pyproject) {
+        // requires-python = ">=3.11" 或 "==3.12.*" 等
+        const m = pyproject.match(/requires-python\s*=\s*['"]([^'"]+)['"]/);
+        if (m) pythonRequired = m[1].replace(/^[<>=~^!]+/, '').replace(/\*$/, '').trim();
+    }
+    if (!pythonRequired) {
+        const pyVer = readHost('.python-version');
+        if (pyVer) pythonRequired = pyVer.trim().replace(/^v/, '');
+    }
+    if (!pythonRequired) {
+        const toolVersions = readHost('.tool-versions');
+        if (toolVersions) {
+            const m = toolVersions.match(/^python\s+(\S+)/m);
+            if (m) pythonRequired = m[1];
+        }
+    }
+    if (pythonRequired) {
+        const current = await execGuest('python3 --version 2>/dev/null || echo NO_PYTHON', 10000);
+        const curVer = current.stdout?.match(/Python\s+(\d+\.\d+\.\d+)/)?.[1] || null;
+        if (!curVer || !versionSatisfies(curVer, pythonRequired)) {
+            log(`python ${curVer || 'missing'} < required ${pythonRequired}: installing via apt (debian backports)`);
+            // 优先尝试 apt 安装特定版本（debian bookworm backports 有 3.11, 3.12）
+            const majorMinor = pythonRequired.split('.').slice(0, 2).join('.');
+            const installCmd = `apt-get update -qq && apt-get install -y -t bookworm-backports python3.${majorMinor.split('.')[1]} python3.${majorMinor.split('.')[1]}-venv python3.${majorMinor.split('.')[1]}-dev 2>/dev/null || ` +
+                `apt-get install -y python3 python3-venv python3-dev && echo "__PYTHON_OK__"`;
+            const r = await execGuest(installCmd, 300000);
+            results.python = { required: pythonRequired, current: curVer, installed: r.stdout?.includes('__PYTHON_OK__') };
+        } else {
+            log(`python ok (${curVer} >= ${pythonRequired})`);
+            results.python = { required: pythonRequired, current: curVer, installed: false };
+        }
+    }
+
+    // ============ 3) Rust ============
+    // 版本来源：rust-toolchain.toml / Cargo.toml [package] rust-version / .tool-versions
+    let rustRequired = null;
+    const rustToolchain = readHost('rust-toolchain.toml') || readHost('rust-toolchain');
+    if (rustToolchain) {
+        const m = rustToolchain.match(/channel\s*=\s*['"]([^'"]+)['"]/) || rustToolchain.match(/^(\d+\.\d+\.\d+)/m);
+        if (m) rustRequired = m[1];
+    }
+    if (!rustRequired) {
+        const cargoToml = readHost('Cargo.toml');
+        if (cargoToml) {
+            const m = cargoToml.match(/rust-version\s*=\s*['"]([^'"]+)['"]/);
+            if (m) rustRequired = m[1];
+        }
+    }
+    if (!rustRequired) {
+        const toolVersions = readHost('.tool-versions');
+        if (toolVersions) {
+            const m = toolVersions.match(/^rust\s+(\S+)/m);
+            if (m) rustRequired = m[1];
+        }
+    }
+    if (rustRequired) {
+        const current = await execGuest('rustc --version 2>/dev/null || echo NO_RUST', 10000);
+        const curVer = current.stdout?.match(/rustc\s+(\d+\.\d+\.\d+)/)?.[1] || null;
+        if (!curVer || !versionSatisfies(curVer, rustRequired)) {
+            log(`rust ${curVer || 'missing'} < required ${rustRequired}: installing via rustup (rsproxy.cn)`);
+            // rustup + rsproxy.cn 镜像（~3-5 分钟）
+            const installCmd = `export RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup; export RUSTUP_DIST_SERVER=https://rsproxy.cn; ` +
+                `if [ ! -s "$HOME/.cargo/env" ]; then curl --proto '=https' --tlsv1.2 -fsSL https://rsproxy.cn/rustup-init.sh | sh -s -- -y --default-toolchain ${rustRequired}; fi; ` +
+                `source "$HOME/.cargo/env"; rustup default ${rustRequired} && rustc --version && echo "__RUST_OK__"`;
+            const r = await execGuest(installCmd, 400000);
+            results.rust = { required: rustRequired, current: curVer, installed: r.stdout?.includes('__RUST_OK__') };
+        } else {
+            log(`rust ok (${curVer} >= ${rustRequired})`);
+            results.rust = { required: rustRequired, current: curVer, installed: false };
+        }
+    }
+
+    // ============ 4) Java (JVM) ============
+    // 版本来源：pom.xml <java.version> / build.gradle toolchain / .tool-versions
+    let javaRequired = null;
+    const pomXml = readHost('pom.xml');
+    if (pomXml) {
+        const m = pomXml.match(/<java\.version>([^<]+)<\/java\.version>/) || pomXml.match(/<maven\.compiler\.release>([^<]+)<\/maven\.compiler\.release>/);
+        if (m) javaRequired = m[1];
+    }
+    if (!javaRequired) {
+        const gradle = readHost('build.gradle') || readHost('build.gradle.kts');
+        if (gradle) {
+            const m = gradle.match(/java\.toolchain\s+languageVersion\s*=\s*(\d+)/) || gradle.match(/sourceCompatibility\s*=\s*(\d+)/);
+            if (m) javaRequired = m[1];
+        }
+    }
+    if (!javaRequired) {
+        const toolVersions = readHost('.tool-versions');
+        if (toolVersions) {
+            const m = toolVersions.match(/^java\s+(\S+)/m);
+            if (m) javaRequired = m[1];
+        }
+    }
+    if (javaRequired) {
+        const current = await execGuest('java -version 2>&1 | head -1', 10000);
+        const curVer = current.stdout?.match(/version\s+"(\d+)(?:\.\d+)?/)?.[1] || current.stderr?.match(/version\s+"(\d+)(?:\.\d+)?/)?.[1] || null;
+        if (!curVer || Number(curVer) < Number(javaRequired)) {
+            log(`java ${curVer || 'missing'} < required ${javaRequired}: installing via apt (adoptium/temurin mirror)`);
+            // 使用 apt 安装指定版本（adoptium 仓库，或默认 default-jdk）
+            const installCmd = `apt-get update -qq && apt-get install -y wget gpg && ` +
+                `wget -qO- https://packages.adoptium.net/artifactory/api/gpg/key/public | gpg --dearmor > /usr/share/keyrings/adoptium.gpg && ` +
+                `echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb bookworm main" > /etc/apt/sources.list.d/adoptium.list && ` +
+                `apt-get update -qq && apt-get install -y temurin-${javaRequired}-jdk && java -version && echo "__JAVA_OK__"`;
+            const r = await execGuest(installCmd, 400000);
+            results.java = { required: javaRequired, current: curVer, installed: r.stdout?.includes('__JAVA_OK__') };
+        } else {
+            log(`java ok (${curVer} >= ${javaRequired})`);
+            results.java = { required: javaRequired, current: curVer, installed: false };
+        }
+    }
+
+    return results;
+}
+
 // 从阶段 A 产出的 configFiles（.env 模板）里解析 PostgreSQL 连接信息，供系统侧直接建库建用户，
 // 避免 verify agent 用 su/runuser/sudo 变体反复试错（历史 3 轮≈60s 的浪费点）。
 // 只接受安全字符（user/db 为字母数字下划线），host 一律由 agent 强制 127.0.0.1。
@@ -2088,13 +2281,23 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         } catch (e) {
             console.error(`[twoStage] go toolchain ensure error (non-fatal): ${e.message?.slice(0, 200)}`);
         }
+        // 统一运行时版本预装：Node / Python / Rust / Java（与 Go 同理，CN 镜像，避免 agent 试错）。
+        let runtimeVersions = { ran: false };
+        try {
+            runtimeVersions = await ensureGuestRuntimeVersions({
+                runtimeRef: ref, workspacePath: wsPath, hostWorkspacePath: hostPath,
+                onLog: (m) => { console.error(`[twoStage] ${m}`); report({ stage: 'B', substage: 'prepare', message: m }); },
+            });
+        } catch (e) {
+            console.error(`[twoStage] runtime versions ensure error (non-fatal): ${e.message?.slice(0, 200)}`);
+        }
         // 注入 unigateway 二进制：仅对被部署应用是 xensemble 类（server/src/gateway 存在）时执行，
         // 使后端能自动拉起网关，预览里「配网关」可用。非此类项目跳过（避免无谓的 11MB 传输）。
         if (isXensemble) {
             await injectGatewayBinary(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
         }
         // 改动 2：plan.context 同时存 depsCached (boolean, 向后兼容) + depsStatus (per-subpackage)
-        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, stack: { type: detected?.type, framework: detected?.framework }, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, successRun: plan._successRun || null } };
+        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, runtimeVersions: runtimeVersions.ran ? runtimeVersions : null, stack: { type: detected?.type, framework: detected?.framework }, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, successRun: plan._successRun || null } };
         delete plan._successRun;
         // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）。
         // 缓存策略：只缓存真正从 LLM 出的 plan（source='opencode'/'ai'）。detectStack 兜底

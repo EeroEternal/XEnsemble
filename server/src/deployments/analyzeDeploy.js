@@ -168,6 +168,7 @@ function buildMessages(treeText, fileContentsText, feedback) {
         '- CRITICAL — frontend AND backend (full-stack integration): The goal is to preview the WHOLE running app in a browser, not just a static page. The final app needs the backend API (auth, data, business logic) wired to the frontend. If the project has a separate backend (e.g. server/ or api/), you MUST start it as part of the serve step (via concurrently, turbo run dev, nx run-many, or a root npm run dev script that starts both). The frontend alone is NOT enough.',
         '- Detect frontend→backend wiring: next.config rewrites to localhost:PORT, vite proxy, hardcoded baseURL http://localhost:PORT, or a server/ dir with its own entry (Node, Go go.mod, Python, Java). When found, the serve step MUST start the backend first in the background, then the frontend in the foreground, e.g. `(cd server && nohup ./bin/server > /tmp/backend.log 2>&1 &) ; cd apps/web && npm start`. A frontend-only plan makes every API call 5xx (blank pages) and the platform health check (which probes API endpoints) will REJECT it.',
         '- Database: if the backend needs PostgreSQL/MySQL (DATABASE_URL / pgx / prisma / gorm / docker-compose db service), include prepare steps to ensure the DB runs locally at 127.0.0.1 (the platform usually pre-provisions PostgreSQL; else `apt-get install -y postgresql` + `service postgresql start`), create the user/database from DATABASE_URL if needed, and run migrations. Never point the app at a remote DB.',
+        '- Runtime versions: check for pinned versions in the project files — package.json "engines.node", .nvmrc, .tool-versions (Node); pyproject.toml requires-python, .python-version (Python); go.mod go directive (Go); rust-toolchain.toml, Cargo.toml rust-version (Rust); pom.xml java.version, build.gradle toolchain (Java). The platform will PRE-INSTALL the required versions from CN mirrors (nvm/npmmirror for Node, apt backports for Python, rustup/rsproxy for Rust, adoptium for Java, npmmirror for Go) during provisioning. Your plan should assume the correct versions are already available — do NOT include steps to install runtimes unless the platform cannot satisfy them.',
         '- Identify ALL configuration files that need user input before deployment (.env, .env.example, config.*, application.*, settings.*, or any file with placeholders / YOUR_API_KEY / empty values / TODO). Include BOTH frontend and backend config files (e.g. web/.env AND server/.env).',
         'STEP 2 — OUTPUT configFiles FIRST, then steps:',
         'configFiles (return BEFORE steps): ALL configuration files (frontend + backend) the user MUST fill in before deployment. For each: {"path":".env","template":"<full file content>","description":"bullet-separated explanation of what to fill (newline-separated)","keys":["API_KEY","DB_URL"]} (keys is OPTIONAL list of placeholder key names to highlight).',
@@ -184,7 +185,7 @@ function buildMessages(treeText, fileContentsText, feedback) {
         '- .agents/preview.json is a platform default hint, NOT authoritative; the project root scripts take priority.',
         '- If a build is required before serving, add the build as a prepare step.',
         '- Keep steps minimal (2-4 max). Do not include steps for writing config files (those go in configFiles).',
-        '- OPTIONAL: if the project needs PostgreSQL, add "needsPostgres": true. If it needs Redis, add "needsRedis": true. If neither, omit or set to false.',
+        '- OPTIONAL: if the project needs PostgreSQL, add "needsPostgres": true. If it needs Redis, add "needsRedis": true. If it needs a specific Node version (engines/.nvmrc), add "needsNode": true. If it needs a specific Python version (requires-python/.python-version), add "needsPython": true. If it needs a specific Rust version (rust-toolchain/Cargo.toml), add "needsRust": true. If it needs a specific Java version (pom.xml/build.gradle), add "needsJava": true. If neither, omit or set to false.',
         'No markdown fences, no explanation, only the JSON object.',
     ].join(' ');
 
@@ -236,6 +237,10 @@ function parseResponse(content) {
         configFiles,
         needsPostgres: Boolean(parsed.needsPostgres),
         needsRedis: Boolean(parsed.needsRedis),
+        needsNode: Boolean(parsed.needsNode),
+        needsPython: Boolean(parsed.needsPython),
+        needsRust: Boolean(parsed.needsRust),
+        needsJava: Boolean(parsed.needsJava),
     };
 }
 
