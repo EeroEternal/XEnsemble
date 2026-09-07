@@ -1092,6 +1092,7 @@ module.exports = {
     validatePlanAgainstProject,
     readTextSafe,
     detectNativeDeps,
+    normalizeCmdForCompare,
     // Internal helpers exposed for tests.
     _internal: {
         detectPackageManager,
