@@ -264,19 +264,18 @@ export default function ProjectSourceSelect({
               <p className="px-3 py-3 text-xs text-zinc-400">{t('git:no_matches', { defaultValue: 'No matches.' })}</p>
             ) : (
               <>
-                {selectedIds.length > 0 && (
-                  <p className="px-3 py-1.5 text-[11px] text-zinc-400" data-testid="pss-multi-select-hint">
-                    {t('git:import_multi_locked_hint', {
-                      defaultValue: 'Locked to group "{{prefix}}" — only repositories under the same group can be selected.',
-                      prefix: prefixOf(selectedRepos[0]?.full_name || ''),
-                    })}
-                  </p>
-                )}
                 {filteredRepos.map((r) => {
                   const key = repoKey(r.provider, r.full_name);
                   const state = selection.find((s) => s.selId === key)
                     || { enabled: true, checked: false };
                   const toggle = () => handleToggle({ ...r, id: key, selId: key, enabled: state.enabled });
+                  // 锁定组提示走 title 悬停（不插入元素，避免下拉高度跳动）
+                  const lockedHint = !state.enabled
+                    ? t('git:import_multi_locked_row', {
+                        defaultValue: 'Locked to group "{{prefix}}" — only repositories under the same group can be selected.',
+                        prefix: prefixOf(selectedRepos[0]?.full_name || ''),
+                      })
+                    : undefined;
                   return (
                     <button
                       key={key}
@@ -284,6 +283,7 @@ export default function ProjectSourceSelect({
                       data-testid={`pss-repo-row-${r.full_name}`}
                       disabled={!state.enabled}
                       onClick={toggle}
+                      title={lockedHint}
                       className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
                         state.checked ? 'bg-zinc-100' : 'hover:bg-zinc-50'
                       } ${!state.enabled ? 'cursor-not-allowed opacity-40' : ''}`}
@@ -302,18 +302,24 @@ export default function ProjectSourceSelect({
                     </button>
                   );
                 })}
-                {selectedIds.length > 0 && (
-                  <button
-                    type="button"
-                    data-testid="pss-import-submit"
-                    onClick={submitMultiImport}
-                    className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium bg-zinc-900 text-white hover:bg-zinc-800"
-                  >
-                    {selectedIds.length > 1
-                      ? t('git:import_multi_submit', { count: selectedIds.length, defaultValue: 'Import {{count}} repositories' })
-                      : t('git:import_repository', { defaultValue: 'Import Repository' })}
-                  </button>
-                )}
+                {/* 常驻确认按钮：未勾选时 disabled 占位，避免勾选后按钮突然出现导致高度跳动 */}
+                <button
+                  type="button"
+                  data-testid="pss-import-submit"
+                  onClick={submitMultiImport}
+                  disabled={selectedIds.length === 0}
+                  className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium ${
+                    selectedIds.length > 0
+                      ? 'bg-zinc-900 text-white hover:bg-zinc-800'
+                      : 'bg-zinc-100 text-zinc-400 cursor-not-allowed'
+                  }`}
+                >
+                  {selectedIds.length > 1
+                    ? t('git:import_multi_submit', { count: selectedIds.length, defaultValue: 'Import {{count}} repositories' })
+                    : selectedIds.length === 1
+                      ? t('git:import_repository', { defaultValue: 'Import Repository' })
+                      : t('git:import_multi_pick_hint', { defaultValue: 'Select repositories to import' })}
+                </button>
                 {isLoading && (
                   <div className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-400">
                     <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />

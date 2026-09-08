@@ -226,6 +226,8 @@
   "import_subtitle": "Select a repository to import as a workspace.",
   "import_multi_submit": "Import {{count}} repositories",
   "import_multi_locked_hint": "Locked to group \"{{prefix}}\" — only repositories under the same group can be selected.",
+  "import_multi_locked_row": "Locked to group \"{{prefix}}\" — only repositories under the same group can be selected.",
+  "import_multi_pick_hint": "Select repositories to import",
   "import_started": "Import started. Cloning repositories…",
   "import_subtitle_multi": "Select one or more repositories (same group) to import as a multi-repo workspace.",
   "import_multi_selected": "{{count}} repositories selected",

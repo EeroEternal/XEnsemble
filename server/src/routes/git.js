@@ -376,10 +376,14 @@ function registerGitRoutes(fastify) {
             return reply.code(400).send({ error: t('errors:invalid_repo_url', { defaultValue: 'Invalid repository URL' }, request.locale || 'en'), code: 'invalid_repo_url' });
         }
 
+        // ── 多仓库导入标记：body.repos 为数组（≥2 项）时走多仓库分支，
+        // 跳过顶层单仓库必填校验与 getRepo 解析（每项在下方循环各自解析）
+        const isMultiRepoImport = Array.isArray(body.repos) && body.repos.length > 1;
+
         const projectName = String(name || (parsedUrl ? parsedUrl.repoName : '') || (repo_full_name || '').split('/').pop() || 'project').trim();
         if (!projectName) return reply.code(400).send({ error: t('errors:name_required', { defaultValue: 'name is required' }, request.locale || 'en'), code: 'name_required' });
 
-        if (!repo_url) {
+        if (!repo_url && !isMultiRepoImport) {
             if (!repo_full_name) {
                 return reply.code(400).send({ error: t('errors:repo_full_name_required', { defaultValue: 'repo_full_name is required' }, request.locale || 'en'), code: 'repo_full_name_required' });
             }
@@ -411,6 +415,13 @@ function registerGitRoutes(fastify) {
                 name: parsedUrl.repoName,
             };
             providerName = resolvedProvider;
+        } else if (isMultiRepoImport) {
+            // 多仓库：只需连接 token（每项在 repos[] 循环里各自 getRepo），
+            // 顶层 repo_full_name 不存在，跳过单仓库解析
+            connection = await connectionService.getConnection(request.user.id, providerName);
+            if (!connection) return reply.code(400).send({ error: t('errors:provider_account_not_connected', { defaultValue: '{{provider}} account not connected', provider: providerName }, request.locale || 'en'), code: 'provider_account_not_connected' });
+            token = await connectionService.getDecryptedToken(request.user.id, providerName);
+            repoInfo = null;
         } else {
             try {
                 connection = await connectionService.getConnection(request.user.id, providerName);
@@ -437,7 +448,9 @@ function registerGitRoutes(fastify) {
         const userId = request.user.id;
         const serverPath = projectDir(userId, projectId);
         const createdAt = Date.now();
-        const baseBranch = branch || repoInfo.defaultBranch || 'main';
+        const baseBranch = branch
+            || (isMultiRepoImport ? (body.repos.find((r) => r?.branch) || {}).branch : repoInfo.defaultBranch)
+            || 'main';
         const autoCreateBranch = auto_create_branch !== false;
         const workBranchName = work_branch_name || `skyharness/workspace-${Date.now().toString(36).slice(-4)}`;
         const currentBranch = autoCreateBranch ? workBranchName : baseBranch;

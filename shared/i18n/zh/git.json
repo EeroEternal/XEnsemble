@@ -225,6 +225,8 @@
   "import_subtitle": "选择一个仓库作为工作空间导入。",
   "import_multi_submit": "导入 {{count}} 个仓库",
   "import_multi_locked_hint": "已锁定分组「{{prefix}}」——仅同组仓库可继续勾选。",
+  "import_multi_locked_row": "已锁定分组「{{prefix}}」——仅同组仓库可继续勾选。",
+  "import_multi_pick_hint": "选择要导入的仓库",
   "import_started": "导入已开始，正在克隆仓库…",
   "import_subtitle_multi": "选择一个或多个同组仓库，导入为多仓库工作空间。",
   "import_multi_selected": "已选 {{count}} 个仓库",

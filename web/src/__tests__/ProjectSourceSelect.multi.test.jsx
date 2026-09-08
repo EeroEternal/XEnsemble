@@ -59,16 +59,28 @@ describe('ProjectSourceSelect 多选勾选（同前缀锁定组）', () => {
     gitApi.listProviders.mockResolvedValue({ providers: [] });
   });
 
-  it('点击行即勾选：org/frontend 后锁定 org 组，other/infra 禁用', async () => {
+  it('点击行即勾选：org/frontend 后锁定 org 组，other/infra 禁用（title 悬停提示，无插入元素）', async () => {
     render(<ProjectSourceSelect {...PROPS} />);
     // 打开下拉（点击 trigger）
     fireEvent.click(screen.getByRole('button', { name: /select repository/i }));
     const row = await screen.findByTestId('pss-repo-row-org/frontend');
-    fireEvent.click(row);
+    const hintBefore = screen.queryByTestId('pss-multi-select-hint');
+    expect(hintBefore).toBeNull(); // 不再有插入式提示条
 
+    fireEvent.click(row);
     expect(screen.getByTestId('pss-repo-row-org/backend')).not.toBeDisabled();
-    expect(screen.getByTestId('pss-repo-row-other/infra')).toBeDisabled();
-    expect(screen.getByTestId('pss-multi-select-hint')).toBeInTheDocument();
+    const locked = screen.getByTestId('pss-repo-row-other/infra');
+    expect(locked).toBeDisabled();
+    expect(locked.getAttribute('title')).toMatch(/org/i); // 悬停提示
+    // 确认按钮常驻，勾选后不新增元素（无高度跳动）
+    expect(screen.getByTestId('pss-import-submit')).toBeEnabled();
+  });
+
+  it('未勾选时确认按钮 disabled 占位', async () => {
+    render(<ProjectSourceSelect {...PROPS} />);
+    fireEvent.click(screen.getByRole('button', { name: /select repository/i }));
+    await screen.findByTestId('pss-repo-row-org/frontend');
+    expect(screen.getByTestId('pss-import-submit')).toBeDisabled();
   });
 
   it('多选提交：onImported 收到 { name, repos[] }，含 provider 隔离', async () => {
@@ -106,7 +118,7 @@ describe('ProjectSourceSelect 多选勾选（同前缀锁定组）', () => {
     fireEvent.click(screen.getByTestId('pss-repo-row-org/frontend'));
 
     expect(screen.getByTestId('pss-repo-row-other/infra')).not.toBeDisabled();
-    expect(screen.queryByTestId('pss-multi-select-hint')).not.toBeInTheDocument();
+    expect(screen.getByTestId('pss-import-submit')).toBeDisabled();
     expect(gitApi.listRepos).toHaveBeenCalled();
   });
 });

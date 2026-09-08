@@ -653,14 +653,6 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
             </div>
           </div>
 
-          {selectedIds.length > 0 && (
-            <p className="text-xs text-zinc-500" data-testid="multi-select-hint">
-              {t('git:import_multi_locked_hint', {
-                defaultValue: 'Locked to group "{{prefix}}" — only repositories under the same group can be selected.',
-                prefix: prefixOf(selectedRepos[0]?.full_name || ''),
-              })}
-            </p>
-          )}
           <div className={`max-h-48 overflow-auto rounded-lg border ${borderHairline}`}>
             {reposLoading ? (
               <div className="flex items-center justify-center gap-2 p-4 text-sm text-zinc-500">
@@ -677,12 +669,20 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
                   const state = selection.find((s) => s.id === repo.id)
                     || { enabled: true, checked: false };
                   const toggle = () => handleToggle({ ...repo, enabled: state.enabled });
+                  // 锁定组提示走 title 悬停（不插入元素，避免列表高度跳动）
+                  const lockedHint = !state.enabled
+                    ? t('git:import_multi_locked_row', {
+                        defaultValue: 'Locked to group "{{prefix}}" — only repositories under the same group can be selected.',
+                        prefix: prefixOf(selectedRepos[0]?.full_name || ''),
+                      })
+                    : undefined;
                   return (
                     <li key={repo.id ?? repo.full_name}>
                       <button
                         type="button"
                         disabled={!state.enabled}
                         onClick={toggle}
+                        title={lockedHint}
                         data-testid={`repo-row-${repo.full_name}`}
                         className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
                           state.checked ? 'bg-zinc-100' : 'hover:bg-zinc-50'

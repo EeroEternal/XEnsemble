@@ -63,7 +63,7 @@ describe('RepoImportDialog 多选勾选（同前缀锁定组）', () => {
     expect(screen.getByTestId('repo-row-a/b/d')).not.toBeDisabled();
     expect(screen.getByTestId('repo-row-a/e')).toBeDisabled();
     expect(screen.getByTestId('repo-row-g/h')).toBeDisabled();
-    expect(screen.getByTestId('multi-select-hint')).toBeInTheDocument();
+    expect(screen.getByTestId('repo-row-g/h').getAttribute('title')).toMatch(/a\/b/i);
   });
 
   it('取消全部勾选后重新开放所有仓库', async () => {
@@ -73,7 +73,7 @@ describe('RepoImportDialog 多选勾选（同前缀锁定组）', () => {
     fireEvent.click(screen.getByTestId('repo-row-a/b/c'));
     fireEvent.click(screen.getByTestId('repo-row-a/b/c'));
     expect(screen.getByTestId('repo-row-a/e')).not.toBeDisabled();
-    expect(screen.queryByTestId('multi-select-hint')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('repo-row-a/e')).not.toHaveAttribute('title');
   });
 
   it('多选提交：按钮显示数量，importRepo 收到 repos 数组', async () => {
