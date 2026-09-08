@@ -59,16 +59,16 @@ function registerRepoRoutes(fastify, deps = {}) {
       });
     }
     const body = request.body || {};
-    if (!body.sub_path || !body.repo_url || !body.role) {
+    if (!body.sub_path || !body.repo_url) {
       return reply.code(400).send({
-        error: 'role, sub_path, repo_url are required',
+        error: 'sub_path, repo_url are required',
         code: 'invalid_input',
       });
     }
     try {
       const repo = await svc.addRepo({
         projectId: project.id,
-        role: body.role,
+        role: body.role || 'custom',
         subPath: body.sub_path,
         repoProvider: body.repo_provider || 'url',
         repoUrl: body.repo_url,

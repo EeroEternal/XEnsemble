@@ -71,6 +71,29 @@ const projects = pgTable('projects', {
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
+const projectRepos = pgTable('project_repos', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  role: text('role').notNull(),
+  subPath: text('sub_path').notNull(),
+  repoProvider: text('repo_provider').notNull(),
+  repoUrl: text('repo_url').notNull(),
+  repoDefaultBranch: text('repo_default_branch').notNull().default('main'),
+  repoInstallationRef: text('repo_installation_ref'),
+  repoTokenSecretRef: text('repo_token_secret_ref'),
+  isPrimary: boolean('is_primary').notNull().default(false),
+  currentBranch: text('current_branch'),
+  cloneStatus: text('clone_status').notNull().default('pending'),
+  cloneError: text('clone_error'),
+  remoteRepoId: text('remote_repo_id'),
+  remoteFullName: text('remote_full_name'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+}, (table) => ({
+  byProject: index('project_repos_project_id_idx').on(table.projectId),
+  uniqSubPath: uniqueIndex('project_repos_project_subpath_uniq').on(table.projectId, table.subPath),
+}));
+
 const runtimes = pgTable('runtimes', {
   id: text('id').primaryKey(),
   projectId: text('project_id').notNull().references(() => projects.id),
@@ -516,6 +539,7 @@ module.exports = {
   platformSettings,
   secrets,
   projects,
+  projectRepos,
   sessions,
   sessionStreams,
   sessionConfigs,

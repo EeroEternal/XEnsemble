@@ -10,7 +10,22 @@
 
 const crypto = require('crypto');
 const { eq, and, asc } = require('drizzle-orm');
-const { parsePath } = require('./PathGroupingService');
+
+// subPath 校验：1+ 段、'/' 分隔，禁止特殊字符与 . / ..
+// （多仓库挂载点为 /workspace/<subPath>，典型值如 'frontend'、'backend'）
+const INVALID_SEGMENT_CHARS = /[\\:*?"<>|\x00-\x1f]/;
+
+function normalizeSubPath(subPath) {
+    if (typeof subPath !== 'string') return null;
+    const trimmed = subPath.trim().replace(/^\/+|\/+$/g, '');
+    if (!trimmed) return null;
+    const segs = trimmed.split('/').filter(Boolean);
+    if (segs.length === 0) return null;
+    for (const s of segs) {
+        if (INVALID_SEGMENT_CHARS.test(s) || s === '.' || s === '..') return null;
+    }
+    return segs.join('/');
+}
 
 function newId(prefix) {
   return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
@@ -50,13 +65,13 @@ class ProjectRepoService {
    * @returns {Promise<object>}
    */
   async addRepo(input) {
-    const { projectId, role, subPath, repoProvider, repoUrl } = input || {};
-    if (!projectId || !role || !subPath || !repoProvider || !repoUrl) {
+    const { projectId, role, subPath: subPathInput, repoProvider, repoUrl } = input || {};
+    if (!projectId || !role || !subPathInput || !repoProvider || !repoUrl) {
       throw new Error('projectId, role, subPath, repoProvider, repoUrl are required');
     }
-    const segs = parsePath(subPath);
-    if (!segs) {
-      throw new Error(`Invalid subPath: "${subPath}". Must be ≥ 2 segments separated by "/"`);
+    const subPath = normalizeSubPath(subPathInput);
+    if (!subPath) {
+      throw new Error(`Invalid subPath: "${subPathInput}". Must be 1+ segments separated by "/" with no special characters`);
     }
     const now = Date.now();
     const isPrimary = !!input.isPrimary;

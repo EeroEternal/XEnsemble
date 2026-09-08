@@ -58,6 +58,7 @@ const { registerGitHubRoutes } = require('./routes/github');
 const { registerGitRoutes } = require('./routes/git');
 const { registerProjectGitRoutes } = require('./routes/projectGit');
 const { registerGitHubAppRoutes } = require('./routes/githubApp');
+const { registerRepoRoutes } = require('./routes/repos');
 const { registerCustomImageRoutes } = require('./routes/customImages');
 const { registerSkillRoutes } = require('./routes/skills');
 const { LocalGitService } = require('./git/LocalGitService');
@@ -196,6 +197,7 @@ fastify.addHook('onRequest', async (request) => {
 registerAuthRoutes(fastify);
 registerAdminRoutes(fastify);
 registerUserRoutes(fastify);
+registerRepoRoutes(fastify, { db, schema, getProjectForUser });
 registerWorkspaceRoutes(fastify, { getProjectForUser });
 registerAutoDeployRoutes(fastify, { getProjectForUser });
 registerTerminalHttpRoutes(fastify);
