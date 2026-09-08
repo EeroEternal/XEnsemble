@@ -28,11 +28,33 @@ async function resolveRuntimeId(userId, sessionId) {
 }
 
 /**
- * Create a GitOperationService scoped to the session's runtime (if session_id provided).
+ * 多仓库路由：多 repo 项目（project_repos > 1 行）默认路由到 primary repo；
+ * repo_id（query/body）可显式指定。单 repo / 无记录 → null（根目录原逻辑）。
+ */
+async function resolveRepoSubPath(projectId, request) {
+    if (!projectId) return null;
+    try {
+        const rows = await db.select().from(schema.projectRepos)
+            .where(eq(schema.projectRepos.projectId, projectId));
+        if (!rows || rows.length <= 1) return null;
+        const repoId = request.query?.repo_id || request.body?.repo_id || null;
+        const target = (repoId && rows.find((r) => r.id === repoId))
+            || rows.find((r) => r.isPrimary)
+            || rows[0];
+        return target.subPath;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Create a GitOperationService scoped to the session's runtime (if session_id provided)
+ * and to the target repo (multi-repo projects default to the primary repo).
  */
 async function getGitService(request) {
     const runtimeId = await resolveRuntimeId(request.user.id, request.query?.session_id || request.body?.session_id);
-    return new GitOperationService({ runtimeId });
+    const repoSubPath = await resolveRepoSubPath(request.params?.id, request);
+    return new GitOperationService({ runtimeId, repoSubPath });
 }
 
 // Generate a commit message from the working-tree diff using the configured
@@ -243,11 +265,13 @@ function registerProjectGitRoutes(fastify) {
     }, async (request, reply) => {
         let project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
-        const gitOperationService = await getGitService(request);
         try {
             const runtimeId = await resolveRuntimeId(request.user.id, request.query?.session_id);
             project = await ensureLocalGitReady(project, request.log, runtimeId);
-            const gitOperationService = new GitOperationService({ runtimeId });
+            const gitOperationService = new GitOperationService({
+                runtimeId,
+                repoSubPath: await resolveRepoSubPath(project.id, request),
+            });
             const mode = request.query.mode === 'light' ? 'light' : 'full';
             const status = mode === 'light'
                 ? await gitOperationService.getStatusLight(project)
