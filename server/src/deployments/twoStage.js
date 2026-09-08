@@ -1500,32 +1500,6 @@ async function ensureRubyVersion({ runtime, runtimeRef, workspacePath, hostWorks
 }
 
 /**
- * 确保 C/C++ 工具链
- */
-async function ensureCppVersion({ runtime, runtimeRef, workspacePath, hostWorkspacePath, log, execGuest }) {
-    let cppRequired = null;
-    const cmakeResult = await findVersionFile(hostWorkspacePath, 'cpp');
-    if (cmakeResult.found && cmakeResult.file === 'CMakeLists.txt') {
-        log(`[ensureGuestRuntimeVersions] CMakeLists.txt found in ${cmakeResult.subdir || 'root'}`);
-        const m = cmakeResult.content.match(/cmake_minimum_required\s*\(\s*VERSION\s+([^)\s]+)/i);
-        if (m) cppRequired = m[1];
-    }
-    // C/C++: 确保基础工具链存在
-    const cppCurrent = await execGuest('gcc --version 2>/dev/null | head -1', 10000);
-    const hasGcc = cppCurrent.stdout?.includes('gcc') || false;
-    const hasCmake = (await execGuest('cmake --version 2>/dev/null | head -1', 10000)).stdout?.includes('cmake') || false;
-    if (!hasGcc || !hasCmake) {
-        log(`c/cpp toolchain missing (gcc=${hasGcc} cmake=${hasCmake}): installing build-essential + cmake`);
-        const installCmd = `apt-get update -qq && apt-get install -y build-essential cmake pkg-config && echo "__CPP_OK__"`;
-        const r = await execGuest(installCmd, 300000);
-        return { required: cppRequired || 'system', current: hasGcc ? 'ok' : 'missing', installed: r.stdout?.includes('__CPP_OK__') };
-    } else {
-        log(`c/cpp toolchain ok (gcc + cmake present)`);
-        return { required: cppRequired || 'system', current: 'ok', installed: false };
-    }
-}
-
-/**
  * 确保 Swift 版本
  */
 async function ensureSwiftVersion({ runtime, runtimeRef, workspacePath, hostWorkspacePath, log, execGuest }) {
@@ -1918,8 +1892,10 @@ async function ensureGuestRuntimeVersions({ runtimeRef, workspacePath, hostWorks
     }
 
     // ============ 9) C/C++ ============
-    // 版本来源：CMakeLists.txt cmake_minimum_required / conanfile.txt / vcpkg.json
-    // C/C++ 通常不需要特定版本，主要是确保 build-essential + cmake + pkg-config 可用
+    // 版本来源：CMakeLists.txt cmake_minimum_required
+    // 条件性（非强制）：只有项目真实声明 C++ 构建（命中 CMakeLists.txt）才装工具链，
+    // 避免无关项目为 gcc/cmake 白花几分钟（AgentHarness 等纯 Go/Node 项目实测每次
+    // 新沙箱烧 ~4 分钟）。native 编译依赖场景由 runPlatformInstall 的 detectNativeDeps 兜底。
     let cppRequired = null;
     const cmakeResult = await findVersionFile(hostWorkspacePath, 'cpp');
     if (cmakeResult.found && cmakeResult.file === 'CMakeLists.txt') {
@@ -1927,30 +1903,16 @@ async function ensureGuestRuntimeVersions({ runtimeRef, workspacePath, hostWorks
         const m = cmakeResult.content.match(/cmake_minimum_required\s*\(\s*VERSION\s+([^)\s]+)/i);
         if (m) cppRequired = m[1];
     }
-    if (!cppRequired) {
-        const conanResult = await findVersionFile(hostWorkspacePath, 'cpp');
-        if (conanResult.found && conanResult.file === 'conanfile.txt') {
-            // conanfile 通常不指定编译器版本，跳过
-        }
-    }
-    if (!cppRequired) {
-        const vcpkgResult = await findVersionFile(hostWorkspacePath, 'cpp');
-        if (vcpkgResult.found && vcpkgResult.file === 'vcpkg.json') {
-            // vcpkg 可指定版本，但通常用默认即可
-        }
-    }
-    // C/C++: 确保基础工具链存在
     const cppCurrent = await execGuest('gcc --version 2>/dev/null | head -1', 10000);
     const hasGcc = cppCurrent.stdout?.includes('gcc') || false;
     const hasCmake = (await execGuest('cmake --version 2>/dev/null | head -1', 10000)).stdout?.includes('cmake') || false;
-    if (!hasGcc || !hasCmake) {
-        log(`c/cpp toolchain missing (gcc=${hasGcc} cmake=${hasCmake}): installing build-essential + cmake`);
+    if (cppRequired && (!hasGcc || !hasCmake)) {
+        log(`c/cpp toolchain missing (gcc=${hasGcc} cmake=${hasCmake}): installing build-essential + cmake (CMakeLists.txt requires C++)`);
         const installCmd = `apt-get update -qq && apt-get install -y build-essential cmake pkg-config && echo "__CPP_OK__"`;
         const r = await execGuest(installCmd, 300000);
-        results.cpp = { required: cppRequired || 'system', current: hasGcc ? 'ok' : 'missing', installed: r.stdout?.includes('__CPP_OK__') };
+        results.cpp = { required: cppRequired, current: hasGcc ? 'ok' : 'missing', installed: r.stdout?.includes('__CPP_OK__') };
     } else {
-        log(`c/cpp toolchain ok (gcc + cmake present)`);
-        results.cpp = { required: cppRequired || 'system', current: 'ok', installed: false };
+        results.cpp = { required: cppRequired || 'system', current: hasGcc ? 'ok' : 'missing', installed: false };
     }
 
     // ============ 10) Swift ============
@@ -2233,7 +2195,9 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
         try {
             await runtime.exec.exec('sh', ['-c', create], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
             console.error(`[twoStage] postgres db provisioned user=${info.user} db=${info.db}`);
-            return { ready: true, dbUser: info.user, dbName: info.db };
+            // 密码一并返回（注入 verify prompt 的 dbPassword），让 agent 直接用预配凭据配置
+            // 应用，而不是自己 su postgres 改库（xensemble 案例：LLM 反复 ALTER USER 死循环）。
+            return { ready: true, dbUser: info.user, dbName: info.db, dbPassword: info.pass || null };
         } catch (e) {
             console.error('[twoStage] postgres db create failed (fallback to agent):', e.message);
             return { ready: true }; // PG 已运行，建库失败则让 agent 兜底
@@ -3168,7 +3132,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             await injectGatewayBinary(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
         }
         // 改动 2：plan.context 同时存 depsCached (boolean, 向后兼容) + depsStatus (per-subpackage)
-        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, runtimeVersions: runtimeVersions.ran ? runtimeVersions : null, stack: { type: detected?.type, framework: detected?.framework }, systemDeps: systemDeps.services, startCandidates, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, successRun: plan._successRun || null } };
+        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, runtimeVersions: runtimeVersions.ran ? runtimeVersions : null, stack: { type: detected?.type, framework: detected?.framework }, systemDeps: systemDeps.services, startCandidates, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, dbPassword: dbProvision.dbPassword || null, successRun: plan._successRun || null } };
         delete plan._successRun;
         // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）。
         // 缓存策略：只缓存真正从 LLM 出的 plan（source='opencode'/'ai'）。detectStack 兜底

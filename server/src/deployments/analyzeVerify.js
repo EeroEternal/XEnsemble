@@ -14,6 +14,13 @@ const API_URL = process.env.LLM_ANALYZE_API_URL || 'https://api.deepseek.com/cha
 const MODEL = process.env.LLM_VERIFY_MODEL || process.env.LLM_ANALYZE_MODEL || 'deepseek-chat';
 const LLM_TIMEOUT_MS = 240000;
 const MAX_AGENT_ROUNDS = Number(process.env.OPENCODE_VERIFY_MAX_ROUNDS) || 60;
+// 同一条命令（install/build/start/su 等）被"去重拦截"累计达到该次数 → 直接 break 进兜底，
+// 不再让 LLM 反复重跑同一命令空转（xensemble 实测 LLM 连续 55 轮决定重跑 su 死循环，
+// 其中"成功命令被重复"与"失败命令被重试"都是循环形态，统一有界）。
+const REPEAT_CMD_HARD_LIMIT = Number(process.env.DEPLOY_VERIFY_REPEAT_CMD_LIMIT) || 5;
+// 常见应用端口，用于给监听端口探测/后端兜底排序（findListeningBackendPort 与
+// assertAppIsServed 共用，避免两处列表漂移）。
+const COMMON_APP_PORTS = [3000, 3888, 3889, 5173, 4173, 8080, 8000, 9000, 5000, 3001, 4000, 8081];
 const SHELL_TIMEOUT_MS = 240000;
 // install/build 类命令单独放宽：大 monorepo 冷 install 常超 240s，被截断 kill 后 agent
 // 只能重试（实测一条 npm install 打满 240s 超时后重跑，时间双倍）。这类命令"截断重来"
@@ -346,7 +353,7 @@ async function assertAppIsServed({ runtimeRef, workspacePath, preferredPort }) {
     const preferred = Number(preferredPort) || 0;
     const listenPorts = await listGuestListenPorts(runtimeRef, workspacePath);
     // 常见应用端口，用于给真实监听端口的探测排序（preferred 排最前，其余常见端口次之）。
-    const commonPorts = [3000, 3888, 3889, 5173, 4173, 8080, 8000, 9000, 5000, 3001, 4000, 8081];
+    const commonPorts = COMMON_APP_PORTS;
     // box 沙箱常驻默认预览端口：3000（欢迎页）与 5173（preview.json serve . --listen 5173）。
     const boxDefaultPorts = [Number(process.env.BOXLITE_DEFAULT_PREVIEW_PORT || 3000), 5173];
 
@@ -472,6 +479,11 @@ async function findListeningBackendPort(runtimeRef, workspacePath, reportedPorts
     const candidates = [
         ...(Array.isArray(reportedPorts) ? reportedPorts.map(Number) : []),
         ...((plan?.context?.startCandidates?.ports || []).map(Number)),
+        // 兜底放宽：当前实际监听的常见应用端口也视为候选（排除系统服务端口）。
+        // 覆盖"agent 未上报 backendPort、startCandidates 也没探测到"但后端其实已
+        // 拉起的场景（xensemble 实测 8080 已监听且 /health 200，agent 死循环 60 轮，
+        // 之前因候选列表不含 8080 而漏判）。
+        ...COMMON_APP_PORTS.filter((p) => listenSet.has(p)),
     ];
     for (const p of candidates) {
         if (Number.isInteger(p) && p >= 1000 && p < 65535 && !BACKEND_LISTEN_EXCLUDE_PORTS.has(p) && listenSet.has(p)) {
@@ -866,14 +878,16 @@ function buildSystemPrompt(plan, toolchain) {
             : []),
         (plan?.context?.dbReady
             ? (plan?.context?.dbName
-                ? `- PostgreSQL is ALREADY installed, run, and the database \`${plan.context.dbName}\` (user \`${plan.context.dbUser}\`) has ALREADY been created by the platform. SKIP installing PG / creating user / creating database. Point the app at 127.0.0.1 and run migrations directly — do NOT run any CREATE USER / CREATE DATABASE.`
+                ? `- PostgreSQL is ALREADY installed and running, and the database \`${plan.context.dbName}\` (user \`${plan.context.dbUser || 'postgres'}\`${plan.context.dbPassword ? `, password \`${plan.context.dbPassword}\`` : ''}) has ALREADY been provisioned by the platform. SKIP installing PG. Point the app at 127.0.0.1:5432/${plan.context.dbName} (postgres://${plan.context.dbUser || 'postgres'}${plan.context.dbPassword ? `:${plan.context.dbPassword}` : ''}@127.0.0.1:5432/${plan.context.dbName}) and run migrations directly. DO NOT run ANY postgres user/database management command — CREATE USER / CREATE ROLE / ALTER USER / DROP USER / CREATE DATABASE / DROP DATABASE, or any \`su postgres -c "psql ..."\` — the platform already created the user and database. If the app cannot connect, FIX THE APP'S DATABASE_URL (host 127.0.0.1, correct password from above) instead of modifying the database.`
                 : '- PostgreSQL is ALREADY installed and started by the platform inside this sandbox. SKIP installing/starting it. Create the user/database only if the app config requires names that do not exist yet, then run migrations.')
             : '- Detect it: the backend uses pg/postgres (server/package.json deps, a db/ dir, or DATABASE_URL / POSTGRES_* in .env files). A backend whose DB-dependent endpoints hang or error is NOT a passing app.'),
         ...(plan?.context?.dbReady ? [] : [
             '- BEFORE apt install, clear stale apt/dpkg locks left by previous runs: `pkill -9 apt-get; pkill -9 dpkg; sleep 1; rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock; sleep 1`. Then `apt-get update -qq && apt-get install -y postgresql postgresql-contrib`. If a lock error still appears, retry the clear+install once.',
             '- Install and start PostgreSQL INSIDE the sandbox: after install run `service postgresql start` (or `pg_ctlcluster <ver> main start`).',
         ]),
-        '- Create a user + database matching the app config. Run psql as the postgres user via `su postgres -c "psql -c \\"...\\""` — in this sandbox `su postgres -c` is the CORRECT way; do NOT waste rounds trying `sudo -u postgres` / `runuser -u postgres` variants. Create the user, then `CREATE DATABASE mydb OWNER myuser;`, and run each CREATE only ONCE.',
+        ...(plan?.context?.dbReady ? [] : [
+            '- Create a user + database matching the app config. Run psql as the postgres user via `su postgres -c "psql -c \\"...\\""` — in this sandbox `su postgres -c` is the CORRECT way; do NOT waste rounds trying `sudo -u postgres` / `runuser -u postgres` variants. Create the user, then `CREATE DATABASE mydb OWNER myuser;`, and run each CREATE only ONCE.',
+        ]),
         '- MIGRATIONS / PRE-START SCRIPTS RUN EXACTLY ONCE: `alembic upgrade`, `npm run db:migrate`, `prestart.sh`, `prisma migrate` etc. are typically idempotent or only need ONE successful run. Before running one, check whether it has already succeeded (table exists / previous exit=0 with no error in output / `alembic current` already up to date); if yes, SKIP it. NEVER re-run the same migration/prestart command just because a later step failed for an unrelated reason.',
         '- Create the tables: look for schema.sql / init.sql / migrations / README "Database Schema" section / the SQL in code (db/*.db.js), and run the DDL so real queries work.',
         '- Point the app at the LOCAL database: edit server/.env (and client env if needed) so POSTGRES_HOST/DATABASE_URL use 127.0.0.1 (or localhost), with the user/password/database you created.',
@@ -994,6 +1008,9 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
     // 失败命令重复计数：同一命令失败后又被重试的次数。≥2 时升级为"重新探测启动命令"
     // 提醒（读项目文档/CLI --help 找真实启动命令），避免猜错命令后陷入重试循环。
     const repeatFailCounts = new Map();
+    // 命令去重硬上限计数：无论成败，同一条命令被拦截的累计次数（键区分成败，
+    // 因为"失败重试"和"成功后仍要重跑"都是死循环形态，都要有界）。
+    const repeatCmdCounts = new Map();
     let lastEditRound = -1;
     let lastNudgeRound = -1;
 // API 健康探测 nudge 计数：根路径 200 但 API 5xx（前端代理的后端没起）时，
@@ -1121,6 +1138,19 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                 if (prev && lastEditRound < prev.round) {
                     trail.push({ round, action: 'repeat_cmd', cmd: dupSig, prevOk: prev.ok });
                     const evidence = prev.evidence || '';
+                    // 硬上限：同一条命令被拦截累计 >= REPEAT_CMD_HARD_LIMIT 次 → 直接进兜底，
+                    // 不再给 LLM 机会继续空转（成功命令的重跑与失败命令的重试同样计数）。
+                    const rptKey = prev.ok ? `ok:${dupSig}` : `fail:${dupSig}`;
+                    const rptN = (repeatCmdCounts.get(rptKey) || 0) + 1;
+                    repeatCmdCounts.set(rptKey, rptN);
+                    if (rptN >= REPEAT_CMD_HARD_LIMIT) {
+                        messages.push({
+                            role: 'user',
+                            content: `You have been blocked from re-running \`${dupSig}\` ${rptN} times in a row with no file edits. The platform will now verify the app directly. If the app is already started or healthy, output your final answer with the current status; otherwise state the real blocker in finalStderr.`,
+                        });
+                        console.error(`[analyzeVerify] breaking verify loop: \`${dupSig}\` blocked ${rptN} times (hard limit ${REPEAT_CMD_HARD_LIMIT})`);
+                        break;
+                    }
                     if (!prev.ok) {
                         // 同一失败命令再次出现：升级为"重新探测启动命令"强提醒（≥2 次重复失败）
                         const fails = (repeatFailCounts.get(dupSig) || 0) + 1;
@@ -1290,7 +1320,7 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                                 ? `Deterministic scan found backend evidence in this project, but your final answer reported NO apiEndpoints and NO backendPort — the backend may not be running at all. Read the code to find the backend entrypoint and its listen port, START it in the background, then output final again WITH "apiEndpoints" (real API routes reachable through the frontend proxy) or "backendPort". A frontend-only final answer will keep being REJECTED.`
                                 : api.verdict === 'backend_unverified'
                                     ? `Your reported apiEndpoints all returned 404 and no backendPort was reported, while the project clearly has a backend. Verify the real proxy prefix/routes (read the frontend proxy config: next.config rewrites / vite proxy / axios baseURL), START the backend if it is not running, then output final again WITH correct "apiEndpoints" AND "backendPort".`
-                                    : `The API endpoints return 5xx — the backend behind the frontend is NOT running (or cannot reach its database). Fix it: (1) start the backend (server/, api/, go.mod main, Dockerfile CMD; e.g. nohup ./bin/server > /tmp/backend.log 2>&1 &); (2) if it needs PostgreSQL/MySQL, ensure the DB is running (service postgresql start), create the user/database from DATABASE_URL, and run migrations; (3) confirm with curl that the API endpoints (${api.endpoints.join(', ')}) return non-5xx — adjust apiEndpoints in your final answer if the paths were wrong.`;
+                                    : `The API endpoints return 5xx — the backend behind the frontend is NOT running (or cannot reach its database). Fix it: (1) start the backend (server/, api/, go.mod main, Dockerfile CMD; e.g. nohup ./bin/server > /tmp/backend.log 2>&1 &); (2) if it needs PostgreSQL/MySQL, ensure the DB is running and reachable at 127.0.0.1,${plan?.context?.dbReady ? ` and make sure the app's DATABASE_URL matches the platform-provisioned database \`${plan.context.dbName || 'db'}\` / user \`${plan.context.dbUser || 'user'}\` (host 127.0.0.1) — DO NOT create or alter any database user (no CREATE USER / ALTER USER / su postgres) since the platform already provisioned it` : ' and create the user/database from DATABASE_URL'} then run migrations; (3) confirm with curl that the API endpoints (${api.endpoints.join(', ')}) return non-5xx — adjust apiEndpoints in your final answer if the paths were wrong.`;
                         messages.push({
                             role: 'user',
                             content: `Code-side health check REJECTED your final answer: the root page serves HTTP 200, but the backend is down — ${api.reason} ${fixHint} Then output final again with ok:true.`,
@@ -1376,15 +1406,18 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
         ? fallbackResult.finalStderr
         : (lastResult?.finalStderr || '');
     let appPort = fallbackResult?.appPort || null;
-    if (fallbackOk) {
-        const probe = await assertAppIsServed({ runtimeRef, workspacePath, preferredPort: defaultPort });
-        if (!probe.ok) {
-            fallbackOk = false;
-            fallbackFailed = true;
-            concreteStderr = probe.reason;
-        } else {
-            appPort = probe.port;
-        }
+    // 无条件复核应用是否真实可用：fallback 直跑失败也可能只是"重跑步骤"本身失败，
+    // 应用其实已由前面的轮次拉起并监听（xensemble 案例：LLM 死循环 60 轮但
+    // 8080/health 已 200）。先探测，命中即判成功；失败再回到原判定链。
+    const probe = await assertAppIsServed({ runtimeRef, workspacePath, preferredPort: defaultPort });
+    if (probe.ok) {
+        fallbackOk = true;
+        appPort = probe.port;
+        concreteStderr = `[platform re-probe] app served on ${probe.port} (http ${probe.httpCode || 'listen'}) — accepted despite agent/failover failure. ${concreteStderr || ''}`;
+    } else if (fallbackOk) {
+        fallbackOk = false;
+        fallbackFailed = true;
+        concreteStderr = probe.reason;
     }
     // 空转/超轮数兜底：agent 未给出 final（空转 break / 超轮），但项目有确定性后端证据、
     // 后端端口在监听 → 判定后端已正常拉起（用户要求：检测不到接口时用端口监听判断）。
