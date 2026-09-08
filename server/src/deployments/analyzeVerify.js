@@ -655,7 +655,13 @@ function buildSystemPrompt(plan, toolchain) {
         '- The serve command must start the app in the background and stay running. Use e.g. `export PORT=<port>; (cd server && npm start) > /tmp/serve.log 2>&1 & sleep 5; cat /tmp/serve.log`, then health-check with curl.',
         '- Keep the serve process alive even after your shell exits: start it with nohup / setsid and disown. Pick any free port (export PORT=<port> if the app reads it; prefer the default port when free) — the platform auto-detects the real app port for the preview, so do not waste rounds fighting over one specific port.',
         '- Verify with an actual HTTP request, not just "process started": `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:<port>/`. A 2xx/3xx/expected response means success.',
-        '- FULL-STACK requirement: a root page 200 is NOT enough. If the project is frontend+backend (the frontend proxies /api to a local backend), the backend process MUST be running and reachable, or every browser page will be blank. Before outputting final, curl a REAL API route from the code yourself: 2xx/3xx/401 (auth required) / 405 (method mismatch) means the backend is alive; 5xx means the backend is down or cannot reach its database — start it / provision the DB / migrate, then re-check. The platform re-runs this check using the apiEndpoints / backendPort you report in your final answer and will REJECT a frontend-only success.',
+        '- FULL-STACK requirement: a root page 200 is NOT enough. If the project is frontend+backend (the frontend proxies /api to a local backend), the backend MUST be running and reachable, or every browser page will be blank.',
+        '- BACKEND ALIVE CHECK — NEVER guess a health/API path. Guessing e.g. /api/health and treating a 404 as "backend dead" is YOUR error, not the app\'s (multica-style backends expose /health, not /api/health). Follow this order:',
+        '  1) READ the backend router code to find REAL routes: `grep -rnE \'"/(health|api/[a-z]+|ping|ready)"|app\\.(get|use)\\(|r\\.Get\\(|@Get|router\\.(get|post)\\(|HandleFunc\\(\' server/ cmd/ internal/ apps/server/ 2>/dev/null | head -30`. Probe a REAL simple GET route (e.g. /health) from the code — not a guessed one.',
+        '  2) If the backend port is LISTENING but your probed path 404s, the backend is still ALIVE: 404 = no such route (your path guess), NOT a dead process. Confirm with `ss -ltn | grep <port>` and report that backendPort as alive.',
+        '  3) A 5xx means the backend PROCESS is up but the request failed in the business/DB layer (missing migration, DB down, bad env). FIX that (run migrations / provision DB / fix .env), do NOT report ok:false just because a guessed endpoint 5xxs — a 5xx proves the server answered.',
+        '  4) Only 000 / connection refused / empty response on the backend port means the backend did NOT start — that is the real failure to fix (wrong start command, build issue).',
+        '  The platform re-runs its own code-side check from the apiEndpoints / backendPort you report, so report REAL routes from code, never guesses.',
         '- When a command fails, DO NOT just rerun it. Read the error, inspect files (read_file/list_dir), fix the root cause (edit_file), then retry.',
         // 改动 4 配套：CRITICAL 规则改为 per-subpackage —— 之前是整项目 boolean，
         // 会让 agent 在 monorepo 里把 server/node_modules 命中当作全 CACHED、跳过 web install。
@@ -1216,6 +1222,35 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                 // 显式带出本次探测结论（alive/backend_listening/skipped/inconclusive），
                 // twoStage 据此决定 serve 类命令能否进入 successRun 缓存（2a 过滤）。
                 apiVerdict = api.verdict;
+            } else if (!ok && backendEvidence && backendEvidence.hasBackend) {
+                // agent 报 ok:false 但有确定性后端证据 → 平台端口监听兜底复核。
+                // 背景：agent 猜错健康/API 路径（如 multica 真实 /health、agent 猜 /api/health
+                // 得 404）会误判"后端没起"而提前 final ok:false，平台该放行却无从复核。
+                // 规则（用户要求）：检测不到具体接口时，用"后端端口是否监听"判断后端是否
+                // 正常拉起——监听 = 进程起来了 = 部署实质成功，不因 agent 猜错路径而误杀。
+                const probe = await assertAppIsServed({ runtimeRef, workspacePath, preferredPort: defaultPort });
+                if (probe.ok) {
+                    const listening = await listGuestListenPorts(runtimeRef, workspacePath);
+                    const listenSet = new Set(listening);
+                    const reportedPorts = sanitizeBackendPorts(r.backendPort);
+                    const anyBackendListening = reportedPorts.some((p) => listenSet.has(p)) || listenSet.has(probe.port);
+                    if (anyBackendListening) {
+                        trail.push({ round, action: 'agent_failed_but_backend_listening', ports: listening });
+                        console.error(`[analyzeVerify] round ${round}: agent reported ok:false but backend port(s) listening (${listening.join(',')}) — overriding to success`);
+                        return {
+                            ...lastResult,
+                            ok: true,
+                            appPort: probe.port,
+                            apiVerdict: 'backend_listening',
+                            source: 'ai',
+                            warning: `agent reported ok:false but platform re-probe found the backend alive (ports listening: ${listening.join(',')})`,
+                            finalStderr: `[platform re-probe] backend is listening on ${listening.join(',')} — agent's ok:false overridden because the backend started successfully. Original: ${lastResult.finalStderr || ''}`.slice(0, 4000),
+                            trail,
+                            messages: trimContext(messages),
+                            roundsUsed: round + 1,
+                        };
+                    }
+                }
             }
             return { ...lastResult, appPort, apiVerdict, source: 'ai', warning: ok ? '' : 'verify agent reported failure', trail, messages: trimContext(messages), roundsUsed: round + 1 };
         }
