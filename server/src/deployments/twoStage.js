@@ -31,7 +31,7 @@ const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 const VERIFY_STATE_TTL_MS = 30 * 60 * 1000;
 // 单次部署（阶段 1 分析 + 阶段 2 验证）整体超时：verify agent 可能因 run_shell 启动服务未正确
 // 后台化（缺少 &/nohup）而挂起，必须有总超时自动中止，否则部署永不结束、前端一直显示 running。
-const DEPLOY_TOTAL_TIMEOUT_MS = Number(process.env.DEPLOY_TOTAL_TIMEOUT_MS) || 20 * 60 * 1000;
+const DEPLOY_TOTAL_TIMEOUT_MS = Number(process.env.DEPLOY_TOTAL_TIMEOUT_MS) || 40 * 60 * 1000;
 
 // 在 stage A 之前 fetch sandbox projectDir 的 origin/main，让 stage A LLM 看到最新代码。
 // 不做 reset --hard：保留用户在工作目录的未提交改动（平台在 /var/lib/.../proj_xxx 上
@@ -799,12 +799,16 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
     // 可覆盖）；agent 侧由 analyzeVerify 的 run_shell 同步预置。
     const nodeMb = Number(process.env.DEPLOY_NODE_MAX_OLD_SPACE_MB) || 3072;
     const PATH_PREFIX = `export PATH="/usr/local/bin:$PATH"; export NODE_OPTIONS="--max-old-space-size=${nodeMb}"; `;
-    const run = async (cmd, cwd) => {
+    // install 根命令单独超时：大 monorepo 冷装（multica 245 子包全量下载 + store 首写）
+    // 实测 9-10 分钟，600s 默认会截断——且失败连锁严重（agent 再装 ~5min / npm fallback
+    // 覆盖不齐导致子包缺失）。
+    const INSTALL_TIMEOUT_MS = Number(process.env.DEPLOY_INSTALL_TIMEOUT_MS) || 1200000;
+    const run = async (cmd, cwd, timeoutMs = 600000) => {
         log(`platform install: ${cmd}${cwd ? ` (cwd=${cwd})` : ''}`);
         try {
             const r = await runtime.exec.exec('sh', ['-c',
                 `${PATH_PREFIX}${cmd} > /tmp/_pi.log 2>&1; ec=$?; tail -15 /tmp/_pi.log; echo "__PI_EXIT__=\${ec}"`],
-                {}, { runtimeRef, cwd: cwd ? `${workspacePath}/${cwd}` : workspacePath, timeoutMs: 600000 });
+                {}, { runtimeRef, cwd: cwd ? `${workspacePath}/${cwd}` : workspacePath, timeoutMs });
             const out = String(r.stdout || '');
             const m = out.match(/__PI_EXIT__=(-?\d+)/);
             const ec = m ? parseInt(m[1], 10) : (Number.isInteger(r.exitCode) ? r.exitCode : 1);
@@ -877,7 +881,14 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
             else log('platform install: npm i -g pnpm failed, will fall back to npm install');
         }
     }
-    let ok = await run(installCmd, '');
+    let ok = await run(installCmd, '', INSTALL_TIMEOUT_MS);
+    if (!ok && pm === 'pnpm') {
+        // pnpm 断点续装：第一次超时/失败时 store 已写入大部分包，重试只需补剩余
+        // （远快于首装），同时消掉「冷装贴着超时上限」的不确定性——比失败后交给
+        // npm fallback（覆盖不齐 pnpm workspace）或 agent 再装（实测多花 ~5min）都好。
+        log('platform install: pnpm first attempt failed, retrying (store warm, resumable)');
+        ok = await run(installCmd, '', INSTALL_TIMEOUT_MS);
+    }
     let effectiveCmd = ok ? installCmd : null;
     if (!ok && pm !== 'npm') {
         // pnpm/yarn/bun 二进制缺失或安装失败：回退 npm（覆盖 package.json workspaces；
@@ -953,31 +964,13 @@ async function ensureGuestGoToolchain({ runtimeRef, workspacePath, hostWorkspace
     log(`[ensureGuestGoToolchain] START hostWorkspacePath=${hostWorkspacePath}`);
     try {
         // 1) 读 go.mod 要求版本（宿主侧纯文件读取；无 go.mod → 非 Go 项目跳过）
-        // 搜索根目录及常见子目录
         let required = null;
         if (hostWorkspacePath) {
             const { readTextSafe } = require('./detectStack');
-            const SUB_DIRS = ['.', 'server', 'api', 'backend', 'apps', 'packages', 'apps/server', 'apps/api', 'apps/backend', 'cmd', 'internal'];
-            for (const sub of SUB_DIRS) {
-                const gomod = String(readTextSafe(path.join(hostWorkspacePath, sub, 'go.mod')) || '');
-                if (gomod.trim()) {
-                    required = gomod.match(/^go\s+(\d+\.\d+(?:\.\d+)?)/m)?.[1] || null;
-                    if (required) {
-                        log(`[ensureGuestGoToolchain] go.mod found in ${sub}, required=${required}`);
-                        break;
-                    }
-                }
-            }
-            if (!required) {
-                log(`[ensureGuestGoToolchain] go.mod not found in any subdir`);
-            }
-        } else {
-            log(`[ensureGuestGoToolchain] SKIP: hostWorkspacePath not provided`);
+            const gomod = String(readTextSafe(path.join(hostWorkspacePath, 'go.mod')) || '');
+            required = gomod.match(/^go\s+(\d+\.\d+(?:\.\d+)?)/m)?.[1] || null;
         }
-        if (!required) {
-            log(`[ensureGuestGoToolchain] END: no go version required`);
-            return { ran: false };
-        }
+        if (!required) return { ran: false };
         // 2) 沙箱当前 go 版本
         let current = null;
         try {
@@ -2340,15 +2333,18 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         // 依赖目录写入 .git/info/exclude（幂等、非致命），同样必须在 install 之前：
         // install 一旦落盘 node_modules，git 变更面板立即被污染。
         await ensureDependencyExcludeInGuest(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
-        // 并行前置：workspace ownership fix + deps cached check + (conditional) postgres provision。
+        // 并行前置：workspace ownership fix + deps cached check + postgres provision。
         // 必须在 verify agent 执行任何 install 之前完成——这是首次部署超时的主要性能杠杆。
+        // needsPostgres 判定：**不再信任 plan.needsPostgres**（来自阶段 A 的 LLM 输出，会漏标
+        // ——xensemble 实测：plan 漏标 → PG 未预配 → 后端 login/register 5xx → agent 自己
+        // 装 PG + 乱改源码，烧掉全部轮数）。一律调用 provisionPostgresIfNeeded，由它内部的
+        // 沙箱 grep 权威判定（毫秒级，不需要 DB 时立即返回 not needed）。
         const provisionStart = Date.now();
-        const needsPg = Boolean(plan?.needsPostgres);
-        console.error(`[twoStage] project=${project.id} provision parallel START (needsPostgres=${needsPg})`);
+        console.error(`[twoStage] project=${project.id} provision parallel START`);
         const results = await Promise.allSettled([
             repairHostWorkspaceOwnership(hostPath), // host 侧 chown，同步快
             detectDepsCached(ref, wsPath, detected), // guest 侧 deps 探测（改动 2：传入 stack 选对应语言脚本）
-            needsPg ? provisionPostgresIfNeeded(ref, wsPath, plan) : Promise.resolve({ ready: false, reason: 'not needed' }), // 条件 postgres
+            provisionPostgresIfNeeded(ref, wsPath, plan), // 内部权威判定，不需要时毫秒级返回
         ]);
         provisionMs = Date.now() - provisionStart;
         console.error(`[twoStage] project=${project.id} provision parallel done in ${provisionMs}ms`);
@@ -2372,16 +2368,14 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
                 console.error(`[twoStage] deps CACHED for all ${Object.keys(depsStatus).length} sub-package(s)`);
             }
         }
-        // dbProvision 从上方并行 provision 的结果解析（PG 已在并行块内按 needsPg 条件启动过，
-        // 这里不再重复调用 provisionPostgresIfNeeded）。
+        // dbProvision 从上方并行 provision 的结果解析（PG 预配由 provisionPostgresIfNeeded
+        // 内部权威判定，这里只解析结果）。
         let dbProvision = { ready: false, reason: 'not needed' };
-        if (needsPg) {
-            if (pgResult.status === 'fulfilled') {
-                dbProvision = pgResult.value;
-            } else {
-                console.error(`[twoStage] postgres provision failed: ${pgResult.reason}`);
-                dbProvision = { ready: false, reason: pgResult.reason?.message || String(pgResult.reason) };
-            }
+        if (pgResult.status === 'fulfilled') {
+            dbProvision = pgResult.value;
+        } else {
+            console.error(`[twoStage] postgres provision failed: ${pgResult.reason}`);
+            dbProvision = { ready: false, reason: pgResult.reason?.message || String(pgResult.reason) };
         }
         console.error(`[twoStage] postgres provision: ready=${dbProvision.ready} reason=${dbProvision.reason}`);
         // 平台侧确定性 install（在 agent 启动前把依赖装齐）：结果注入 verify prompt，

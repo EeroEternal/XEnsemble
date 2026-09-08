@@ -112,7 +112,9 @@ test('detectStack: monorepo (pnpm-workspace.yaml) is detected over package.json'
         writeFile(dir, 'pnpm-lock.yaml', '');
         const s = detectStack(dir);
         assert.equal(s.type, 'monorepo');
-        assert.equal(s.startCmd, 'pnpm run dev');
+        // 生产语义（2026-09）：dev script 不再进 startCmd（dev 是开发形态，live 模式由
+        // devKind 承担）——fixture 子包没有 start/serve → startCmd=null。
+        assert.equal(s.startCmd, null);
         // detectMonorepoApps returns actual directory names from pnpm-workspace.yaml globs
         assert.deepEqual(s.monorepoApps, ['web', 'server']);
     });
@@ -128,7 +130,7 @@ test('detectStack: monorepo (turbo.json) is detected', () => {
         writeFile(dir, 'pnpm-lock.yaml', '');
         const s = detectStack(dir);
         assert.equal(s.type, 'monorepo');
-        assert.equal(s.startCmd, 'pnpm run dev'); // turbo implies pnpm if no lockfile
+        assert.equal(s.startCmd, null); // dev-only fixture：dev 不进 startCmd（生产语义）
     });
 });
 
@@ -288,17 +290,16 @@ test('detectStack: unknown when nothing matches', () => {
 test('stackToPreviewContract: monorepo with start command splits correctly', () => {
     withTempDir((dir) => {
         writeFile(dir, 'pnpm-workspace.yaml', 'packages:\n  - "apps/*"\n');
-        // Root package.json (required for detectNodeStack to find a dev script → startCmd).
-        writeFile(dir, 'package.json', JSON.stringify({ scripts: { dev: 'pnpm -r dev' } }));
+        // Root package.json with a production `start` script → startCmd = `pnpm run start`.
+        writeFile(dir, 'package.json', JSON.stringify({ scripts: { start: 'pnpm -r start' } }));
         writeFile(dir, 'pnpm-lock.yaml', '');
         writeFile(dir, 'apps/web/package.json', JSON.stringify({ scripts: { dev: 'vite' } }));
         const s = detectStack(dir);
         const c = stackToPreviewContract(s);
-        // detectNodeStack normalizes `dev` script to `pnpm run dev` regardless of its raw body.
         assert.equal(c.command, 'pnpm'); // packageManager = 'pnpm' due to pnpm-lock.yaml
         assert.ok(Array.isArray(c.args));
         assert.ok(c.args.includes('run'));
-        assert.ok(c.args.includes('dev'));
+        assert.ok(c.args.includes('start'));
         assert.equal(c.port, 3000);
     });
 });
@@ -404,6 +405,8 @@ test('detectStack: monorepo (directory-based — xensemble case)', () => {
     // xensemble has root package.json (with `dev:server`, `dev:web` scripts)
     // plus web/server/desktop subdirs each with their own package.json + lockfile.
     // No pnpm-workspace.yaml / lerna.json / turbo.json.
+    // server/package.json has a production `start` script (node src/server.js) —
+    // detectNodeStack 的子包回退会把它提为 startCmd（生产语义）。
     const dir = makeProject({
         'package.json': JSON.stringify({
             scripts: { 'dev:server': 'cd server && npm run dev', 'dev:web': 'cd web && npm run dev' },
@@ -411,7 +414,7 @@ test('detectStack: monorepo (directory-based — xensemble case)', () => {
         'web/package.json': JSON.stringify({ dependencies: { vite: '^5' } }),
         'web/vite.config.ts': '',
         'web/package-lock.json': '',
-        'server/package.json': JSON.stringify({ dependencies: { fastify: '^4' } }),
+        'server/package.json': JSON.stringify({ dependencies: { fastify: '^4' }, scripts: { start: 'node src/server.js' } }),
         'server/package-lock.json': '',
         'desktop/package.json': JSON.stringify({}),
         'desktop/package-lock.json': '',
@@ -419,17 +422,16 @@ test('detectStack: monorepo (directory-based — xensemble case)', () => {
     try {
         const s = detectStack(dir);
         assert.equal(s.type, 'monorepo', 'xensemble-like dir should detect as monorepo');
-        // resolveMonorepoStartScript picks first dev:* alphabetically (no plain `dev` script).
-        // packageManager is 'npm' (no pnpm-lock.yaml in test fixture).
-        assert.match(s.startCmd, /\bnpm run dev:/);
+        // 生产语义：子包 server 的 start 提为 startCmd（dev:* 不再进 startCmd）。
+        assert.match(s.startCmd, /cd server && npm run start/);
         assert.ok(Array.isArray(s.monorepoApps) && s.monorepoApps.length >= 2,
             `monorepoApps should list subdirs, got ${JSON.stringify(s.monorepoApps)}`);
     } finally { rm(dir); }
 });
 
-test('detectStack: monorepo prefers plain "dev" script over dev:* when both exist', () => {
-    // Plain `dev` should win — the documented behavior (line 132-136 of detectStack.js).
-    // When root has both `dev` and `dev:web`, the detection should resolve `dev` first.
+test('detectStack: monorepo plain "dev" script no longer leaks into startCmd', () => {
+    // 生产语义（2026-09）：plain `dev`（concurrently）与 `dev:*` 都是开发形态，
+    // 不进 startCmd——fallback plan 的 serve 步骤跑 dev 会探测失败。
     const dir = makeProject({
         'package.json': JSON.stringify({
             scripts: { 'dev': 'concurrently "npm:dev:web" "npm:dev:server"', 'dev:web': 'cd web && vite', 'dev:server': 'cd server && npm start' },
@@ -441,8 +443,9 @@ test('detectStack: monorepo prefers plain "dev" script over dev:* when both exis
     });
     try {
         const s = detectStack(dir);
-        // packageManager is 'npm' (no pnpm-lock.yaml/yarn.lock/bun.lockb)
-        assert.match(s.startCmd, /\bnpm run dev$/, `plain 'dev' should win, got: ${s.startCmd}`);
+        assert.equal(s.type, 'monorepo');
+        // server 子包没有 start/serve → startCmd=null（live 开发需求由 devKind 单独承担）。
+        assert.equal(s.startCmd, null, `dev scripts must not leak into startCmd, got: ${s.startCmd}`);
     } finally { rm(dir); }
 });
 

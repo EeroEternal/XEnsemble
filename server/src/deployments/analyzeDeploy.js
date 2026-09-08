@@ -502,6 +502,9 @@ function fallbackSteps(fileContentsText) {
 }
 
 // 对 LLM API 的瞬时故障（5xx / 429 / 网络错误）自动重试，避免一次网关抖动直接让部署失败。
+// 不支持 thinking 参数的模型（如 glm-flash 连 { type: "disabled" } 都不收，直接 400）：
+// 首次 400 且错误指向 thinking 时记录，本进程后续请求自动不带该参数（自愈降级）。
+const noThinkingModels = new Set();
 async function callLlm(messages) {
     const retries = 2;
     let lastWarning = '';
@@ -509,15 +512,23 @@ async function callLlm(messages) {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
         try {
+            const bodyObj = { model: MODEL, messages, max_tokens: 16000, temperature: 0.2, response_format: { type: 'json_object' } };
+            if (!noThinkingModels.has(MODEL)) bodyObj.thinking = { type: 'disabled' };
             const res = await fetch(API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
-                body: JSON.stringify({ model: MODEL, messages, max_tokens: 16000, temperature: 0.2, response_format: { type: 'json_object' }, thinking: { type: 'disabled' } }),
+                body: JSON.stringify(bodyObj),
                 signal: controller.signal,
             });
             if (!res.ok) {
                 const text = await res.text().catch(() => '');
                 lastWarning = `LLM error ${res.status}: ${text.slice(0, 120)}`;
+                if (res.status === 400 && /thinking/i.test(text) && !noThinkingModels.has(MODEL)) {
+                    noThinkingModels.add(MODEL);
+                    console.error(`[analyzeDeploy] model ${MODEL} rejected thinking param — retrying without it`);
+                    clearTimeout(timer);
+                    continue;
+                }
                 if ((res.status >= 500 || res.status === 429) && attempt < retries) {
                     console.error(`[analyzeDeploy] LLM error ${res.status}, retry ${attempt + 1}/${retries}`);
                     await new Promise((r) => setTimeout(r, attempt === 0 ? 1500 : 4000));

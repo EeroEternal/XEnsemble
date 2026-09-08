@@ -261,16 +261,26 @@ class BoxLiteClient {
     }
 
     async spawn(sessionName, spec) {
-        const res = await this._fetch(`${this.base}/api/sessions/${encodeURIComponent(sessionName)}/spawn`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(spec || {}),
-        });
-        if (!res.ok) {
+        // guest zygote 竞态：并发 exec 时 libcontainer 偶发
+        // "received unexpected message: InitReady"（容器进程未创建）→ HTTP 500
+        // "failed to spawn command in sandbox"。间歇性瞬时错误（box console.log 里
+        // 失败前后都在成功），失败时进程并未创建 → 重试安全。默认重试 2 次。
+        const MAX_ATTEMPTS = 3;
+        let lastErr = null;
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            const res = await this._fetch(`${this.base}/api/sessions/${encodeURIComponent(sessionName)}/spawn`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(spec || {}),
+            });
+            if (res.ok) return res.json();
             const t = await res.text().catch(() => '');
-            throw new Error(`spawn failed: ${res.status} ${t}`);
+            lastErr = new Error(`spawn failed: ${res.status} ${t}`);
+            const retryable = res.status === 500 && /failed to spawn/i.test(t);
+            if (!retryable || attempt === MAX_ATTEMPTS) throw lastErr;
+            await new Promise((r) => setTimeout(r, attempt * 500));
         }
-        return res.json();
+        throw lastErr;
     }
 
     createAttachWebSocket(attachUrl) {

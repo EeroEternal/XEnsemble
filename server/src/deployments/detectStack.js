@@ -225,9 +225,40 @@ function detectNodeStack(dir) {
     const type = fw?.type || 'node-express';
 
     const scripts = pkg.scripts || {};
-    const buildCmd = scripts.build ? `${pm} run build` : null;
+    let buildCmd = scripts.build ? `${pm} run build` : null;
     const scriptName = resolveStartScript(scripts, framework);
-    const startCmd = scriptName ? `${pm} run ${scriptName}` : null;
+    // 生产启动语义：只有 start/serve 算部署入口。dev（concurrently / vite dev）是开发
+    // 形态——fallback plan 的 serve 步骤跑 dev 会探测失败（xensemble 实测 npm run dev
+    // 6 秒内起不完整服务被误判失败），dev 需求由 live 模式的 devKind 单独检测承担。
+    let startCmd = ['start', 'serve'].includes(scriptName) ? `${pm} run ${scriptName}` : null;
+    // 根没有 start/build script 时扫一层子目录：xensemble 这类「入口在子包」的项目
+    // （server/package.json start = node src/server.js、web/ build = vite build）——
+    // 只看根会让 startCmd=null → analyzeDeploy 决策树走「保留 LLM plan」分支，
+    // LLM 给的 static-serve 坏计划（serve 源码根）就被放行执行 → verify 反复纠偏烧轮数。
+    // 子包 start 只认生产启动（start/serve，不拿 dev）；server/api/backend 等后端特征目录
+    // 优先；build 回退优先 web/client/frontend，跳过 desktop/mobile（electron 不进部署）。
+    if (!startCmd || !buildCmd) {
+        try {
+            const entries = fs.readdirSync(dir, { withFileTypes: true })
+                .filter((e) => e.isDirectory() && e.name !== 'node_modules' && !e.name.startsWith('.'))
+                .map((e) => e.name);
+            const isBackendDir = (n) => /^(server|api|backend|srv)$/i.test(n);
+            const ordered = [...entries.filter(isBackendDir), ...entries.filter((n) => !isBackendDir(n))];
+            for (const name of ordered) {
+                const subPkg = readJsonSafe(path.join(dir, name, 'package.json'));
+                if (!subPkg) continue;
+                const subScripts = subPkg.scripts || {};
+                if (!startCmd && ['start', 'serve'].find((sn) => subScripts[sn])) {
+                    const subPm = detectPackageManager(path.join(dir, name));
+                    startCmd = `cd ${name} && ${subPm} run ${['start', 'serve'].find((sn) => subScripts[sn])}`;
+                }
+                if (!buildCmd && /^(web|client|frontend|app|ui|www)$/i.test(name) && subScripts.build) {
+                    buildCmd = `cd ${name} && ${detectPackageManager(path.join(dir, name))} run build`;
+                }
+                if (startCmd && buildCmd) break;
+            }
+        } catch { /* 子包扫描失败不影响根探测 */ }
+    }
 
     return {
         type,
@@ -282,11 +313,17 @@ function detectMonorepo(dir) {
     // （兜底 null 不影响 monorepoApps 字段填充——下面合并）。
     const apps = detectMonorepoApps(dir) || (matched ? null : collectMonorepoAppsFromSubdirs(dir));
     if (inner) {
-        // Re-resolve start script with the monorepo fallback so we can
-        // surface `dev:web` / `dev:server` style scripts.
+        // 生产语义优先序：根 start/serve > 子包 server start（inner.startCmd，
+        // detectNodeStack 的子包回退）。根 dev / dev:*（concurrently / turbo dev）是
+        // 开发形态——放进 startCmd 会生成「serve 步骤跑 dev」的 fallback plan（探测必
+        // 失败，xensemble 实测）；live 开发需求由 devKind 单独检测承担，不混入 startCmd。
+        // 都没有时 startCmd=null → 决策树保留 LLM plan（对纯 dev-script 项目是正确取舍）。
         const pkg = readJsonSafe(path.join(dir, 'package.json')) || {};
-        const monorepoScript = resolveMonorepoStartScript(pkg.scripts || {});
-        const startCmd = monorepoScript ? `${inner.packageManager} run ${monorepoScript}` : inner.startCmd;
+        const pkgScripts = pkg.scripts || {};
+        const prodScript = ['start', 'serve'].find((n) => pkgScripts[n]);
+        const startCmd = prodScript
+            ? `${inner.packageManager} run ${prodScript}`
+            : inner.startCmd || null;
         return {
             type: 'monorepo',
             defaultPort: inner.defaultPort,

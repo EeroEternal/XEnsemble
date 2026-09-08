@@ -29,6 +29,10 @@ const MAX_TOOL_OUTPUT = 6000;
 
 const LLM_RETRIES = 2;
 
+// 不支持 thinking 参数的模型（如 glm-5-3-flash 连 { type: "disabled" } 都不收，直接 400）。
+// 首次 400 且错误指向 thinking 时记录，本进程后续请求自动不带该参数（自愈降级）。
+const noThinkingModels = new Set();
+
 // 对 LLM API 的瞬时故障（5xx / 429 / 网络错误）自动重试，避免一次网关抖动直接让部署失败。
 async function callLlm(messages, abortSignal) {
     let lastWarning = '';
@@ -40,15 +44,26 @@ async function callLlm(messages, abortSignal) {
             abortSignal.addEventListener('abort', () => controller.abort());
         }
         try {
+            // thinking disabled：reasoning 模型输出慢，显式关闭。部分模型不支持该字段
+            // （见 noThinkingModels）——400 自愈后自动降级为不带。
+            const bodyObj = { model: MODEL, messages, max_tokens: 16000, temperature: 0.2, response_format: { type: 'json_object' } };
+            if (!noThinkingModels.has(MODEL)) bodyObj.thinking = { type: 'disabled' };
             const res = await fetch(API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
-                body: JSON.stringify({ model: MODEL, messages, max_tokens: 16000, temperature: 0.2, response_format: { type: 'json_object' }, thinking: { type: 'disabled' } }),
+                body: JSON.stringify(bodyObj),
                 signal: controller.signal,
             });
             if (!res.ok) {
                 const text = await res.text().catch(() => '');
                 lastWarning = `LLM error ${res.status}: ${text.slice(0, 160)}`;
+                // 模型不支持 thinking 参数 → 记住并立即降级重试（不带 thinking）
+                if (res.status === 400 && /thinking/i.test(text) && !noThinkingModels.has(MODEL)) {
+                    noThinkingModels.add(MODEL);
+                    console.error(`[analyzeVerify] model ${MODEL} rejected thinking param — retrying without it`);
+                    clearTimeout(timer);
+                    continue;
+                }
                 if ((res.status >= 500 || res.status === 429) && attempt < LLM_RETRIES) {
                     console.error(`[analyzeVerify] LLM error ${res.status}, retry ${attempt + 1}/${LLM_RETRIES}`);
                     await new Promise((r) => setTimeout(r, attempt === 0 ? 1500 : 4000));
@@ -155,7 +170,29 @@ function tryParseJson(text) {
     const start = s.indexOf('{');
     const end = s.lastIndexOf('}');
     if (start === -1 || end === -1) return null;
-    try { return JSON.parse(s.slice(start, end + 1)); } catch { return null; }
+    try { return JSON.parse(s.slice(start, end + 1)); } catch { /* fallthrough */ }
+    // 括号平衡扫描（字符串感知）：glm-flash 偶发在 JSON 对象后附加说明文字，
+    // lastIndexOf('}') 会把后面的内容卷进来导致 parse 失败——这里只截取第一个
+    // 完整的平衡对象再试。
+    let depth = 0, inStr = false, esc = false;
+    for (let i = start; i < s.length; i++) {
+        const ch = s[i];
+        if (inStr) {
+            if (esc) esc = false;
+            else if (ch === '\\') esc = true;
+            else if (ch === '"') inStr = false;
+            continue;
+        }
+        if (ch === '"') inStr = true;
+        else if (ch === '{') depth++;
+        else if (ch === '}') {
+            depth--;
+            if (depth === 0) {
+                try { return JSON.parse(s.slice(start, i + 1)); } catch { return null; }
+            }
+        }
+    }
+    return null;
 }
 
 function shellQuote(s) {
@@ -776,6 +813,28 @@ function buildResumeHint(trail) {
     return lines.filter(Boolean).join('\n');
 }
 
+// 续修历史压缩摘要：接回的对话超过阈值时，被丢弃的中间历史压缩成这一条。
+// 从 trail 尾部提取关键动作序列（成功/失败的命令），让模型不丢主线又不被长历史淹没。
+function buildCompressedResumeSummary(trail, roundsUsed) {
+    const t = Array.isArray(trail) ? trail : [];
+    const actions = t.slice(-16).map((x) => {
+        if (x.action === 'tool' && x.tool === 'run_shell') {
+            const ok = /^exit=0\b/.test(String(x.out || ''));
+            return `r${x.round}: shell${ok ? ' [ok]' : ' [fail]'} # ${String(x.cmd || '').slice(0, 90)}`;
+        }
+        if (x.action === 'tool') return `r${x.round}: ${x.tool}`;
+        if (x.action === 'final') return `r${x.round}: final ok=${x.ok}`;
+        if (x.action === 'api_probe') return `r${x.round}: api_probe verdict=${x.verdict}`;
+        return `r${x.round}: ${x.action}`;
+    }).join('\n');
+    return [
+        `RESUME CONTEXT — history compressed. ${roundsUsed} of ${MAX_AGENT_ROUNDS} rounds were already used in the previous attempt; it stopped before the deploy was healthy.`,
+        'Key actions from that attempt (newest last):',
+        actions,
+        'Learn from what already failed above; do NOT redo successful steps or re-explore the same files. Converge to final as fast as possible.',
+    ].join('\n');
+}
+
 async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted }) {
     const defaultPort = projectType?.defaultPort || 3000;
     // 确定性后端签名（宿主侧毫秒级文件扫描，只算一次）：final 通过时用于校验
@@ -803,8 +862,20 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
 
     if (resume && Array.isArray(resume.messages) && resume.messages.length > 0) {
         // 断点续修：接回上次的对话历史，注入进度提示后从上次轮数继续，不从头重跑。
-        messages = resume.messages.slice();
+        // 历史压缩：原样接回全部历史会让弱模型在超长上下文里迷失（实测 glm-flash 接回
+        // 24 轮失败历史后，36 轮里十几次重复 cat 同一个 package.json 打转直到轮数耗尽）。
+        // 超过阈值时只保留 system + 最近 12 条（≈6 轮），中间历史压缩为一条摘要消息。
+        const KEEP_RECENT = 12;
         roundStart = Math.min(Number(resume.roundsUsed) || 0, MAX_AGENT_ROUNDS - 1);
+        if (resume.messages.length > KEEP_RECENT + 2) {
+            messages = [
+                resume.messages[0],
+                { role: 'user', content: buildCompressedResumeSummary(resume.trail, roundStart) },
+                ...resume.messages.slice(-KEEP_RECENT),
+            ];
+        } else {
+            messages = resume.messages.slice();
+        }
         messages.push({ role: 'user', content: buildResumeHint(resume.trail) });
     } else {
         const initialUser = [
@@ -876,7 +947,7 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
         if (!parsed) {
             const len = String(llmResult.content || '').length;
             trail.push({ round, action: 'invalid_json', truncated, len });
-            console.error(`[analyzeVerify] round ${round}: INVALID JSON (truncated=${truncated}, len=${len}, finish=${llmResult.finishReason})`);
+            console.error(`[analyzeVerify] round ${round}: INVALID JSON (truncated=${truncated}, len=${len}, finish=${llmResult.finishReason}) head=${String(llmResult.content || '').slice(0, 200).replace(/\n/g, ' ')}`);
             messages.push({
                 role: 'user',
                 content: 'Your previous response was NOT valid JSON (it was likely truncated because it was too long). Respond with ONLY ONE valid JSON object — no thinking, no analysis text, no markdown fences. A TOOL CALL must be under 800 characters: {"action":"tool","tool":"...","args":{...}}. The FINAL answer may be up to 4000 characters: {"action":"final","result":{...}}.',
