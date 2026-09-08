@@ -599,7 +599,7 @@ export default function AppSidebar({
             >
               <Sparkles className="w-4 h-4 shrink-0" strokeWidth={1.75} />
               <span className="min-w-0 flex-1 truncate text-left">
-                {t('skills:title', { defaultValue: 'Skills Marketplace' })}
+                {t('skills:title', { defaultValue: 'Skills' })}
               </span>
               {skillsUnread > 0 && (
                 <span

@@ -158,7 +158,7 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
             <h1 className="text-2xl font-bold tracking-tight text-zinc-900">{t('skills:title')}</h1>
             <p className="mt-1 text-sm text-zinc-500">{t('skills:subtitle')}</p>
           </div>
-          <Button size="md" className="shrink-0" onClick={() => navigate('/skills/mine')}>
+          <Button size="md" className="shrink-0" onClick={() => navigate('/skills')}>
             <Sparkles className="w-4 h-4" />
             {t('skills:my_skills', { defaultValue: 'My Skills' })}
           </Button>
@@ -273,7 +273,7 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
                       {s.isInstalled ? (
                         <button
                           type="button"
-                          onClick={() => navigate('/skills/mine')}
+                          onClick={() => navigate('/skills')}
                           title={t('skills:install_go_manage', { defaultValue: 'Manage in My Skills' })}
                           className={`inline-flex items-center gap-1 text-[11px] font-medium text-zinc-700 border border-zinc-300 rounded-md px-2.5 py-1 hover:bg-zinc-50 ${consoleButtonFocusClass}`}
                         >

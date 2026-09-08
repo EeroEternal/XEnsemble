@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import {
   Plus, Pencil, CheckCircle, Archive, Play, Trash2, UploadCloud, ArrowDownToLine,
-  Loader2, RefreshCw, Search, ArrowUpCircle,
+  Loader2, RefreshCw, Search, ArrowUpCircle, Store,
 } from 'lucide-react';
 
 import Button from '../components/Button';
@@ -57,6 +58,7 @@ function textToScripts(text) {
 
 export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { showToast } = useToast();
 
   const [skills, setSkills] = useState([]);
@@ -254,6 +256,12 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
   return (
     <div className={`${consoleAdminPageClass} px-4 sm:px-6 lg:px-8 py-6 ${className}`} aria-hidden={ariaHidden}>
       <PageHeader title={t('skills:my_skills')} />
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="secondary" onClick={() => navigate('/skills/market')}>
+          <Store className="w-4 h-4" />
+          {t('skills:market', { defaultValue: 'Skills Market' })}
+        </Button>
+      </div>
 
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs text-zinc-500 shrink-0">{t('skills:count', { count: skills.length, defaultValue: '{{count}} skills' })}</span>

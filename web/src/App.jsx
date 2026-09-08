@@ -69,8 +69,8 @@ function AuthenticatedLayout({
 
   const isSessions = location.pathname === '/sessions';
   const isHistory = location.pathname === '/history';
-  const isSkillsMarket = location.pathname === '/skills';
-  const isMySkills = location.pathname === '/skills/mine';
+  const isMySkills = location.pathname === '/skills';
+  const isSkillsMarket = location.pathname === '/skills/market';
   const isAgentsAdmin = location.pathname === '/admin/agents';
   const isUsersAdmin = location.pathname === '/admin/users';
   const isGatewayAdmin = location.pathname === '/admin/gateway';
@@ -200,19 +200,19 @@ function AuthenticatedLayout({
           )}
           aria-hidden={!isHistory}
         />
-        <SkillsMarket
-          className={cn(
-            'flex h-full min-h-0 flex-1 flex-col',
-            isSkillsMarket ? 'relative z-20' : offRouteClass,
-          )}
-          aria-hidden={!isSkillsMarket}
-        />
         <MySkills
           className={cn(
             'flex h-full min-h-0 flex-1 flex-col',
             isMySkills ? 'relative z-20' : offRouteClass,
           )}
           aria-hidden={!isMySkills}
+        />
+        <SkillsMarket
+          className={cn(
+            'flex h-full min-h-0 flex-1 flex-col',
+            isSkillsMarket ? 'relative z-20' : offRouteClass,
+          )}
+          aria-hidden={!isSkillsMarket}
         />
         {user?.role === 'admin' && isAgentsAdmin && (
             <div
@@ -428,7 +428,7 @@ function App() {
               <Route path="/sessions" element={null} />
               <Route path="/history" element={null} />
               <Route path="/skills" element={null} />
-              <Route path="/skills/mine" element={null} />
+              <Route path="/skills/market" element={null} />
               <Route path="/settings" element={null} />
               <Route
                 path="/custom-images"
