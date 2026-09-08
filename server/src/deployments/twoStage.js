@@ -2581,6 +2581,42 @@ async function startRewriteProxy({ runtimeRef, workspacePath, upstreamPort, list
 }
 
 /**
+ * verify 前清理过期的前端构建产物。
+ *
+ * verify agent 常因"看到构建产物目录已存在"而跳过重新构建，复用上一个部署残留的
+ * 不完整/过期产物（xensemble 实测：login 页引用的 2 个 chunk 在 .next 产物中缺失，
+ * next 返回 500 → 前端 JS 加载失败 → 白屏；首页 chunk 齐全所以首页正常）。
+ * 每次 verify 前清掉这些目录，agent 必须重新构建，产物必然与当前源码一致。
+ *
+ * 覆盖主流前端框架的标准产物/缓存目录（全部可再生成）：
+ *   - Next.js：.next / out
+ *   - Nuxt：.nuxt / .output
+ *   - SvelteKit：.svelte-kit
+ *   - Vite/webpack/CRA/Angular：dist / build / .vite
+ *   - Parcel：.parcel-cache
+ *   - Docusaurus / VuePress：.docusaurus / .vuepress
+ *   - Electron：dist-electron / dist_electron
+ * 排除 node_modules/.pnpm-store/.git（npm 包自身的 dist 不删、源码仓库不动）。
+ * 纯后端/静态项目通常无这些目录，零影响。
+ */
+async function clearStaleBuildArtifacts(runtimeRef, workspacePath) {
+    const runtime = getRuntime();
+    const dirs = '.next .nuxt .output .svelte-kit .vite .parcel-cache .angular .docusaurus .vuepress dist build out dist-electron dist_electron';
+    const names = dirs.split(' ').map((d) => `-name "${d}"`).join(' -o ');
+    const cmd = `find . -maxdepth 5 -type d \\( ${names} \\) -prune `
+        + '-not -path "*/node_modules/*" -not -path "*/.pnpm-store/*" -not -path "*/.git/*" '
+        + '-exec rm -rf {} +; echo "__CLEAR_BUILD_ARTIFACTS_DONE__"';
+    try {
+        const r = await runtime.exec.exec('sh', ['-c', cmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 90000 });
+        console.error(`[twoStage] stale build artifacts cleared (exit=${r.exitCode})`);
+        return String(r.stdout || '').includes('__CLEAR_BUILD_ARTIFACTS_DONE__');
+    } catch (e) {
+        console.error(`[twoStage] clear stale build artifacts failed (non-fatal): ${e.message?.slice(0, 120)}`);
+        return false;
+    }
+}
+
+/**
  * 孤儿部署记录回收。
  *
  * 进程被强杀（systemd 重启 / 崩溃 / SIGTERM 超时 force exit）时，进行中的
@@ -3172,6 +3208,10 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         error: `部署验证超时（超过 ${Math.round(totalTimeoutMs / 60000)} 分钟）已自动中止`,
         warning: '部署验证超时已中止。可点击“继续部署”从上次进度断点续修（已完成的安装/构建不会重跑）。',
     };
+    // 清掉残留的前端构建产物（.next/out/dist），迫使 verify 重新构建——
+    // 避免 agent 看到 .next 已存在就跳过 build、复用残缺产物导致预览白屏（见函数注释）。
+    await clearStaleBuildArtifacts(ref, wsPath);
+
     let verifySettled = false;
     const verify = await new Promise((resolve) => {
         const timer = setTimeout(() => {

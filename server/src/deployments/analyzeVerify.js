@@ -824,6 +824,7 @@ function buildSystemPrompt(plan, toolchain) {
         '',
         'Workflow:',
         '1. Run the prepare steps one by one (install deps, build, migrate, prisma generate, etc.). If the project needs native build deps, `apt-get update && apt-get install -y python3 build-essential` first.',
+        '1b. THE PLATFORM CLEARED stale build artifacts (.next/out/dist) before this verify. Even if a build directory exists, it is NOT from this deploy — run the build step for real (npm run build / next build / vite build / tsc, etc.) so the preview serves the CURRENT source. Do NOT skip building because `.next`/`dist` appears to exist: a stale/incomplete artifact serves blank pages. After build, verify the expected artifacts exist.',
         (plan?.context?.platformInstall?.ran
             ? '1a. DEPENDENCIES ARE ALREADY INSTALLED by the platform (see the PLATFORM INSTALL block above). SKIP every install-type prepare step in the plan (npm/yarn/pnpm/pip install, etc.) — start directly at the build/migrate/serve steps. Long-running commands (install/build) get a 10-minute timeout; short ones 4 minutes.'
             : '1a. Long-running commands (install/build/migrate) get a 10-minute timeout; short commands 4 minutes.'),
