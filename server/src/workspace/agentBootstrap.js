@@ -190,7 +190,7 @@ function resolveGitExcludePath(workspacePath) {
  * 非 git 仓库回落 `.gitignore`（此时无 git 污染顾虑）。
  *
  * 0025（方案 B）：除 .agents/ 与 .xensemble/ 外，把全部 Agent 原生技能目录也加入忽略——
- * 技能落盘不污染用户 git changes（claude/qwen/codebuddy/kimi/pi/qoder/opencode/openclaw 等）。
+ * 技能落盘不污染用户 git changes（claude/qwen/codebuddy/kimi/pi/opencode/openclaw 等）。
  * 与 skillInjector 的 DEFAULT_AGENT_NATIVE_DIRS 保持同步。
  */
 function ensureGitignoreEntries(workspacePath) {
@@ -203,7 +203,6 @@ function ensureGitignoreEntries(workspacePath) {
         '.codebuddy/skills/',
         '.kimi-code/skills/',
         '.pi/skills/',
-        '.qoder/r/s/skills/',
         '.opencode/skills/',
         '.agents/skills/',
         'skills/',

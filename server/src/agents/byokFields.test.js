@@ -15,7 +15,7 @@ const {
 test('BYOK_FIELDS: covers all configurable agents', () => {
     const expected = [
         'kimi-code', 'claude-code', 'opencode', 'cline', 'droid',
-        'glm-agent', 'qoder', 'qwen-code', 'minimax-cli', 'pi',
+        'glm-agent', 'qwen-code', 'minimax-cli', 'pi',
         'commandcode', 'hermes', 'openclaw',
         'github-copilot', 'codebuddy', 'cursor', 'amp',
     ];
