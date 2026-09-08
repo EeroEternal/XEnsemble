@@ -805,6 +805,37 @@ async function detectGuestPackageManager(runtimeRef, workspacePath) {
 // 注入 prompt：「平台已装好，禁止重复 install」；失败的带日志让 agent 定点修复。
 // 前置条件：configureGuestMirrors 已执行（镜像源就绪）、ensureDependencyExcludeInGuest
 // 已执行（install 落盘 node_modules 前排除项先配好）——调用方保证顺序。
+/**
+ * 静态识别 electron 桌面应用子包（apps/desktop、desktop/ 等，package.json 依赖含 electron）。
+ * electron 无法在浏览器 preview，其依赖（electron 二进制下载 + electron-builder install-app-deps）
+ * 是国内 github releases 链路卡死的源头；识别后 platform install 跳过其安装脚本/补装。
+ * 纯文件读取（毫秒级），对其他含 desktop 子包的项目同样生效。
+ * @param {string|null} hostWorkspacePath
+ * @returns {{name:string, path:string, electron:string}[]}
+ */
+function detectElectronDesktopSubpackages(hostWorkspacePath) {
+    if (!hostWorkspacePath) return [];
+    const out = [];
+    try {
+        for (const sub of ['apps', 'desktop', 'client']) {
+            const base = path.join(hostWorkspacePath, sub);
+            if (!fs.existsSync(base) || !fs.statSync(base).isDirectory()) continue;
+            for (const dir of fs.readdirSync(base)) {
+                const pkgPath = path.join(base, dir, 'package.json');
+                if (!fs.existsSync(pkgPath)) continue;
+                try {
+                    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+                    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+                    if (deps.electron) {
+                        out.push({ name: pkg.name || dir, path: `${sub}/${dir}`, electron: deps.electron });
+                    }
+                } catch { /* 单包解析失败不影响其他 */ }
+            }
+        }
+    } catch { /* 扫描失败不影响 install */ }
+    return out;
+}
+
 async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath, stack, depsStatus, onLog }) {
     const runtime = getRuntime();
     const log = (m) => { if (onLog) onLog(m); };
@@ -828,20 +859,33 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
     // build ×3 ≈ 10 分钟）。平台命令统一预置 3GB 堆上限（DEPLOY_NODE_MAX_OLD_SPACE_MB
     // 可覆盖）；agent 侧由 analyzeVerify 的 run_shell 同步预置。
     const nodeMb = Number(process.env.DEPLOY_NODE_MAX_OLD_SPACE_MB) || 3072;
-    // electron 二进制走 npmmirror（.npmrc 也写了 electron_mirror，这里再注入环境变量
-    // 双保险——corepack pnpm 或 electron-builder install-app-deps 可能不读 .npmrc）
-    const ELECTRON_MIRROR = 'https://npmmirror.com/mirrors/electron/';
-    const ELECTRON_BUILDER_BINARIES_MIRROR = 'https://npmmirror.com/mirrors/electron-builder-binaries/';
-    const PATH_PREFIX = `export PATH="/usr/local/bin:$PATH"; export NODE_OPTIONS="--max-old-space-size=${nodeMb}"; export ELECTRON_MIRROR=${ELECTRON_MIRROR}; export ELECTRON_BUILDER_BINARIES_MIRROR=${ELECTRON_BUILDER_BINARIES_MIRROR}; `;
+    // github releases 二进制下载（electron/playwright 等）国内链路卡（实测 github 主页通、
+    // releases CDN 不通，宿主+沙箱一致）。方案：主走 npmmirror 国内二进制镜像，install
+    // 失败后用 ghproxy 类 github 代理兜底（第三方，短超时快速失败，不拖流程）。
+    // verify agent 侧由 analyzeVerify 的 run_shell 注入同一组镜像 env。
+    const MIRROR_ENV = 'export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/; '
+        + 'export ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/; '
+        + 'export PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright/; ';
+    // ghproxy 兜底：ELECTRON_MIRROR 指向 ghproxy 前缀（代理完整 github releases URL）。
+    // 第三方服务不稳定，作为失败后的最后一次尝试，用短超时避免拖住部署。
+    const GH_PROXY = process.env.DEPLOY_GH_PROXY || 'https://ghproxy.net';
+    const GH_PROXY_ENV = `export ELECTRON_MIRROR=${GH_PROXY}/https://github.com/electron/electron/releases/download/; `;
+    const GH_FALLBACK_INSTALL_TIMEOUT_MS = Number(process.env.DEPLOY_GH_FALLBACK_TIMEOUT_MS) || 300000;
+    const PATH_PREFIX = `export PATH="/usr/local/bin:$PATH"; export NODE_OPTIONS="--max-old-space-size=${nodeMb}"; `;
     // install 根命令单独超时：大 monorepo 冷装（multica 245 子包全量下载 + store 首写）
     // 实测 9-10 分钟，600s 默认会截断——且失败连锁严重（agent 再装 ~5min / npm fallback
     // 覆盖不齐导致子包缺失）。
     const INSTALL_TIMEOUT_MS = Number(process.env.DEPLOY_INSTALL_TIMEOUT_MS) || 1200000;
-    const run = async (cmd, cwd, timeoutMs = 600000) => {
-        log(`platform install: ${cmd}${cwd ? ` (cwd=${cwd})` : ''}`);
+    // electron 桌面应用子包：无法在浏览器 preview，对部署目标无用；其依赖（electron 二进制
+    // 下载 + electron-builder install-app-deps）正是 github 卡死的源头。识别后根 install 用
+    // --ignore-scripts 跳过其 postinstall，补装循环直接排除该子包。
+    const electronSubs = detectElectronDesktopSubpackages(hostWorkspacePath);
+    const electronSubPaths = new Set(electronSubs.map((e) => e.path));
+    const run = async (cmd, cwd, timeoutMs = 600000, useGhProxy = false) => {
+        log(`platform install: ${cmd}${cwd ? ` (cwd=${cwd})` : ''}${useGhProxy ? ' [ghproxy fallback]' : ''}`);
         try {
             const r = await runtime.exec.exec('sh', ['-c',
-                `${PATH_PREFIX}${cmd} > /tmp/_pi.log 2>&1; ec=$?; tail -15 /tmp/_pi.log; echo "__PI_EXIT__=\${ec}"`],
+                `${PATH_PREFIX}${useGhProxy ? GH_PROXY_ENV : MIRROR_ENV}${cmd} > /tmp/_pi.log 2>&1; ec=$?; tail -15 /tmp/_pi.log; echo "__PI_EXIT__=\${ec}"`],
                 {}, { runtimeRef, cwd: cwd ? `${workspacePath}/${cwd}` : workspacePath, timeoutMs });
             const out = String(r.stdout || '');
             const m = out.match(/__PI_EXIT__=(-?\d+)/);
@@ -921,13 +965,21 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
             else log('platform install: npm i -g pnpm failed, will fall back to npm install');
         }
     }
+    // electron 桌面子包存在：根 install 加 --ignore-scripts 跳过 electron 二进制下载与
+    // electron-builder install-app-deps（github releases 国内卡死的源头）。web/server 的
+    // postinstall（如 sharp/esbuild）同样被跳过，由 verify agent 在需要时补跑。
+    if (electronSubs.length && /^corepack pnpm|^pnpm|^yarn/.test(installCmd)) {
+        log(`platform install: electron desktop sub-packages detected (${electronSubs.map((e) => e.name).join(', ')}), adding --ignore-scripts to avoid github binary download`);
+        installCmd += ' --ignore-scripts';
+    }
     let ok = await run(installCmd, '', INSTALL_TIMEOUT_MS);
     if (!ok && pm === 'pnpm') {
         // pnpm 断点续装：第一次超时/失败时 store 已写入大部分包，重试只需补剩余
         // （远快于首装），同时消掉「冷装贴着超时上限」的不确定性——比失败后交给
         // npm fallback（覆盖不齐 pnpm workspace）或 agent 再装（实测多花 ~5min）都好。
-        log('platform install: pnpm first attempt failed, retrying (store warm, resumable)');
-        ok = await run(installCmd, '', INSTALL_TIMEOUT_MS);
+        // 兜底重试切 ghproxy 镜像（第三方，短超时，失败快速进入 npm fallback 不拖流程）。
+        log('platform install: pnpm first attempt failed, retrying via ghproxy mirror fallback (short timeout)');
+        ok = await run(installCmd, '', GH_FALLBACK_INSTALL_TIMEOUT_MS, true);
     }
     let effectiveCmd = ok ? installCmd : null;
     if (!ok && pm !== 'npm') {
@@ -954,7 +1006,10 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
             // web 13s + server 25s + desktop 78s = ~2min，并行后 = max(~78s)。
             // 并发限流：沙箱内存有限（2GB），同时跑太多 npm install 会互相 OOM，
             // 默认 3 并发，DEPLOY_INSTALL_CONCURRENCY 可覆盖。
-            const subs = stillStale.map(([sub]) => sub).filter((s) => s !== '.').slice(0, 20);
+            const subs = stillStale.map(([sub]) => sub).filter((s) => s !== '.' && !electronSubPaths.has(s)).slice(0, 20);
+            if (electronSubs.length && subs.length !== stillStale.filter(([s]) => s !== '.').length) {
+                log(`platform install: skipping electron desktop sub-package(s) in per-sub install (${electronSubs.map((e) => e.path).join(', ')})`);
+            }
             if (subs.length) {
                 const concurrency = Math.max(1, Math.min(Number(process.env.DEPLOY_INSTALL_CONCURRENCY) || 3, subs.length));
                 const queue = [...subs];

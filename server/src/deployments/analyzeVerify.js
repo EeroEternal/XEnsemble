@@ -228,7 +228,12 @@ async function runTool(tool, args, runtimeRef, workspacePath) {
             if (cmd.length > 4000) return '(command too long, max 4000 chars)';
             // Capture the REAL exit code: piping through head would otherwise mask it with head's own status.
             // NODE_OPTIONS 统一预置（见 NODE_MAX_OLD_SPACE_MB 注释），agent 不必逐次手加。
-            const wrapped = `export NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}"; ${cmd} > /tmp/_vt.log 2>&1; ec=$?; head -200 /tmp/_vt.log; echo "__EXIT_CODE__=\${ec}"`;
+            // github releases 二进制镜像（与 platform install 的 MIRROR_ENV 一致）：agent 补装
+            // electron/playwright 等依赖时走 npmmirror，避免国内 github releases 链路卡死。
+            const BIN_MIRROR_ENV = 'export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/; '
+                + 'export ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/; '
+                + 'export PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright/; ';
+            const wrapped = `export NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}"; ${BIN_MIRROR_ENV}${cmd} > /tmp/_vt.log 2>&1; ec=$?; head -200 /tmp/_vt.log; echo "__EXIT_CODE__=\${ec}"`;
             const r = await runtime.exec.exec('sh', ['-c', wrapped], {}, {
                 runtimeRef, cwd: workspacePath, maxBuffer: 4 * 1024 * 1024,
                 timeoutMs: LONG_CMD_RE.test(cmd) ? LONG_SHELL_TIMEOUT_MS : SHELL_TIMEOUT_MS,
