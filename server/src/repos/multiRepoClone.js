@@ -117,7 +117,9 @@ async function multiRepoClone(project, repos, opts = {}) {
     } catch (err) {
         // primary 失败不阻断 secondary clone（各自状态独立回写）
     }
-    const secondaries = repos.filter((r) => r.id !== primary.id);
+    // 用对象身份排除 primary：不依赖 id 字段（历史上 id 缺失会让该过滤
+    // 静默清空 secondaries，第二个仓库根本不进 clone 队列）
+    const secondaries = repos.filter((r) => r !== primary);
     if (secondaries.length > 0) {
         await Promise.all(secondaries.map((r) => cloneSecondary(project, r)));
     }

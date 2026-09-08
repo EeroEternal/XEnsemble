@@ -603,6 +603,9 @@ function registerGitRoutes(fastify) {
                         currentBranch: r.isPrimary ? currentBranch : (r.repoDefaultBranch || 'main'),
                         cloneStatus: 'cloning',
                     });
+                    // 回填 DB 行 id：multiRepoClone 靠 id 回写 clone_status，
+                    // 缺 id 会让 postgres.js 抛 UNDEFINED_VALUE，状态永远停在 cloning
+                    r.id = row.id;
                     if (r.isPrimary) primaryRepoRowId = row.id;
                 }
             } catch (err) {
