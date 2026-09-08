@@ -88,5 +88,10 @@
     "read_file_failed": "Failed to read file",
     "conflict": "Conflict: file was modified externally",
     "save_failed": "Save failed"
+  },
+  "repos": {
+    "loading": "Loading repositories…",
+    "load_failed": "Failed to load repositories",
+    "primary": "Primary repository"
   }
 }

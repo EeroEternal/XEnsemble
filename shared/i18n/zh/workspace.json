@@ -87,5 +87,10 @@
     "read_file_failed": "读取文件失败",
     "conflict": "冲突：文件已被外部修改",
     "save_failed": "保存失败"
+  },
+  "repos": {
+    "loading": "正在加载仓库…",
+    "load_failed": "仓库加载失败",
+    "primary": "主仓库"
   }
 }

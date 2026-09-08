@@ -83,7 +83,10 @@ const TreeNode = memo(function TreeNode({ node, depth, expanded, selectedPath, o
   );
 });
 
-function LazyTree({ selectedPath, onOpenFile, projectId, sessionId, onFetchDir, refreshTrigger = 0, onContextMenu }) {
+// rootPath：多仓库项目下每 repo 的树根（相对 workspace 根，如 'frontend'）。
+// 默认 '.'（单仓库原行为）。内部状态 key 仍用 '.' 表示根，仅 fetch 路径做映射；
+// 子目录展开/选中高亮用的 entry.path 天然是相对 workspace 根的全路径，无需映射。
+function LazyTree({ selectedPath, onOpenFile, projectId, sessionId, onFetchDir, refreshTrigger = 0, onContextMenu, rootPath = '.' }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const [loadedDirs, setLoadedDirs] = useState(() => new Set());
   const [loadingDirs, setLoadingDirs] = useState(() => new Set());
@@ -129,7 +132,7 @@ function LazyTree({ selectedPath, onOpenFile, projectId, sessionId, onFetchDir, 
     };
     attempt(0);
     return () => { cancelled = true; };
-  }, [projectId, sessionId, onFetchDir]);
+  }, [projectId, sessionId, onFetchDir, rootPath]);
 
   // Silent refresh when refreshTrigger changes: re-fetch root + all expanded dirs,
   // preserving expanded state. Dirs that fail to fetch (deleted) are collapsed.
@@ -138,17 +141,18 @@ function LazyTree({ selectedPath, onOpenFile, projectId, sessionId, onFetchDir, 
     prevRefresh.current = refreshTrigger;
     if (!projectId || !onFetchDir) return;
     const currentExpanded = expandedRef.current;
-    const dirsToFetch = ['.', ...Array.from(currentExpanded).filter((p) => p !== '.')];
+    const dirsToFetch = [rootPath, ...Array.from(currentExpanded).filter((p) => p !== '.')];
     Promise.all(dirsToFetch.map((p) => onFetchDir(projectId, p).catch(() => null))).then((results) => {
       const nextChildren = {};
       const nextLoaded = new Set();
       const failedPaths = new Set();
       dirsToFetch.forEach((p, i) => {
+        const key = p === rootPath ? '.' : p;
         if (results[i] !== null) {
-          nextChildren[p] = results[i];
-          nextLoaded.add(p);
-        } else if (p !== '.') {
-          failedPaths.add(p);
+          nextChildren[key] = results[i];
+          nextLoaded.add(key);
+        } else if (key !== '.') {
+          failedPaths.add(key);
         }
       });
       setDirChildren(nextChildren);
@@ -285,7 +289,7 @@ function LazyTree({ selectedPath, onOpenFile, projectId, sessionId, onFetchDir, 
   );
 }
 
-export default function WorkspaceFileTree({ items, selectedPath, onOpenFile, showHidden = false, lazy, projectId, sessionId, onFetchDir, refreshTrigger, onContextMenu }) {
+export default function WorkspaceFileTree({ items, selectedPath, onOpenFile, showHidden = false, lazy, projectId, sessionId, onFetchDir, refreshTrigger, onContextMenu, rootPath }) {
   if (lazy) {
     return (
       <LazyTree
@@ -296,6 +300,7 @@ export default function WorkspaceFileTree({ items, selectedPath, onOpenFile, sho
         onFetchDir={onFetchDir}
         refreshTrigger={refreshTrigger}
         onContextMenu={onContextMenu}
+        rootPath={rootPath}
       />
     );
   }
