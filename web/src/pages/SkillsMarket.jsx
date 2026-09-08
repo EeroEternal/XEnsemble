@@ -155,13 +155,9 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
       <div className="shrink-0 border-b border-zinc-200 px-6 py-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-zinc-900">{t('skills:title')}</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-zinc-900">{t('skills:market_title')}</h1>
             <p className="mt-1 text-sm text-zinc-500">{t('skills:subtitle')}</p>
           </div>
-          <Button size="md" className="shrink-0" onClick={() => navigate('/skills')}>
-            <Sparkles className="w-4 h-4" />
-            {t('skills:my_skills', { defaultValue: 'My Skills' })}
-          </Button>
         </div>
       </div>
 
