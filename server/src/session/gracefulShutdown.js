@@ -36,16 +36,24 @@ async function gracefulShutdownSessions({
     const live = typeof sessionManager?.listSessions === 'function'
         ? sessionManager.listSessions()
         : [];
+    // 每 session 的 stop 限时：boxlite stopSession 可能等待沙箱 hibernate/操作长时间未返回，
+    // 导致 SIGTERM 后 shutdown 超过 10s 被强制 process.exit(1)（部署脚本 restart server 时
+    // 实测 16:13:14 SIGTERM → 16:13:24 forcing exit，opencode 子进程被 SIGKILL，正在跑的
+    // preview 部署直接中断）。限时后 shutdown 快速优雅退出（exit 0），部署/会话仍可断点续修。
+    const stopTimeoutMs = Number(process.env.SHUTDOWN_SESSION_STOP_TIMEOUT_MS || 3000);
     await Promise.all(live.map(async (session) => {
         try {
-            await stopSession({
-                db,
-                schema,
-                runtime,
-                sessionManager,
-                session,
-                fastifyLog,
-            });
+            await Promise.race([
+                stopSession({
+                    db,
+                    schema,
+                    runtime,
+                    sessionManager,
+                    session,
+                    fastifyLog,
+                }),
+                new Promise((resolve) => setTimeout(resolve, stopTimeoutMs)),
+            ]);
         } catch (err) {
             fastifyLog?.warn?.(err, `[shutdown] failed to stop session ${session?.id}`);
         }
