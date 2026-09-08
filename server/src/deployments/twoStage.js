@@ -33,6 +33,36 @@ const VERIFY_STATE_TTL_MS = 30 * 60 * 1000;
 // 后台化（缺少 &/nohup）而挂起，必须有总超时自动中止，否则部署永不结束、前端一直显示 running。
 const DEPLOY_TOTAL_TIMEOUT_MS = Number(process.env.DEPLOY_TOTAL_TIMEOUT_MS) || 40 * 60 * 1000;
 
+// apt/dpkg 防卡死统一参数（实测 verify agent 现场 apt-get 装 postgres 卡住 → 60 轮耗尽）：
+//  - DPkg::Lock::Timeout：dpkg 锁等待有界（默认无限等），避免与残留 apt 进程互卡
+//  - Acquire::Retries / Acquire::http::Timeout：网络重试/下载超时有界
+// 安装前先清理残留锁与半死 apt/dpkg 进程，避免上一轮中断残留导致新安装立刻卡死。
+const APT_SAFE_FLAGS = '-o DPkg::Lock::Timeout=300 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::ftp::Timeout=30';
+const APT_CLEAR_LOCKS = 'pkill -9 apt-get 2>/dev/null; pkill -9 dpkg 2>/dev/null; sleep 1; rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null; true';
+
+/**
+ * 防卡死的 apt 安装（通用系统依赖安装入口，postgres/mysql/build-essential 等共用）。
+ * 先清锁，再带超时/重试参数安装；返回是否成功与日志尾部，供调用方判断/记录。
+ */
+async function aptSafeInstall({ runtime, runtimeRef, workspacePath, packages, onLog, timeoutMs = 420000 }) {
+    const log = (m) => { if (onLog) onLog(m); };
+    try {
+        await runtime.exec.exec('sh', ['-c', `${APT_CLEAR_LOCKS}`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => {});
+        const t = Math.floor(timeoutMs / 1000);
+        const updateT = Math.min(120, t); // update 独立短超时，避免镜像源卡住拖死 install
+        const cmd = `export DEBIAN_FRONTEND=noninteractive; (timeout ${updateT} apt-get update -qq ${APT_SAFE_FLAGS} 2>&1 | tail -8; timeout ${t} apt-get install -y -qq ${APT_SAFE_FLAGS} ${packages} 2>&1 | tail -20; ec=$?; echo "__APT_EXIT__=${ec}")`;
+        const r = await runtime.exec.exec('sh', ['-c', cmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: timeoutMs + 30000 });
+        const out = String(r.stdout || '');
+        const m = out.match(/__APT_EXIT__=(-?\d+)/);
+        const ok = m ? Number(m[1]) === 0 : false;
+        log(`apt install ${packages}: ${ok ? 'ok' : 'FAILED'} ${out.replace(/__APT_EXIT__=-?\d+/, '').trim().slice(-400)}`);
+        return { ok, logTail: out.slice(-600) };
+    } catch (e) {
+        log(`apt install ${packages} error (non-fatal): ${e.message?.slice(0, 200)}`);
+        return { ok: false, logTail: String(e.message || '').slice(0, 400) };
+    }
+}
+
 // 在 stage A 之前 fetch sandbox projectDir 的 origin/main，让 stage A LLM 看到最新代码。
 // 不做 reset --hard：保留用户在工作目录的未提交改动（平台在 /var/lib/.../proj_xxx 上
 // 有时存在 agentharness/xxx 之类的 session 分支上的 uncommitted 改动；reset 会丢）。
@@ -831,7 +861,13 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
             const chk = await runtime.exec.exec('sh', ['-c', 'dpkg -s build-essential >/dev/null 2>&1 && echo YES || echo NO'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 10000 });
             if (String(chk.stdout || '').trim() !== 'YES') {
                 log(`native compile deps detected (${native.pkgs.join(', ')}): installing build-essential + python3`);
-                await run('apt-get update -qq && apt-get install -y -qq build-essential python3', '');
+                // 防卡死：清残留锁 + DPkg::Lock::Timeout/Acquire 重试/超时，避免 apt 长期挂起
+                await aptSafeInstall({
+                    runtime, runtimeRef, workspacePath,
+                    packages: 'build-essential python3',
+                    onLog: (m) => log(m),
+                    timeoutMs: 240000,
+                });
             } else {
                 log(`native compile deps detected (${native.pkgs.join(', ')}): build-essential already present`);
             }
@@ -1010,7 +1046,504 @@ async function ensureGuestGoToolchain({ runtimeRef, workspacePath, hostWorkspace
 }
 
 /**
- * 统一运行时版本预装：Node / Python / Rust / Java。
+ * 版本比较：major.minor.patch 数值比较
+ */
+function versionSatisfies(current, required) {
+    const parse = (v) => (String(v || '').match(/(\d+)\.(\d+)(?:\.(\d+))?/) || []).slice(1, 4).map(Number);
+    const [c1, c2, c3] = parse(current);
+    const [r1, r2, r3] = parse(required);
+    if (c1 !== r1) return c1 > r1;
+    if (c2 !== r2) return c2 > r2;
+    return c3 >= r3;
+}
+
+/**
+ * 递归搜索版本文件（宿主侧）
+ * @param {string} hostRoot - 宿主项目根路径
+ * @param {string} language - 语言标识
+ * @returns {Promise<{content: string, subdir: string, file: string, found: boolean}>}
+ */
+async function findVersionFile(hostRoot, language) {
+    if (!hostRoot) return { content: '', subdir: null, file: null, found: false };
+    const targets = TARGET_FILES[language] || [];
+    const SKIP_DIRS = ['node_modules', '.git', 'dist', 'build', 'target', 'vendor', '.next', 'out', 'coverage'];
+    const MAX_SEARCH_DEPTH = 3;
+    const MAX_FILES_TO_CHECK = 50;
+    const SEARCH_TIMEOUT_MS = 10000;
+    let checked = 0;
+
+    async function searchDir(dir, depth) {
+        if (depth > MAX_SEARCH_DEPTH || checked >= MAX_FILES_TO_CHECK) return null;
+        try {
+            const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+            for (const entry of entries) {
+                if (checked >= MAX_FILES_TO_CHECK) break;
+                const fullPath = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                    if (SKIP_DIRS.includes(entry.name)) continue;
+                    const found = await searchDir(fullPath, depth + 1);
+                    if (found) return found;
+                } else if (targets.includes(entry.name)) {
+                    checked++;
+                    const { readTextSafe } = require('./detectStack');
+                    const content = String(readTextSafe(fullPath) || '');
+                    if (content.trim()) {
+                        return { content, subdir: path.relative(hostRoot, path.dirname(fullPath)), file: entry.name, found: true };
+                    }
+                }
+            }
+        } catch { /* 忽略权限错误等 */ }
+        return null;
+    }
+
+    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('search timeout')), SEARCH_TIMEOUT_MS));
+    try {
+        const result = await Promise.race([searchDir(hostRoot, 0), timeoutPromise]);
+        return result || { content: '', subdir: null, file: null, found: false };
+    } catch {
+        return { content: '', subdir: null, file: null, found: false };
+    }
+}
+
+/**
+ * 在沙箱中执行命令
+ */
+async function execGuestCommand(runtime, runtimeRef, workspacePath, cmd, timeoutMs = 30000) {
+    const PATH_PREFIX = 'export PATH="/usr/local/bin:$PATH"; ';
+    try {
+        const r = await runtime.exec.exec('sh', ['-c', `${PATH_PREFIX}${cmd}`], {}, { runtimeRef, cwd: workspacePath, timeoutMs });
+        return { ok: true, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') };
+    } catch (e) {
+        return { ok: false, error: String(e.message || e) };
+    }
+}
+
+/**
+ * 目标文件名（按优先级，找到即停止）
+ */
+const TARGET_FILES = {
+    node: ['package.json', '.nvmrc', '.node-version', '.tool-versions'],
+    python: ['pyproject.toml', '.python-version', '.tool-versions'],
+    rust: ['rust-toolchain.toml', 'rust-toolchain', 'Cargo.toml', '.tool-versions'],
+    java: ['pom.xml', 'build.gradle', 'build.gradle.kts', '.tool-versions'],
+    go: ['go.mod'],
+    php: ['composer.json', '.php-version', '.tool-versions'],
+    dotnet: ['global.json', '.tool-versions', 'Directory.Build.props'],
+    ruby: ['Gemfile', '.ruby-version', '.tool-versions'],
+    cpp: ['CMakeLists.txt', 'Makefile', 'conanfile.txt', 'vcpkg.json', 'meson.build'],
+    swift: ['Package.swift', '.swift-version', '.tool-versions'],
+    zig: ['build.zig', 'zig.mod', '.tool-versions'],
+};
+
+/**
+ * 确保 Node.js 版本
+ */
+async function ensureNodeVersion({ runtime, runtimeRef, workspacePath, hostWorkspacePath, log, execGuest }) {
+    let nodeRequired = null;
+    const pkgJsonResult = await findVersionFile(hostWorkspacePath, 'node');
+    if (pkgJsonResult.found && pkgJsonResult.file === 'package.json') {
+        log(`[ensureGuestRuntimeVersions] package.json found in ${pkgJsonResult.subdir || 'root'}`);
+        try {
+            const pkg = JSON.parse(pkgJsonResult.content);
+            nodeRequired = pkg?.engines?.node || null;
+        } catch { }
+    }
+    if (!nodeRequired) {
+        const nvmrcResult = await findVersionFile(hostWorkspacePath, 'node');
+        if (nvmrcResult.found && (nvmrcResult.file === '.nvmrc' || nvmrcResult.file === '.node-version')) {
+            log(`[ensureGuestRuntimeVersions] ${nvmrcResult.file} found in ${nvmrcResult.subdir || 'root'}`);
+            nodeRequired = nvmrcResult.content.trim().replace(/^v/, '');
+        }
+    }
+    if (!nodeRequired) {
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'node');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^nodejs\s+(\S+)/m);
+            if (m) nodeRequired = m[1].replace(/^v/, '');
+        }
+    }
+    if (!nodeRequired) return { required: null, current: null, installed: false };
+
+    const current = await execGuest('node --version 2>/dev/null || echo NO_NODE', 10000);
+    const curVer = current.stdout?.match(/v?(\d+\.\d+\.\d+)/)?.[1] || null;
+    if (!curVer || !versionSatisfies(curVer, nodeRequired)) {
+        log(`node ${curVer || 'missing'} < required ${nodeRequired}: installing via nvm (npmmirror)`);
+        const installCmd = `export NVM_NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node; ` +
+            `if [ ! -s "$HOME/.nvm/nvm.sh" ]; then curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash; fi; ` +
+            `source "$HOME/.nvm/nvm.sh"; nvm install ${nodeRequired} && nvm use ${nodeRequired} && nvm alias default ${nodeRequired} && node --version && echo "__NODE_OK__"`;
+        const r = await execGuest(installCmd, 300000);
+        return { required: nodeRequired, current: curVer, installed: r.stdout?.includes('__NODE_OK__') };
+    } else {
+        log(`node ok (${curVer} >= ${nodeRequired})`);
+        return { required: nodeRequired, current: curVer, installed: false };
+    }
+}
+
+/**
+ * 确保 Python 版本
+ */
+async function ensurePythonVersion({ runtime, runtimeRef, workspacePath, hostWorkspacePath, log, execGuest }) {
+    let pythonRequired = null;
+    const pyprojectResult = await findVersionFile(hostWorkspacePath, 'python');
+    if (pyprojectResult.found && pyprojectResult.file === 'pyproject.toml') {
+        log(`[ensureGuestRuntimeVersions] pyproject.toml found in ${pyprojectResult.subdir || 'root'}`);
+        const m = pyprojectResult.content.match(/requires-python\s*=\s*['"]([^'"]+)['"]/);
+        if (m) pythonRequired = m[1].replace(/^[<>=~^!]+/, '').replace(/\*$/, '').trim();
+    }
+    if (!pythonRequired) {
+        const pyVerResult = await findVersionFile(hostWorkspacePath, 'python');
+        if (pyVerResult.found && pyVerResult.file === '.python-version') {
+            pythonRequired = pyVerResult.content.trim().replace(/^v/, '');
+        }
+    }
+    if (!pythonRequired) {
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'python');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^python\s+(\S+)/m);
+            if (m) pythonRequired = m[1];
+        }
+    }
+    if (!pythonRequired) return { required: null, current: null, installed: false };
+
+    const current = await execGuest('python3 --version 2>/dev/null || echo NO_PYTHON', 10000);
+    const curVer = current.stdout?.match(/Python\s+(\d+\.\d+\.\d+)/)?.[1] || null;
+    if (!curVer || !versionSatisfies(curVer, pythonRequired)) {
+        log(`python ${curVer || 'missing'} < required ${pythonRequired}: installing via apt (debian backports)`);
+        const majorMinor = pythonRequired.split('.').slice(0, 2).join('.');
+        const installCmd = `apt-get update -qq && apt-get install -y -t bookworm-backports python3.${majorMinor.split('.')[1]} python3.${majorMinor.split('.')[1]}-venv python3.${majorMinor.split('.')[1]}-dev 2>/dev/null || ` +
+            `apt-get install -y python3 python3-venv python3-dev && echo "__PYTHON_OK__"`;
+        const r = await execGuest(installCmd, 300000);
+        return { required: pythonRequired, current: curVer, installed: r.stdout?.includes('__PYTHON_OK__') };
+    } else {
+        log(`python ok (${curVer} >= ${pythonRequired})`);
+        return { required: pythonRequired, current: curVer, installed: false };
+    }
+}
+
+/**
+ * 确保 Rust 版本
+ */
+async function ensureRustVersion({ runtime, runtimeRef, workspacePath, hostWorkspacePath, log, execGuest }) {
+    let rustRequired = null;
+    const rustToolchainResult = await findVersionFile(hostWorkspacePath, 'rust');
+    if (rustToolchainResult.found && (rustToolchainResult.file === 'rust-toolchain.toml' || rustToolchainResult.file === 'rust-toolchain')) {
+        log(`[ensureGuestRuntimeVersions] ${rustToolchainResult.file} found in ${rustToolchainResult.subdir || 'root'}`);
+        const m = rustToolchainResult.content.match(/channel\s*=\s*['"]([^'"]+)['"]/) || rustToolchainResult.content.match(/^(\d+\.\d+\.\d+)/m);
+        if (m) rustRequired = m[1];
+    }
+    if (!rustRequired) {
+        const cargoTomlResult = await findVersionFile(hostWorkspacePath, 'rust');
+        if (cargoTomlResult.found && cargoTomlResult.file === 'Cargo.toml') {
+            log(`[ensureGuestRuntimeVersions] Cargo.toml found in ${cargoTomlResult.subdir || 'root'}`);
+            const m = cargoTomlResult.content.match(/rust-version\s*=\s*['"]([^'"]+)['"]/);
+            if (m) rustRequired = m[1];
+        }
+    }
+    if (!rustRequired) {
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'rust');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^rust\s+(\S+)/m);
+            if (m) rustRequired = m[1];
+        }
+    }
+    if (!rustRequired) return { required: null, current: null, installed: false };
+
+    const current = await execGuest('rustc --version 2>/dev/null || echo NO_RUST', 10000);
+    const curVer = current.stdout?.match(/rustc\s+(\d+\.\d+\.\d+)/)?.[1] || null;
+    if (!curVer || !versionSatisfies(curVer, rustRequired)) {
+        log(`rust ${curVer || 'missing'} < required ${rustRequired}: installing via rustup (rsproxy.cn)`);
+        const installCmd = `export RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup; export RUSTUP_DIST_SERVER=https://rsproxy.cn; ` +
+            `if [ ! -s "$HOME/.cargo/env" ]; then curl --proto '=https' --tlsv1.2 -fsSL https://rsproxy.cn/rustup-init.sh | sh -s -- -y --default-toolchain ${rustRequired}; fi; ` +
+            `source "$HOME/.cargo/env"; rustup default ${rustRequired} && rustc --version && echo "__RUST_OK__"`;
+        const r = await execGuest(installCmd, 400000);
+        return { required: rustRequired, current: curVer, installed: r.stdout?.includes('__RUST_OK__') };
+    } else {
+        log(`rust ok (${curVer} >= ${rustRequired})`);
+        return { required: rustRequired, current: curVer, installed: false };
+    }
+}
+
+/**
+ * 确保 Java 版本
+ */
+async function ensureJavaVersion({ runtime, runtimeRef, workspacePath, hostWorkspacePath, log, execGuest }) {
+    let javaRequired = null;
+    const pomXmlResult = await findVersionFile(hostWorkspacePath, 'java');
+    if (pomXmlResult.found && pomXmlResult.file === 'pom.xml') {
+        log(`[ensureGuestRuntimeVersions] pom.xml found in ${pomXmlResult.subdir || 'root'}`);
+        const m = pomXmlResult.content.match(/<java\.version>([^<]+)<\/java\.version>/) || pomXmlResult.content.match(/<maven\.compiler\.release>([^<]+)<\/maven\.compiler\.release>/);
+        if (m) javaRequired = m[1];
+    }
+    if (!javaRequired) {
+        const gradleResult = await findVersionFile(hostWorkspacePath, 'java');
+        if (gradleResult.found && (gradleResult.file === 'build.gradle' || gradleResult.file === 'build.gradle.kts')) {
+            log(`[ensureGuestRuntimeVersions] ${gradleResult.file} found in ${gradleResult.subdir || 'root'}`);
+            const m = gradleResult.content.match(/java\.toolchain\s+languageVersion\s*=\s*(\d+)/) || gradleResult.content.match(/sourceCompatibility\s*=\s*(\d+)/);
+            if (m) javaRequired = m[1];
+        }
+    }
+    if (!javaRequired) {
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'java');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^java\s+(\S+)/m);
+            if (m) javaRequired = m[1];
+        }
+    }
+    if (!javaRequired) return { required: null, current: null, installed: false };
+
+    const current = await execGuest('java -version 2>&1 | head -1', 10000);
+    const curVer = current.stdout?.match(/version\s+"(\d+)(?:\.\d+)?/)?.[1] || current.stderr?.match(/version\s+"(\d+)(?:\.\d+)?/)?.[1] || null;
+    if (!curVer || Number(curVer) < Number(javaRequired)) {
+        log(`java ${curVer || 'missing'} < required ${javaRequired}: installing via apt (adoptium/temurin mirror)`);
+        const installCmd = `apt-get update -qq && apt-get install -y wget gpg && ` +
+            `wget -qO- https://packages.adoptium.net/artifactory/api/gpg/key/public | gpg --dearmor > /usr/share/keyrings/adoptium.gpg && ` +
+            `echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb bookworm main" > /etc/apt/sources.list.d/adoptium.list && ` +
+            `apt-get update -qq && apt-get install -y temurin-${javaRequired}-jdk && java -version && echo "__JAVA_OK__"`;
+        const r = await execGuest(installCmd, 400000);
+        return { required: javaRequired, current: curVer, installed: r.stdout?.includes('__JAVA_OK__') };
+    } else {
+        log(`java ok (${curVer} >= ${javaRequired})`);
+        return { required: javaRequired, current: curVer, installed: false };
+    }
+}
+
+/**
+ * 确保 PHP 版本
+ */
+async function ensurePhpVersion({ runtime, runtimeRef, workspacePath, hostWorkspacePath, log, execGuest }) {
+    let phpRequired = null;
+    const composerResult = await findVersionFile(hostWorkspacePath, 'php');
+    if (composerResult.found && composerResult.file === 'composer.json') {
+        log(`[ensureGuestRuntimeVersions] composer.json found in ${composerResult.subdir || 'root'}`);
+        try {
+            const composer = JSON.parse(composerResult.content);
+            phpRequired = composer?.config?.platform?.php || composer?.require?.php || null;
+            if (phpRequired) phpRequired = phpRequired.replace(/^[<>=~^!]+/, '').replace(/\*$/, '').trim();
+        } catch { }
+    }
+    if (!phpRequired) {
+        const phpVerResult = await findVersionFile(hostWorkspacePath, 'php');
+        if (phpVerResult.found && phpVerResult.file === '.php-version') {
+            phpRequired = phpVerResult.content.trim().replace(/^v/, '');
+        }
+    }
+    if (!phpRequired) {
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'php');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^php\s+(\S+)/m);
+            if (m) phpRequired = m[1];
+        }
+    }
+    if (!phpRequired) return { required: null, current: null, installed: false };
+
+    const current = await execGuest('php --version 2>/dev/null | head -1', 10000);
+    const curVer = current.stdout?.match(/PHP\s+(\d+\.\d+\.\d+)/)?.[1] || null;
+    if (!curVer || !versionSatisfies(curVer, phpRequired)) {
+        log(`php ${curVer || 'missing'} < required ${phpRequired}: installing via apt (ondrej PPA)`);
+        const installCmd = `apt-get update -qq && apt-get install -y software-properties-common && ` +
+            `add-apt-repository -y ppa:ondrej/php && apt-get update -qq && ` +
+            `apt-get install -y php${phpRequired.replace('.', '')} php${phpRequired.replace('.', '')}-cli php${phpRequired.replace('.', '')}-common && php --version && echo "__PHP_OK__"`;
+        const r = await execGuest(installCmd, 300000);
+        return { required: phpRequired, current: curVer, installed: r.stdout?.includes('__PHP_OK__') };
+    } else {
+        log(`php ok (${curVer} >= ${phpRequired})`);
+        return { required: phpRequired, current: curVer, installed: false };
+    }
+}
+
+/**
+ * 确保 .NET 版本
+ */
+async function ensureDotnetVersion({ runtime, runtimeRef, workspacePath, hostWorkspacePath, log, execGuest }) {
+    let dotnetRequired = null;
+    const globalJsonResult = await findVersionFile(hostWorkspacePath, 'dotnet');
+    if (globalJsonResult.found && globalJsonResult.file === 'global.json') {
+        log(`[ensureGuestRuntimeVersions] global.json found in ${globalJsonResult.subdir || 'root'}`);
+        try {
+            const globalJson = JSON.parse(globalJsonResult.content);
+            dotnetRequired = globalJson?.sdk?.version || null;
+        } catch { }
+    }
+    if (!dotnetRequired) {
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'dotnet');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^dotnet\s+(\S+)/m);
+            if (m) dotnetRequired = m[1];
+        }
+    }
+    if (!dotnetRequired) {
+        const dirBuildResult = await findVersionFile(hostWorkspacePath, 'dotnet');
+        if (dirBuildResult.found && dirBuildResult.file === 'Directory.Build.props') {
+            const m = dirBuildResult.content.match(/<TargetFramework>([^<]+)<\/TargetFramework>/) || dirBuildResult.content.match(/<NETCoreVersion>([^<]+)<\/NETCoreVersion>/);
+            if (m) dotnetRequired = m[1].replace('net', '').replace('core', '');
+        }
+    }
+    if (!dotnetRequired) return { required: null, current: null, installed: false };
+
+    const current = await execGuest('dotnet --version 2>/dev/null', 10000);
+    const curVer = current.stdout?.trim() || null;
+    if (!curVer || !versionSatisfies(curVer, dotnetRequired)) {
+        log(`dotnet ${curVer || 'missing'} < required ${dotnetRequired}: installing via Microsoft mirror`);
+        const installCmd = `wget -q https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O packages-microsoft-prod.deb && ` +
+            `dpkg -i packages-microsoft-prod.deb && apt-get update -qq && ` +
+            `apt-get install -y dotnet-sdk-${dotnetRequired} && dotnet --version && echo "__DOTNET_OK__"`;
+        const r = await execGuest(installCmd, 300000);
+        return { required: dotnetRequired, current: curVer, installed: r.stdout?.includes('__DOTNET_OK__') };
+    } else {
+        log(`dotnet ok (${curVer} >= ${dotnetRequired})`);
+        return { required: dotnetRequired, current: curVer, installed: false };
+    }
+}
+
+/**
+ * 确保 Ruby 版本
+ */
+async function ensureRubyVersion({ runtime, runtimeRef, workspacePath, hostWorkspacePath, log, execGuest }) {
+    let rubyRequired = null;
+    const gemfileResult = await findVersionFile(hostWorkspacePath, 'ruby');
+    if (gemfileResult.found && gemfileResult.file === 'Gemfile') {
+        log(`[ensureGuestRuntimeVersions] Gemfile found in ${gemfileResult.subdir || 'root'}`);
+        const m = gemfileResult.content.match(/ruby\s+['"]([^'"]+)['"]/);
+        if (m) rubyRequired = m[1];
+    }
+    if (!rubyRequired) {
+        const rubyVerResult = await findVersionFile(hostWorkspacePath, 'ruby');
+        if (rubyVerResult.found && rubyVerResult.file === '.ruby-version') {
+            rubyRequired = rubyVerResult.content.trim().replace(/^v/, '');
+        }
+    }
+    if (!rubyRequired) {
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'ruby');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^ruby\s+(\S+)/m);
+            if (m) rubyRequired = m[1];
+        }
+    }
+    if (!rubyRequired) return { required: null, current: null, installed: false };
+
+    const current = await execGuest('ruby --version 2>/dev/null', 10000);
+    const curVer = current.stdout?.match(/ruby\s+(\d+\.\d+\.\d+)/)?.[1] || null;
+    if (!curVer || !versionSatisfies(curVer, rubyRequired)) {
+        log(`ruby ${curVer || 'missing'} < required ${rubyRequired}: installing via apt (brightbox PPA)`);
+        const installCmd = `apt-get update -qq && apt-get install -y software-properties-common && ` +
+            `add-apt-repository -y ppa:brightbox/ruby-ng && apt-get update -qq && ` +
+            `apt-get install -y ruby${rubyRequired.replace('.', '')} ruby${rubyRequired.replace('.', '')}-dev && ruby --version && echo "__RUBY_OK__"`;
+        const r = await execGuest(installCmd, 300000);
+        return { required: rubyRequired, current: curVer, installed: r.stdout?.includes('__RUBY_OK__') };
+    } else {
+        log(`ruby ok (${curVer} >= ${rubyRequired})`);
+        return { required: rubyRequired, current: curVer, installed: false };
+    }
+}
+
+/**
+ * 确保 C/C++ 工具链
+ */
+async function ensureCppVersion({ runtime, runtimeRef, workspacePath, hostWorkspacePath, log, execGuest }) {
+    let cppRequired = null;
+    const cmakeResult = await findVersionFile(hostWorkspacePath, 'cpp');
+    if (cmakeResult.found && cmakeResult.file === 'CMakeLists.txt') {
+        log(`[ensureGuestRuntimeVersions] CMakeLists.txt found in ${cmakeResult.subdir || 'root'}`);
+        const m = cmakeResult.content.match(/cmake_minimum_required\s*\(\s*VERSION\s+([^)\s]+)/i);
+        if (m) cppRequired = m[1];
+    }
+    // C/C++: 确保基础工具链存在
+    const cppCurrent = await execGuest('gcc --version 2>/dev/null | head -1', 10000);
+    const hasGcc = cppCurrent.stdout?.includes('gcc') || false;
+    const hasCmake = (await execGuest('cmake --version 2>/dev/null | head -1', 10000)).stdout?.includes('cmake') || false;
+    if (!hasGcc || !hasCmake) {
+        log(`c/cpp toolchain missing (gcc=${hasGcc} cmake=${hasCmake}): installing build-essential + cmake`);
+        const installCmd = `apt-get update -qq && apt-get install -y build-essential cmake pkg-config && echo "__CPP_OK__"`;
+        const r = await execGuest(installCmd, 300000);
+        return { required: cppRequired || 'system', current: hasGcc ? 'ok' : 'missing', installed: r.stdout?.includes('__CPP_OK__') };
+    } else {
+        log(`c/cpp toolchain ok (gcc + cmake present)`);
+        return { required: cppRequired || 'system', current: 'ok', installed: false };
+    }
+}
+
+/**
+ * 确保 Swift 版本
+ */
+async function ensureSwiftVersion({ runtime, runtimeRef, workspacePath, hostWorkspacePath, log, execGuest }) {
+    let swiftRequired = null;
+    const packageSwiftResult = await findVersionFile(hostWorkspacePath, 'swift');
+    if (packageSwiftResult.found && packageSwiftResult.file === 'Package.swift') {
+        log(`[ensureGuestRuntimeVersions] Package.swift found in ${packageSwiftResult.subdir || 'root'}`);
+        const m = packageSwiftResult.content.match(/\/\/\s*swift-tools-version\s*:?\s*(\d+\.\d+)/);
+        if (m) swiftRequired = m[1];
+    }
+    if (!swiftRequired) {
+        const swiftVerResult = await findVersionFile(hostWorkspacePath, 'swift');
+        if (swiftVerResult.found && swiftVerResult.file === '.swift-version') {
+            swiftRequired = swiftVerResult.content.trim().replace(/^v/, '');
+        }
+    }
+    if (!swiftRequired) {
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'swift');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^swift\s+(\S+)/m);
+            if (m) swiftRequired = m[1];
+        }
+    }
+    if (!swiftRequired) return { required: null, current: null, installed: false };
+
+    const current = await execGuest('swift --version 2>/dev/null | head -1', 10000);
+    const curVer = current.stdout?.match(/Swift\s+(\d+\.\d+(?:\.\d+)?)/)?.[1] || null;
+    if (!curVer || !versionSatisfies(curVer, swiftRequired)) {
+        log(`swift ${curVer || 'missing'} < required ${swiftRequired}: installing via swiftly (CN mirror)`);
+        const installCmd = `export SWIFTLY_HOME_DIR="/usr/local/swiftly"; export PATH="${SWIFTLY_HOME_DIR}/bin:$PATH"; ` +
+            `curl -fsSL https://swiftly.swiftlang.org/install.sh | bash -s -- --assume-yes && ` +
+            `source "${SWIFTLY_HOME_DIR}/env.sh" && swiftly install ${swiftRequired} && swift --version && echo "__SWIFT_OK__"`;
+        const r = await execGuest(installCmd, 400000);
+        return { required: swiftRequired, current: curVer, installed: r.stdout?.includes('__SWIFT_OK__') };
+    } else {
+        log(`swift ok (${curVer} >= ${swiftRequired})`);
+        return { required: swiftRequired, current: curVer, installed: false };
+    }
+}
+
+/**
+ * 确保 Zig 版本
+ */
+async function ensureZigVersion({ runtime, runtimeRef, workspacePath, hostWorkspacePath, log, execGuest }) {
+    let zigRequired = null;
+    const buildZigResult = await findVersionFile(hostWorkspacePath, 'zig');
+    if (buildZigResult.found && buildZigResult.file === 'build.zig') {
+        log(`[ensureGuestRuntimeVersions] build.zig found in ${buildZigResult.subdir || 'root'}`);
+    }
+    if (!zigRequired) {
+        const zigModResult = await findVersionFile(hostWorkspacePath, 'zig');
+        if (zigModResult.found && zigModResult.file === 'zig.mod') {
+            const m = zigModResult.content.match(/zig\s*=\s*['"]([^'"]+)['"]/);
+            if (m) zigRequired = m[1];
+        }
+    }
+    if (!zigRequired) {
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'zig');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^zig\s+(\S+)/m);
+            if (m) zigRequired = m[1];
+        }
+    }
+    if (!zigRequired) return { required: null, current: null, installed: false };
+
+    const current = await execGuest('zig version 2>/dev/null', 10000);
+    const curVer = current.stdout?.trim() || null;
+    if (!curVer || !versionSatisfies(curVer, zigRequired)) {
+        log(`zig ${curVer || 'missing'} < required ${zigRequired}: installing via CN mirror`);
+        const installCmd = `curl -fsSL https://ziglang.org/builds/zig-linux-x86_64-${zigRequired}.tar.xz -o /tmp/zig.tar.xz && ` +
+            `tar -xf /tmp/zig.tar.xz -C /usr/local --strip-components=1 && zig version && echo "__ZIG_OK__"`;
+        const r = await execGuest(installCmd, 300000);
+        return { required: zigRequired, current: curVer, installed: r.stdout?.includes('__ZIG_OK__') };
+    } else {
+        log(`zig ok (${curVer} >= ${zigRequired})`);
+        return { required: zigRequired, current: curVer, installed: false };
+    }
+}
+
+/**
+ * 统一运行时版本预装：Node / Python / Rust / Java / Go / PHP / .NET / Ruby / C/C++ / Swift / Zig。
  * 读取宿主项目的版本锁定文件，比对沙箱现有版本，不满足时从 CN 镜像下载安装。
  * 与 ensureGuestGoToolchain 同理：在 verify agent 之前确定性完成，避免 agent 试错。
  * 支持多目录项目：在根目录及常见子目录(server/, apps/, packages/, api/, backend/)中搜索版本文件。
@@ -1019,112 +1552,14 @@ async function ensureGuestRuntimeVersions({ runtimeRef, workspacePath, hostWorks
     const runtime = getRuntime();
     const log = (m) => { if (onLog) onLog(m); };
     const PATH_PREFIX = 'export PATH="/usr/local/bin:$PATH"; ';
-    const results = { node: null, python: null, rust: null, java: null };
+    const results = { node: null, python: null, rust: null, java: null, go: null, php: null, dotnet: null, ruby: null, cpp: null, swift: null, zig: null };
     log(`[ensureGuestRuntimeVersions] START hostWorkspacePath=${hostWorkspacePath}`);
 
-    // 通用：读取宿主文件（支持子目录搜索）
-    const { readTextSafe } = require('./detectStack');
-
-    // 限制常量：防止大型项目遍历过久
-    const MAX_SEARCH_DEPTH = 3;           // 最大递归深度（根=0，server=1，server/cmd=2）
-    const MAX_FILES_TO_CHECK = 50;        // 最多读取文件数
-    const SEARCH_TIMEOUT_MS = 10000;      // 搜索总超时
-
-    // 目标文件名（按优先级，找到即停止）
-    const TARGET_FILES = {
-        node: ['package.json', '.nvmrc', '.node-version', '.tool-versions'],
-        python: ['pyproject.toml', '.python-version', '.tool-versions'],
-        rust: ['rust-toolchain.toml', 'rust-toolchain', 'Cargo.toml', '.tool-versions'],
-        java: ['pom.xml', 'build.gradle', 'build.gradle.kts', '.tool-versions'],
-        go: ['go.mod'],
-    };
-
-    // 通用：递归搜索目标文件（宿主侧）
-    async function findVersionFile(hostRoot, language) {
-        if (!hostRoot) return { content: '', subdir: null, found: false };
-        const targets = TARGET_FILES[language] || [];
-        let checked = 0;
-        
-        async function searchDir(dir, depth) {
-            if (depth > MAX_SEARCH_DEPTH || checked >= MAX_FILES_TO_CHECK) return null;
-            try {
-                const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-                for (const entry of entries) {
-                    if (checked >= MAX_FILES_TO_CHECK) break;
-                    const fullPath = path.join(dir, entry.name);
-                    if (entry.isDirectory()) {
-                        // 跳过常见的大目录
-                        if (['node_modules', '.git', 'dist', 'build', 'target', 'vendor', '.next', 'out', 'coverage'].includes(entry.name)) continue;
-                        const found = await searchDir(fullPath, depth + 1);
-                        if (found) return found;
-                    } else if (targets.includes(entry.name)) {
-                        checked++;
-                        const content = String(readTextSafe(fullPath) || '');
-                        if (content.trim()) {
-                            return { content, subdir: path.relative(hostRoot, path.dirname(fullPath)), file: entry.name };
-                        }
-                    }
-                }
-            } catch { /* 忽略权限错误等 */ }
-            return null;
-        }
-
-        // 设置总超时
-        const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('search timeout')), SEARCH_TIMEOUT_MS)
-        );
-        
-        try {
-            const result = await Promise.race([searchDir(hostRoot, 0), timeoutPromise]);
-            return result || { content: '', subdir: null, found: false };
-        } catch {
-            return { content: '', subdir: null, found: false };
-        }
-    }
-
-    // 通用：沙箱侧也用同逻辑（可选，当前只用宿主侧结果）
-    const findVersionFileGuest = async (guestRoot, language) => {
-        if (!guestRoot) return { content: '', subdir: null, found: false };
-        const targets = TARGET_FILES[language] || [];
-        let checked = 0;
-        
-        async function searchDir(dir, depth) {
-            if (depth > MAX_SEARCH_DEPTH || checked >= MAX_FILES_TO_CHECK) return null;
-            try {
-                const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-                for (const entry of entries) {
-                    if (checked >= MAX_FILES_TO_CHECK) break;
-                    const fullPath = path.join(dir, entry.name);
-                    if (entry.isDirectory()) {
-                        if (['node_modules', '.git', 'dist', 'build', 'target', 'vendor', '.next', 'out', 'coverage'].includes(entry.name)) continue;
-                        const found = await searchDir(fullPath, depth + 1);
-                        if (found) return found;
-                    } else if (targets.includes(entry.name)) {
-                        checked++;
-                        const content = String(readTextSafe(path.join(workspacePath, path.relative(guestRoot, fullPath))) || '');
-                        if (content.trim()) {
-                            return { content, subdir: path.relative(guestRoot, path.dirname(fullPath)), file: entry.name };
-                        }
-                    }
-                }
-            } catch { }
-            return null;
-        }
-
-        try {
-            const result = await Promise.race([searchDir(guestRoot, 0), timeoutPromise]);
-            return result || { content: '', subdir: null, found: false };
-        } catch {
-            return { content: '', subdir: null, found: false };
-        }
-    };
-    
     if (!hostWorkspacePath) {
         log(`[ensureGuestRuntimeVersions] END: hostWorkspacePath not provided`);
         return results;
     }
 
-    // 通用：沙箱执行命令
     const execGuest = async (cmd, timeoutMs = 30000) => {
         try {
             const r = await runtime.exec.exec('sh', ['-c', `${PATH_PREFIX}${cmd}`], {}, { runtimeRef, cwd: workspacePath, timeoutMs });
@@ -1132,16 +1567,6 @@ async function ensureGuestRuntimeVersions({ runtimeRef, workspacePath, hostWorks
         } catch (e) {
             return { ok: false, error: String(e.message || e) };
         }
-    };
-
-    // 版本比较：major.minor.patch 数值比较
-    const versionSatisfies = (current, required) => {
-        const parse = (v) => (String(v || '').match(/(\d+)\.(\d+)(?:\.(\d+))?/) || []).slice(1, 4).map(Number);
-        const [c1, c2, c3] = parse(current);
-        const [r1, r2, r3] = parse(required);
-        if (c1 !== r1) return c1 > r1;
-        if (c2 !== r2) return c2 > r2;
-        return c3 >= r3;
     };
 
     // ============ 1) Node.js ============
@@ -1309,6 +1734,238 @@ async function ensureGuestRuntimeVersions({ runtimeRef, workspacePath, hostWorks
         }
     }
 
+    // ============ 6) PHP ============
+    // 版本来源：composer.json config.platform.php / .php-version / .tool-versions
+    let phpRequired = null;
+    const composerResult = await findVersionFile(hostWorkspacePath, 'php');
+    if (composerResult.found && composerResult.file === 'composer.json') {
+        log(`[ensureGuestRuntimeVersions] composer.json found in ${composerResult.subdir || 'root'}`);
+        try {
+            const composer = JSON.parse(composerResult.content);
+            phpRequired = composer?.config?.platform?.php || composer?.require?.php || null;
+            if (phpRequired) phpRequired = phpRequired.replace(/^[<>=~^!]+/, '').replace(/\*$/, '').trim();
+        } catch { }
+    }
+    if (!phpRequired) {
+        const phpVerResult = await findVersionFile(hostWorkspacePath, 'php');
+        if (phpVerResult.found && phpVerResult.file === '.php-version') {
+            phpRequired = phpVerResult.content.trim().replace(/^v/, '');
+        }
+    }
+    if (!phpRequired) {
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'php');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^php\s+(\S+)/m);
+            if (m) phpRequired = m[1];
+        }
+    }
+    if (phpRequired) {
+        const current = await execGuest('php --version 2>/dev/null | head -1', 10000);
+        const curVer = current.stdout?.match(/PHP\s+(\d+\.\d+\.\d+)/)?.[1] || null;
+        if (!curVer || !versionSatisfies(curVer, phpRequired)) {
+            log(`php ${curVer || 'missing'} < required ${phpRequired}: installing via apt (ondrej PPA)`);
+            const installCmd = `apt-get update -qq && apt-get install -y software-properties-common && ` +
+                `add-apt-repository -y ppa:ondrej/php && apt-get update -qq && ` +
+                `apt-get install -y php${phpRequired.replace('.', '')} php${phpRequired.replace('.', '')}-cli php${phpRequired.replace('.', '')}-common && php --version && echo "__PHP_OK__"`;
+            const r = await execGuest(installCmd, 300000);
+            results.php = { required: phpRequired, current: curVer, installed: r.stdout?.includes('__PHP_OK__') };
+        } else {
+            log(`php ok (${curVer} >= ${phpRequired})`);
+            results.php = { required: phpRequired, current: curVer, installed: false };
+        }
+    }
+
+    // ============ 7) .NET ============
+    // 版本来源：global.json sdk.version / .tool-versions / Directory.Build.props
+    let dotnetRequired = null;
+    const globalJsonResult = await findVersionFile(hostWorkspacePath, 'dotnet');
+    if (globalJsonResult.found && globalJsonResult.file === 'global.json') {
+        log(`[ensureGuestRuntimeVersions] global.json found in ${globalJsonResult.subdir || 'root'}`);
+        try {
+            const globalJson = JSON.parse(globalJsonResult.content);
+            dotnetRequired = globalJson?.sdk?.version || null;
+        } catch { }
+    }
+    if (!dotnetRequired) {
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'dotnet');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^dotnet\s+(\S+)/m);
+            if (m) dotnetRequired = m[1];
+        }
+    }
+    if (!dotnetRequired) {
+        const dirBuildResult = await findVersionFile(hostWorkspacePath, 'dotnet');
+        if (dirBuildResult.found && dirBuildResult.file === 'Directory.Build.props') {
+            const m = dirBuildResult.content.match(/<TargetFramework>([^<]+)<\/TargetFramework>/) || dirBuildResult.content.match(/<NETCoreVersion>([^<]+)<\/NETCoreVersion>/);
+            if (m) dotnetRequired = m[1].replace('net', '').replace('core', '');
+        }
+    }
+    if (dotnetRequired) {
+        const current = await execGuest('dotnet --version 2>/dev/null', 10000);
+        const curVer = current.stdout?.trim() || null;
+        if (!curVer || !versionSatisfies(curVer, dotnetRequired)) {
+            log(`dotnet ${curVer || 'missing'} < required ${dotnetRequired}: installing via Microsoft mirror`);
+            const installCmd = `wget -q https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O packages-microsoft-prod.deb && ` +
+                `dpkg -i packages-microsoft-prod.deb && apt-get update -qq && ` +
+                `apt-get install -y dotnet-sdk-${dotnetRequired} && dotnet --version && echo "__DOTNET_OK__"`;
+            const r = await execGuest(installCmd, 300000);
+            results.dotnet = { required: dotnetRequired, current: curVer, installed: r.stdout?.includes('__DOTNET_OK__') };
+        } else {
+            log(`dotnet ok (${curVer} >= ${dotnetRequired})`);
+            results.dotnet = { required: dotnetRequired, current: curVer, installed: false };
+        }
+    }
+
+    // ============ 8) Ruby ============
+    // 版本来源：Gemfile ruby 'X.Y.Z' / .ruby-version / .tool-versions
+    let rubyRequired = null;
+    const gemfileResult = await findVersionFile(hostWorkspacePath, 'ruby');
+    if (gemfileResult.found && gemfileResult.file === 'Gemfile') {
+        log(`[ensureGuestRuntimeVersions] Gemfile found in ${gemfileResult.subdir || 'root'}`);
+        const m = gemfileResult.content.match(/ruby\s+['"]([^'"]+)['"]/);
+        if (m) rubyRequired = m[1];
+    }
+    if (!rubyRequired) {
+        const rubyVerResult = await findVersionFile(hostWorkspacePath, 'ruby');
+        if (rubyVerResult.found && rubyVerResult.file === '.ruby-version') {
+            rubyRequired = rubyVerResult.content.trim().replace(/^v/, '');
+        }
+    }
+    if (!rubyRequired) {
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'ruby');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^ruby\s+(\S+)/m);
+            if (m) rubyRequired = m[1];
+        }
+    }
+    if (rubyRequired) {
+        const current = await execGuest('ruby --version 2>/dev/null', 10000);
+        const curVer = current.stdout?.match(/ruby\s+(\d+\.\d+\.\d+)/)?.[1] || null;
+        if (!curVer || !versionSatisfies(curVer, rubyRequired)) {
+            log(`ruby ${curVer || 'missing'} < required ${rubyRequired}: installing via apt (brightbox PPA)`);
+            const installCmd = `apt-get update -qq && apt-get install -y software-properties-common && ` +
+                `add-apt-repository -y ppa:brightbox/ruby-ng && apt-get update -qq && ` +
+                `apt-get install -y ruby${rubyRequired.replace('.', '')} ruby${rubyRequired.replace('.', '')}-dev && ruby --version && echo "__RUBY_OK__"`;
+            const r = await execGuest(installCmd, 300000);
+            results.ruby = { required: rubyRequired, current: curVer, installed: r.stdout?.includes('__RUBY_OK__') };
+        } else {
+            log(`ruby ok (${curVer} >= ${rubyRequired})`);
+            results.ruby = { required: rubyRequired, current: curVer, installed: false };
+        }
+    }
+
+    // ============ 9) C/C++ ============
+    // 版本来源：CMakeLists.txt cmake_minimum_required / conanfile.txt / vcpkg.json
+    // C/C++ 通常不需要特定版本，主要是确保 build-essential + cmake + pkg-config 可用
+    let cppRequired = null;
+    const cmakeResult = await findVersionFile(hostWorkspacePath, 'cpp');
+    if (cmakeResult.found && cmakeResult.file === 'CMakeLists.txt') {
+        log(`[ensureGuestRuntimeVersions] CMakeLists.txt found in ${cmakeResult.subdir || 'root'}`);
+        const m = cmakeResult.content.match(/cmake_minimum_required\s*\(\s*VERSION\s+([^)\s]+)/i);
+        if (m) cppRequired = m[1];
+    }
+    if (!cppRequired) {
+        const conanResult = await findVersionFile(hostWorkspacePath, 'cpp');
+        if (conanResult.found && conanResult.file === 'conanfile.txt') {
+            // conanfile 通常不指定编译器版本，跳过
+        }
+    }
+    if (!cppRequired) {
+        const vcpkgResult = await findVersionFile(hostWorkspacePath, 'cpp');
+        if (vcpkgResult.found && vcpkgResult.file === 'vcpkg.json') {
+            // vcpkg 可指定版本，但通常用默认即可
+        }
+    }
+    // C/C++: 确保基础工具链存在
+    const cppCurrent = await execGuest('gcc --version 2>/dev/null | head -1', 10000);
+    const hasGcc = cppCurrent.stdout?.includes('gcc') || false;
+    const hasCmake = (await execGuest('cmake --version 2>/dev/null | head -1', 10000)).stdout?.includes('cmake') || false;
+    if (!hasGcc || !hasCmake) {
+        log(`c/cpp toolchain missing (gcc=${hasGcc} cmake=${hasCmake}): installing build-essential + cmake`);
+        const installCmd = `apt-get update -qq && apt-get install -y build-essential cmake pkg-config && echo "__CPP_OK__"`;
+        const r = await execGuest(installCmd, 300000);
+        results.cpp = { required: cppRequired || 'system', current: hasGcc ? 'ok' : 'missing', installed: r.stdout?.includes('__CPP_OK__') };
+    } else {
+        log(`c/cpp toolchain ok (gcc + cmake present)`);
+        results.cpp = { required: cppRequired || 'system', current: 'ok', installed: false };
+    }
+
+    // ============ 10) Swift ============
+    // 版本来源：Package.swift // swift-tools-version:X.Y / .swift-version / .tool-versions
+    let swiftRequired = null;
+    const packageSwiftResult = await findVersionFile(hostWorkspacePath, 'swift');
+    if (packageSwiftResult.found && packageSwiftResult.file === 'Package.swift') {
+        log(`[ensureGuestRuntimeVersions] Package.swift found in ${packageSwiftResult.subdir || 'root'}`);
+        const m = packageSwiftResult.content.match(/\/\/\s*swift-tools-version\s*:?\s*(\d+\.\d+)/);
+        if (m) swiftRequired = m[1];
+    }
+    if (!swiftRequired) {
+        const swiftVerResult = await findVersionFile(hostWorkspacePath, 'swift');
+        if (swiftVerResult.found && swiftVerResult.file === '.swift-version') {
+            swiftRequired = swiftVerResult.content.trim().replace(/^v/, '');
+        }
+    }
+    if (!swiftRequired) {
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'swift');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^swift\s+(\S+)/m);
+            if (m) swiftRequired = m[1];
+        }
+    }
+    if (swiftRequired) {
+        const current = await execGuest('swift --version 2>/dev/null | head -1', 10000);
+        const curVer = current.stdout?.match(/Swift\s+(\d+\.\d+(?:\.\d+)?)/)?.[1] || null;
+        if (!curVer || !versionSatisfies(curVer, swiftRequired)) {
+            log(`swift ${curVer || 'missing'} < required ${swiftRequired}: installing via swiftly (CN mirror)`);
+            const installCmd = `export SWIFTLY_HOME_DIR="/usr/local/swiftly"; export PATH="${SWIFTLY_HOME_DIR}/bin:$PATH"; ` +
+                `curl -fsSL https://swiftly.swiftlang.org/install.sh | bash -s -- --assume-yes && ` +
+                `source "${SWIFTLY_HOME_DIR}/env.sh" && swiftly install ${swiftRequired} && swift --version && echo "__SWIFT_OK__"`;
+            const r = await execGuest(installCmd, 400000);
+            results.swift = { required: swiftRequired, current: curVer, installed: r.stdout?.includes('__SWIFT_OK__') };
+        } else {
+            log(`swift ok (${curVer} >= ${swiftRequired})`);
+            results.swift = { required: swiftRequired, current: curVer, installed: false };
+        }
+    }
+
+    // ============ 11) Zig ============
+    // 版本来源：build.zig / zig.mod / .tool-versions
+    let zigRequired = null;
+    const buildZigResult = await findVersionFile(hostWorkspacePath, 'zig');
+    if (buildZigResult.found && buildZigResult.file === 'build.zig') {
+        log(`[ensureGuestRuntimeVersions] build.zig found in ${buildZigResult.subdir || 'root'}`);
+        // build.zig 通常不硬编码版本，依赖 zig.mod
+    }
+    if (!zigRequired) {
+        const zigModResult = await findVersionFile(hostWorkspacePath, 'zig');
+        if (zigModResult.found && zigModResult.file === 'zig.mod') {
+            // zig.mod 可能包含版本信息
+            const m = zigModResult.content.match(/zig\s*=\s*['"]([^'"]+)['"]/);
+            if (m) zigRequired = m[1];
+        }
+    }
+    if (!zigRequired) {
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'zig');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^zig\s+(\S+)/m);
+            if (m) zigRequired = m[1];
+        }
+    }
+    if (zigRequired) {
+        const current = await execGuest('zig version 2>/dev/null', 10000);
+        const curVer = current.stdout?.trim() || null;
+        if (!curVer || !versionSatisfies(curVer, zigRequired)) {
+            log(`zig ${curVer || 'missing'} < required ${zigRequired}: installing via CN mirror`);
+            const installCmd = `curl -fsSL https://ziglang.org/builds/zig-linux-x86_64-${zigRequired}.tar.xz -o /tmp/zig.tar.xz && ` +
+                `tar -xf /tmp/zig.tar.xz -C /usr/local --strip-components=1 && zig version && echo "__ZIG_OK__"`;
+            const r = await execGuest(installCmd, 300000);
+            results.zig = { required: zigRequired, current: curVer, installed: r.stdout?.includes('__ZIG_OK__') };
+        } else {
+            log(`zig ok (${curVer} >= ${zigRequired})`);
+            results.zig = { required: zigRequired, current: curVer, installed: false };
+        }
+    }
+
     log(`[ensureGuestRuntimeVersions] END results=${JSON.stringify(results)}`);
     return results;
 }
@@ -1459,19 +2116,23 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
     if (!needs) return { ready: false };
 
     try {
-        // base 镜像可能未装 PostgreSQL（Debian bookworm 默认无）→ 先 apt 安装。
+        // base 镜像可能未装 PostgreSQL（Debian bookworm 默认无）→ 先 apt 安装（防卡死：
+        // 清残留锁 + DPkg::Lock::Timeout/Acquire 重试/超时，避免 verify agent 现场 apt 卡住）。
         // 幂等：已装则跳过，避免重复 update/install 浪费时间。
-        const install = `
-            pkill -9 apt-get 2>/dev/null; pkill -9 dpkg 2>/dev/null; sleep 1
-            rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock
-            if ! command -v pg_isready >/dev/null 2>&1 && ! ls /etc/postgresql/*/main 2>/dev/null | grep -q .; then
-              export DEBIAN_FRONTEND=noninteractive
-              apt-get update -qq 2>/dev/null || true
-              apt-get install -y -qq postgresql postgresql-contrib 2>&1 | tail -5
-            fi
-            (service postgresql start 2>/dev/null || pg_ctlcluster $(ls /etc/postgresql 2>/dev/null | head -1) main start 2>/dev/null) || true
-        `;
-        await runtime.exec.exec('sh', ['-c', install], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 240000 });
+        const already = await runtime.exec.exec('sh', ['-c', 'command -v pg_isready >/dev/null 2>&1 && echo YES || echo NO'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 10000 }).catch(() => ({ stdout: 'NO' }));
+        if (String(already.stdout || '').trim() !== 'YES') {
+            const installRes = await aptSafeInstall({
+                runtime, runtimeRef, workspacePath,
+                packages: 'postgresql postgresql-contrib',
+                onLog: (m) => console.error(`[twoStage] ${m}`),
+                timeoutMs: 240000,
+            });
+            if (!installRes.ok) {
+                console.error('[twoStage] postgres apt install failed (fallback to agent):', installRes.logTail);
+                return { ready: false };
+            }
+        }
+        await runtime.exec.exec('sh', ['-c', `(service postgresql start 2>/dev/null || pg_ctlcluster $(ls /etc/postgresql 2>/dev/null | head -1) main start 2>/dev/null) || true`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 30000 });
         // 等 PG 真正就绪（最多 30s，apt 安装后首次启动可能偏慢）
         let pgReady = false;
         for (let i = 0; i < 30; i++) {
@@ -2340,7 +3001,17 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         // 装 PG + 乱改源码，烧掉全部轮数）。一律调用 provisionPostgresIfNeeded，由它内部的
         // 沙箱 grep 权威判定（毫秒级，不需要 DB 时立即返回 not needed）。
         const provisionStart = Date.now();
-        console.error(`[twoStage] project=${project.id} provision parallel START`);
+
+        // 系统服务依赖探测（宿主侧确定性扫描）兜底 LLM 的 needsPostgres：LLM plan 漏判/走
+        // fallback plan 时仍能命中需要 postgres 的项目，把安装提前到 verify 之前，
+        // 避免 verify agent 现场 apt 试错卡死（实测 60 轮耗尽 → 部署失败）。
+        let systemDeps = { services: [], signals: [] };
+        try {
+            const { detectSystemDeps: detectSysDeps } = require('./detectStack');
+            systemDeps = detectSysDeps(hostPath) || systemDeps;
+        } catch { /* 探测失败不阻塞 */ }
+        const needsPg = Boolean(plan?.needsPostgres) || systemDeps.services.includes('postgres');
+        console.error(`[twoStage] project=${project.id} provision parallel START (needsPostgres=${needsPg}, systemDeps=${systemDeps.services.join(',') || 'none'})`);
         const results = await Promise.allSettled([
             repairHostWorkspaceOwnership(hostPath), // host 侧 chown，同步快
             detectDepsCached(ref, wsPath, detected), // guest 侧 deps 探测（改动 2：传入 stack 选对应语言脚本）
@@ -2421,7 +3092,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             await injectGatewayBinary(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
         }
         // 改动 2：plan.context 同时存 depsCached (boolean, 向后兼容) + depsStatus (per-subpackage)
-        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, runtimeVersions: runtimeVersions.ran ? runtimeVersions : null, stack: { type: detected?.type, framework: detected?.framework }, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, successRun: plan._successRun || null } };
+        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, runtimeVersions: runtimeVersions.ran ? runtimeVersions : null, stack: { type: detected?.type, framework: detected?.framework }, systemDeps: systemDeps.services, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, successRun: plan._successRun || null } };
         delete plan._successRun;
         // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）。
         // 缓存策略：只缓存真正从 LLM 出的 plan（source='opencode'/'ai'）。detectStack 兜底
