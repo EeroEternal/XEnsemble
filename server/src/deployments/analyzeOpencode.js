@@ -17,7 +17,10 @@ function resolveOpencodeBin() {
 }
 
 const OPENCODE_BIN = resolveOpencodeBin();
-const PROMPT_TIMEOUT_MS = Number(process.env.OPENCODE_ANALYZE_TIMEOUT_MS) || 480000;
+// 超时：opencode 探索大项目 + LLM 调用可能较慢，但 fallback（analyzeDeploy 内置 ReAct）
+// 数十秒内也能出计划，因此这里不需要长等——超时后快速 fallback，避免"分析项目"长时间
+// 无进展（AgentHarness 实测 opencode 卡满 480s）。
+const PROMPT_TIMEOUT_MS = Number(process.env.OPENCODE_ANALYZE_TIMEOUT_MS) || 240000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MARKER_START = '__DEPLOY_PLAN_START__';
 const MARKER_END = '__DEPLOY_PLAN_END__';
@@ -62,6 +65,16 @@ function buildOpencodeConfig() {
     for (const m of new Set([model, process.env.LLM_VERIFY_MODEL, process.env.OPENAI_MODEL].filter(Boolean))) {
         models[m] = { name: m };
     }
+    // 让 opencode 探索时跳过依赖/构建产物目录：agent 只需读源码生成计划，
+    // node_modules/.pnpm-store 等动辄数百 MB、几万文件，遍历会让分析超时
+    // （AgentHarness monorepo 实测：stage A opencode 卡满 480s 超时）。
+    const ignore = [
+        '**/node_modules/**', '**/.pnpm-store/**', '**/.git/**',
+        '**/dist/**', '**/build/**', '**/.next/**', '**/out/**', '**/coverage/**',
+        '**/target/**', '**/__pycache__/**', '**/.venv/**', '**/venv/**',
+        '**/.cache/**', '**/.turbo/**', '**/.nx/**', '**/.yarn/**', '**/.pnp.*',
+        '**/pnpm-lock.yaml', '**/package-lock.json', '**/yarn.lock',
+    ];
     return {
         provider: {
             xensemble: {
@@ -71,6 +84,7 @@ function buildOpencodeConfig() {
                 models,
             },
         },
+        ignore,
     };
 }
 
@@ -174,6 +188,7 @@ async function analyzeProjectWithOpencode(workspacePath, isAborted) {
             resolve(payload);
         };
         const timer = setTimeout(() => {
+            console.error(`[analyzeOpencode] TIMEOUT after ${PROMPT_TIMEOUT_MS}ms (stdout tail: ${stripAnsi(stdout).slice(-400)}, stderr tail: ${stripAnsi(stderr).slice(-400)})`);
             finish({ ok: false, warning: 'opencode run timeout' });
             child.kill('SIGTERM');
         }, PROMPT_TIMEOUT_MS);
