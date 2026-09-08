@@ -451,6 +451,50 @@ function sanitizeBackendPorts(raw) {
     return out;
 }
 
+// 系统服务常驻端口：判定"后端进程拉起"时必须排除（postgres/mysql/redis/mongo 由平台
+// provision，监听 ≠ 应用后端）。注意：不排除 3000——next/express 等大量项目默认就
+// 监听 3000，排除会误杀；沙箱欢迎页/默认页由 assertAppIsServed 的内容探测区分。
+const BACKEND_LISTEN_EXCLUDE_PORTS = new Set([5432, 3306, 6379, 27017, 11211, 5173]);
+
+/**
+ * 端口监听兜底：判断"后端端口是否真的在监听"（用户要求：检测不到具体接口时，用端口
+ * 监听判断后端是否正常拉起）。候选 = agent 上报的 backendPort + 平台探测的 startCandidates
+ * 端口，排除系统服务端口。返回命中的端口或 null。
+ */
+async function findListeningBackendPort(runtimeRef, workspacePath, reportedPorts, plan) {
+    const listening = await listGuestListenPorts(runtimeRef, workspacePath);
+    const listenSet = new Set(listening);
+    const candidates = [
+        ...(Array.isArray(reportedPorts) ? reportedPorts.map(Number) : []),
+        ...((plan?.context?.startCandidates?.ports || []).map(Number)),
+    ];
+    for (const p of candidates) {
+        if (Number.isInteger(p) && p >= 1000 && p < 65535 && !BACKEND_LISTEN_EXCLUDE_PORTS.has(p) && listenSet.has(p)) {
+            return p;
+        }
+    }
+    return null;
+}
+
+/**
+ * 后端存活复核（agent 报失败/空转时平台兜底，通用、不绑定具体项目）：
+ *   - backendPort：后端进程拉起的佐证（监听判定，排除系统服务端口）
+ *   - appPort：preview 隧道目标，必须是被预览的**前端页面**端口（assertAppIsServed 做
+ *     内容探测，排除欢迎页/目录列表/空页）。纯后端项目（无前端页面）退回后端端口，
+ *     至少 preview 可达后端响应。
+ * 返回 { backendPort, appPort, frontendServed }；后端未监听时返回 null。
+ */
+async function verifyBackendAlive(runtimeRef, workspacePath, reportedPorts, plan, defaultPort) {
+    const backendPort = await findListeningBackendPort(runtimeRef, workspacePath, reportedPorts, plan);
+    if (!backendPort) return null;
+    const probe = await assertAppIsServed({ runtimeRef, workspacePath, preferredPort: defaultPort });
+    return {
+        backendPort,
+        appPort: probe.ok ? probe.port : backendPort,
+        frontendServed: probe.ok,
+    };
+}
+
 async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, backendPorts, backendEvidence = null }) {
     const targets = sanitizeApiEndpoints(endpoints);
 
@@ -654,6 +698,7 @@ function buildSystemPrompt(plan, toolchain) {
         '- Every run_shell call is a FRESH shell (working dir resets to /workspace each time). Use `cd <dir> && <cmd>` inside ONE call when you need a subdirectory. Background processes started with `&` keep running in the VM.',
         '- The serve command must start the app in the background and stay running. Use e.g. `export PORT=<port>; (cd server && npm start) > /tmp/serve.log 2>&1 & sleep 5; cat /tmp/serve.log`, then health-check with curl.',
         '- Keep the serve process alive even after your shell exits: start it with nohup / setsid and disown. Pick any free port (export PORT=<port> if the app reads it; prefer the default port when free) — the platform auto-detects the real app port for the preview, so do not waste rounds fighting over one specific port.',
+        '- PORT IN USE HANDLING (MANDATORY): before (re)starting the backend, check who owns the port: `ss -ltnp | grep :<port>` and `pgrep -af <project-binary>`. If the port is ALREADY owned by YOUR OWN backend process (same project binary/name), DO NOT restart — it is already up (a second start only fails with "address already in use"). Just curl the health route and proceed. If a DIFFERENT process owns it, start your backend on a NEW free port (export PORT=<new>) AND make the frontend reach it (update next.config rewrites / vite proxy target / .env NEXT_PUBLIC_API_URL to the new port, or proxy /api to it) — any arrangement that makes the backend reachable through the frontend is fine. Never report failure solely because the default port was busy.',
         '- Verify with an actual HTTP request, not just "process started": `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:<port>/`. A 2xx/3xx/expected response means success.',
         '- FULL-STACK requirement: a root page 200 is NOT enough. If the project is frontend+backend (the frontend proxies /api to a local backend), the backend MUST be running and reachable, or every browser page will be blank.',
         '- BACKEND ALIVE CHECK — NEVER guess a health/API path. Guessing e.g. /api/health and treating a 404 as "backend dead" is YOUR error, not the app\'s (multica-style backends expose /health, not /api/health). Follow this order:',
@@ -985,13 +1030,42 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
         }
         const truncated = llmResult.finishReason === 'length';
         let parsed = tryParseJson(llmResult.content);
+        // 手动提取容错：LLM 偶发输出"汇报文本"而非 JSON（如 round 10 输出
+        // "Migrations applied OK backend_up: up web_build: done 3000:200
+        // 8080:/api/health -> 200"——检测全部正确但格式不是 JSON）。此时先做
+        // 字段级宽松提取：能抽出 "action" 字段就用它；final 且有明确成功信号
+        // （后端 up + 端口 2xx + 构建完成）则按 ok:true 的 final 处理，避免
+        // "检测正确却因格式被拦"后 agent 反复重试、撞端口占用等连锁误判。
+        if (!parsed) {
+            const rawText = String(llmResult.content || '');
+            const actionMatch = rawText.match(/"action"\s*:\s*"([a-z_]+)"/i);
+            if (actionMatch) {
+                const actionName = actionMatch[1];
+                if (actionName === 'final' && /(backend[_ -]?up|server.*started|health.{0,40}(200|ok)|build.*done|migrations?.*ok)/i.test(rawText)) {
+                    parsed = { action: 'final', result: { ok: true, tested: [], finalStderr: `[format-fixed] LLM 输出非 JSON 但含成功信号，平台按 ok:true 处理。原文: ${rawText.slice(0, 400)}` } };
+                } else {
+                    // 有 action 但参数缺失/无法解析 → 用空参数重试该 action（tool 会报"(no command)"等，
+                    // 让 LLM 看到具体错误而不是笼统 INVALID）。必须转成 {action:'tool', tool:...}，
+                    // 否则主循环把 actionName（如 run_shell）当未知 action 处理会误判空转。
+                    parsed = { action: 'tool', tool: actionName, args: {} };
+                }
+            } else if (/(backend[_ -]?up|server\s+started).{0,120}(build\s+done|migrations?.*ok|status.*ok|ready)/is.test(rawText)
+                && /\b2\d\d\b/.test(rawText)
+                && /(final|result|success|report)/i.test(rawText)) {
+                // 强成功信号：无 "action" 字段的纯文本汇报（检测全对但格式错，如 multica 案例
+                // "backend_up: up web_build: done 3000:200 8080:/api/health -> 200"）。
+                // 推断 final ok:true 后平台仍会真实验证（assertAppIsServed + probeApiHealth），
+                // 误判会被复核拦下，风险可控。
+                parsed = { action: 'final', result: { ok: true, tested: [], finalStderr: `[format-fixed] LLM 输出非 JSON 但含完整成功信号，平台按 ok:true 处理并验证。原文: ${rawText.slice(0, 400)}` } };
+            }
+        }
         if (!parsed) {
             const len = String(llmResult.content || '').length;
             trail.push({ round, action: 'invalid_json', truncated, len });
             console.error(`[analyzeVerify] round ${round}: INVALID JSON (truncated=${truncated}, len=${len}, finish=${llmResult.finishReason}) head=${String(llmResult.content || '').slice(0, 200).replace(/\n/g, ' ')}`);
             messages.push({
                 role: 'user',
-                content: 'Your previous response was NOT valid JSON (it was likely truncated because it was too long). Respond with ONLY ONE valid JSON object — no thinking, no analysis text, no markdown fences. A TOOL CALL must be under 800 characters: {"action":"tool","tool":"...","args":{...}}. The FINAL answer may be up to 4000 characters: {"action":"final","result":{...}}.',
+                content: 'Your previous response was NOT valid JSON (it was likely truncated because it was too long). Respond with ONLY ONE valid JSON object — no thinking, no analysis text, no markdown fences. A TOOL CALL must be under 800 characters: {"action":"tool","tool":"...","args":{...}}. The FINAL answer may be up to 4000 characters: {"action":"final","result":{"ok":true,"tested":["..."],"apiEndpoints":["GET /health"],"backendPort":8080,"finalStderr":"","summary":"..."}}. If your output has no JSON at all (plain text report), re-send it AS JSON.',
             });
             continue;
         }
@@ -1225,31 +1299,26 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
             } else if (!ok && backendEvidence && backendEvidence.hasBackend) {
                 // agent 报 ok:false 但有确定性后端证据 → 平台端口监听兜底复核。
                 // 背景：agent 猜错健康/API 路径（如 multica 真实 /health、agent 猜 /api/health
-                // 得 404）会误判"后端没起"而提前 final ok:false，平台该放行却无从复核。
-                // 规则（用户要求）：检测不到具体接口时，用"后端端口是否监听"判断后端是否
-                // 正常拉起——监听 = 进程起来了 = 部署实质成功，不因 agent 猜错路径而误杀。
-                const probe = await assertAppIsServed({ runtimeRef, workspacePath, preferredPort: defaultPort });
-                if (probe.ok) {
-                    const listening = await listGuestListenPorts(runtimeRef, workspacePath);
-                    const listenSet = new Set(listening);
-                    const reportedPorts = sanitizeBackendPorts(r.backendPort);
-                    const anyBackendListening = reportedPorts.some((p) => listenSet.has(p)) || listenSet.has(probe.port);
-                    if (anyBackendListening) {
-                        trail.push({ round, action: 'agent_failed_but_backend_listening', ports: listening });
-                        console.error(`[analyzeVerify] round ${round}: agent reported ok:false but backend port(s) listening (${listening.join(',')}) — overriding to success`);
-                        return {
-                            ...lastResult,
-                            ok: true,
-                            appPort: probe.port,
-                            apiVerdict: 'backend_listening',
-                            source: 'ai',
-                            warning: `agent reported ok:false but platform re-probe found the backend alive (ports listening: ${listening.join(',')})`,
-                            finalStderr: `[platform re-probe] backend is listening on ${listening.join(',')} — agent's ok:false overridden because the backend started successfully. Original: ${lastResult.finalStderr || ''}`.slice(0, 4000),
-                            trail,
-                            messages: trimContext(messages),
-                            roundsUsed: round + 1,
-                        };
-                    }
+                // 得 404）会误判"后端没起"而提前 final ok:false；且 assertAppIsServed 以根路径
+                // curl 判"应用内容"，纯 API 后端根路径 404（multica 只有 /health /api/* 路由）
+                // 会被误判 down。因此这里用 verifyBackendAlive：后端端口监听（排除系统服务
+                // 端口）= 后端已拉起；appPort 用前端页面端口（assertAppIsServed 内容探测）。
+                const alive = await verifyBackendAlive(runtimeRef, workspacePath, sanitizeBackendPorts(r.backendPort), plan, defaultPort);
+                if (alive) {
+                    trail.push({ round, action: 'agent_failed_but_backend_listening', backendPort: alive.backendPort, appPort: alive.appPort });
+                    console.error(`[analyzeVerify] round ${round}: agent reported ok:false but backend port ${alive.backendPort} listening — overriding to success (appPort=${alive.appPort})`);
+                    return {
+                        ...lastResult,
+                        ok: true,
+                        appPort: alive.appPort,
+                        apiVerdict: 'backend_listening',
+                        source: 'ai',
+                        warning: `agent reported ok:false but platform re-probe found backend ${alive.backendPort} listening (appPort ${alive.appPort}) — deployment accepted`,
+                        finalStderr: `[platform re-probe] backend is listening on ${alive.backendPort}${alive.frontendServed ? `, app served on ${alive.appPort}` : ' (no frontend page detected, using backend port)'} — agent's ok:false overridden. Original: ${lastResult.finalStderr || ''}`.slice(0, 4000),
+                        trail,
+                        messages: trimContext(messages),
+                        roundsUsed: round + 1,
+                    };
                 }
             }
             return { ...lastResult, appPort, apiVerdict, source: 'ai', warning: ok ? '' : 'verify agent reported failure', trail, messages: trimContext(messages), roundsUsed: round + 1 };
@@ -1298,6 +1367,18 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
             concreteStderr = probe.reason;
         } else {
             appPort = probe.port;
+        }
+    }
+    // 空转/超轮数兜底：agent 未给出 final（空转 break / 超轮），但项目有确定性后端证据、
+    // 后端端口在监听 → 判定后端已正常拉起（用户要求：检测不到接口时用端口监听判断）。
+    // appPort 取前端页面端口，避免 preview 隧道打到后端 API 端口。
+    if (!fallbackOk && backendEvidence && backendEvidence.hasBackend) {
+        const alive = await verifyBackendAlive(runtimeRef, workspacePath, [], plan, defaultPort);
+        if (alive) {
+            fallbackOk = true;
+            appPort = alive.appPort;
+            concreteStderr = `[platform re-probe] backend listening on ${alive.backendPort}, app served on ${alive.appPort} — accepted despite no agent final. ${concreteStderr || ''}`;
+            console.error(`[analyzeVerify] no agent final but backend port ${alive.backendPort} listening — overriding to success (appPort=${alive.appPort})`);
         }
     }
     const ok = lastResult ? lastResult.ok : fallbackOk;
