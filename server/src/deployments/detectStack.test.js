@@ -29,6 +29,7 @@ const {
     detectStack,
     detectBackendSignature,
     detectSystemDeps,
+    detectStartCandidates,
     validatePlanAgainstProject,
     _internal: {
         parsePortFromViteConfig,
@@ -869,4 +870,41 @@ test('detectSystemDeps: null path returns empty', () => {
     const r = detectSystemDeps(null);
     assert.deepEqual(r.services, []);
     assert.deepEqual(r.signals, []);
+});
+
+// ─── detectStartCandidates: 启动命令候选探测（多来源、启发式）───
+
+test('detectStartCandidates: finds go server start from dev.sh + Makefile + ports', () => {
+    const dir = makeProject({
+        'Makefile': 'dev:\n\tbash scripts/dev.sh\nstart:\n\t$(REQUIRE_ENV)\n',
+        'scripts/dev.sh': 'cd server && go run ./cmd/server) &\n',
+        'start-server.sh': 'PORT=8080 ./server\n',
+        'README.md': '## Run\n\ngo run ./cmd/server\nBackend on :8080\n',
+    });
+    try {
+        const r = detectStartCandidates(dir);
+        assert.ok(r.candidates.some((c) => c.cmd === 'go run ./cmd/server'), `candidates: ${JSON.stringify(r.candidates)}`);
+        assert.ok(r.candidates.some((c) => c.cmd === 'bash scripts/dev.sh'));
+        assert.ok(r.ports.includes(8080), `ports: ${r.ports.join(',')}`);
+        // 变量片段应被清理
+        assert.ok(!r.candidates.some((c) => c.cmd.startsWith('$(')));
+        // 命令尾部杂字符应被清理（go run ./cmd/server) → go run ./cmd/server）
+        assert.ok(!r.candidates.some((c) => /\)\s*$/.test(c.cmd)));
+    } finally { rm(dir); }
+});
+
+test('detectStartCandidates: finds node start script from package.json', () => {
+    const dir = makeProject({
+        'server/package.json': JSON.stringify({ scripts: { start: 'node index.js' }, dependencies: { express: '^4' } }),
+    });
+    try {
+        const r = detectStartCandidates(dir);
+        assert.ok(r.candidates.some((c) => c.cmd.includes('run start')));
+    } finally { rm(dir); }
+});
+
+test('detectStartCandidates: null path returns empty', () => {
+    const r = detectStartCandidates(null);
+    assert.deepEqual(r.candidates, []);
+    assert.deepEqual(r.ports, []);
 });

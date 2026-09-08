@@ -665,6 +665,23 @@ function buildSystemPrompt(plan, toolchain) {
         'Deploy plan to execute:',
         JSON.stringify(plan?.steps || [], null, 2),
         '',
+        // 启动命令候选（宿主侧启发式探测，可能不准）。verify 用候选起步；失败时按
+        // "重新探测协议"读项目文档（README / SELF_HOSTING / start-*.sh / Makefile run:
+        // / CLI --help）找真实启动命令，而不是对同一命令反复重试。
+        (() => {
+            const sc = plan?.context?.startCandidates;
+            const cands = Array.isArray(sc?.candidates) ? sc.candidates.filter((c) => c && c.cmd) : [];
+            const ports = Array.isArray(sc?.ports) ? sc.ports : [];
+            if (!cands.length && !ports.length) return '';
+            const lines = ['START COMMAND CANDIDATES (platform static scan — HEURISTIC, may be wrong or pick a dev/install command). Use as STARTING POINTS only:'];
+            for (const c of cands.slice(0, 6)) {
+                lines.push(`  - ${c.cmd}${c.port ? ` (port ${c.port})` : ''}  [from ${c.source || '?'}]`);
+            }
+            if (ports.length) lines.push(`PORT HINTS (candidates, from docs/configs): ${ports.join(', ')}`);
+            lines.push('RE-DISCOVERY PROTOCOL (MANDATORY when a start attempt fails): if the app or its backend does not come up (curl 5xx / connection refused / command not found / unknown command), DO NOT retry the same command or wander with ls/curl. Re-discover the REAL start command from the project: read README / SELF_HOSTING.md / start-*.sh / Makefile `run:`/`start:` target / `./<bin> --help`, and check where the frontend proxies /api (next.config rewrites / vite proxy target) to find the backend port. Then start it with the correct command and verify.');
+            lines.push('');
+            return lines.join('\n');
+        })(),
         (plan?.context?.successRun?.length
             ? [
                 'PREVIOUS SUCCESSFUL RUN (from the last successful deploy of this project — follow it to go fast, verify each step still works):',
@@ -910,6 +927,9 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
     // 泛化防重复：按"语义化命令签名"记录最近一次执行及其成败（agent 换日志文件名也拦得住）。
     // 同一条核心命令（install/build/start）已跑过且期间没有 edit_file → 阻止重复执行。
     const ranCmds = new Map();
+    // 失败命令重复计数：同一命令失败后又被重试的次数。≥2 时升级为"重新探测启动命令"
+    // 提醒（读项目文档/CLI --help 找真实启动命令），避免猜错命令后陷入重试循环。
+    const repeatFailCounts = new Map();
     let lastEditRound = -1;
     let lastNudgeRound = -1;
 // API 健康探测 nudge 计数：根路径 200 但 API 5xx（前端代理的后端没起）时，
@@ -1008,12 +1028,27 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                 if (prev && lastEditRound < prev.round) {
                     trail.push({ round, action: 'repeat_cmd', cmd: dupSig, prevOk: prev.ok });
                     const evidence = prev.evidence || '';
-                    messages.push({
-                        role: 'user',
-                        content: prev.ok
-                            ? `You already ran \`${dupSig}\` successfully earlier (round ${prev.round}) and have not edited any files since.${evidence} Do NOT re-run it. If its output is missing, read the build/dev script (package.json / scripts/*) to find where it outputs, then serve that; do not rebuild.`
-                            : `You already ran \`${dupSig}\` and it failed (round ${prev.round}), with no file edits since. Re-running the same command won't fix it. Inspect the previous error, fix the root cause (edit_file), or start the app / output final with the real reason.`,
-                    });
+                    if (!prev.ok) {
+                        // 同一失败命令再次出现：升级为"重新探测启动命令"强提醒（≥2 次重复失败）
+                        const fails = (repeatFailCounts.get(dupSig) || 0) + 1;
+                        repeatFailCounts.set(dupSig, fails);
+                        if (fails >= 2) {
+                            messages.push({
+                                role: 'user',
+                                content: `You have retried \`${dupSig}\` ${fails} times and it keeps failing (round ${prev.round}), with no file edits since. STOP retrying it. This is likely the WRONG start command (multica-style projects fail with "./server: No such file" or "unknown command" because the real entry point differs). RE-DISCOVER the real start command from the project: read README / SELF_HOSTING.md / start-*.sh / Makefile \`run:\`/\`start:\` target / \`./<binary> --help\`, and check next.config rewrites / vite proxy target for the backend port. Then start the app with the correct command.`,
+                            });
+                        } else {
+                            messages.push({
+                                role: 'user',
+                                content: `You already ran \`${dupSig}\` and it failed (round ${prev.round}), with no file edits since. Re-running the same command won't fix it. Inspect the previous error, fix the root cause (edit_file), or start the app / output final with the real reason.`,
+                            });
+                        }
+                    } else {
+                        messages.push({
+                            role: 'user',
+                            content: `You already ran \`${dupSig}\` successfully earlier (round ${prev.round}) and have not edited any files since.${evidence} Do NOT re-run it. If its output is missing, read the build/dev script (package.json / scripts/*) to find where it outputs, then serve that; do not rebuild.`,
+                        });
+                    }
                     prevToolSig = '';
                     repeatCount = 0;
                     continue;
@@ -1037,6 +1072,21 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
             const out = await runTool(parsed.tool, parsed.args || {}, runtimeRef, workspacePath);
             const toolMs = Date.now() - toolStart;
             console.error(`[analyzeVerify] round ${round}: tool ${parsed.tool} ${toolMs}ms dupSig=${dupSig} prevOk=${ranCmds.get(dupSig)?.ok} lastEditRound=${lastEditRound} out_len=${String(out).length}`);
+            // 启动命令报错检测：命令本身不存在/子命令错误（./server: No such file、unknown command
+            // "serve"、command not found 等）→ 立即提醒"重新探测启动命令"，避免 agent 换变体重试。
+            if (parsed.tool === 'run_shell') {
+                const cmdText = String(parsed.args?.cmd || parsed.args?.command || '');
+                const norm = cmdText.toLowerCase();
+                const isStartCmd = /(serve|start|daemon|run|dev)\b/.test(norm) && /(\.\/|\bgo\b|\bnpm\b|\bpnpm\b|\byarn\b|\bnode\b|\buvicorn\b|\bpython3?\b|\bcargo\b|java\s+-jar|nohup|setsid)/.test(norm);
+                const outText = String(out || '');
+                if (isStartCmd && /(no such file|not found|unknown command|is not a (valid )?command|command not found|no command named|exec format error)/i.test(outText)) {
+                    messages.push({
+                        role: 'user',
+                        content: `The start command you tried appears to be WRONG (the error mentions "No such file" / "unknown command" / "not found"). DO NOT retry it or its variants. RE-DISCOVER the REAL start command from the project: read README / SELF_HOSTING.md / start-*.sh / Makefile \`run:\`/\`start:\` target / \`./<binary> --help\`, and check next.config rewrites / vite proxy target to find the backend port. Then start the app with the correct command and verify.`,
+                    });
+                    messages = trimContext(messages);
+                }
+            }
             // 健康检查失败重试计数：检测健康检查类命令失败，防止 check -> build -> check 无限循环
             if (parsed.tool === 'run_shell') {
                 const norm = String(parsed.args?.cmd || '').toLowerCase();

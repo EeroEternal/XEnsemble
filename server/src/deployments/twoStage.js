@@ -3001,17 +3001,20 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         // 装 PG + 乱改源码，烧掉全部轮数）。一律调用 provisionPostgresIfNeeded，由它内部的
         // 沙箱 grep 权威判定（毫秒级，不需要 DB 时立即返回 not needed）。
         const provisionStart = Date.now();
-
         // 系统服务依赖探测（宿主侧确定性扫描）兜底 LLM 的 needsPostgres：LLM plan 漏判/走
         // fallback plan 时仍能命中需要 postgres 的项目，把安装提前到 verify 之前，
         // 避免 verify agent 现场 apt 试错卡死（实测 60 轮耗尽 → 部署失败）。
         let systemDeps = { services: [], signals: [] };
+        // 启动命令候选探测（启发式、可能不准）：注入 verify，失败时引导 agent 重新探测
+        // 项目文档找真实启动命令，避免猜错启动命令后陷入重复循环（multica 类项目实测）。
+        let startCandidates = { candidates: [], ports: [], hints: [] };
         try {
-            const { detectSystemDeps: detectSysDeps } = require('./detectStack');
+            const { detectSystemDeps: detectSysDeps, detectStartCandidates: detectStarts } = require('./detectStack');
             systemDeps = detectSysDeps(hostPath) || systemDeps;
+            startCandidates = detectStarts(hostPath) || startCandidates;
         } catch { /* 探测失败不阻塞 */ }
         const needsPg = Boolean(plan?.needsPostgres) || systemDeps.services.includes('postgres');
-        console.error(`[twoStage] project=${project.id} provision parallel START (needsPostgres=${needsPg}, systemDeps=${systemDeps.services.join(',') || 'none'})`);
+        console.error(`[twoStage] project=${project.id} provision parallel START (needsPostgres=${needsPg}, systemDeps=${systemDeps.services.join(',') || 'none'}, startCandidates=${startCandidates.candidates.length})`);
         const results = await Promise.allSettled([
             repairHostWorkspaceOwnership(hostPath), // host 侧 chown，同步快
             detectDepsCached(ref, wsPath, detected), // guest 侧 deps 探测（改动 2：传入 stack 选对应语言脚本）
@@ -3092,7 +3095,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             await injectGatewayBinary(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
         }
         // 改动 2：plan.context 同时存 depsCached (boolean, 向后兼容) + depsStatus (per-subpackage)
-        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, runtimeVersions: runtimeVersions.ran ? runtimeVersions : null, stack: { type: detected?.type, framework: detected?.framework }, systemDeps: systemDeps.services, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, successRun: plan._successRun || null } };
+        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, runtimeVersions: runtimeVersions.ran ? runtimeVersions : null, stack: { type: detected?.type, framework: detected?.framework }, systemDeps: systemDeps.services, startCandidates, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, successRun: plan._successRun || null } };
         delete plan._successRun;
         // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）。
         // 缓存策略：只缓存真正从 LLM 出的 plan（source='opencode'/'ai'）。detectStack 兜底

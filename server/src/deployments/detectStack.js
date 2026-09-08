@@ -997,6 +997,167 @@ function escapeRegExp(s) {
     return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// 启动命令候选探测（通用、多来源、启发式）
+//
+// 背景：verify agent 对"Go 单二进制 + monorepo + 自写启动脚本"类项目（如 multica）
+// 常猜错启动命令（./server、./multica serve 均不存在），健康检查 500 后陷入重复
+// 循环 60 轮耗尽。这里在宿主侧静态提取**启动命令候选**（可能不准——README 可能写
+// 安装命令、脚本可能是 dev 专用），verify 用候选起步，失败时按"重新探测协议"读
+// 项目文档（README/start-*.sh/Makefile/CLI --help）修正，而不是盲目重试。
+//
+// 覆盖来源（根 + 常见子目录）：
+//   1) 启动脚本 start-*.sh / run.sh / dev.sh / serve.sh 等 → 核心命令 + 端口
+//   2) Makefile 的 run:/start:/serve:/dev: target recipe + 端口
+//   3) README / SELF_HOSTING.md / README.md / CONTRIBUTING.md 的启动说明 + 端口
+//   4) next.config.* 的 rewrites destination / vite.config.* 的 proxy target → 后端端口
+//   5) docker-compose*.yml 的 ports → 应用端口
+//   6) 各子包 package.json scripts（dev/start/serve）→ 前端启动命令
+// ──────────────────────────────────────────────────────────────────────────
+
+const START_CMD_RE = /\b(go\s+run\s+\S+|\bnpm\s+run\s+(?:dev|start|serve|preview)|pnpm\s+run\s+(?:dev|start|serve|preview)|yarn\s+(?:dev|start|serve)|uvicorn\s+\S+|gunicorn\s+\S+|python3?\s+(?:app|main|manage|server|asgi|wsgi)\.py|cargo\s+run\b|java\s+-jar\s+\S+|mvn\s+spring-boot:run|gradle\s+bootRun|php\s+artisan\s+serve|\.\/[A-Za-z0-9_./-]+\s+(?:server|daemon|serve|start|api|web)\b|docker\s+compose\s+up\b|go\s+run\b|npm\s+(?:start|dev)\b|node\s+\S+\.js\b|bundle\s+exec\s+\S+)/gi;
+const PORT_RE = /(?::|--port[= ]+|PORT[=: ]+|port[=: ]+|listen[=: ]+)\s*(\d{4,5})\b/gi;
+
+// 从命令文本提取端口号（去重保序，最多 4 个）
+function extractPorts(text) {
+    const ports = [];
+    const seen = new Set();
+    for (const m of String(text || '').matchAll(PORT_RE)) {
+        const p = Number(m[1]);
+        if (p >= 1000 && p <= 65535 && !seen.has(p)) {
+            seen.add(p);
+            ports.push(p);
+            if (ports.length >= 4) break;
+        }
+    }
+    return ports;
+}
+
+function detectStartCandidates(hostWorkspacePath) {
+    const candidates = [];
+    const ports = new Set();
+    const hints = [];
+    if (!hostWorkspacePath) return { candidates, ports: [], hints };
+    const dir = hostWorkspacePath;
+    const seenCmd = new Set();
+    const addCandidate = (cmd, port, source) => {
+        // 清理尾部杂字符（脚本里的 `)`, `&`, `;`, `\`, `|`, 变量片段等），保留核心命令
+        const c = String(cmd || '')
+            .replace(/[)&\s;|\\]+$/, '')
+            .replace(/^(?:cd\s+[^&&|;]*\s*&&\s*)+/i, '')
+            .trim();
+        if (!c || c.length > 200 || c.startsWith('$(')) return;
+        if (seenCmd.has(c)) return;
+        seenCmd.add(c);
+        candidates.push({ cmd: c, port: port || null, source });
+        if (port) ports.add(port);
+    };
+    // 常见后端子目录：优先这些目录，其次根目录
+    const subdirs = ['.', 'server', 'api', 'backend', 'srv', 'cmd', 'apps/server', 'apps/api', 'apps/backend', 'packages/server', 'src/server'];
+    const relevantDirs = subdirs.filter((s) => s === '.' || fs.existsSync(path.join(dir, s)));
+    try {
+        // 一层真实子目录（覆盖 apps/*, packages/* 等动态目录）
+        for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (ent.isDirectory() && !ent.name.startsWith('.') && !['node_modules', '.git', 'dist', 'build', 'target', 'out'].includes(ent.name)) {
+                relevantDirs.push(ent.name);
+            }
+        }
+    } catch { /* ignore */ }
+
+    for (const sub of relevantDirs) {
+        const subDir = sub === '.' ? dir : path.join(dir, sub);
+        let entries;
+        try { entries = fs.readdirSync(subDir, { withFileTypes: true }); } catch { continue; }
+        const files = entries.filter((e) => e.isFile()).map((e) => e.name);
+
+        // 1) 启动脚本
+        for (const f of files) {
+            if (!/^(start|run|serve|dev)[^/]*\.sh$|^start-server\.sh$|^entrypoint\.sh$/i.test(f)) continue;
+            const text = readTextSafe(path.join(subDir, f)) || '';
+            for (const m of text.matchAll(START_CMD_RE)) {
+                addCandidate(m[0], null, `${sub}/${f}`);
+            }
+            for (const p of extractPorts(text)) {
+                ports.add(p);
+                hints.push(`port ${p} in ${sub}/${f}`);
+            }
+        }
+        // 2) Makefile run/start/serve/dev target
+        if (files.includes('Makefile')) {
+            const mk = readTextSafe(path.join(subDir, 'Makefile')) || '';
+            for (const target of ['run', 'start', 'serve', 'dev']) {
+                const m = mk.match(new RegExp(`^${target}\\s*:\\s*([^\\n]+)`, 'm'));
+                if (m) {
+                    const recipe = m[1].trim().replace(/^@/, '').replace(/\s+&&\s+.*$/, '');
+                    addCandidate(recipe, null, `${sub}/Makefile (${target}:)`);
+                }
+            }
+            for (const p of extractPorts(mk)) {
+                ports.add(p);
+                hints.push(`port ${p} in ${sub}/Makefile`);
+            }
+        }
+        // 3) README / SELF_HOSTING / CONTRIBUTING 启动说明
+        const docFile = files.find((f) => /^(README|SELF_HOSTING|SELF-HOSTING|CONTRIBUTING|QUICKSTART)\.(md|mdx|txt)$/i.test(f));
+        if (docFile) {
+            const doc = readTextSafe(path.join(subDir, docFile)) || '';
+            // 取包含启动模式的整行（避免断行），限 10 条
+            const lines = doc.split('\n');
+            let found = 0;
+            for (let i = 0; i < lines.length && found < 10; i++) {
+                const line = lines[i].trim();
+                if (!line || line.startsWith('#')) continue;
+                const m = line.match(START_CMD_RE);
+                if (m) {
+                    // 跳过"安装/克隆"类说明（含有 install/git clone/pip install）
+                    if (/\b(install|clone|add|setup)\b/i.test(line) && !/\b(run|start|serve)\b/i.test(line)) continue;
+                    addCandidate(m[0], null, `${sub}/${docFile}`);
+                    found++;
+                }
+            }
+            for (const p of extractPorts(doc)) {
+                ports.add(p);
+                hints.push(`port ${p} in ${sub}/${docFile}`);
+            }
+        }
+        // 4) next.config rewrites destination / vite proxy target
+        for (const f of files) {
+            if (!/^next\.config\.[cm]?[jt]s$/.test(f) && !/^vite\.config\.[cm]?[jt]s$/.test(f)) continue;
+            const cfg = readTextSafe(path.join(subDir, f)) || '';
+            for (const p of extractPorts(cfg)) {
+                ports.add(p);
+                hints.push(`port ${p} in ${sub}/${f} (frontend proxy/backend target)`);
+            }
+        }
+        // 5) docker-compose ports
+        for (const f of files) {
+            if (!/^docker-compose.*\.ya?ml$/.test(f)) continue;
+            const dc = readTextSafe(path.join(subDir, f)) || '';
+            for (const p of extractPorts(dc)) {
+                ports.add(p);
+                hints.push(`port ${p} in ${sub}/${f}`);
+            }
+        }
+        // 6) package.json dev/start/serve scripts（子包启动入口）
+        if (files.includes('package.json')) {
+            const pkg = readJsonSafe(path.join(subDir, 'package.json'));
+            const scripts = pkg?.scripts || {};
+            for (const name of ['dev', 'start', 'serve', 'preview']) {
+                if (scripts[name]) {
+                    addCandidate(`cd ${sub === '.' ? '.' : sub} && <pm> run ${name}`, null, `${sub}/package.json (scripts.${name})`);
+                    break;
+                }
+            }
+        }
+    }
+    // 汇总端口：常见默认端口兜底（不重复已有）
+    for (const p of [3000, 8080, 8000, 5173, 5000, 4000, 3001]) {
+        if (!ports.has(p)) ports.add(p);
+    }
+    const portList = [...ports].filter((p) => p >= 1000 && p <= 65535).slice(0, 8);
+    return { candidates: candidates.slice(0, 8), ports: portList, hints: hints.slice(0, 8) };
+}
+
 // 后端签名确定性扫描：毫秒级、纯文件读取，为阶段 A 提供权威后端证据。
 // 目的：LLM 把带后端的项目误判成纯前端静态站时，self-check 能依据这里的证据拦截。
 const BACKEND_DIR_CANDIDATES = [
@@ -1297,6 +1458,7 @@ module.exports = {
     readTextSafe,
     detectNativeDeps,
     detectSystemDeps,
+    detectStartCandidates,
     normalizeCmdForCompare,
     // Internal helpers exposed for tests.
     _internal: {
