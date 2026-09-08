@@ -34,25 +34,39 @@ function hostGit(cwd, args, options = {}) {
         });
         let stdout = '';
         let stderr = '';
+        let settled = false;
         const timer = setTimeout(() => {
             child.kill('SIGKILL');
-            reject(new Error(`git ${args[0]} timed out`));
+            finish(reject, new Error(`git ${args[0]} timed out`));
         }, options.timeoutMs || 30_000);
+        const finish = (fn, value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            fn(value);
+        };
         child.stdout.on('data', (d) => { stdout += d; });
         child.stderr.on('data', (d) => { stderr += d; });
-        child.on('error', (err) => {
-            clearTimeout(timer);
-            reject(err);
-        });
+        child.on('error', (err) => finish(reject, err));
         child.on('close', (code) => {
-            clearTimeout(timer);
             if (code !== 0) {
                 const err = new Error(`git ${args[0]} failed: ${stderr || stdout}`);
                 err.exitCode = code;
-                reject(err);
+                finish(reject, err);
                 return;
             }
-            resolve({ exitCode: 0, stdout, stderr });
+            finish(resolve, { exitCode: 0, stdout, stderr });
+        });
+        // 'close' 等 stdio 流关闭才触发；git 会 fork git-remote-https 等子进程，
+        // 主进程退出后孙进程仍持有管道会导致 close 永不到来、Promise 永久 pending
+        // （表现为 clone 状态卡死）。exit 后给 1s 收尾窗口兜底。
+        child.on('exit', (code) => {
+            setTimeout(() => {
+                if (settled) return;
+                const err = new Error(`git ${args[0]} exited (code ${code}) but stdio pipes stayed open`);
+                err.exitCode = code ?? 1;
+                finish(reject, err);
+            }, 1000);
         });
     });
 }

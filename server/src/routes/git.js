@@ -563,6 +563,8 @@ function registerGitRoutes(fastify) {
             // Legacy GitHub-specific fields for backward compat
             githubRepoId: providerName === 'github' ? Number(effectiveRepoInfo.id) || null : null,
             githubFullName: providerName === 'github' ? (effectiveRepoInfo.fullName || repo_full_name) : null,
+            // 多仓库布局标记：后续 git 路由按此路由到 primary/指定 repo
+            workspaceMode: primaryRepo ? 'git_multi' : 'git',
             currentBranch,
             cloneStatus: 'cloning',
             createdAt,
@@ -741,19 +743,19 @@ function registerGitRoutes(fastify) {
                 request.user.id,
                 request.body?.session_id || request.query?.session_id,
             );
-            // 多仓库：默认路由 primary repo（repo_id 可显式指定）
+            // 多仓库：布局标记为 git_multi 时默认路由 primary repo（repo_id 可显式指定）
             let repoSubPath = null;
-            try {
+            if (project.workspaceMode === 'git_multi') {
                 const repoRows = await db.select().from(schema.projectRepos)
                     .where(eq(schema.projectRepos.projectId, project.id));
-                if (repoRows.length > 1) {
+                if (repoRows.length > 0) {
                     const repoId = request.body?.repo_id || request.query?.repo_id || null;
                     const target = (repoId && repoRows.find((r) => r.id === repoId))
                         || repoRows.find((r) => r.isPrimary)
                         || repoRows[0];
                     repoSubPath = target.subPath;
                 }
-            } catch { /* 容错：无 project_repos 表/行时走根目录 */ }
+            }
             const gitOperationService = new GitOperationService({ runtimeId, repoSubPath });
             const mergeRequestService = new MergeRequestService({ gitOperationService });
             const record = await mergeRequestService.create(

@@ -28,15 +28,23 @@ async function resolveRuntimeId(userId, sessionId) {
 }
 
 /**
- * 多仓库路由：多 repo 项目（project_repos > 1 行）默认路由到 primary repo；
- * repo_id（query/body）可显式指定。单 repo / 无记录 → null（根目录原逻辑）。
+ * 多仓库路由：仅布局标记为 git_multi 的项目按 project_repos 路由
+ * （默认 primary；repo_id query/body 可显式指定）。
+ * 其余（单仓库 / 无记录 / 行删除后剩 1 行）一律 null → 根目录原逻辑。
+ * 布局标记在 import-git 多仓库导入时写入 projects.workspace_mode，
+ * 避免"按当前行数推断"在 repo 增删后产生歧义。
  */
 async function resolveRepoSubPath(projectId, request) {
     if (!projectId) return null;
     try {
+        const pRows = await db.select({ workspaceMode: schema.projects.workspaceMode })
+            .from(schema.projects)
+            .where(eq(schema.projects.id, projectId))
+            .limit(1);
+        if (pRows[0]?.workspaceMode !== 'git_multi') return null;
         const rows = await db.select().from(schema.projectRepos)
             .where(eq(schema.projectRepos.projectId, projectId));
-        if (!rows || rows.length <= 1) return null;
+        if (!rows || rows.length === 0) return null;
         const repoId = request.query?.repo_id || request.body?.repo_id || null;
         const target = (repoId && rows.find((r) => r.id === repoId))
             || rows.find((r) => r.isPrimary)

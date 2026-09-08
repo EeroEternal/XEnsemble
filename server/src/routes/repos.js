@@ -66,17 +66,26 @@ function registerRepoRoutes(fastify, deps = {}) {
       });
     }
     try {
-      const repo = await svc.addRepo({
-        projectId: project.id,
-        role: body.role || 'custom',
-        subPath: body.sub_path,
-        repoProvider: body.repo_provider || 'url',
-        repoUrl: body.repo_url,
-        repoDefaultBranch: body.repo_default_branch || 'main',
-        isPrimary: !!body.is_primary,
-        remoteRepoId: body.remote_repo_id || null,
-        remoteFullName: body.remote_full_name || null,
-      });
+      // 重试语义：同 sub_path 已存在且 clone 失败/中断 → 复用行重新 clone；
+      // 其余情况仍走唯一索引 409
+      const existing = await svc.getBySubPath(project.id, body.sub_path);
+      let repo;
+      if (existing && ['failed', 'interrupted'].includes(existing.cloneStatus)) {
+        await svc.updateCloneStatus(existing.id, 'cloning', null);
+        repo = { ...existing, cloneStatus: 'cloning', cloneError: null };
+      } else {
+        repo = await svc.addRepo({
+          projectId: project.id,
+          role: body.role || 'custom',
+          subPath: body.sub_path,
+          repoProvider: body.repo_provider || 'url',
+          repoUrl: body.repo_url,
+          repoDefaultBranch: body.repo_default_branch || 'main',
+          isPrimary: !!body.is_primary,
+          remoteRepoId: body.remote_repo_id || null,
+          remoteFullName: body.remote_full_name || null,
+        });
+      }
       // 异步触发 clone（best-effort，状态回写 project_repos.clone_status）
       if (body.repo_url) {
         const { multiRepoClone } = require('../repos/multiRepoClone');

@@ -101,6 +101,40 @@ test('POST /api/v1/projects/:id/repos 重复 sub_path 409', async () => {
   assert.equal(res.statusCode, 409);
 });
 
+test('POST /api/v1/projects/:id/repos failed 行重试复用（不 409）', async () => {
+  // 收割任务会把中断的行置 failed；同名重新 POST 应复用该行重新 clone
+  const res = await fastify.inject({
+    method: 'POST', url: '/api/v1/projects/p1/repos',
+    payload: { sub_path: 'retry-me', repo_url: 'https://x.com/a.git' },
+  });
+  assert.equal(res.statusCode, 201);
+  await fastify.inject({
+    method: 'POST', url: '/api/v1/projects/p1/repos',
+    payload: { sub_path: 'retry-me', repo_url: 'https://x.com/a.git' },
+  }); // 进入 cloning（非 failed）
+  const res2 = await fastify.inject({
+    method: 'POST', url: '/api/v1/projects/p1/repos',
+    payload: { sub_path: 'retry-me', repo_url: 'https://x.com/a.git' },
+  });
+  assert.equal(res2.statusCode, 409); // cloning 中仍 409
+
+  // 手动置 failed → 再次 POST 应复用行返回 201
+  const { db, schema } = ctx;
+  const { eq } = require('drizzle-orm');
+  await db.update(schema.projectRepos)
+    .set({ cloneStatus: 'failed', cloneError: 'import interrupted' })
+    .where(require('drizzle-orm').and(
+      require('drizzle-orm').eq(schema.projectRepos.projectId, 'p1'),
+      require('drizzle-orm').eq(schema.projectRepos.subPath, 'retry-me'),
+    ));
+  const res3 = await fastify.inject({
+    method: 'POST', url: '/api/v1/projects/p1/repos',
+    payload: { sub_path: 'retry-me', repo_url: 'https://x.com/a.git' },
+  });
+  assert.equal(res3.statusCode, 201);
+  assert.equal(JSON.parse(res3.body).repo.cloneStatus, 'cloning');
+});
+
 test('GET /api/v1/projects/:id/repos 列表', async () => {
   const res = await fastify.inject({
     method: 'GET', url: '/api/v1/projects/p1/repos',
