@@ -1045,19 +1045,6 @@ function goVersionSatisfies(current, required) {
     return a3 >= b3;
 }
 
-// Go 版本排序比较：a > b 返回正数，a < b 返回负数（供 sort 取最高版本）。
-function compareGoVersions(a, b) {
-    const parse = (v) => {
-        const m = String(v || '').match(/(\d+)\.(\d+)(?:\.(\d+))?/);
-        return m ? [Number(m[1]), Number(m[2]), Number(m[3] || 0)] : [0, 0, 0];
-    };
-    const [a1, a2, a3] = parse(a);
-    const [b1, b2, b3] = parse(b);
-    if (a1 !== b1) return a1 - b1;
-    if (a2 !== b2) return a2 - b2;
-    return a3 - b3;
-}
-
 // Go 工具链版本预检与平台预装：go.mod 要求的版本高于沙箱已装版本时（如要求 go 1.26
 // 而沙箱是 apt 的 1.19/1.22），agent 只能反复试错——实测 multica（AgentHarness）verify
 // 烧掉 30+ 分钟在「apt 装旧 Go → 降级 go.mod → 编译失败 → 恢复重来」循环上。
@@ -1071,21 +1058,15 @@ async function ensureGuestGoToolchain({ runtimeRef, workspacePath, hostWorkspace
     const PATH_PREFIX = 'export PATH="/usr/local/bin:$PATH"; ';
     log(`[ensureGuestGoToolchain] START hostWorkspacePath=${hostWorkspacePath}`);
     try {
-        // 1) 读 go.mod 要求版本（宿主侧纯文件读取；无 go.mod → 非 Go 项目跳过）。
-        //    只读根 go.mod 会漏掉 monorepo 子目录的 Go 服务（AgentHarness/multica 实测：
-        //    根无 go.mod，server/go.mod 要求 1.26.1 → 预装被跳过 → verify agent 现场试错
-        //    30+ 轮还降级 go.mod）。扫描根 + 常见 Go 后端子目录，取最高版本要求。
+        // 1) 读 go.mod 要求版本：复用 findVersionFile 深度扫描（MAX_SEARCH_DEPTH=3，任意
+        //    目录结构都覆盖），而非硬编码根/常见子目录。AgentHarness/multica 的 Go 服务在
+        //    server/ 子目录，只读根 go.mod 会漏检 → 预装跳过 → verify agent 现场试错 30+ 轮
+        //    还降级 go.mod 污染源码。
         let required = null;
         if (hostWorkspacePath) {
-            const { readTextSafe } = require('./detectStack');
-            const requiredVersions = [];
-            for (const rel of ['', 'server', 'api', 'backend', 'cmd']) {
-                const gomod = String(readTextSafe(path.join(hostWorkspacePath, rel, 'go.mod')) || '');
-                const m = gomod.match(/^go\s+(\d+\.\d+(?:\.\d+)?)/m);
-                if (m) requiredVersions.push(m[1]);
-            }
-            if (requiredVersions.length) {
-                required = requiredVersions.sort((a, b) => compareGoVersions(a, b)).pop();
+            const found = await findVersionFile(hostWorkspacePath, 'go');
+            if (found.found) {
+                required = String(found.content).match(/^go\s+(\d+\.\d+(?:\.\d+)?)/m)?.[1] || null;
             }
         }
         if (!required) return { ran: false };
