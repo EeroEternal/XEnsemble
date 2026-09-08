@@ -429,7 +429,25 @@ Desktop Client 或 Self-Hosted Server 使用 **Local Runtime Provider**，Agent/
 
 ---
 
-## 14. 相关文档
+## 14. 多仓库项目（Multi-Repo Project）
+
+为支持前后端分离 / 多服务编排，项目层支持导入多个独立 Git 仓库（1 个 project ↔ N 条 `project_repos`）。规范：
+
+| 维度 | 约定 |
+|------|------|
+| 数据层 | `projects` 保留主 repo 字段（兼容）；`project_repos` 一对多子表（`sub_path` 唯一、`is_primary` 应用层保证唯一），迁移 `server/drizzle/0023_project_repos.sql` 含存量 projects 幂等回填 |
+| 布局 | **仅 repos > 1 的项目使用子目录布局**（`projectDir/<subPath>`）；单 repo / 存量项目一律根目录原逻辑 |
+| Runtime | BoxLite `ensureReady` 接受 `repos`：多 repo 时为每 repo 建 worktree（分支 `agentharness/session-<runtimeId>-<subPath>`），host 挂 worktree 根目录单卷，guest `/workspace/<subPath>` 各 repo 可见；gitVolume 指向 primary repo 的 `.git` |
+| Git | `GitOperationService` 接受 `repoSubPath`；git 路由（projectGit 全族 / merge-requests）按 `project_repos` 解析：多 repo 默认 primary，`repo_id` 可显式指定 |
+| 导入 | `POST /import-git` 接受 `repos[]`（`repo_url` / `repo_full_name` 两种模式），1 个 project + N 条 `project_repos`，primary 走完整流程（runtime + clone + work branch + scaffold），secondary 并发 clone；Web 端在现有 RepoImportDialog 勾选多仓库（同 full_name 前缀锁定组），Session 启动流程不变 |
+| Preview | `spec.previews[]` 多入口（`MultiRepoDeploymentSpec` 归一化 + path 前缀最长匹配，未命中回退 isPrimary 或 404）；twoStage 多实例注册联动为后续任务 |
+| 前端 | 文件树 `MultiRootFileTree`（tabs，primary 默认选中；单 repo 回退原树）；FS API 无需改动（`<subPath>/...` 在 jail 内天然合法） |
+
+实现计划与任务分解见 `docs/superpowers/plans/2026-09-04-multi-repo-project.md`。
+
+---
+
+## 15. 相关文档
 
 - 客户端 API：`docs/ApiClient.md`
 - 用户/配额：`docs/UserManagement.md`
