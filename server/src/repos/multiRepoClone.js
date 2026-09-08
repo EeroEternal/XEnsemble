@@ -30,51 +30,67 @@ function withTimeout(promiseFactory, ms, label) {
 async function clonePrimary(project, primary, opts) {
     const { baseBranch, workBranchName, autoCreateBranch } = opts;
     const svc = new ProjectRepoService({ db, projectReposTable: schema.projectRepos });
+    const stage = (msg) => console.log(`[multiRepoClone] ${project.id}/${primary.subPath}: ${msg}`);
     try {
         await withTimeout(async () => {
+            let t = Date.now();
             const { ensureProjectRuntime } = require('../runtime/RuntimeService');
             const primarySvc = new GitOperationService({ repoSubPath: primary.subPath });
+            stage(`runtime provision start`);
             const ready = await ensureProjectRuntime(project);
+            stage(`runtime provision done in ${Date.now() - t}ms`);
             // Update the in-memory project object so that subsequent
             // _execGit -> ensureProjectRuntime calls use the fast path.
             if (ready?.runtime?.id) {
                 project.defaultRuntimeId = ready.runtime.id;
             }
+            t = Date.now();
             await primarySvc.cloneRepo(project, {
                 repoUrl: primary.cloneUrl,
                 branch: baseBranch || primary.repoDefaultBranch || 'main',
             });
+            stage(`clone done in ${Date.now() - t}ms`);
             if (autoCreateBranch && workBranchName) {
+                t = Date.now();
                 await primarySvc.createBranch(project, workBranchName, baseBranch || primary.repoDefaultBranch || 'main');
+                stage(`work branch done in ${Date.now() - t}ms`);
             }
             // scaffold 写 primary 仓库根（多仓库布局下 projectDir 根不是 git 仓，
             // autoCommitOnExit 的 git 提交只对 <subPath> 仓库有意义）
             const { scaffoldXEnsembleWithFs } = require('../repositories/RepositoryEnvironmentService');
             const scaffoldRoot = path.join(ready.hostWorkspacePath || ready.workspacePath, primary.subPath);
+            t = Date.now();
             await scaffoldXEnsembleWithFs(scaffoldRoot, {
                 baseBranch: baseBranch || primary.repoDefaultBranch || 'main',
                 autoCommitOnExit: true,
             });
+            stage(`scaffold done in ${Date.now() - t}ms`);
         }, CLONE_TIMEOUT_MS, `primary repo "${primary.subPath}" clone`);
         await svc.updateCloneStatus(primary.id, 'ready', null);
     } catch (err) {
-        await svc.updateCloneStatus(primary.id, 'failed', err.message);
+        stage(`FAILED: ${err?.message || err}`);
+        await svc.updateCloneStatus(primary.id, 'failed', err?.message || String(err));
     }
 }
 
 async function cloneSecondary(project, repo) {
     const svc = new ProjectRepoService({ db, projectReposTable: schema.projectRepos });
     const opSvc = new GitOperationService({ repoSubPath: repo.subPath });
+    const stage = (msg) => console.log(`[multiRepoClone] ${project.id}/${repo.subPath}: ${msg}`);
     try {
         await withTimeout(async () => {
+            const t = Date.now();
+            stage(`clone start`);
             await opSvc.cloneRepo(project, {
                 repoUrl: repo.cloneUrl,
                 branch: repo.repoDefaultBranch || 'main',
             });
+            stage(`clone done in ${Date.now() - t}ms`);
         }, CLONE_TIMEOUT_MS, `repo "${repo.subPath}" clone`);
         await svc.updateCloneStatus(repo.id, 'ready', null);
     } catch (err) {
-        await svc.updateCloneStatus(repo.id, 'failed', err.message);
+        stage(`FAILED: ${err?.message || err}`);
+        await svc.updateCloneStatus(repo.id, 'failed', err?.message || String(err));
     }
 }
 
