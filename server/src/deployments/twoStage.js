@@ -50,7 +50,7 @@ async function aptSafeInstall({ runtime, runtimeRef, workspacePath, packages, on
         await runtime.exec.exec('sh', ['-c', `${APT_CLEAR_LOCKS}`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => {});
         const t = Math.floor(timeoutMs / 1000);
         const updateT = Math.min(120, t); // update 独立短超时，避免镜像源卡住拖死 install
-        const cmd = `export DEBIAN_FRONTEND=noninteractive; (timeout ${updateT} apt-get update -qq ${APT_SAFE_FLAGS} 2>&1 | tail -8; timeout ${t} apt-get install -y -qq ${APT_SAFE_FLAGS} ${packages} 2>&1 | tail -20; ec=$?; echo "__APT_EXIT__=${ec}")`;
+        const cmd = `export DEBIAN_FRONTEND=noninteractive; (timeout ${updateT} apt-get update -qq ${APT_SAFE_FLAGS} 2>&1 | tail -8; timeout ${t} apt-get install -y -qq ${APT_SAFE_FLAGS} ${packages} 2>&1 | tail -20; ec=$?; echo "__APT_EXIT__=\${ec}")`;
         const r = await runtime.exec.exec('sh', ['-c', cmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: timeoutMs + 30000 });
         const out = String(r.stdout || '');
         const m = out.match(/__APT_EXIT__=(-?\d+)/);

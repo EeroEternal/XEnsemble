@@ -68,12 +68,15 @@ function buildOpencodeConfig() {
     // 让 opencode 探索时跳过依赖/构建产物目录：agent 只需读源码生成计划，
     // node_modules/.pnpm-store 等动辄数百 MB、几万文件，遍历会让分析超时
     // （AgentHarness monorepo 实测：stage A opencode 卡满 480s 超时）。
+    // 注意：ignore 条目只能用简单 gitignore 语法（`node_modules` / `**/node_modules`）。
+    // 带尾部 `/**` 的 glob（如 `**/node_modules/**`）会让 opencode 1.18.x 的 server
+    // 解析崩溃（UnknownError: Unexpected server error），实测后去除。
     const ignore = [
-        '**/node_modules/**', '**/.pnpm-store/**', '**/.git/**',
-        '**/dist/**', '**/build/**', '**/.next/**', '**/out/**', '**/coverage/**',
-        '**/target/**', '**/__pycache__/**', '**/.venv/**', '**/venv/**',
-        '**/.cache/**', '**/.turbo/**', '**/.nx/**', '**/.yarn/**', '**/.pnp.*',
-        '**/pnpm-lock.yaml', '**/package-lock.json', '**/yarn.lock',
+        'node_modules', '**/node_modules', '.pnpm-store', '**/.pnpm-store',
+        '.git', 'dist', 'build', '.next', 'out', 'coverage',
+        'target', '__pycache__', '.venv', 'venv',
+        '.cache', '.turbo', '.nx', '.yarn', '.pnp.*',
+        'pnpm-lock.yaml', 'package-lock.json', 'yarn.lock',
     ];
     return {
         provider: {
