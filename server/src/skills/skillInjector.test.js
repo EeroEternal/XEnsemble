@@ -269,7 +269,6 @@ test('getSkillTargets resolves instructionFile + nativeSkillDirs per agent', () 
     assert.deepEqual(defs.getSkillTargets('qwen-code').nativeSkillDirs, ['.qwen/skills']);
     assert.deepEqual(defs.getSkillTargets('codebuddy').nativeSkillDirs, ['.codebuddy/skills']);
     assert.deepEqual(defs.getSkillTargets('kimi-code').nativeSkillDirs, ['.kimi-code/skills']);
-    assert.deepEqual(defs.getSkillTargets('qoder').nativeSkillDirs, ['.qoder/r/s/skills']);
     assert.deepEqual(defs.getSkillTargets('opencode').nativeSkillDirs, ['.opencode/skills', '.agents/skills']);
     assert.deepEqual(defs.getSkillTargets('pi').nativeSkillDirs, ['.pi/skills']);
     // 未确认的 Agent → 空数组（AGENTS.md 兜底）

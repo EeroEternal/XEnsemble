@@ -147,7 +147,7 @@ const DEFAULT_AGENTS = [
         cmd: 'cline',
         args: ['-i'],
         env_required: ['ANTHROPIC_API_KEY'],
-        userSkillDirs: ['.claude/skills'],
+        userSkillDirs: ['.cursor/skills', '.claude/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'CLINE_DATA_DIR',
@@ -186,6 +186,7 @@ const DEFAULT_AGENTS = [
         cmd: 'droid',
         args: [],
         env_required: [],
+        nativeSkillDirs: ['.factory/skills'],
         userSkillDirs: ['.factory/skills'],
         resume: {
             level: 'L2',
@@ -217,6 +218,7 @@ const DEFAULT_AGENTS = [
         cmd: 'zai',
         args: [],
         env_required: [],
+        userSkillDirs: ['.claude/skills'],
         resume: {
             level: 'L2',
             redirectHome: true,
@@ -250,56 +252,6 @@ const DEFAULT_AGENTS = [
                     watchDebounceMs: 300,
                     enableHistory: true,
                     apiKey: '',
-                }, null, 2),
-            }],
-        },
-    },
-    {
-        id: 'qoder',
-        name: 'Qoder CLI',
-        cmd: 'qodercli',
-        args: [],
-        env_required: ['QODER_PERSONAL_ACCESS_TOKEN'],
-        // 0021：原生技能目录（.qoder/r/s/skills，官方确认）
-        nativeSkillDirs: ['.qoder/r/s/skills'],
-        userSkillDirs: ['.qoder/skills'],
-        resume: {
-            level: 'L2',
-            stateArgs: ['--config-dir'],
-            resumeArgs: ['--continue'],
-            resumeCheckSubdir: 'logs/sessions',
-        },
-        configSchema: {
-            configFiles: [{
-                path: '${STATE_DIR}/settings.json',
-                format: 'json',
-                label: 'settings.json',
-                description: 'Qoder CLI 配置文件（Provider、模型、权限等）',
-                example: JSON.stringify({
-                    general: {
-                        enableAutoUpdate: false,
-                    },
-                    model: 'openai/gpt-4o',
-                    permissions: {
-                        allow: ['Bash(git:*)', 'Read(//**)'],
-                        deny: [],
-                    },
-                    providers: {
-                        'openai': {
-                            baseUrl: 'https://api.openai.com/v1',
-                            apiKey: 'sk-xxxx',
-                            displayName: 'OpenAI',
-                            model: 'gpt-4o',
-                            maxOutputTokens: 8192,
-                            models: [
-                                {
-                                    model: 'gpt-4o',
-                                    displayName: 'GPT-4o',
-                                    maxOutputTokens: 8192,
-                                },
-                            ],
-                        },
-                    },
                 }, null, 2),
             }],
         },
@@ -430,6 +382,7 @@ const DEFAULT_AGENTS = [
         cmd: 'hermes',
         args: ['chat'],
         env_required: [],
+        nativeSkillDirs: ['skills'],
         userSkillDirs: ['.hermes/skills'],
         resume: {
             level: 'L2',

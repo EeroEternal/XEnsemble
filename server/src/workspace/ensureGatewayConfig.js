@@ -10,7 +10,6 @@ const { guessContextLength } = require('../llm/modelContext');
 const GATEWAY_CONFIG_AGENTS = new Set([
     'qwen-code',
     'droid',
-    'qoder',
     'openclaw',
     'minimax-cli',
     'pi',
@@ -70,32 +69,6 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                     compactionTokenLimitPerModel: Object.fromEntries(
                         targets.map((t) => [t, guessContextLength(t)]),
                     ),
-                }, null, 2),
-            };
-
-        case 'qoder':
-            return {
-                dirPath: stateDirPath,
-                filePath: `${stateDirPath}/settings.json`,
-                content: JSON.stringify({
-                    general: { enableAutoUpdate: false },
-                    model: `gateway/${def}`,
-                    providers: {
-                        gateway: {
-                            baseUrl: routerUrl,
-                            apiKey: sessionToken,
-                            displayName: 'XEnsemble Gateway',
-                            model: def,
-                            type: 'openai-compatible',
-                            maxOutputTokens: 8192,
-                            models: targets.map((t) => ({
-                                model: t,
-                                displayName: t,
-                                contextWindow: guessContextLength(t),
-                                maxOutputTokens: 8192,
-                            })),
-                        },
-                    },
                 }, null, 2),
             };
 
