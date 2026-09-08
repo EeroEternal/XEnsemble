@@ -828,7 +828,11 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
     // build ×3 ≈ 10 分钟）。平台命令统一预置 3GB 堆上限（DEPLOY_NODE_MAX_OLD_SPACE_MB
     // 可覆盖）；agent 侧由 analyzeVerify 的 run_shell 同步预置。
     const nodeMb = Number(process.env.DEPLOY_NODE_MAX_OLD_SPACE_MB) || 3072;
-    const PATH_PREFIX = `export PATH="/usr/local/bin:$PATH"; export NODE_OPTIONS="--max-old-space-size=${nodeMb}"; `;
+    // electron 二进制走 npmmirror（.npmrc 也写了 electron_mirror，这里再注入环境变量
+    // 双保险——corepack pnpm 或 electron-builder install-app-deps 可能不读 .npmrc）
+    const ELECTRON_MIRROR = 'https://npmmirror.com/mirrors/electron/';
+    const ELECTRON_BUILDER_BINARIES_MIRROR = 'https://npmmirror.com/mirrors/electron-builder-binaries/';
+    const PATH_PREFIX = `export PATH="/usr/local/bin:$PATH"; export NODE_OPTIONS="--max-old-space-size=${nodeMb}"; export ELECTRON_MIRROR=${ELECTRON_MIRROR}; export ELECTRON_BUILDER_BINARIES_MIRROR=${ELECTRON_BUILDER_BINARIES_MIRROR}; `;
     // install 根命令单独超时：大 monorepo 冷装（multica 245 子包全量下载 + store 首写）
     // 实测 9-10 分钟，600s 默认会截断——且失败连锁严重（agent 再装 ~5min / npm fallback
     // 覆盖不齐导致子包缺失）。
@@ -2043,6 +2047,10 @@ for f in /etc/apt/sources.list.d/*.sources; do
 done
 # 2) npm / pnpm registry
 printf 'registry=https://registry.npmmirror.com\\n' > /root/.npmrc 2>/dev/null || true
+# electron 二进制默认从 github releases 下载（国内网络卡死，实测 AgentHarness monorepo
+# 的 apps/desktop 使 pnpm install 卡满 20 分钟超时）；.npmrc 的 electron_mirror 会被
+# electron/@electron/get 读取，走 npmmirror 镜像
+printf 'electron_mirror=https://npmmirror.com/mirrors/electron/\\n' >> /root/.npmrc 2>/dev/null || true
 # pnpm 专用配置：corepack pnpm 可能不读取 /root/.npmrc，显式写 pnpm config
 if command -v pnpm >/dev/null 2>&1 || command -v corepack >/dev/null 2>&1; then
   pnpm config set registry https://registry.npmmirror.com --global 2>/dev/null || true
