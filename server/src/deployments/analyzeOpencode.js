@@ -29,6 +29,11 @@ function buildPrompt(workspacePath) {
     return [
         'You are a deployment analysis agent. Your job: analyze the project at the current working directory and produce a complete deploy plan that brings up the full stack (frontend + backend).',
         '',
+        'READ-ONLY ANALYSIS (MANDATORY):',
+        '- This is a SOURCE ANALYSIS task only. Do NOT execute ANY command: no install (npm/pnpm/yarn/apt/pip/go install), no build (npm run build / go build / make), no run/start, no database commands (psql / pg_isready / migrate), no git operations. Listing directories and reading files are the ONLY allowed actions.',
+        '- NEVER read dependency/generated directories: node_modules, .pnpm-store, .git, dist, build, .next, out, target, __pycache__, .venv, *.lock files. They are not source code and reading them wastes time on thousands of files. Read ONLY source files: package.json, pnpm-workspace.yaml, turbo.json, next.config.*, vite.config.*, apps/*/package.json, packages/*/package.json, server/*.go / server/package.json, .env* , README*, Makefile, scripts/*, docker-compose*.yml, go.mod, etc.',
+        '- Your plan is executed LATER by a separate verification stage that installs, builds and starts the app for real. Your job is ONLY to analyze the source and emit the plan JSON — never attempt to verify anything yourself.',
+        '',
         'Tasks:',
         '1. Explore the project (read package.json, monorepo config, .env* files, scripts, etc.) to understand the tech stack, monorepo layout (workspaces/lerna/nx/turbo/pnpm-workspaces), frontend vs backend split (web/ client/ server/ api/ apps/* packages/*), package manager, dev/preview scripts, ports, and ALL configuration files needing user input (.env, .env.example, config.*, application.*, settings.*).',
         '2. FULL-STACK integration is mandatory. Detect frontend→backend wiring: next.config.js rewrites/destination to localhost:PORT, vite.config proxy, hardcoded fetch/axios baseURL like http://localhost:8080, or a separate server/ / api/ dir (Node, Go go.mod, Python FastAPI/Flask, Java). If found, the plan MUST build AND start that backend — a frontend-only plan makes every browser page blank (API 5xx → white screen) and will be REJECTED by the platform health check, which probes API endpoints in addition to the root page.',
