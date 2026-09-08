@@ -16,7 +16,7 @@
     "db:migrate": "node scripts/db-migrate.js",
     "db:seed": "node scripts/db-seed.js",
     "db:studio": "drizzle-kit studio",
-    "test": "NODE_ENV=test node --test --test-concurrency=1 --test-force-exit src/http/*.test.js src/workspace/*.test.js src/agents/*.test.js src/llm/*.test.js src/gateway/*.test.js src/config/*.test.js src/runtime/*.test.js src/auth/*.test.js src/session/*.test.js src/skills/*.test.js src/repos/*.test.js src/github/*.test.js src/git/providers/*.test.js src/git/GitConnectionService.test.js src/git/LocalGitService.test.js src/git/GitHubAppService.test.js src/git/webhookHandler.test.js src/git/advancedGit.test.js",
+    "test": "NODE_ENV=test node --test --test-concurrency=1 --test-force-exit src/http/*.test.js src/workspace/*.test.js src/agents/*.test.js src/llm/*.test.js src/gateway/*.test.js src/config/*.test.js src/runtime/*.test.js src/auth/*.test.js src/session/*.test.js src/scheduler/*.test.js src/skills/*.test.js src/repos/*.test.js src/github/*.test.js src/git/providers/*.test.js src/git/GitConnectionService.test.js src/git/LocalGitService.test.js src/git/GitHubAppService.test.js src/git/webhookHandler.test.js src/git/advancedGit.test.js",
     "test:llm-acceptance": "NODE_ENV=test RUN_LLM_ACCEPTANCE=1 node --test src/llm/proxy.acceptance.test.js",
     "gateway": "UNIGATEWAY_CONFIG_PATH=./data/unigateway.toml UNIGATEWAY_BIND_ADDR=127.0.0.1:8741 ../gateway/target/release/xensemble-unigateway"
   },

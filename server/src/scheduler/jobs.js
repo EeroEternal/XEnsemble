@@ -84,6 +84,54 @@ async function runConversationSummarize({ log = console } = {}) {
 }
 
 /**
+ * repo-clone-reap：收割中断的多仓库导入。
+ *
+ * 背景：import-git 的 clone 编排（multiRepoClone）是进程内后台任务，
+ * 服务重启/部署会打断它——project_repos 与 projects 的 clone_status
+ * 永远停在 cloning，前端导入进度无限转圈。
+ *
+ * 兜底策略：clone_status='cloning' 且 updated_at 超过阈值（默认 15 分钟，
+ * 大于看门狗的 10 分钟硬超时，正常运行时看门狗会先写终态）→ 置 failed；
+ * 受影响 project 在其下不再有进行中的 repo 后一并置 failed。
+ */
+async function runRepoCloneReap({ log = console } = {}) {
+    const { and, eq, lt } = require('drizzle-orm');
+    const schema = require('../db/schema');
+    const staleMs = Number(process.env.REPO_CLONE_STALE_MS) || 15 * 60_000;
+    const cutoff = Date.now() - staleMs;
+    const INTERRUPTED = 'import interrupted (service restart or timeout)';
+
+    const staleRepos = await db.select().from(schema.projectRepos)
+        .where(and(eq(schema.projectRepos.cloneStatus, 'cloning'), lt(schema.projectRepos.updatedAt, cutoff)));
+
+    for (const repo of staleRepos) {
+        await db.update(schema.projectRepos)
+            .set({ cloneStatus: 'failed', cloneError: INTERRUPTED, updatedAt: Date.now() })
+            .where(eq(schema.projectRepos.id, repo.id));
+    }
+    if (staleRepos.length > 0) {
+        log.warn?.(`[repo-clone-reap] reaped ${staleRepos.length} stale repo(s): ${staleRepos.map((r) => `${r.projectId}/${r.subPath}`).join(', ')}`);
+    }
+
+    const staleProjects = await db.select().from(schema.projects)
+        .where(and(eq(schema.projects.cloneStatus, 'cloning'), lt(schema.projects.createdAt, cutoff)));
+
+    let reapedProjects = 0;
+    for (const p of staleProjects) {
+        const repos = await db.select().from(schema.projectRepos)
+            .where(eq(schema.projectRepos.projectId, p.id));
+        if (repos.some((r) => r.cloneStatus === 'cloning')) continue; // 还有进行中的 repo
+        const failed = repos.find((r) => r.cloneStatus === 'failed');
+        await db.update(schema.projects)
+            .set({ cloneStatus: 'failed', cloneError: failed?.cloneError || INTERRUPTED })
+            .where(eq(schema.projects.id, p.id));
+        reapedProjects += 1;
+        log.warn?.(`[repo-clone-reap] project ${p.id} (${p.name}) marked failed after interruption`);
+    }
+    return staleRepos.length + reapedProjects;
+}
+
+/**
  * 返回当前启用的一组 job 定义（供 Scheduler 注入）。
  */
 function createJobs() {
@@ -98,7 +146,12 @@ function createJobs() {
             intervalMs: Number(process.env.SKILL_PIPELINE_INTERVAL_MS) || require('../skills/skillPipeline').DEFAULT_INTERVAL_MS,
             run: (ctx) => require('../skills/skillPipeline').runPipeline({ log: ctx?.log || console }),
         },
+        {
+            name: 'repo-clone-reap',
+            intervalMs: Number(process.env.REPO_CLONE_REAP_INTERVAL_MS) || 60_000,
+            run: (ctx) => runRepoCloneReap(ctx),
+        },
     ];
 }
 
-module.exports = { createJobs, runConversationSummarize, listCandidateSessions, DEFAULT_INTERVAL_MS };
+module.exports = { createJobs, runConversationSummarize, listCandidateSessions, runRepoCloneReap, DEFAULT_INTERVAL_MS };

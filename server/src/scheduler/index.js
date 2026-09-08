@@ -207,6 +207,7 @@ async function getSchedulerStatus() {
         ...byName.keys(),
         'conversation-summarize',
         'skill-pipeline',
+        'repo-clone-reap',
     ]);
     return [...names].map((name) => {
         const r = byName.get(name);
