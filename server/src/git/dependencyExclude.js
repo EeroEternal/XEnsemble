@@ -72,12 +72,36 @@ const DEPENDENCY_EXCLUDE_ENTRIES = [
 
 // 幂等 POSIX sh 脚本：逐条 grep -qxF 精确整行匹配，只追加缺失条目，绝不删除
 // 用户自己的 exclude 规则。heredoc 加单引号避免任何变量展开。
-const DEPENDENCY_EXCLUDE_SCRIPT = `if [ -d .git ]; then
-  mkdir -p .git/info 2>/dev/null || true
-  touch .git/info/exclude 2>/dev/null || true
+// git 目录定位（boxlite 沙箱把 .git 挂载成 /workspace.git，/workspace 下无 .git，
+// 旧脚本 `if [ -d .git ]` 直接跳过导致 exclude 从未写入）：
+//   1) /workspace.git 目录（boxlite 挂载，写入即主仓库 .git/info/exclude，per-clone 生效）
+//   2) .git 文件（git worktree 的 gitdir 指针，解析出真实 gitdir，绝对/相对路径都支持）
+//   3) .git 目录（普通 clone / local provider）
+const DEPENDENCY_EXCLUDE_SCRIPT = `GIT_DIR=''
+if [ -d /workspace.git ]; then
+  GIT_DIR=/workspace.git
+elif [ -f .git ] && [ -s .git ]; then
+  GIT_DIR="$(sed -n 's/^gitdir:[[:space:]]*//p' .git | head -1)"
+  case "$GIT_DIR" in
+    /*) ;;
+    *)
+      if RESOLVED="$(cd -P "$(pwd -P)" >/dev/null 2>&1 && cd -P "$GIT_DIR" 2>/dev/null && pwd -P)"; then
+        GIT_DIR="$RESOLVED"
+      else
+        GIT_DIR=''
+      fi
+      ;;
+  esac
+fi
+if [ -z "$GIT_DIR" ] && [ -d .git ]; then
+  GIT_DIR=.git
+fi
+if [ -n "$GIT_DIR" ] && [ -d "$GIT_DIR" ]; then
+  mkdir -p "$GIT_DIR/info" 2>/dev/null || true
+  touch "$GIT_DIR/info/exclude" 2>/dev/null || true
   while IFS= read -r entry; do
     [ -n "$entry" ] || continue
-    grep -qxF "$entry" .git/info/exclude 2>/dev/null || printf '%s\\n' "$entry" >> .git/info/exclude
+    grep -qxF "$entry" "$GIT_DIR/info/exclude" 2>/dev/null || printf '%s\\n' "$entry" >> "$GIT_DIR/info/exclude"
   done <<'XENSEMBLE_EXCLUDE_EOF'
 ${DEPENDENCY_EXCLUDE_ENTRIES.join('\n')}
 XENSEMBLE_EXCLUDE_EOF

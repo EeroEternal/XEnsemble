@@ -2948,7 +2948,13 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
 
     if (!plan) {
         report({ stage: 'A', message: '阶段 1：调用 LLM 1 出部署计划' });
-        const planResult = await analyzeProjectDeploy({ workspacePath: wsPath, hostWorkspacePath: hostWs, runtimeRef: ref, isAborted: () => isAborted() });
+        // 传 hostPath（真实 host 项目目录）而非 hostWs：attach-only 部署路径
+        // （ensureProjectRuntime 早退分支）不返回 hostWorkspacePath，hostWs 可能为
+        // undefined → analyzeDeploy 内部 detectStack 退化成 detectStack('/workspace')，
+        // 而 host 的 /workspace 是平台 seed 的欢迎页目录（index.html "Workspace ready"），
+        // 会把任意项目误判成 static（startCmd=python3 -m http.server），生成的 fallback
+        // plan serve 步骤变成 python3，verify 阶段误判工具链缺失（AgentHarness/multica 实测）。
+        const planResult = await analyzeProjectDeploy({ workspacePath: wsPath, hostWorkspacePath: hostPath, runtimeRef: ref, isAborted: () => isAborted() });
         if (planResult?.aborted) {
             return { ok: false, aborted: true, error: '部署已中止', elapsedMs: Date.now() - startedAt };
         }
@@ -3146,7 +3152,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         }, totalTimeoutMs);
         analyzeProjectVerify({
             workspacePath: wsPath,
-            hostWorkspacePath: hostWs,
+            hostWorkspacePath: hostPath,
             runtimeRef: ref,
             plan,
             projectType: detected,

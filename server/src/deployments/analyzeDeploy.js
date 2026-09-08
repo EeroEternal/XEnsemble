@@ -54,6 +54,7 @@ const SKIP_DIRS = new Set([
     '.venv', '__pycache__', '.cache', '.turbo', '.nx',
     'vendor', 'target', 'venv', '.tox', 'Pods', 'bower_components',
     'jspm_packages', '.gradle', '.m2', 'tmp', 'logs',
+    '.pnpm-store', // pnpm 全局依赖缓存：体量巨大且非项目代码，不排除会占满 800 行 tree 把真实文件挤出
 ]);
 const SKIP_EXTS = new Set(['.lock', '.map', '.min.js', '.min.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.mp4', '.webm', '.zip', '.tar', '.gz', '.pdf', '.bin', '.so', '.dylib', '.exe']);
 const CONFIG_PATTERNS = [/^\.env(\.|$)/, /\.example$/, /\.sample$/, /\.template$/, /^config\.(json|ya?ml|toml|js|ts)$/, /^application\.(ya?ml|properties)$/];

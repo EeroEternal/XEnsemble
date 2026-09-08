@@ -643,14 +643,21 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
 }
 
 /**
- * Code-side post-verify constraint: re-probe the sandbox toolchain and
- * flag any tool the plan's serve step still needs but is missing. This
- * is the "code is the stable constraint" check the user asked for —
- * even if the LLM's final answer says `ok: true`, we refuse success
- * when the binary the serve step needs is still not on PATH.
+ * Code-side diagnostic: re-probe the sandbox toolchain and report any tool
+ * the plan's non-serve steps still need but is missing. This is the "code is
+ * the stable constraint" check the user asked for — even if the LLM's final
+ * answer says `ok: true`, a missing binary (e.g. `go` for `go build`, `node`
+ * for `npm run build`) is a real reason the app cannot come up.
  *
- * Only flags tools that the plan actually invokes AND the plan does
- * NOT already install via apt-get in some prepare step.
+ * IMPORTANT: serve steps are SKIPPED on purpose — they are the LLM's guess at
+ * HOW to expose the app (e.g. `python3 -m http.server`), and the agent may
+ * legitimately serve it with a different working approach (real backend binary,
+ * next start, vite preview…). Treating a serve-step binary as a hard dependency
+ * vetoes deployments that already work (multica: plan serve step `python3`,
+ * agent ran `go run ./cmd/server` and health-checked 200).
+ *
+ * The result is DIAGNOSTIC ONLY: callers attach it to warning/finalStderr and
+ * let the real probes (assertAppIsServed / probeApiHealth) decide success.
  *
  * @param {object} plan
  * @param {string} runtimeRef
@@ -660,11 +667,12 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
 async function findMissingPlanTools(plan, runtimeRef, workspacePath) {
     const steps = Array.isArray(plan?.steps) ? plan.steps : [];
     if (steps.length === 0) return [];
-    // Collect tools used by non-apt-get steps.
+    // Collect tools used by non-apt-get, non-serve steps.
     const toolRe = /(?:^|\s|;|&&|\|\|)(go|cargo|rustc|python3|pip|pip3|java|mvn|gradle|make|gcc|node|pnpm|npm|yarn|corepack)\b/g;
     const aptRe = /apt-get\s+install/;
     const used = new Set();
     for (const step of steps) {
+        if (step.kind === 'serve') continue; // serve 是起服务的备选方案，不构成硬依赖
         if (aptRe.test(step.command || '')) continue; // apt-get install is the install, not a dep
         for (const m of String(step.command || '').matchAll(toolRe)) {
             used.add(m[1]);
@@ -1227,20 +1235,24 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                 summary: String(r.summary || '').slice(0, 500),
             };
             trail.push({ round, action: 'final', ok });
-            // Code-side constraint: re-probe the toolchain right before
-            // declaring victory. The LLM may have claimed the install
-            // worked but apt-get can silently fail on lock contention or
-            // network blips. If a tool the plan needed is still missing,
-            // refuse success — the caller will see a real failure reason
-            // instead of "agent says ok but server can't start".
+            // Code-side diagnostic: re-probe the toolchain right before declaring
+            // victory. A missing binary that plan steps actually need (e.g. `go`
+            // for `go build`) is a concrete failure reason when the app really is
+            // down. But this does NOT veto success by itself — the plan's steps
+            // (especially the serve step) are guesses at HOW to run the app, and
+            // the agent may have used a different working approach (e.g. plan says
+            // `python3 -m http.server`, agent ran the real backend `go run ./cmd/server`
+            // and health-checked 200). Success is decided ONLY by the real probes
+            // below (assertAppIsServed + probeApiHealth); missing tools are kept as
+            // diagnostics so a genuine failure shows a concrete reason.
             const toolsStillMissing = await findMissingPlanTools(plan, runtimeRef, workspacePath);
             if (toolsStillMissing.length) {
                 trail.push({ round, action: 'toolchain_still_missing', tools: toolsStillMissing });
+                const missingNote = `plan-required tool(s) not on PATH (diagnostic): ${toolsStillMissing.map((t) => `${t.tool} (${t.reason})`).join(', ')}`;
                 lastResult = {
                     ...lastResult,
-                    ok: false,
-                    warning: `tools still missing after verify: ${toolsStillMissing.map((t) => `${t.tool} (${t.reason})`).join(', ')}`,
-                    finalStderr: `code-side toolchain check found ${toolsStillMissing.length} missing tool(s):\n${toolsStillMissing.map((t) => `  - ${t.tool}: ${t.reason}`).join('\n')}\n\n${lastResult.finalStderr || ''}`.slice(0, 4000),
+                    warning: [lastResult.warning, missingNote].filter(Boolean).join(' | '),
+                    finalStderr: `${missingNote}\n${lastResult.finalStderr || ''}`.slice(0, 4000),
                 };
             }
             let appPort = null;
