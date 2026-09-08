@@ -335,6 +335,12 @@ function forwardToGateway(request, reply, { targetBaseUrl, gatewayKey, path, onR
             bodyStream.push(body);
             bodyStream.push(null);
             options.buffer = bodyStream;
+            // 重新序列化后的 body 长度与原始请求不同（注入 thinking_budget /
+            // JSON 紧凑化）。http-proxy 原样透传原始 Content-Length，上游按旧
+            // 长度读 body 会在 JSON 中途 EOF（"Failed to parse the request
+            // body as JSON: EOF while parsing ..."→ 400）。同步改写。
+            request.raw.headers['content-length'] = String(body.length);
+            delete request.raw.headers['transfer-encoding'];
         }
         proxy.web(request.raw, reply.raw, options, (err) => {
             proxy.off('proxyRes', onProxyRes);
