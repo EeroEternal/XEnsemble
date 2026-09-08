@@ -950,15 +950,34 @@ async function ensureGuestGoToolchain({ runtimeRef, workspacePath, hostWorkspace
     const runtime = getRuntime();
     const log = (m) => { if (onLog) onLog(m); };
     const PATH_PREFIX = 'export PATH="/usr/local/bin:$PATH"; ';
+    log(`[ensureGuestGoToolchain] START hostWorkspacePath=${hostWorkspacePath}`);
     try {
         // 1) 读 go.mod 要求版本（宿主侧纯文件读取；无 go.mod → 非 Go 项目跳过）
+        // 搜索根目录及常见子目录
         let required = null;
         if (hostWorkspacePath) {
             const { readTextSafe } = require('./detectStack');
-            const gomod = String(readTextSafe(path.join(hostWorkspacePath, 'go.mod')) || '');
-            required = gomod.match(/^go\s+(\d+\.\d+(?:\.\d+)?)/m)?.[1] || null;
+            const SUB_DIRS = ['.', 'server', 'api', 'backend', 'apps', 'packages', 'apps/server', 'apps/api', 'apps/backend', 'cmd', 'internal'];
+            for (const sub of SUB_DIRS) {
+                const gomod = String(readTextSafe(path.join(hostWorkspacePath, sub, 'go.mod')) || '');
+                if (gomod.trim()) {
+                    required = gomod.match(/^go\s+(\d+\.\d+(?:\.\d+)?)/m)?.[1] || null;
+                    if (required) {
+                        log(`[ensureGuestGoToolchain] go.mod found in ${sub}, required=${required}`);
+                        break;
+                    }
+                }
+            }
+            if (!required) {
+                log(`[ensureGuestGoToolchain] go.mod not found in any subdir`);
+            }
+        } else {
+            log(`[ensureGuestGoToolchain] SKIP: hostWorkspacePath not provided`);
         }
-        if (!required) return { ran: false };
+        if (!required) {
+            log(`[ensureGuestGoToolchain] END: no go version required`);
+            return { ran: false };
+        }
         // 2) 沙箱当前 go 版本
         let current = null;
         try {
@@ -1001,17 +1020,116 @@ async function ensureGuestGoToolchain({ runtimeRef, workspacePath, hostWorkspace
  * 统一运行时版本预装：Node / Python / Rust / Java。
  * 读取宿主项目的版本锁定文件，比对沙箱现有版本，不满足时从 CN 镜像下载安装。
  * 与 ensureGuestGoToolchain 同理：在 verify agent 之前确定性完成，避免 agent 试错。
+ * 支持多目录项目：在根目录及常见子目录(server/, apps/, packages/, api/, backend/)中搜索版本文件。
  */
 async function ensureGuestRuntimeVersions({ runtimeRef, workspacePath, hostWorkspacePath, onLog }) {
     const runtime = getRuntime();
     const log = (m) => { if (onLog) onLog(m); };
     const PATH_PREFIX = 'export PATH="/usr/local/bin:$PATH"; ';
     const results = { node: null, python: null, rust: null, java: null };
+    log(`[ensureGuestRuntimeVersions] START hostWorkspacePath=${hostWorkspacePath}`);
 
-    // 通用：读取宿主文件
+    // 通用：读取宿主文件（支持子目录搜索）
     const { readTextSafe } = require('./detectStack');
-    const readHost = (rel) => hostWorkspacePath ? String(readTextSafe(path.join(hostWorkspacePath, rel)) || '') : '';
-    const readGuest = (rel) => String(readTextSafe(path.join(workspacePath, rel)) || '');
+
+    // 限制常量：防止大型项目遍历过久
+    const MAX_SEARCH_DEPTH = 3;           // 最大递归深度（根=0，server=1，server/cmd=2）
+    const MAX_FILES_TO_CHECK = 50;        // 最多读取文件数
+    const SEARCH_TIMEOUT_MS = 10000;      // 搜索总超时
+
+    // 目标文件名（按优先级，找到即停止）
+    const TARGET_FILES = {
+        node: ['package.json', '.nvmrc', '.node-version', '.tool-versions'],
+        python: ['pyproject.toml', '.python-version', '.tool-versions'],
+        rust: ['rust-toolchain.toml', 'rust-toolchain', 'Cargo.toml', '.tool-versions'],
+        java: ['pom.xml', 'build.gradle', 'build.gradle.kts', '.tool-versions'],
+        go: ['go.mod'],
+    };
+
+    // 通用：递归搜索目标文件（宿主侧）
+    async function findVersionFile(hostRoot, language) {
+        if (!hostRoot) return { content: '', subdir: null, found: false };
+        const targets = TARGET_FILES[language] || [];
+        let checked = 0;
+        
+        async function searchDir(dir, depth) {
+            if (depth > MAX_SEARCH_DEPTH || checked >= MAX_FILES_TO_CHECK) return null;
+            try {
+                const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+                for (const entry of entries) {
+                    if (checked >= MAX_FILES_TO_CHECK) break;
+                    const fullPath = path.join(dir, entry.name);
+                    if (entry.isDirectory()) {
+                        // 跳过常见的大目录
+                        if (['node_modules', '.git', 'dist', 'build', 'target', 'vendor', '.next', 'out', 'coverage'].includes(entry.name)) continue;
+                        const found = await searchDir(fullPath, depth + 1);
+                        if (found) return found;
+                    } else if (targets.includes(entry.name)) {
+                        checked++;
+                        const content = String(readTextSafe(fullPath) || '');
+                        if (content.trim()) {
+                            return { content, subdir: path.relative(hostRoot, path.dirname(fullPath)), file: entry.name };
+                        }
+                    }
+                }
+            } catch { /* 忽略权限错误等 */ }
+            return null;
+        }
+
+        // 设置总超时
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('search timeout')), SEARCH_TIMEOUT_MS)
+        );
+        
+        try {
+            const result = await Promise.race([searchDir(hostRoot, 0), timeoutPromise]);
+            return result || { content: '', subdir: null, found: false };
+        } catch {
+            return { content: '', subdir: null, found: false };
+        }
+    }
+
+    // 通用：沙箱侧也用同逻辑（可选，当前只用宿主侧结果）
+    const findVersionFileGuest = async (guestRoot, language) => {
+        if (!guestRoot) return { content: '', subdir: null, found: false };
+        const targets = TARGET_FILES[language] || [];
+        let checked = 0;
+        
+        async function searchDir(dir, depth) {
+            if (depth > MAX_SEARCH_DEPTH || checked >= MAX_FILES_TO_CHECK) return null;
+            try {
+                const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+                for (const entry of entries) {
+                    if (checked >= MAX_FILES_TO_CHECK) break;
+                    const fullPath = path.join(dir, entry.name);
+                    if (entry.isDirectory()) {
+                        if (['node_modules', '.git', 'dist', 'build', 'target', 'vendor', '.next', 'out', 'coverage'].includes(entry.name)) continue;
+                        const found = await searchDir(fullPath, depth + 1);
+                        if (found) return found;
+                    } else if (targets.includes(entry.name)) {
+                        checked++;
+                        const content = String(readTextSafe(path.join(workspacePath, path.relative(guestRoot, fullPath))) || '');
+                        if (content.trim()) {
+                            return { content, subdir: path.relative(guestRoot, path.dirname(fullPath)), file: entry.name };
+                        }
+                    }
+                }
+            } catch { }
+            return null;
+        }
+
+        try {
+            const result = await Promise.race([searchDir(guestRoot, 0), timeoutPromise]);
+            return result || { content: '', subdir: null, found: false };
+        } catch {
+            return { content: '', subdir: null, found: false };
+        }
+    };
+    
+    if (!hostWorkspacePath) {
+        log(`[ensureGuestRuntimeVersions] END: hostWorkspacePath not provided`);
+        return results;
+    }
 
     // 通用：沙箱执行命令
     const execGuest = async (cmd, timeoutMs = 30000) => {
@@ -1036,21 +1154,25 @@ async function ensureGuestRuntimeVersions({ runtimeRef, workspacePath, hostWorks
     // ============ 1) Node.js ============
     // 版本来源：package.json engines.node / .nvmrc / .node-version / .tool-versions
     let nodeRequired = null;
-    const pkgJson = readHost('package.json');
-    if (pkgJson) {
+    const pkgJsonResult = await findVersionFile(hostWorkspacePath, 'node');
+    if (pkgJsonResult.found && pkgJsonResult.file === 'package.json') {
+        log(`[ensureGuestRuntimeVersions] package.json found in ${pkgJsonResult.subdir || 'root'}`);
         try {
-            const pkg = JSON.parse(pkgJson);
+            const pkg = JSON.parse(pkgJsonResult.content);
             nodeRequired = pkg?.engines?.node || null;
         } catch { }
     }
     if (!nodeRequired) {
-        const nvmrc = readHost('.nvmrc') || readHost('.node-version');
-        if (nvmrc) nodeRequired = nvmrc.trim().replace(/^v/, '');
+        const nvmrcResult = await findVersionFile(hostWorkspacePath, 'node');
+        if (nvmrcResult.found && (nvmrcResult.file === '.nvmrc' || nvmrcResult.file === '.node-version')) {
+            log(`[ensureGuestRuntimeVersions] ${nvmrcResult.file} found in ${nvmrcResult.subdir || 'root'}`);
+            nodeRequired = nvmrcResult.content.trim().replace(/^v/, '');
+        }
     }
     if (!nodeRequired) {
-        const toolVersions = readHost('.tool-versions');
-        if (toolVersions) {
-            const m = toolVersions.match(/^nodejs\s+(\S+)/m);
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'node');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^nodejs\s+(\S+)/m);
             if (m) nodeRequired = m[1].replace(/^v/, '');
         }
     }
@@ -1074,20 +1196,23 @@ async function ensureGuestRuntimeVersions({ runtimeRef, workspacePath, hostWorks
     // ============ 2) Python ============
     // 版本来源：pyproject.toml [project] requires-python / .python-version / .tool-versions
     let pythonRequired = null;
-    const pyproject = readHost('pyproject.toml');
-    if (pyproject) {
+    const pyprojectResult = await findVersionFile(hostWorkspacePath, 'python');
+    if (pyprojectResult.found && pyprojectResult.file === 'pyproject.toml') {
+        log(`[ensureGuestRuntimeVersions] pyproject.toml found in ${pyprojectResult.subdir || 'root'}`);
         // requires-python = ">=3.11" 或 "==3.12.*" 等
-        const m = pyproject.match(/requires-python\s*=\s*['"]([^'"]+)['"]/);
+        const m = pyprojectResult.content.match(/requires-python\s*=\s*['"]([^'"]+)['"]/);
         if (m) pythonRequired = m[1].replace(/^[<>=~^!]+/, '').replace(/\*$/, '').trim();
     }
     if (!pythonRequired) {
-        const pyVer = readHost('.python-version');
-        if (pyVer) pythonRequired = pyVer.trim().replace(/^v/, '');
+        const pyVerResult = await findVersionFile(hostWorkspacePath, 'python');
+        if (pyVerResult.found && pyVerResult.file === '.python-version') {
+            pythonRequired = pyVerResult.content.trim().replace(/^v/, '');
+        }
     }
     if (!pythonRequired) {
-        const toolVersions = readHost('.tool-versions');
-        if (toolVersions) {
-            const m = toolVersions.match(/^python\s+(\S+)/m);
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'python');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^python\s+(\S+)/m);
             if (m) pythonRequired = m[1];
         }
     }
@@ -1111,22 +1236,24 @@ async function ensureGuestRuntimeVersions({ runtimeRef, workspacePath, hostWorks
     // ============ 3) Rust ============
     // 版本来源：rust-toolchain.toml / Cargo.toml [package] rust-version / .tool-versions
     let rustRequired = null;
-    const rustToolchain = readHost('rust-toolchain.toml') || readHost('rust-toolchain');
-    if (rustToolchain) {
-        const m = rustToolchain.match(/channel\s*=\s*['"]([^'"]+)['"]/) || rustToolchain.match(/^(\d+\.\d+\.\d+)/m);
+    const rustToolchainResult = await findVersionFile(hostWorkspacePath, 'rust');
+    if (rustToolchainResult.found && (rustToolchainResult.file === 'rust-toolchain.toml' || rustToolchainResult.file === 'rust-toolchain')) {
+        log(`[ensureGuestRuntimeVersions] ${rustToolchainResult.file} found in ${rustToolchainResult.subdir || 'root'}`);
+        const m = rustToolchainResult.content.match(/channel\s*=\s*['"]([^'"]+)['"]/) || rustToolchainResult.content.match(/^(\d+\.\d+\.\d+)/m);
         if (m) rustRequired = m[1];
     }
     if (!rustRequired) {
-        const cargoToml = readHost('Cargo.toml');
-        if (cargoToml) {
-            const m = cargoToml.match(/rust-version\s*=\s*['"]([^'"]+)['"]/);
+        const cargoTomlResult = await findVersionFile(hostWorkspacePath, 'rust');
+        if (cargoTomlResult.found && cargoTomlResult.file === 'Cargo.toml') {
+            log(`[ensureGuestRuntimeVersions] Cargo.toml found in ${cargoTomlResult.subdir || 'root'}`);
+            const m = cargoTomlResult.content.match(/rust-version\s*=\s*['"]([^'"]+)['"]/);
             if (m) rustRequired = m[1];
         }
     }
     if (!rustRequired) {
-        const toolVersions = readHost('.tool-versions');
-        if (toolVersions) {
-            const m = toolVersions.match(/^rust\s+(\S+)/m);
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'rust');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^rust\s+(\S+)/m);
             if (m) rustRequired = m[1];
         }
     }
@@ -1150,22 +1277,24 @@ async function ensureGuestRuntimeVersions({ runtimeRef, workspacePath, hostWorks
     // ============ 4) Java (JVM) ============
     // 版本来源：pom.xml <java.version> / build.gradle toolchain / .tool-versions
     let javaRequired = null;
-    const pomXml = readHost('pom.xml');
-    if (pomXml) {
-        const m = pomXml.match(/<java\.version>([^<]+)<\/java\.version>/) || pomXml.match(/<maven\.compiler\.release>([^<]+)<\/maven\.compiler\.release>/);
+    const pomXmlResult = await findVersionFile(hostWorkspacePath, 'java');
+    if (pomXmlResult.found && pomXmlResult.file === 'pom.xml') {
+        log(`[ensureGuestRuntimeVersions] pom.xml found in ${pomXmlResult.subdir || 'root'}`);
+        const m = pomXmlResult.content.match(/<java\.version>([^<]+)<\/java\.version>/) || pomXmlResult.content.match(/<maven\.compiler\.release>([^<]+)<\/maven\.compiler\.release>/);
         if (m) javaRequired = m[1];
     }
     if (!javaRequired) {
-        const gradle = readHost('build.gradle') || readHost('build.gradle.kts');
-        if (gradle) {
-            const m = gradle.match(/java\.toolchain\s+languageVersion\s*=\s*(\d+)/) || gradle.match(/sourceCompatibility\s*=\s*(\d+)/);
+        const gradleResult = await findVersionFile(hostWorkspacePath, 'java');
+        if (gradleResult.found && (gradleResult.file === 'build.gradle' || gradleResult.file === 'build.gradle.kts')) {
+            log(`[ensureGuestRuntimeVersions] ${gradleResult.file} found in ${gradleResult.subdir || 'root'}`);
+            const m = gradleResult.content.match(/java\.toolchain\s+languageVersion\s*=\s*(\d+)/) || gradleResult.content.match(/sourceCompatibility\s*=\s*(\d+)/);
             if (m) javaRequired = m[1];
         }
     }
     if (!javaRequired) {
-        const toolVersions = readHost('.tool-versions');
-        if (toolVersions) {
-            const m = toolVersions.match(/^java\s+(\S+)/m);
+        const toolVersionsResult = await findVersionFile(hostWorkspacePath, 'java');
+        if (toolVersionsResult.found && toolVersionsResult.file === '.tool-versions') {
+            const m = toolVersionsResult.content.match(/^java\s+(\S+)/m);
             if (m) javaRequired = m[1];
         }
     }
@@ -1187,6 +1316,7 @@ async function ensureGuestRuntimeVersions({ runtimeRef, workspacePath, hostWorks
         }
     }
 
+    log(`[ensureGuestRuntimeVersions] END results=${JSON.stringify(results)}`);
     return results;
 }
 
