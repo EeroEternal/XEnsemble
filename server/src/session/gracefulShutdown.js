@@ -37,9 +37,17 @@ async function gracefulShutdownSessions({
         ? sessionManager.listSessions()
         : [];
     // 每 session 的 stop 限时：boxlite stopSession 可能等待沙箱 hibernate/操作长时间未返回，
-    // 导致 SIGTERM 后 shutdown 超过 10s 被强制 process.exit(1)（部署脚本 restart server 时
+    // 导致 SIGTERM 后 shutdown 超时被强制 process.exit(1)（部署脚本 restart server 时
     // 实测 16:13:14 SIGTERM → 16:13:24 forcing exit，opencode 子进程被 SIGKILL，正在跑的
     // preview 部署直接中断）。限时后 shutdown 快速优雅退出（exit 0），部署/会话仍可断点续修。
+    //
+    // 持久化安全权衡：
+    // - stopSession 第一步就先把 session 的 DB status 置 'idle'（idleHibernate.js），
+    //   这是"可恢复"的关键状态，毫秒级完成，在 3s 限时内必然落库；waitForAgentExit/
+    //   hibernate（15s/35s）即使被截断，恢复靠 DB idle + recoverRunningSessions，不丢状态。
+    // - 对话记录 transcript 由下方 flushAllSync 在 stopSession 全部结束后同步落盘（不在
+    //   限时内），且总超时已提到 30s（installProcessShutdownHooks 默认值），多个 session
+    //   的 stop 限时不会挤占 transcript/close 的预算。
     const stopTimeoutMs = Number(process.env.SHUTDOWN_SESSION_STOP_TIMEOUT_MS || 3000);
     await Promise.all(live.map(async (session) => {
         try {
@@ -70,7 +78,7 @@ async function gracefulShutdownSessions({
     }
 }
 
-function installProcessShutdownHooks(fastify, { timeoutMs = 10_000, onShutdown } = {}) {
+function installProcessShutdownHooks(fastify, { timeoutMs = 30_000, onShutdown } = {}) {
     let shuttingDown = false;
     const shutdown = async (signal) => {
         if (shuttingDown) return;
