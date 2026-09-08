@@ -416,11 +416,10 @@ function registerGitRoutes(fastify) {
             };
             providerName = resolvedProvider;
         } else if (isMultiRepoImport) {
-            // 多仓库：只需连接 token（每项在 repos[] 循环里各自 getRepo），
-            // 顶层 repo_full_name 不存在，跳过单仓库解析
-            connection = await connectionService.getConnection(request.user.id, providerName);
-            if (!connection) return reply.code(400).send({ error: t('errors:provider_account_not_connected', { defaultValue: '{{provider}} account not connected', provider: providerName }, request.locale || 'en'), code: 'provider_account_not_connected' });
-            token = await connectionService.getDecryptedToken(request.user.id, providerName);
+            // 多仓库：provider 模式项需要连接 token（每项在 repos[] 循环里各自 getRepo）；
+            // connection 允许为 null（URL 模式项无需连接），provider 模式项在循环内再拦
+            connection = await connectionService.getConnection(request.user.id, providerName).catch(() => null);
+            token = connection ? await connectionService.getDecryptedToken(request.user.id, providerName).catch(() => null) : null;
             repoInfo = null;
         } else {
             try {
