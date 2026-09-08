@@ -43,6 +43,8 @@ const AGENT_BOX_IMAGE_CATALOG = {
         minNodeVersion: '18',
         install: 'npm install -g @guizmo-ai/zai-cli && node /tmp/patch-zai-autosave.cjs',
     },
+    // engines: >=20.0.0
+    'qoder': { tag: 'qoder', buildable: true, minNodeVersion: '20' },
     // engines: >=22.0.0
     'qwen-code': { tag: 'qwen-code', buildable: true, minNodeVersion: '22' },
     // engines: >=18

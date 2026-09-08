@@ -183,7 +183,7 @@ for (const agentId of NODE22_AGENTS) {
 }
 
 // Helper: test all agents that require Node.js >= 20
-const NODE20_AGENTS = ['commandcode'];
+const NODE20_AGENTS = ['qoder', 'commandcode'];
 for (const agentId of NODE20_AGENTS) {
   test(`validateSelection rejects ${agentId} with Node.js 18`, () => {
     const result = validateSelection([
@@ -230,10 +230,12 @@ for (const agentId of NO_REQUIREMENT_AGENTS) {
 test('validateSelection reports error for the highest-requirement agent when multiple selected', () => {
   const result = validateSelection([
     { component_id: 'agent:kimi-code', version: 'latest' },
+    { component_id: 'agent:qoder', version: 'latest' },
     { component_id: 'lang:nodejs', version: '18' },
   ]);
   assert.equal(result.ok, false);
   assert.match(result.error, /kimi-code.*requires Node.js >= 22/);
+  assert.match(result.error, /qoder.*requires Node.js >= 20/);
 });
 
 test('catalog exposes minNodeVersion for agents that declare it', () => {

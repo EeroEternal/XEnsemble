@@ -221,6 +221,14 @@ test('buildGatewayConfigSpec: openclaw writes contextWindow per model', () => {
     assert.equal(models[0].contextWindow, 1048576);
 });
 
+test('buildGatewayConfigSpec: qoder writes contextWindow per model', () => {
+    const spec = buildGatewayConfigSpec('qoder', ctx);
+    const content = JSON.parse(spec.content);
+    const models = content.providers.gateway.models;
+    assert.equal(models[0].contextWindow, 1048576);
+    assert.equal(models[0].maxOutputTokens, 8192);
+});
+
 test('buildGatewayConfigSpec: cline writes contextWindow per model (best-effort)', () => {
     const spec = buildGatewayConfigSpec('cline', ctx);
     const content = JSON.parse(spec.content);
