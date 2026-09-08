@@ -5,6 +5,7 @@ import { useGitProvider } from '../../hooks/useGitProvider';
 import { useToast } from '../Toast';
 import * as gitApi from '../../lib/gitApi';
 import { getProviderLabel } from '../../lib/gitLabels';
+import { computeSelectionState, toggleRepo, prefixOf } from '../../lib/repoSelection';
 import {
   consoleButtonFocusClass,
   consoleDropdownPanelClass,
@@ -43,6 +44,8 @@ export default function ProjectSourceSelect({
   const [oauthConfigured, setOauthConfigured] = useState({});
   const [reposByProvider, setReposByProvider] = useState({});
   const [loadingRepos, setLoadingRepos] = useState({});
+  // 多选勾选（多仓库导入）：勾选第一个仓库后按 full_name 前缀锁定组（含 provider 隔离跨源）
+  const [selectedIds, setSelectedIds] = useState([]);
   const [urlMode, setUrlMode] = useState(false);
   const [urlInput, setUrlInput] = useState('');
   const [urlError, setUrlError] = useState(null);
@@ -127,8 +130,42 @@ export default function ProjectSourceSelect({
     return allRepos.filter((r) => r.full_name?.toLowerCase().includes(q));
   }, [allRepos, query]);
 
-  const handleSelectRepo = (repo) => {
-    onImported?.(repo);
+  // 多选状态计算：id/前缀计算用含 provider 的 key（隔离跨源同前缀组），行数据保持原始字段
+  const selection = useMemo(() => {
+    const states = computeSelectionState(
+      allRepos.map((r) => ({ id: repoKey(r.provider, r.full_name), full_name: repoKey(r.provider, r.full_name) })),
+      selectedIds,
+    );
+    const stateById = new Map(states.map((s) => [s.id, s]));
+    return allRepos.map((r) => {
+      const key = repoKey(r.provider, r.full_name);
+      const s = stateById.get(key);
+      return { ...r, selId: key, enabled: s?.enabled ?? true, checked: s?.checked ?? false };
+    });
+  }, [allRepos, selectedIds]);
+  const selectedRepos = useMemo(
+    () => selection.filter((r) => r.checked),
+    [selection],
+  );
+
+  const handleToggle = (repo) => {
+    // 跨前缀仓库不可勾选（enabled=false 时点击无效）
+    if (!repo.enabled && !selectedIds.includes(repo.selId)) return;
+    setSelectedIds(toggleRepo(selectedIds, repo));
+  };
+
+  const submitMultiImport = () => {
+    if (selectedRepos.length === 0) return;
+    // 单仓库保持原形态；多仓库携带 repos[]（上游 handleRepoImported 兼容两种形态）
+    if (selectedRepos.length === 1) {
+      onImported?.(selectedRepos[0]);
+    } else {
+      onImported?.({
+        name: selectedRepos[0].name,
+        repos: selectedRepos.map((r) => ({ ...r })),
+      });
+    }
+    setSelectedIds([]);
     setOpen(false);
   };
 
@@ -167,7 +204,10 @@ export default function ProjectSourceSelect({
     await providers[provider].connect();
   };
 
-  const triggerLabel = importedProject ? importedProject.name : t('git:select_repository');
+  const multiCount = importedProject?.repos?.length || 0;
+  const triggerLabel = multiCount > 1
+    ? t('git:import_multi_selected', { count: multiCount, defaultValue: '{{count}} repositories selected' })
+    : (importedProject ? importedProject.name : t('git:select_repository'));
 
   return (
     <div className="relative" ref={rootRef}>
@@ -224,23 +264,56 @@ export default function ProjectSourceSelect({
               <p className="px-3 py-3 text-xs text-zinc-400">{t('git:no_matches', { defaultValue: 'No matches.' })}</p>
             ) : (
               <>
+                {selectedIds.length > 0 && (
+                  <p className="px-3 py-1.5 text-[11px] text-zinc-400" data-testid="pss-multi-select-hint">
+                    {t('git:import_multi_locked_hint', {
+                      defaultValue: 'Locked to group "{{prefix}}" — only repositories under the same group can be selected.',
+                      prefix: prefixOf(selectedRepos[0]?.full_name || ''),
+                    })}
+                  </p>
+                )}
                 {filteredRepos.map((r) => {
                   const key = repoKey(r.provider, r.full_name);
-                  const isSelected = importedProject && importedProject.name === r.name;
+                  const state = selection.find((s) => s.selId === key)
+                    || { enabled: true, checked: false };
+                  const toggle = () => handleToggle({ ...r, id: key, selId: key, enabled: state.enabled });
                   return (
                     <button
                       key={key}
                       type="button"
-                      onClick={() => handleSelectRepo(r)}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-zinc-50"
+                      data-testid={`pss-repo-row-${r.full_name}`}
+                      disabled={!state.enabled}
+                      onClick={toggle}
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
+                        state.checked ? 'bg-zinc-100' : 'hover:bg-zinc-50'
+                      } ${!state.enabled ? 'cursor-not-allowed opacity-40' : ''}`}
                     >
-                      <GitBranch className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
+                      <input
+                        type="checkbox"
+                        checked={state.checked}
+                        disabled={!state.enabled}
+                        onChange={toggle}
+                        onClick={(e) => e.stopPropagation()}
+                        className="shrink-0 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
+                      />
                       <span className="min-w-0 flex-1 truncate text-zinc-700">{r.full_name}</span>
                       <span className="shrink-0 text-[10px] text-zinc-400">{getProviderLabel(r.provider)}</span>
-                      {isSelected && <Check className="w-3.5 h-3.5 shrink-0 text-zinc-900" />}
+                      {state.checked && <Check className="w-3.5 h-3.5 shrink-0 text-zinc-900" />}
                     </button>
                   );
                 })}
+                {selectedIds.length > 0 && (
+                  <button
+                    type="button"
+                    data-testid="pss-import-submit"
+                    onClick={submitMultiImport}
+                    className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium bg-zinc-900 text-white hover:bg-zinc-800"
+                  >
+                    {selectedIds.length > 1
+                      ? t('git:import_multi_submit', { count: selectedIds.length, defaultValue: 'Import {{count}} repositories' })
+                      : t('git:import_repository', { defaultValue: 'Import Repository' })}
+                  </button>
+                )}
                 {isLoading && (
                   <div className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-400">
                     <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />

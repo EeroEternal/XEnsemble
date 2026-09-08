@@ -228,6 +228,7 @@
   "import_multi_locked_hint": "Locked to group \"{{prefix}}\" — only repositories under the same group can be selected.",
   "import_started": "Import started. Cloning repositories…",
   "import_subtitle_multi": "Select one or more repositories (same group) to import as a multi-repo workspace.",
+  "import_multi_selected": "{{count}} repositories selected",
   "connect_subtitle": "Connect a Git provider to import repositories.",
   "connect_account_hint": "Connect your {{label}} account to import repositories.",
   "oauth_admin_required": "An administrator must configure {{label}} OAuth before you can connect.",

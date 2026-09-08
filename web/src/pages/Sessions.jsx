@@ -607,6 +607,72 @@ export default React.forwardRef(function Sessions({
   const handleLaunchFromModal = async () => {
     setLaunchModalError(null);
 
+    // 多仓库导入（创建工作空间多选勾选，repos.length > 1）
+    if (importedProject?.repos?.length > 1) {
+      const repos = importedProject.repos;
+      setLaunchingSession(true);
+      setWorkspaceCreating(true);
+      setCreationStep('import');
+      setShowNewInstanceModal(false);
+      onLaunchPanelClose?.();
+      let creationFailed = false;
+      try {
+        const importPayload = {
+          provider: repos[0].provider,
+          name: importedProject.name || repos[0].name,
+          repos: repos.map((r, i) => ({
+            repo_full_name: r.full_name,
+            repo_provider: r.provider,
+            sub_path: r.name,
+            branch: r.default_branch,
+            is_primary: i === 0,
+          })),
+        };
+        const result = await gitApi.importRepo(importPayload);
+        switchWorkspace(result.id);
+        setProjects((prev) => {
+          if (prev.some((p) => p.id === result.id)) return prev;
+          return [...prev, { id: result.id, name: importedProject.name || repos[0].name, createdAt: Date.now() }];
+        });
+        await new Promise((resolve, reject) => {
+          let attempts = 0;
+          const pollId = setInterval(async () => {
+            attempts += 1;
+            try {
+              const res = await githubApi.getCloneStatus(result.id);
+              if (res?.clone_status === 'ready') {
+                clearInterval(pollId);
+                resolve();
+              } else if (res?.clone_status === 'failed') {
+                clearInterval(pollId);
+                reject(new Error(res.clone_error || t('git:error.clone_failed')));
+              }
+            } catch {
+              /* keep polling */
+            }
+            if (attempts >= 150) {
+              clearInterval(pollId);
+              reject(new Error(t('git:error.clone_timeout')));
+            }
+          }, 2000);
+        });
+        setCreationStep('session');
+        await handleStartSession(result.id, importedProject.name || repos[0].name, { closeLaunchModal: true });
+      } catch (err) {
+        creationFailed = true;
+        setLaunchModalError(err.message || t('git:error.import_failed'));
+      } finally {
+        if (!creationFailed) {
+          await new Promise((r) => setTimeout(r, 800));
+          setSkipPendingSpinner(true);
+          setWorkspaceCreating(false);
+          setCreationStep(null);
+          setLaunchingSession(false);
+        }
+      }
+      return;
+    }
+
     if (importedProject?.repo) {
       const repo = importedProject.repo;
       setLaunchingSession(true);
@@ -731,8 +797,13 @@ export default React.forwardRef(function Sessions({
     }
   };
 
-  const handleRepoImported = useCallback((repo) => {
-    setImportedProject({ name: repo.name, repo });
+  const handleRepoImported = useCallback((payload) => {
+    // 兼容两种形态：单仓库 repo 对象（原逻辑） / 多仓库 { name, repos[] }（ProjectSourceSelect 多选勾选）
+    if (payload?.repos?.length > 1) {
+      setImportedProject({ name: payload.name, repos: payload.repos });
+    } else {
+      setImportedProject({ name: payload.name, repo: payload });
+    }
   }, []);
 
   const closeOnboarding = useCallback(() => {
