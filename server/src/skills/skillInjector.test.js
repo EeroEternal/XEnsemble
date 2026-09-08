@@ -451,10 +451,14 @@ test('getInstructionFile integration via injector deps', () => {
 
 test('slugify produces safe directory names', () => {
     assert.equal(injector.slugify('Fix Postgres Pool'), 'fix-postgres-pool');
-    assert.equal(injector.slugify('跑通 迁移'), '跑通-迁移');
+    // 非 ASCII 字符（中文等）会被 OpenCode 等的目录名校验拒绝，统一丢弃
+    assert.equal(injector.slugify('跑通 PostgreSQL 迁移'), 'postgresql');
+    assert.equal(injector.slugify('跑通 迁移'), 'skill'); // 纯中文回退
     assert.equal(injector.slugify('...'), 'skill'); // 全符号回退
     assert.equal(injector.slugify('a'.repeat(100)).length, 60);
     assert.ok(!/\.\./.test(injector.slugify('../etc')));
+    // Agent 原生目录的硬校验（OpenCode：^[a-z0-9]+(-[a-z0-9]+)*$）
+    assert.match(injector.slugify('跑通 PostgreSQL 迁移'), /^[a-z0-9]+(-[a-z0-9]+)*$/);
 });
 
 test('safeRel blocks path traversal', () => {

@@ -1910,11 +1910,23 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
         //     导致沙箱挂载目录里看不到技能（历史 bug，已修复）。
         if (skillInjectEnabled()) {
             try {
+                // 配置根被重定向到 stateDir 的 Agent（如 claude-code 的
+                // CLAUDE_CONFIG_DIR=stateDir，见 resumeSession stateEnv），
+                // 技能发现路径是 <stateDir>/skills——VM 内复制必须落到那里
+                const stateSkillsDir = agentMeta.resume?.stateEnv && sessionStateDir?.stateDirPath
+                    ? `${sessionStateDir.stateDirPath}/skills`
+                    : null;
                 const injectResult = await injectSkillsForSession({
                     userId: request.user.id,
                     projectId: project_id,
                     agentId: agentMeta.id,
                     workspacePath: ready.hostWorkspacePath || workspacePath,
+                    // 载体模式：spawn 前把宿主载体全量复制为 VM 内真目录（1 次 exec，
+                    // 每次会话启动即最新）——复制对所有 Agent 的扫描实现一致
+                    runtimeExec: runtime && runtime.exec ? runtime.exec : null,
+                    runtimeRef: ready.runtime ? ready.runtime.runtimeRef : null,
+                    carrierGuestRoot: ready.skillCarrierGuestRoot || null,
+                    vmSkillsDir: stateSkillsDir,
                 });
                 if (injectResult.injected) {
                     fastify.log.info(

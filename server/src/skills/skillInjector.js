@@ -127,15 +127,23 @@ function isLandableSkill(skill) {
 }
 
 /**
- * 0020：技能名 → 安全目录名（保留中英文/数字，其余转 `-`）。
+ * 0020：技能名 → 安全目录名。
+ *
+ * 注意：OpenCode 等 Agent 对技能目录名/frontmatter name 有硬校验
+ * `^[a-z0-9]+(-[a-z0-9]+)*$`（小写字母数字 + 单连字符分隔），中文等
+ * 非 ASCII 字符会被 Agent 静默拒绝（技能不出现在可用清单里）。因此
+ * 这里丢弃全部非 `[a-z0-9]` 字符——纯中文标题会退化为 `skill`，
+ * 混合标题（如「跑通 PostgreSQL 迁移」）保留 ASCII 部分（`postgresql`）。
  */
 function slugify(name) {
     const slug = String(name || '')
         .toLowerCase()
-        .replace(/[^\p{L}\p{N}_-]+/gu, '-')
+        .normalize('NFKD')
+        .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
-        .slice(0, 60);
-    return slug && DIR_NAME_RE.test(slug) ? slug : 'skill';
+        .slice(0, 60)
+        .replace(/^-+|-+$/g, '');
+    return slug && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug) ? slug : 'skill';
 }
 
 /**
@@ -499,9 +507,20 @@ async function listActiveSkills(userId, projectId) {
  *   默认本地 fs。BoxLite workspace 不在控制面 FS 时由调用方注入（T4.3 边界）
  * @param {boolean} [opts.bumpUsage] 注入成功后对入选 skills 批量 usage_count+1（默认 true）
  * @param {boolean} [opts.useSkillCarrier] 覆盖技能载体模式判定（测试用；默认 isSkillCarrierEnabled()）
+ * @param {object} [opts.runtimeExec] 沙箱内 exec 适配器（BoxLiteExecAdapter）。载体
+ *   模式且提供时，spawn 前把宿主载体全量复制为 VM 内真目录（1 次 exec，每次会话
+ *   启动即最新）——软链被 Claude Code 的目录遍历拒绝（对子项 lstat/Dirent 过滤，
+ *   实测 /skills 为空而 opencode 正常），libkrun 内 mount --bind 也无权限
+ * @param {string} [opts.runtimeRef] 沙箱会话名（runtimeExec 路由所需）
+ * @param {string} [opts.carrierGuestRoot] 载体 guest 根（如 /workspace/.git/xe-skills，
+ *   worktree 会话为 /workspace.git/xe-skills）；VM 内复制的源前缀
+ * @param {string} [opts.vmSkillsDir] VM 内技能目录覆盖（guest 绝对路径）。配置根被
+ *   重定向的 Agent（如 claude-code 的 CLAUDE_CONFIG_DIR=stateDir）技能发现路径是
+ *   `<stateDir>/skills` 而非 ~/.claude/skills——调用方按 agent 的 stateEnv 计算传入；
+ *   未传则默认 /root/<agent userSkillDirs[0]>
  * @returns {Promise<{ injected: boolean, reason?: string, instructionFile?: string, count?: number, truncated?: boolean, skillIds?: string[] }>}
  */
-async function injectForSession({ userId, projectId, agentId, workspacePath, fsAdapter, bumpUsage = true, useSkillCarrier }) {
+async function injectForSession({ userId, projectId, agentId, workspacePath, fsAdapter, bumpUsage = true, useSkillCarrier, runtimeExec = null, runtimeRef = null, carrierGuestRoot = null, vmSkillsDir = null }) {
     if (!isEnabled()) return { injected: false, reason: 'disabled' };
 
     const allSkills = await listActiveSkills(userId, projectId);
@@ -547,6 +566,26 @@ async function injectForSession({ userId, projectId, agentId, workspacePath, fsA
         writtenSlugs.push(...await writeSkillDirectories(adapter, skillRoot, s, targetRoots, { markManaged: true }));
     }
     await cleanupSkillDirectories(adapter, skillRoot, writtenSlugs, targetRoots, { onlyManaged: true });
+
+    // P4 增强：载体模式且提供沙箱 exec + 载体 guest 根时，把宿主载体（spawn 前
+    // 已落盘最新）全量复制为 VM 内真目录——1 次 exec（rm+cp），对所有 Agent 的
+    // 目录遍历实现一致（实测 Claude Code 拒绝目录级软链而 opencode 正常；
+    // libkrun 内 mount --bind 无权限）。每次会话启动全量刷新，无 stale；失败仅跳过。
+    // 目标目录：vmSkillsDir 优先（CLAUDE_CONFIG_DIR 等 stateEnv 重定向场景——
+    // Claude Code 的扫描根是 <configDir>/skills，/root/.claude/skills 对它不可见），
+    // 否则 /root/<agent userSkillDirs[0]>。
+    if (runtimeExec && runtimeRef && carrierDir && carrierGuestRoot) {
+        try {
+            const carrierDirGuest = `${carrierGuestRoot}/${userSkillDirs[0]}`;
+            const vmSkillsDirs = vmSkillsDir ? [vmSkillsDir] : userSkillDirs.map((d) => `/root/${d}`);
+            for (const vmDir of vmSkillsDirs) {
+                await runtimeExec.exec('sh', ['-c',
+                    `rm -rf ${JSON.stringify(vmDir)} && mkdir -p ${JSON.stringify(vmDir)} `
+                    + `&& cp -a ${JSON.stringify(carrierDirGuest)}/. ${JSON.stringify(vmDir)}/`],
+                {}, { runtimeRef, cwd: '/' });
+            }
+        } catch (_) { /* VM 内复制失败不阻断（引导脚本兜底） */ }
+    }
 
     // T4.3：注入成功后对入选 skills 批量 usage_count+1（审计/计数失败不阻断）
     if (bumpUsage && skillIds.length > 0) {

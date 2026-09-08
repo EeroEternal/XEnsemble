@@ -34,15 +34,17 @@ function buildWorkspaceMountKey(hostPath, guestPath) {
  */
 
 /**
- * 0030（.git 搭车）：生成 VM 引导期的技能目录 symlink 脚本（POSIX sh，busybox 兼容）。
- * 对 agent 声明的全部 userSkillDirs 逐个建立 /root/<dir> → <carrierRoot>/<dir>：
- * - 已是 symlink → 刷新（rm 后重建，指向当前载体路径）
- * - 是镜像内置的实体目录 → 若载体对应目录为空，先把镜像内容种子合并进载体
- *   （cp -a，避免 agent 随镜像自带的技能被 symlink 替换后丢失），再替换为 symlink
- * - 不存在 → 直接建链
- * 每步 best-effort（|| true），单目录失败不影响其余目录；整体为 best-effort 引导步骤。
- * symlink 位于 VM 本地 /root（非挂载卷），VM 销毁即失，须在每个新 VM 引导期重建；
- * VM 复用（reused）时 guest FS 保留，无需重跑。
+ * 0030（.git 搭车）：生成 VM 引导期的技能目录种子脚本（POSIX sh，busybox 兼容）。
+ * 对 agent 声明的全部 userSkillDirs 逐个把载体内容复制到 /root/<dir>：
+ * - 镜像内置的实体目录 → 若载体对应目录为空，先把镜像内容种子合并进载体
+ *   （cp -a，避免 agent 随镜像自带的技能丢失），再整体复制
+ * - 不再用目录级软链：Claude Code 的目录遍历对子项 lstat/Dirent 过滤，实测
+ *   软链技能被静默跳过（/skills 为空）而 opencode 正常；libkrun 内
+ *   mount --bind 也无权限。复制出的真目录对所有 Agent 实现一致。
+ * - 实际的技能内容同步由 injectForSession 在每次 spawn 前经沙箱 exec 全量
+ *   刷新 /root/<dir>（每次会话启动即最新），本脚本仅作新 VM 的初始兜底。
+ * 位于 VM 本地 /root（非挂载卷），VM 销毁即失，须在每个新 VM 引导期重建；
+ * VM 复用（reused）时 guest FS 保留，由 spawn 前复制保持新鲜。
  * @param {string} agentId
  * @param {string|null} carrierGuestRoot 载体 guest 根（如 /workspace.git/xe-skills）；
  *   null（载体停用 / 工程非 git 仓库 / agent 无 userSkillDirs）时不生成
@@ -62,12 +64,13 @@ function buildSkillSymlinkScript(agentId, carrierGuestRoot) {
         const linkParent = path.posix.dirname(link);
         parts.push(
             `mkdir -p ${JSON.stringify(carrier)} ${JSON.stringify(linkParent)}; `
-            + `if [ -L ${JSON.stringify(link)} ]; then rm -f ${JSON.stringify(link)}; `
-            + `elif [ -d ${JSON.stringify(link)} ]; then `
-            + `if [ -z "$(ls -A ${JSON.stringify(carrier)} 2>/dev/null)" ]; then `
+            // 旧整层软链清理；镜像内置实体目录先种子合并进载体（载体为空时），
+            // 避免 agent 自带技能丢失
+            + `if [ -L ${JSON.stringify(link)} ]; then rm -f ${JSON.stringify(link)}; fi; `
+            + `if [ -d ${JSON.stringify(link)} ] && [ -z "$(ls -A ${JSON.stringify(carrier)} 2>/dev/null)" ]; then `
             + `cp -a ${JSON.stringify(link)}/. ${JSON.stringify(carrier)}/ 2>/dev/null || true; fi; `
-            + `rm -rf ${JSON.stringify(link)}; fi; `
-            + `ln -s ${JSON.stringify(carrier)} ${JSON.stringify(link)} 2>/dev/null || true`,
+            + `mkdir -p ${JSON.stringify(link)}; `
+            + `cp -a ${JSON.stringify(carrier)}/. ${JSON.stringify(link)}/ 2>/dev/null || true`,
         );
     }
     return parts.join('; ');
@@ -525,7 +528,16 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         // 会让 index.html 误触发 detectStaticStack → plan 走 python3 -m http.server
         // → 后端永不启动 → POST 5xx）。仅 boxlite 路径写，local/k8s 不受影响。
         this._hostWorkspacePaths.set(name, workspaceVolume.host_path);
-        return { runtimeRef: name, workspacePath: guestWorkspacePath, image, mountKey, hostWorkspacePath };
+        // skillCarrierGuestRoot：技能载体 guest 根，供 spawn 前把宿主载体复制为
+        // VM 内真目录时使用（见 injectForSession 的 runtimeExec 分支）。
+        return {
+            runtimeRef: name,
+            workspacePath: guestWorkspacePath,
+            image,
+            mountKey,
+            hostWorkspacePath,
+            skillCarrierGuestRoot: skillCarrierGuestRoot || null,
+        };
     }
 
     async attach(runtimeRef) {

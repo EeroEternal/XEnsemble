@@ -265,15 +265,17 @@ test('ensureWorkspacePath retries on transient spawn failure', async () => {
 test('buildSkillSymlinkScript covers ALL userSkillDirs via carrier root (0030 核心)', () => {
     const script = BoxLiteRuntimeProvider.buildSkillSymlinkScript('kimi-code', '/workspace.git/xe-skills');
     assert.ok(script, 'script generated');
-    // kimi-code 声明 3 个目录，全部 symlink 到 .git 载体（worktree 会话路径）
-    assert.ok(script.includes('ln -s "/workspace.git/xe-skills/.kimi/skills" "/root/.kimi/skills"'));
-    assert.ok(script.includes('ln -s "/workspace.git/xe-skills/.claude/skills" "/root/.claude/skills"'));
-    assert.ok(script.includes('ln -s "/workspace.git/xe-skills/.agents/skills" "/root/.agents/skills"'));
-    // 镜像内置实体目录 → 种子合并（载体为空时）再替换为 symlink
+    // kimi-code 声明 3 个目录：载体内容复制为 VM 内真目录（软链被 Claude Code 的
+    // 目录遍历拒绝、mount 无权限——复制对所有实现一致），逐目录覆盖
+    assert.ok(script.includes('cp -a "/workspace.git/xe-skills/.kimi/skills"/. "/root/.kimi/skills"/'), 'copies carrier to /root (.kimi)');
+    assert.ok(script.includes('cp -a "/workspace.git/xe-skills/.claude/skills"/. "/root/.claude/skills"/'), 'copies carrier to /root (.claude)');
+    assert.ok(script.includes('cp -a "/workspace.git/xe-skills/.agents/skills"/. "/root/.agents/skills"/'), 'copies carrier to /root (.agents)');
+    // 旧整层软链清理（历史版本遗留）
+    assert.ok(script.includes('if [ -L "/root/.kimi/skills" ]; then rm -f'), 'removes whole-dir symlink');
+    // 镜像内置实体目录 → 种子合并（载体为空时）
     assert.ok(script.includes('cp -a'), 'seeds carrier from image-baked dirs when carrier empty');
-    assert.ok(script.includes('rm -rf'), 'replaces real dirs with symlinks');
-    // 陈旧 symlink 刷新
-    assert.ok(script.includes('if [ -L'), 'refreshes stale symlinks');
+    // 不再生成目录级软链
+    assert.ok(!script.includes('ln -s "/workspace'), 'no whole-dir symlinks');
 });
 
 test('buildSkillSymlinkScript defaults / worktree 与默认会话两种载体路径', () => {
@@ -293,7 +295,7 @@ test('buildSkillSymlinkScript defaults / worktree 与默认会话两种载体路
     }
     // 默认会话载体路径（.git 在 workspace 卷内）
     const wsScript = BoxLiteRuntimeProvider.buildSkillSymlinkScript('claude-code', '/workspace/.git/xe-skills');
-    assert.ok(wsScript.includes('ln -s "/workspace/.git/xe-skills/.claude/skills" "/root/.claude/skills"'));
+    assert.ok(wsScript.includes('cp -a "/workspace/.git/xe-skills/.claude/skills"/. "/root/.claude/skills"/'));
 });
 
 test('resolveSkillCarrierGuestRoot：worktree 走 .git 卷，默认会话要求工程是 git 仓库', () => {
@@ -331,7 +333,7 @@ test('resolveSkillCarrierGuestRoot：worktree 走 .git 卷，默认会话要求�
     }
 });
 
-test('ensureReady 默认会话：git 工程执行载体 symlink 引导（.git 在 workspace 卷内）', async () => {
+test('ensureReady 默认会话：git 工程执行载体复制引导（.git 在 workspace 卷内）', async () => {
     const provider = new BoxLiteRuntimeProvider();
     const client = new MockBoxLiteClient();
     provider.client = client;
@@ -340,7 +342,7 @@ test('ensureReady 默认会话：git 工程执行载体 symlink 引导（.git �
     const project = { id: 'proj_carrier_ok', userId: 'usr_cok' };
     fs.mkdirSync(path.join(workspace.projectDir(project.userId, project.id), '.git'), { recursive: true });
 
-    await provider.ensureReady(project, {
+    const ready = await provider.ensureReady(project, {
         runtimeId: 'rt_cok',
         agentId: 'kimi-code',
         image: 'xensemble/agent-kimi-code:latest',
@@ -349,15 +351,15 @@ test('ensureReady 默认会话：git 工程执行载体 symlink 引导（.git �
 
     // 0030：仍只有 workspace 一个卷（零新增设备）
     assert.equal(client.opened[0].volumes.length, 1);
-    const symlinkExec = (client.execCalls || []).find(
-        (c) => c.command === 'sh' && Array.isArray(c.args) && c.args.join(' ').includes('ln -s'),
+    const carrierExec = (client.execCalls || []).find(
+        (c) => c.command === 'sh' && Array.isArray(c.args) && c.args.join(' ').includes('cp -a "/workspace/.git/xe-skills/.kimi/skills"/. "/root/.kimi/skills"/'),
     );
-    assert.ok(symlinkExec, 'carrier symlink bootstrap runs for git project');
-    assert.ok(symlinkExec.args.join(' ').includes('"/workspace/.git/xe-skills/.kimi/skills"'),
-        'carrier path inside workspace volume');
+    assert.ok(carrierExec, 'carrier copy bootstrap runs for git project');
+    // 供 spawn 前复制刷新使用（见 injectForSession runtimeExec 分支）
+    assert.equal(ready.skillCarrierGuestRoot, '/workspace/.git/xe-skills');
 });
 
-test('ensureReady worktree 会话：载体 symlink 指向 .git 卷内', async () => {
+test('ensureReady worktree 会话：载体在 .git 卷内', async () => {
     const provider = new BoxLiteRuntimeProvider();
     const client = new MockBoxLiteClient();
     provider.client = client;
@@ -370,7 +372,7 @@ test('ensureReady worktree 会话：载体 symlink 指向 .git 卷内', async ()
     fs.mkdirSync(wtDir, { recursive: true });
     provider._ensureWorktree = async () => wtDir;
 
-    await provider.ensureReady(project, {
+    const ready = await provider.ensureReady(project, {
         runtimeId: 'rt_cwt',
         agentId: 'kimi-code',
         image: 'xensemble/agent-kimi-code:latest',
@@ -379,12 +381,11 @@ test('ensureReady worktree 会话：载体 symlink 指向 .git 卷内', async ()
 
     // worktree 会话：workspace + .git 两卷（IRQ 预算内，技能零新增设备）
     assert.equal(client.opened[0].volumes.length, 2);
-    const symlinkExec = (client.execCalls || []).find(
-        (c) => c.command === 'sh' && Array.isArray(c.args) && c.args.join(' ').includes('ln -s'),
+    const carrierExec = (client.execCalls || []).find(
+        (c) => c.command === 'sh' && Array.isArray(c.args) && c.args.join(' ').includes('cp -a "/workspace.git/xe-skills/.kimi/skills"/. "/root/.kimi/skills"/'),
     );
-    assert.ok(symlinkExec, 'carrier symlink bootstrap runs for worktree session');
-    assert.ok(symlinkExec.args.join(' ').includes('"/workspace.git/xe-skills/.kimi/skills"'),
-        'carrier path inside .git volume');
+    assert.ok(carrierExec, 'carrier copy bootstrap runs for worktree session');
+    assert.equal(ready.skillCarrierGuestRoot, '/workspace.git/xe-skills');
 });
 
 test('skill symlink exec failure does not block session (best-effort)', async () => {

@@ -273,6 +273,9 @@ async function ensureProjectRuntime(project, opts = {}) {
             runtime: runtimeRow,
             workspacePath,
             hostWorkspacePath,
+            // 技能载体 guest 根（provider.ensureReady 产物）：spawn 前把宿主载体
+            // 复制为 VM 内真目录时需要（见 injectForSession 的 runtimeExec 分支）
+            skillCarrierGuestRoot: provision.skillCarrierGuestRoot || null,
             recoverable: Boolean(attach?.recoverable),
         };
     });
