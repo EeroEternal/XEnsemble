@@ -16,6 +16,7 @@ import { formatGitOAuthError } from '../../lib/gitLabels';
 import { useToast } from '../Toast';
 import * as gitApi from '../../lib/gitApi';
 import { generateWorkBranchName } from '../../lib/gitApi';
+import { computeSelectionState, toggleRepo, prefixOf } from '../../lib/repoSelection';
 import * as githubApi from '../../lib/githubApi';
 import {
   consoleDialogLgClass,
@@ -77,6 +78,8 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
   const [reposLoading, setReposLoading] = useState(false);
   const [query, setQuery] = useState('');
   const [selectedFullName, setSelectedFullName] = useState('');
+  // 多选勾选（多仓库导入）：勾选第一个仓库后按 full_name 前缀锁定组
+  const [selectedIds, setSelectedIds] = useState([]);
   const [mode, setMode] = useState('browse');
   const [urlInput, setUrlInput] = useState('');
   const [urlFetching, setUrlFetching] = useState(false);
@@ -107,15 +110,30 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
   const [urlOnlyError, setUrlOnlyError] = useState(null);
   const urlOnlyInputRef = useRef(null);
 
+  // 仓库 id 兜底（URL fetch 的仓库可能无 id，用 full_name 作为稳定 key）
+  const reposWithIds = useMemo(
+    () => repos.map((r) => ({ ...r, id: r.id ?? r.full_name })),
+    [repos],
+  );
+  const selection = useMemo(
+    () => computeSelectionState(reposWithIds, selectedIds),
+    [reposWithIds, selectedIds],
+  );
+  const selectedRepos = useMemo(
+    () => selection.filter((r) => selectedIds.includes(r.id)),
+    [selection, selectedIds],
+  );
+
   const selectedRepo = useMemo(
-    () => repos.find((r) => r.full_name === selectedFullName) || null,
-    [repos, selectedFullName],
+    () => selectedRepos[0] || reposWithIds.find((r) => r.full_name === selectedFullName) || null,
+    [selectedRepos, reposWithIds, selectedFullName],
   );
 
   const resetForm = () => {
     setRepos([]);
     setQuery('');
     setSelectedFullName('');
+    setSelectedIds([]);
     setMode('browse');
     setUrlInput('');
     setUrlFetching(false);
@@ -268,25 +286,52 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
 
   const filteredRepos = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return repos;
-    return repos.filter((r) => r.full_name?.toLowerCase().includes(q));
-  }, [repos, query]);
+    if (!q) return reposWithIds;
+    return reposWithIds.filter((r) => r.full_name?.toLowerCase().includes(q));
+  }, [reposWithIds, query]);
+
+  const handleToggle = (repo) => {
+    // 跨前缀仓库不可勾选（enabled=false 时点击无效）
+    if (!repo.enabled && !selectedIds.includes(repo.id)) return;
+    const next = toggleRepo(selectedIds, repo);
+    setSelectedIds(next);
+    // 锚定第一个勾选仓库，驱动 name/branch 默认值
+    const first = next.length > 0 ? reposWithIds.find((r) => r.id === next[0]) : null;
+    setSelectedFullName(first ? first.full_name : '');
+  };
 
   const handleImport = async () => {
-    if (!selectedFullName) return;
+    if (!selectedRepo) return;
     setImporting(true);
     try {
-      const result = await gitApi.importRepo({
-        provider,
-        repo_full_name: selectedFullName,
-        name: name.trim() || selectedRepo?.name,
-        branch: branch.trim() || selectedRepo?.default_branch || 'main',
-        auto_create_branch: autoCreateBranch,
-        work_branch_name: workBranchName.trim() || generateWorkBranchName(''),
-      });
+      let result;
+      if (selectedIds.length > 1) {
+        // 多仓库：一次 import-git repos[] → 1 个 project + N 条 project_repos
+        result = await gitApi.importRepo({
+          provider,
+          name: name.trim() || undefined,
+          repos: selectedRepos.map((r, idx) => ({
+            repo_full_name: r.full_name,
+            role: 'custom',
+            sub_path: r.name,
+            branch: r.default_branch || 'main',
+            is_primary: idx === 0,
+          })),
+        });
+      } else {
+        // 单仓库：原逻辑（向后兼容）
+        result = await gitApi.importRepo({
+          provider,
+          repo_full_name: selectedRepo.full_name,
+          name: name.trim() || selectedRepo.name,
+          branch: branch.trim() || selectedRepo.default_branch || 'main',
+          auto_create_branch: autoCreateBranch,
+          work_branch_name: workBranchName.trim() || generateWorkBranchName(''),
+        });
+      }
       setImportedProjectId(result.id);
       setCloneStatus(result.status || 'cloning');
-      showToast('success', 'Import started. Cloning repository…');
+      showToast('success', t('git:import_started', { defaultValue: 'Import started. Cloning repositories…' }));
     } catch (err) {
       showToast('error', err.message);
       setImporting(false);
@@ -318,7 +363,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
   };
 
   const canImport = Boolean(
-    selectedFullName && name.trim() && branch.trim() && (!autoCreateBranch || workBranchName.trim()),
+    selectedIds.length > 0 && selectedRepo && name.trim() && branch.trim() && (!autoCreateBranch || workBranchName.trim()),
   );
 
   const username = connection?.remote_username || connection?.remoteUsername
@@ -608,6 +653,14 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
             </div>
           </div>
 
+          {selectedIds.length > 0 && (
+            <p className="text-xs text-zinc-500" data-testid="multi-select-hint">
+              {t('git:import_multi_locked_hint', {
+                defaultValue: 'Locked to group "{{prefix}}" — only repositories under the same group can be selected.',
+                prefix: prefixOf(selectedRepos[0]?.full_name || ''),
+              })}
+            </p>
+          )}
           <div className={`max-h-48 overflow-auto rounded-lg border ${borderHairline}`}>
             {reposLoading ? (
               <div className="flex items-center justify-center gap-2 p-4 text-sm text-zinc-500">
@@ -620,25 +673,40 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
               </div>
             ) : (
               <ul className="divide-y divide-zinc-200">
-                {filteredRepos.map((repo) => (
-                  <li key={repo.id || repo.full_name}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedFullName(repo.full_name)}
-                      className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors ${
-                        selectedFullName === repo.full_name ? 'bg-zinc-100' : 'hover:bg-zinc-50'
-                      }`}
-                    >
-                      <span className="min-w-0 truncate font-medium text-zinc-900">
-                        {repo.full_name}
-                      </span>
-                      <span className="shrink-0 text-xs text-zinc-500">
-                        {repo.private ? 'Private' : 'Public'}
-                        {repo.language ? ` · ${repo.language}` : ''}
-                      </span>
-                    </button>
-                  </li>
-                ))}
+                {filteredRepos.map((repo) => {
+                  const state = selection.find((s) => s.id === repo.id)
+                    || { enabled: true, checked: false };
+                  const toggle = () => handleToggle({ ...repo, enabled: state.enabled });
+                  return (
+                    <li key={repo.id ?? repo.full_name}>
+                      <button
+                        type="button"
+                        disabled={!state.enabled}
+                        onClick={toggle}
+                        data-testid={`repo-row-${repo.full_name}`}
+                        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
+                          state.checked ? 'bg-zinc-100' : 'hover:bg-zinc-50'
+                        } ${!state.enabled ? 'cursor-not-allowed opacity-40' : ''}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={state.checked}
+                          disabled={!state.enabled}
+                          onChange={toggle}
+                          onClick={(e) => e.stopPropagation()}
+                          className="shrink-0 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
+                        />
+                        <span className="min-w-0 truncate font-medium text-zinc-900">
+                          {repo.full_name}
+                        </span>
+                        <span className="shrink-0 text-xs text-zinc-500">
+                          {repo.private ? 'Private' : 'Public'}
+                          {repo.language ? ` · ${repo.language}` : ''}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -772,12 +840,15 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
           size="sm"
           disabled={!canImport || importing}
           onClick={handleImport}
+          data-testid="import-submit"
         >
           {importing ? (
             <>
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
               {t('git:importing')}
             </>
+          ) : selectedIds.length > 1 ? (
+            t('git:import_multi_submit', { count: selectedIds.length, defaultValue: 'Import {{count}} repositories' })
           ) : (
             t('git:import_repository')
           )}
