@@ -27,6 +27,8 @@ function withTimeout(promiseFactory, ms, label) {
     return Promise.race([promiseFactory(), timeout]).finally(() => clearTimeout(timer));
 }
 
+const withCause = (err) => `${err?.message || err}${err?.cause ? ` | cause: ${err.cause.message || err.cause}` : ''}`;
+
 async function clonePrimary(project, primary, opts) {
     const { baseBranch, workBranchName, autoCreateBranch } = opts;
     const svc = new ProjectRepoService({ db, projectReposTable: schema.projectRepos });
@@ -68,7 +70,7 @@ async function clonePrimary(project, primary, opts) {
         }, CLONE_TIMEOUT_MS, `primary repo "${primary.subPath}" clone`);
         await svc.updateCloneStatus(primary.id, 'ready', null);
     } catch (err) {
-        stage(`FAILED: ${err?.message || err}`);
+        stage(`FAILED: ${withCause(err)}`);
         await svc.updateCloneStatus(primary.id, 'failed', err?.message || String(err));
     }
 }
@@ -89,7 +91,7 @@ async function cloneSecondary(project, repo) {
         }, CLONE_TIMEOUT_MS, `repo "${repo.subPath}" clone`);
         await svc.updateCloneStatus(repo.id, 'ready', null);
     } catch (err) {
-        stage(`FAILED: ${err?.message || err}`);
+        stage(`FAILED: ${withCause(err)}`);
         await svc.updateCloneStatus(repo.id, 'failed', err?.message || String(err));
     }
 }
