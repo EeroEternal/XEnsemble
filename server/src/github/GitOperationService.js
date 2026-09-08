@@ -53,6 +53,8 @@ class GitOperationService {
         this.exec = deps.exec ?? getRuntime().exec;
         this.fs = deps.fs ?? getRuntime().fs;
         this._runtimeId = deps.runtimeId || null;
+        // 多仓库：指定 repo 后 git 操作路由到 projectDir/<subPath>（或其 worktree）
+        this._repoSubPath = deps.repoSubPath || null;
         const origEnsure = deps.ensureProjectRuntime ?? ensureProjectRuntime;
         this.ensureProjectRuntime = async (project, opts = {}) => {
             return origEnsure(project, { ...(this._runtimeId ? { runtimeId: this._runtimeId } : {}), ...opts });
@@ -100,15 +102,28 @@ class GitOperationService {
         let gitDir = null;
         let workTree = null;
 
+        // 多仓库：默认路由到 projectDir/<subPath>
+        if (this._repoSubPath) {
+            hostPath = path.join(hostPath, this._repoSubPath);
+        }
+
         // If a runtimeId is set (session-scoped), prefer the worktree path.
         // Compute explicit --git-dir / --work-tree so host git bypasses the
         // worktree's .git pointer (which may be rewritten to a VM path).
         if (this._runtimeId) {
             const mainDir = workspace.projectDir(project.userId, project.id);
-            const wtPath = workspace.worktreeDir(project.userId, project.id, this._runtimeId);
+            const wtPath = this._repoSubPath
+                ? workspace.repoWorktreePath(project.userId, project.id, this._runtimeId, this._repoSubPath)
+                : workspace.worktreeDir(project.userId, project.id, this._runtimeId);
             if (fs.existsSync(path.join(wtPath, '.git'))) {
                 hostPath = wtPath;
-                gitDir = path.join(mainDir, '.git', 'worktrees', this._runtimeId);
+                // 多 repo worktree 的主 .git 位于 projectDir/<subPath>/.git，
+                // admin 目录名为 worktree 路径 basename（= subPath）
+                const mainGitDir = this._repoSubPath
+                    ? path.join(mainDir, this._repoSubPath, '.git')
+                    : path.join(mainDir, '.git');
+                const wtAdminName = this._repoSubPath || this._runtimeId;
+                gitDir = path.join(mainGitDir, 'worktrees', wtAdminName);
                 workTree = wtPath;
             }
         }
@@ -147,9 +162,15 @@ class GitOperationService {
             // 但 /workspace.git 已挂载进沙箱（= 宿主 .git）、/workspace = worktree。
             // 用 GIT_DIR/GIT_WORK_TREE 显式指到沙箱路径，让沙箱内 git 不依赖 .git 指针；
             // 宿主侧指针保持宿主路径，宿主 git（--git-dir/--work-tree）不受影响。
+            // 多仓库：gitVolume 挂 primary repo 的 .git，worktree admin 目录为 <subPath>；
+            // 非 primary repo 的 .git 未挂入沙箱，沙箱内 git 仅对 primary 可用（宿主侧不受限）。
             if (this._runtimeId) {
-                env.GIT_DIR = `/workspace.git/worktrees/${this._runtimeId}`;
-                env.GIT_WORK_TREE = '/workspace';
+                env.GIT_DIR = this._repoSubPath
+                    ? `/workspace.git/worktrees/${this._repoSubPath}`
+                    : `/workspace.git/worktrees/${this._runtimeId}`;
+                env.GIT_WORK_TREE = this._repoSubPath
+                    ? `${ready.workspacePath}/${this._repoSubPath}`
+                    : '/workspace';
             }
             const result = await exec(
                 'git',

@@ -38,6 +38,12 @@ function worktreeDir(userId, projectId, runtimeId) {
     return path.join(WORKSPACE_ROOT, userId, `${projectId}.wt`, runtimeId);
 }
 
+// 多仓库：每个 repo 的 worktree 在 runtime worktree 目录下的 <subPath> 子目录
+// （BoxLiteRuntimeProvider._ensureRepoWorktree / GitOperationService repoSubPath 路由共用）
+function repoWorktreePath(userId, projectId, runtimeId, subPath) {
+    return path.join(worktreeDir(userId, projectId, runtimeId), subPath);
+}
+
 function createProjectDirectory(userId, projectId) {
     ensureWorkspaceRoot();
     const dir = projectDir(userId, projectId);
@@ -129,6 +135,7 @@ module.exports = {
     ensureWorkspaceRoot,
     projectDir,
     worktreeDir,
+    repoWorktreePath,
     createProjectDirectory,
     resolveSafePath,
 };

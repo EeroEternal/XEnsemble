@@ -158,6 +158,32 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         };
     }
 
+    /**
+     * 多仓库 volume：host 挂 worktree 根目录（内含各 repo 的 worktree 子目录），
+     * guest 仍是 /workspace —— 各 repo 天然可见于 /workspace/<subPath>。
+     * gitVolume 取 primary repo 的 .git（twoStage 沙箱内 git 指针改写与 skills
+     * 载体都依赖 /workspace.git 语义）。单 repo 场景不使用本方法（走原逻辑）。
+     */
+    buildMultiRepoVolume(project, worktreeBasePath, repos) {
+        const guestPath = this.workspacePath();
+        const hostPath = worktreeBasePath || this.hostWorkspacePath(project);
+        const primary = repos.find((r) => r.isPrimary) || repos[0];
+        const primaryGitDir = path.join(this.hostWorkspacePath(project), primary.subPath, '.git');
+        const gitVolume = fs.existsSync(primaryGitDir) ? {
+            host_path: primaryGitDir,
+            guest_path: '/workspace.git',
+            read_only: false,
+        } : null;
+        return {
+            host_path: hostPath,
+            guest_path: guestPath,
+            read_only: false,
+            mountKey: buildWorkspaceMountKey(hostPath, guestPath) + (gitVolume ? `+${gitVolume.guest_path}` : ''),
+            gitVolume,
+            repos,
+        };
+    }
+
     async _ensureWorktree(project, runtimeId) {
         const mainDir = this.hostWorkspacePath(project);
         const gitDir = path.join(mainDir, '.git');
@@ -203,6 +229,64 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
 
         try {
             const wtRoot = path.dirname(wtDir);
+            if (fs.existsSync(wtRoot) && fs.readdirSync(wtRoot).length === 0) {
+                fs.rmdirSync(wtRoot);
+            }
+        } catch { /* best-effort */ }
+    }
+
+    /**
+     * 多仓库：为单个 repo 在 runtime worktree 根下创建子目录 worktree。
+     * 分支名使用完整 runtimeId（避免 slice(-4) 碰撞）+ subPath。
+     */
+    async _ensureRepoWorktree(project, runtimeId, repo) {
+        const mainDir = path.join(this.hostWorkspacePath(project), repo.subPath);
+        const gitDir = path.join(mainDir, '.git');
+        if (!fs.existsSync(gitDir)) return null;
+
+        const wtDir = workspace.repoWorktreePath(project.userId, project.id, runtimeId, repo.subPath);
+        if (fs.existsSync(path.join(wtDir, '.git'))) return wtDir;
+
+        fs.mkdirSync(path.dirname(wtDir), { recursive: true });
+        const branchName = `agentharness/session-${runtimeId}-${repo.subPath}`;
+        const baseBranch = repo.repoDefaultBranch || project.repoDefaultBranch || 'main';
+        try {
+            await execFileAsync('git', ['-C', mainDir, 'fetch', 'origin', baseBranch]);
+        } catch { /* offline or no remote */ }
+        try {
+            await execFileAsync('git', ['-C', mainDir, 'worktree', 'add', '-b', branchName, wtDir, `origin/${baseBranch}`]);
+            return wtDir;
+        } catch {
+            try {
+                await execFileAsync('git', ['-C', mainDir, 'worktree', 'add', '-b', branchName, wtDir]);
+                return wtDir;
+            } catch {
+                try {
+                    await execFileAsync('git', ['-C', mainDir, 'worktree', 'add', '--detach', wtDir]);
+                    return wtDir;
+                } catch {
+                    return null;
+                }
+            }
+        }
+    }
+
+    /** 多仓库：清理 runtime worktree 根下所有 repo 子目录 worktree（best-effort）。 */
+    async _removeRepoWorktrees(project, runtimeId) {
+        const wtRoot = workspace.worktreeDir(project.userId, project.id, runtimeId);
+        if (!fs.existsSync(wtRoot)) return;
+        const entries = fs.readdirSync(wtRoot, { withFileTypes: true })
+            .filter((e) => e.isDirectory() && fs.existsSync(path.join(wtRoot, e.name, '.git')));
+        await Promise.all(entries.map((e) => (async () => {
+            const wtDir = path.join(wtRoot, e.name);
+            const mainDir = path.join(this.hostWorkspacePath(project), e.name);
+            try {
+                await execFileAsync('git', ['-C', mainDir, 'worktree', 'remove', '--force', wtDir]);
+            } catch {
+                try { fs.rmSync(wtDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+            }
+        })()));
+        try {
             if (fs.existsSync(wtRoot) && fs.readdirSync(wtRoot).length === 0) {
                 fs.rmdirSync(wtRoot);
             }
@@ -342,11 +426,24 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         // For non-default runtimes, create a git worktree so each session
         // gets its own working tree (independent branch / uncommitted state).
         // Since each session gets its own runtimeId, the worktree is per-session.
+        // 多仓库（opts.repos.length > 1）：为每个 repo 建 worktree，host 挂
+        // worktree 根目录单卷（guest /workspace/<subPath> 各 repo 可见）。
+        const repos = Array.isArray(opts.repos) && opts.repos.length > 0 ? opts.repos : null;
+        const multiRepo = !!(repos && repos.length > 1);
         let worktreePath = null;
+        let workspaceVolume;
         if (runtimeId && project.defaultRuntimeId && runtimeId !== project.defaultRuntimeId) {
-            worktreePath = await this._ensureWorktree(project, runtimeId);
+            if (multiRepo) {
+                worktreePath = workspace.worktreeDir(project.userId, project.id, runtimeId);
+                await Promise.all(repos.map((r) => this._ensureRepoWorktree(project, runtimeId, r)));
+                workspaceVolume = this.buildMultiRepoVolume(project, worktreePath, repos);
+            } else {
+                worktreePath = await this._ensureWorktree(project, runtimeId);
+                workspaceVolume = this.buildWorkspaceVolume(project, worktreePath);
+            }
+        } else {
+            workspaceVolume = this.buildWorkspaceVolume(project, worktreePath);
         }
-        const workspaceVolume = this.buildWorkspaceVolume(project, worktreePath);
         const { host_path: hostWorkspacePath, guest_path: guestWorkspacePath, mountKey } = workspaceVolume;
         workspace.createProjectDirectory(project.userId, project.id);
         // 0030（.git 搭车）：技能载体 guest 根——worktree 会话在 .git 卷内，
@@ -579,6 +676,11 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
                     const pRows = await db.select().from(schema.projects)
                         .where(eq(schema.projects.id, rt.projectId));
                     if (pRows.length > 0) {
+                        const repoRows = await db.select().from(schema.projectRepos)
+                            .where(eq(schema.projectRepos.projectId, rt.projectId));
+                        if (repoRows.length > 1) {
+                            await this._removeRepoWorktrees(pRows[0], runtimeRef);
+                        }
                         await this._removeWorktree(pRows[0], runtimeRef);
                     }
                 }

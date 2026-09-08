@@ -198,9 +198,19 @@ async function ensureProjectRuntime(project, opts = {}) {
             opts.componentDiskSizeMb = componentDiskSizeMb;
         }
 
+        // 多仓库：拉取 project_repos 透传给 provider（BoxLite ensureReady 按
+        // repos.length>1 走多 worktree / 多根挂载；单 repo 或无记录走原逻辑）。
+        let projectRepos = null;
+        try {
+            const repoRows = await db.select().from(schema.projectRepos)
+                .where(eq(schema.projectRepos.projectId, project.id));
+            if (repoRows.length > 0) projectRepos = repoRows;
+        } catch { /* project_repos 尚未迁移时容错 */ }
+
         const provision = await rt.provider.ensureReady(project, {
             runtimeId: runtimeRow.id,
             forceRecreate: !!opts.forceRecreate,
+            ...(projectRepos ? { repos: projectRepos } : {}),
             ...(isBoxLite ? {
                 agentId: opts.agentId,
                 image,

@@ -77,6 +77,14 @@ function registerRepoRoutes(fastify, deps = {}) {
         remoteRepoId: body.remote_repo_id || null,
         remoteFullName: body.remote_full_name || null,
       });
+      // 异步触发 clone（best-effort，状态回写 project_repos.clone_status）
+      if (body.repo_url) {
+        const { multiRepoClone } = require('../repos/multiRepoClone');
+        multiRepoClone(project, [{
+          ...repo,
+          cloneUrl: body.repo_url,
+        }], { autoCreateBranch: false }).catch((e) => request.log?.error?.(e));
+      }
       return reply.code(201).send({ repo });
     } catch (err) {
       if (/Invalid subPath/.test(err.message)) {

@@ -92,7 +92,7 @@ class ProjectRepoService {
       repoTokenSecretRef: input.repoTokenSecretRef || null,
       isPrimary,
       currentBranch: input.currentBranch || null,
-      cloneStatus: 'pending',
+      cloneStatus: input.cloneStatus || 'pending',
       cloneError: null,
       remoteRepoId: input.remoteRepoId || null,
       remoteFullName: input.remoteFullName || null,

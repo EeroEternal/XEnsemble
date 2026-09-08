@@ -442,21 +442,115 @@ function registerGitRoutes(fastify) {
         const workBranchName = work_branch_name || `skyharness/workspace-${Date.now().toString(36).slice(-4)}`;
         const currentBranch = autoCreateBranch ? workBranchName : baseBranch;
 
+        // ── 多仓库导入（body.repos 数组，length > 1）──
+        // 布局约定：仅多 repo 项目使用子目录布局（projectDir/<subPath>）；
+        // 单 repo / 存量项目一律根目录原逻辑。
+        const reposInput = Array.isArray(body.repos) && body.repos.length > 1 ? body.repos : null;
+        let resolvedRepos = null;
+        if (reposInput) {
+            resolvedRepos = [];
+            const seenSubPaths = new Set();
+            for (let i = 0; i < reposInput.length; i++) {
+                const r = reposInput[i] || {};
+                let itemInfo = null;
+                try {
+                    if (r.repo_url) {
+                        const parsed = resolveRepoUrl(r.repo_url);
+                        if (!parsed) throw new Error('invalid repo_url');
+                        const resolvedProvider = hasProvider(parsed.provider) ? parsed.provider : 'url';
+                        itemInfo = {
+                            cloneUrl: parsed.cloneUrl,
+                            fullName: parsed.fullName,
+                            name: parsed.repoName,
+                            provider: resolvedProvider,
+                            defaultBranch: r.branch || await probeDefaultBranch(parsed.cloneUrl),
+                        };
+                    } else if (r.repo_full_name) {
+                        const rProvider = r.repo_provider || providerName;
+                        if (!hasProvider(rProvider) || !connection) {
+                            return reply.code(400).send({ error: t('errors:provider_account_not_connected', { defaultValue: '{{provider}} account not connected', provider: rProvider }, request.locale || 'en'), code: 'provider_account_not_connected' });
+                        }
+                        const providerInst = getProvider(rProvider);
+                        const config = await getProviderConfig(rProvider);
+                        const info = await providerInst.getRepo(token, r.repo_full_name, { apiBase: config?.apiBase });
+                        itemInfo = {
+                            cloneUrl: info.cloneUrl,
+                            fullName: info.fullName || r.repo_full_name,
+                            name: info.name || r.repo_full_name.split('/').pop(),
+                            provider: rProvider,
+                            defaultBranch: r.branch || info.defaultBranch || 'main',
+                        };
+                    } else {
+                        return reply.code(400).send({ error: 'each repo requires repo_url or repo_full_name', code: 'repo_url_required' });
+                    }
+                } catch (err) {
+                    request.log.error(err);
+                    return reply.code(400).send({ error: err.message || 'failed to resolve repo', code: 'repo_resolve_failed' });
+                }
+
+                const subPath = String(r.sub_path || r.subPath || itemInfo.name || '').trim();
+                if (!subPath) {
+                    return reply.code(400).send({ error: 'sub_path is required for each repo', code: 'sub_path_required' });
+                }
+                if (seenSubPaths.has(subPath)) {
+                    return reply.code(400).send({ error: `duplicate sub_path: ${subPath}`, code: 'sub_path_conflict' });
+                }
+                seenSubPaths.add(subPath);
+                resolvedRepos.push({
+                    subPath,
+                    cloneUrl: itemInfo.cloneUrl,
+                    fullName: itemInfo.fullName,
+                    name: itemInfo.name,
+                    provider: itemInfo.provider,
+                    repoDefaultBranch: itemInfo.defaultBranch || 'main',
+                    isPrimary: r.is_primary != null ? !!r.is_primary : i === 0,
+                    remoteRepoId: r.remote_repo_id || null,
+                });
+            }
+            // primary 唯一化：多个 is_primary 时保留第一个
+            const primaryCount = resolvedRepos.filter((r) => r.isPrimary).length;
+            if (primaryCount === 0) resolvedRepos[0].isPrimary = true;
+            if (primaryCount > 1) {
+                let seen = false;
+                for (const r of resolvedRepos) {
+                    if (r.isPrimary) {
+                        if (seen) r.isPrimary = false;
+                        else seen = true;
+                    }
+                }
+            }
+        }
+
+        // 多仓库：project 行取 primary repo 的信息（保持 projects 表兼容）
+        const primaryRepo = resolvedRepos
+            ? resolvedRepos.find((r) => r.isPrimary)
+            : null;
+        const effectiveRepoInfo = primaryRepo
+            ? {
+                cloneUrl: primaryRepo.cloneUrl,
+                defaultBranch: primaryRepo.repoDefaultBranch,
+                fullName: primaryRepo.fullName,
+                name: primaryRepo.name,
+                id: null,
+            }
+            : repoInfo;
+        const effectiveBaseBranch = primaryRepo ? primaryRepo.repoDefaultBranch : baseBranch;
+
         const projectRow = {
             id: projectId,
             userId,
             name: projectName,
             serverPath,
-            repoProvider: providerName,
-            repoUrl: repoInfo.cloneUrl,
-            repoDefaultBranch: repoInfo.defaultBranch || 'main',
+            repoProvider: primaryRepo ? primaryRepo.provider : providerName,
+            repoUrl: effectiveRepoInfo.cloneUrl,
+            repoDefaultBranch: effectiveRepoInfo.defaultBranch || 'main',
             repoTokenSecretRef: connection?.id || null,
             workspaceMode: 'git',
-            remoteRepoId: repoInfo.id || null,
-            remoteFullName: repoInfo.fullName || repo_full_name,
+            remoteRepoId: effectiveRepoInfo.id || null,
+            remoteFullName: effectiveRepoInfo.fullName || repo_full_name,
             // Legacy GitHub-specific fields for backward compat
-            githubRepoId: providerName === 'github' ? Number(repoInfo.id) || null : null,
-            githubFullName: providerName === 'github' ? (repoInfo.fullName || repo_full_name) : null,
+            githubRepoId: providerName === 'github' ? Number(effectiveRepoInfo.id) || null : null,
+            githubFullName: providerName === 'github' ? (effectiveRepoInfo.fullName || repo_full_name) : null,
             currentBranch,
             cloneStatus: 'cloning',
             createdAt,
@@ -470,56 +564,140 @@ function registerGitRoutes(fastify) {
         }
 
         const { ensureProjectRuntime } = require('../runtime/RuntimeService');
+        const { multiRepoClone } = require('../repos/multiRepoClone');
+        const { ProjectRepoService } = require('../repos/ProjectRepoService');
+        const projectRepoService = new ProjectRepoService({ db, projectReposTable: schema.projectRepos });
         const project = { ...projectRow };
 
-        (async () => {
+        let primaryRepoRowId = null;
+        if (resolvedRepos) {
+            // 写 project_repos（多仓库导入）
             try {
-                const ready = await ensureProjectRuntime(project);
-                // Update the in-memory project object so that subsequent
-                // _execGit -> ensureProjectRuntime calls use the fast path
-                // (cached runtime row) instead of re-entering ensureReady,
-                // which can trigger a VM delete+recreate race.
-                if (ready?.runtime?.id) {
-                    project.defaultRuntimeId = ready.runtime.id;
+                for (const r of resolvedRepos) {
+                    const row = await projectRepoService.addRepo({
+                        projectId,
+                        role: 'custom',
+                        subPath: r.subPath,
+                        repoProvider: r.provider,
+                        repoUrl: r.cloneUrl,
+                        repoDefaultBranch: r.repoDefaultBranch,
+                        isPrimary: r.isPrimary,
+                        remoteFullName: r.fullName,
+                        remoteRepoId: r.remoteRepoId,
+                        repoInstallationRef: connection?.id || null,
+                        repoTokenSecretRef: connection?.id || null,
+                        currentBranch: r.isPrimary ? currentBranch : (r.repoDefaultBranch || 'main'),
+                        cloneStatus: 'cloning',
+                    });
+                    if (r.isPrimary) primaryRepoRowId = row.id;
                 }
-
-                const cloneResult = await gitOperationService.cloneRepo(project, {
-                    repoUrl: repoInfo.cloneUrl,
-                    branch: baseBranch,
-                });
-
-                let branchSha = cloneResult.sha;
-                if (autoCreateBranch) {
-                    const createResult = await gitOperationService.createBranch(
-                        project, workBranchName, baseBranch);
-                    branchSha = createResult.sha;
-                }
-
-                await scaffoldXEnsembleWithFs(ready.hostWorkspacePath || ready.workspacePath, {
-                    baseBranch,
-                    autoCommitOnExit: true,
-                });
-
-                await db.update(schema.projects)
-                    .set({ cloneStatus: 'ready', cloneError: null })
-                    .where(eq(schema.projects.id, projectId));
             } catch (err) {
-                request.log.error(err, `Git import failed for project ${projectId}`);
-                await db.update(schema.projects)
-                    .set({ cloneStatus: 'failed', cloneError: err.message })
-                    .where(eq(schema.projects.id, projectId));
+                request.log.error(err);
             }
-        })();
+
+            (async () => {
+                await multiRepoClone(project, resolvedRepos, {
+                    baseBranch: effectiveBaseBranch,
+                    workBranchName,
+                    autoCreateBranch,
+                });
+                // project 行状态跟随 primary repo
+                if (primaryRepoRowId) {
+                    const pr = await projectRepoService.getById(primaryRepoRowId);
+                    await db.update(schema.projects)
+                        .set({ cloneStatus: pr?.cloneStatus || 'ready', cloneError: pr?.cloneError || null })
+                        .where(eq(schema.projects.id, projectId));
+                }
+            })();
+        } else {
+            // 单仓库：原流程 + 写一条 project_repos 记录（布局仍在根目录）
+            let singleRepoRowId = null;
+            try {
+                const row = await projectRepoService.addRepo({
+                    projectId,
+                    role: 'primary',
+                    subPath: projectName.toLowerCase().replace(/[^a-z0-9_-]+/g, '-') || 'workspace',
+                    repoProvider: providerName,
+                    repoUrl: repoInfo.cloneUrl,
+                    repoDefaultBranch: repoInfo.defaultBranch || 'main',
+                    isPrimary: true,
+                    remoteRepoId: repoInfo.id || null,
+                    remoteFullName: repoInfo.fullName || repo_full_name || null,
+                    repoInstallationRef: connection?.id || null,
+                    repoTokenSecretRef: connection?.id || null,
+                    currentBranch,
+                });
+                singleRepoRowId = row.id;
+            } catch (err) {
+                request.log.error(err, 'failed to record project_repos for single repo import');
+            }
+
+            (async () => {
+                try {
+                    const ready = await ensureProjectRuntime(project);
+                    // Update the in-memory project object so that subsequent
+                    // _execGit -> ensureProjectRuntime calls use the fast path
+                    // (cached runtime row) instead of re-entering ensureReady,
+                    // which can trigger a VM delete+recreate race.
+                    if (ready?.runtime?.id) {
+                        project.defaultRuntimeId = ready.runtime.id;
+                    }
+
+                    const cloneResult = await gitOperationService.cloneRepo(project, {
+                        repoUrl: repoInfo.cloneUrl,
+                        branch: baseBranch,
+                    });
+
+                    let branchSha = cloneResult.sha;
+                    if (autoCreateBranch) {
+                        const createResult = await gitOperationService.createBranch(
+                            project, workBranchName, baseBranch);
+                        branchSha = createResult.sha;
+                    }
+
+                    await scaffoldXEnsembleWithFs(ready.hostWorkspacePath || ready.workspacePath, {
+                        baseBranch,
+                        autoCommitOnExit: true,
+                    });
+
+                    await db.update(schema.projects)
+                        .set({ cloneStatus: 'ready', cloneError: null })
+                        .where(eq(schema.projects.id, projectId));
+                    if (singleRepoRowId) {
+                        await projectRepoService.updateCloneStatus(singleRepoRowId, 'ready', null);
+                    }
+                } catch (err) {
+                    request.log.error(err, `Git import failed for project ${projectId}`);
+                    await db.update(schema.projects)
+                        .set({ cloneStatus: 'failed', cloneError: err.message })
+                        .where(eq(schema.projects.id, projectId));
+                    if (singleRepoRowId) {
+                        await projectRepoService.updateCloneStatus(singleRepoRowId, 'failed', err.message);
+                    }
+                }
+            })();
+        }
+
+        const responseRepos = resolvedRepos
+            ? resolvedRepos.map((r) => ({
+                sub_path: r.subPath,
+                repo_full_name: r.fullName,
+                repo_url: r.cloneUrl,
+                is_primary: r.isPrimary,
+                clone_status: 'cloning',
+            }))
+            : undefined;
 
         return reply.code(202).send({
             id: projectId,
             name: projectName,
-            provider: providerName,
-            remote_full_name: repoInfo.fullName || repo_full_name,
-            repo_url: repoInfo.cloneUrl,
+            provider: primaryRepo ? primaryRepo.provider : providerName,
+            remote_full_name: effectiveRepoInfo.fullName || repo_full_name,
+            repo_url: effectiveRepoInfo.cloneUrl,
             current_branch: currentBranch,
             status: 'cloning',
             created_at: createdAt,
+            ...(responseRepos ? { repos: responseRepos } : {}),
         });
     });
 
