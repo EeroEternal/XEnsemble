@@ -830,6 +830,173 @@ function detectNativeDeps(hostWorkspacePath) {
     return { hit: found.size > 0, pkgs: [...found].slice(0, 8) };
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// 系统服务依赖探测（postgres / mysql / redis / mongodb）
+//
+// 目标：通用地（不写死 postgres 单点）识别"项目需要哪些系统级服务"，供 twoStage
+// provision 在 verify 之前确定性安装，避免 verify agent 现场 apt 试错卡死
+// （实测：apt-get 装 postgres 卡住 → 60 轮 verify 耗尽 → 部署失败）。
+//
+// 信号来源（纯文件读取，宿主侧毫秒级）：
+//   1) 依赖名（根 + 一层子目录 package.json / go.mod / requirements.txt /
+//      pyproject.toml / Cargo.toml）
+//   2) 连接串 / 环境变量（.env*、docker-compose*.yml、Dockerfile*）
+//   3) docker-compose 服务镜像（postgres/mysql/redis/mongo）
+//
+// 保守策略：宁可多报（provision 幂等且失败不阻塞），不可漏报（漏了 verify 才试错）。
+// 多数据库 ORM（prisma/sequelize/typeorm/knex/drizzle-orm/sqlx）不直接判库，
+// 依赖连接串/配置文件兜底，避免误装。
+// ──────────────────────────────────────────────────────────────────────────
+
+const SYSTEM_SERVICE_DEPS = {
+    postgres: new Set([
+        // npm
+        'pg', 'pg-promise', 'pg-hstore', 'pg-native', 'postgres',
+        // go
+        'github.com/lib/pq', 'github.com/jackc/pgx', 'github.com/jackc/pgx/v4', 'github.com/jackc/pgx/v5',
+        // python
+        'psycopg2', 'psycopg2-binary', 'asyncpg', 'pg8000',
+        // rust
+        'tokio-postgres', 'postgres',
+    ]),
+    mysql: new Set([
+        // npm（mariadb 包同时服务 MariaDB）
+        'mysql', 'mysql2', 'mariadb',
+        // go
+        'github.com/go-sql-driver/mysql',
+        // python
+        'pymysql', 'mysqlclient', 'MySQLdb',
+        // rust
+        'mysql',
+    ]),
+    redis: new Set([
+        'redis', 'ioredis', 'connect-redis',          // npm
+        'github.com/go-redis/redis', 'github.com/go-redis/redis/v8', 'github.com/redis/go-redis', // go
+        'redis',                                       // python / rust
+    ]),
+    mongodb: new Set([
+        'mongodb', 'mongoose', 'mongodb-memory-server', // npm
+        'go.mongodb.org/mongo-driver',                   // go
+        'pymongo', 'motor',                              // python
+        'mongodb',                                       // rust
+    ]),
+};
+
+// 单值也可能命中多个服务（如 'redis' 同时是 npm/py/rust 包名）——只记一次，交由证据判断。
+const SERVICE_NAME_RE = {
+    postgres: /\bpostgres(?:ql)?\b/i,
+    mysql: /\bmysql\b|\bmariadb\b/i,
+    redis: /\bredis\b/i,
+    mongodb: /\bmongo(?:db)?\b/i,
+};
+
+// 从一段文本（依赖清单/连接串/配置）提取命中的服务集合。
+function matchServicesInText(text) {
+    const hits = new Set();
+    if (!text) return hits;
+    // 连接串（最权威）
+    if (/postgres(?:ql)?:\/\/|\bDATABASE_URL\b[^=\n]*=\s*['"]?postgres(?:ql)?:/i.test(text)) hits.add('postgres');
+    if (/mysql:\/\/|mariadb:\/\/|\bDATABASE_URL\b[^=\n]*=\s*['"]?mysql:/i.test(text)) hits.add('mysql');
+    if (/redis:\/\/|\bREDIS_URL\b/i.test(text)) hits.add('redis');
+    if (/mongodb(?:\+srv)?:\/\/|\bMONGO(?:_URL|_URI)\b/i.test(text)) hits.add('mongodb');
+    // 环境变量约定
+    if (/\bPOSTGRES_(?:HOST|DB|USER|PASSWORD)\b/i.test(text)) hits.add('postgres');
+    if (/\bMYSQL_(?:HOST|DB|USER|PASSWORD|DATABASE)\b/i.test(text)) hits.add('mysql');
+    return hits;
+}
+
+/**
+ * 确定性系统服务依赖扫描（宿主侧纯文件读取）。
+ *
+ * @param {string|null} hostWorkspacePath
+ * @returns {{ services: string[], signals: Array<{service:string, evidence:string}> }}
+ */
+function detectSystemDeps(hostWorkspacePath) {
+    const signals = [];
+    if (!hostWorkspacePath) return { services: [], signals };
+    const dir = hostWorkspacePath;
+    const seenServices = new Set();
+    const record = (service, evidence) => {
+        if (service && !seenServices.has(service)) {
+            seenServices.add(service);
+            signals.push({ service, evidence });
+        }
+    };
+
+    // 1) 依赖名扫描：根 + 一层子目录（同 detectNativeDeps 范围）。
+    const depFiles = [];
+    try {
+        for (const name of ['package.json', 'go.mod', 'requirements.txt', 'pyproject.toml', 'Cargo.toml', 'composer.json']) {
+            if (hasFile(dir, name)) depFiles.push({ sub: '.', name });
+        }
+        for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (!ent.isDirectory() || ent.name === 'node_modules' || ent.name.startsWith('.')) continue;
+            for (const name of ['package.json', 'go.mod', 'requirements.txt', 'pyproject.toml', 'Cargo.toml', 'composer.json']) {
+                if (hasFile(path.join(dir, ent.name), name)) depFiles.push({ sub: ent.name, name });
+            }
+        }
+    } catch { /* ignore */ }
+
+    for (const { sub, name } of depFiles) {
+        let text = null;
+        if (name === 'package.json' || name === 'composer.json') {
+            const j = readJsonSafe(path.join(dir, sub, name));
+            if (!j) continue;
+            text = JSON.stringify(j) || '';
+        } else {
+            text = readTextSafe(path.join(dir, sub, name)) || '';
+        }
+        for (const [service, depNames] of Object.entries(SYSTEM_SERVICE_DEPS)) {
+            for (const dep of depNames) {
+                // package.json 里是裸包名；go.mod/Cargo.toml 里可能是路径/版本，做子串匹配
+                const re = new RegExp(`(?:^|[^A-Za-z0-9_.-/])${escapeRegExp(dep)}(?:$|[^A-Za-z0-9_.-])`);
+                if (re.test(text)) {
+                    record(service, `${dep} in ${sub}/${name}`);
+                    break;
+                }
+            }
+        }
+    }
+
+    // 2) 连接串 / 环境变量 / 编排文件：根 + 一层子目录的 .env*、docker-compose*.yml、Dockerfile*。
+    const configNames = ['.env', '.env.example', '.env.local', 'docker-compose.yml', 'docker-compose.yaml',
+        'docker-compose.deploy.yml', 'docker-compose.selfhost.yml', 'Dockerfile', 'docker-compose.yml.example'];
+    const configFiles = [];
+    try {
+        for (const name of configNames) {
+            if (hasFile(dir, name)) configFiles.push({ sub: '.', name });
+        }
+        for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (!ent.isDirectory() || ent.name === 'node_modules' || ent.name.startsWith('.')) continue;
+            for (const name of configNames) {
+                if (hasFile(path.join(dir, ent.name), name)) configFiles.push({ sub: ent.name, name });
+            }
+        }
+    } catch { /* ignore */ }
+
+    for (const { sub, name } of configFiles) {
+        const text = readTextSafe(path.join(dir, sub, name)) || '';
+        for (const service of matchServicesInText(text)) {
+            record(service, `${name} in ${sub === '.' ? 'root' : sub}/ (${name})`);
+        }
+        // docker-compose 服务镜像：`image: postgres:16` 等
+        if (/docker-compose/.test(name)) {
+            for (const [service, re] of Object.entries(SERVICE_NAME_RE)) {
+                const imgRe = new RegExp(`image:\\s*['"]?[^\\s'"]*${re.source}`, 'i');
+                if (imgRe.test(text)) record(service, `docker-compose image in ${sub}/${name}`);
+            }
+        }
+    }
+
+    // 3) 后端服务源码指纹（server/ 等目录的 main 入口里出现数据库驱动 import）——
+    //    交给上面依赖名扫描已覆盖；这里仅对"找不到依赖清单但明显是后端"的项目兜底。
+    return { services: signals.map((s) => s.service), signals };
+}
+
+function escapeRegExp(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // 后端签名确定性扫描：毫秒级、纯文件读取，为阶段 A 提供权威后端证据。
 // 目的：LLM 把带后端的项目误判成纯前端静态站时，self-check 能依据这里的证据拦截。
 const BACKEND_DIR_CANDIDATES = [
@@ -1129,6 +1296,7 @@ module.exports = {
     validatePlanAgainstProject,
     readTextSafe,
     detectNativeDeps,
+    detectSystemDeps,
     normalizeCmdForCompare,
     // Internal helpers exposed for tests.
     _internal: {

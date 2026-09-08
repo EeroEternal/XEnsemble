@@ -382,7 +382,9 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
             ],
             network: resolveBoxliteSessionNetwork(opts.network),
             resources: {
-                disk_size_gb: Number(process.env.BOXLITE_DISK_SIZE_GB || 20),
+                // 默认 4G 根盘（可经 BOXLITE_DISK_SIZE_GB 覆盖）。注意：Go toolchain + node_modules +
+                // 系统服务（postgres 等）对根盘有硬需求，重依赖项目建议调大，勿低于此值。
+                disk_size_gb: Number(process.env.BOXLITE_DISK_SIZE_GB || 4),
                 // 大前端（如 xensemble 自身）在默认 4GB 沙箱里 vite build 会 OOM；默认给 6GB。
                 memory_mib: Number(process.env.BOXLITE_MEMORY_MIB || 6144),
                 cpus: Number(process.env.BOXLITE_CPUS || 4),

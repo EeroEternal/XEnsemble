@@ -28,6 +28,7 @@ const path = require('path');
 const {
     detectStack,
     detectBackendSignature,
+    detectSystemDeps,
     validatePlanAgainstProject,
     _internal: {
         parsePortFromViteConfig,
@@ -807,4 +808,65 @@ test('detectBackendSignature: finds Laravel artisan', () => {
         assert.equal(sig.hasBackend, true);
         assert.match(sig.suggestCmd, /artisan serve/);
     } finally { rm(dir); }
+});
+
+// ─── detectSystemDeps: 系统服务依赖探测（postgres/mysql/redis/mongodb）───
+
+test('detectSystemDeps: finds postgres via npm pg dep in subdir', () => {
+    const dir = makeProject({
+        'package.json': JSON.stringify({ name: 'root', private: true }),
+        'server/package.json': JSON.stringify({ dependencies: { pg: '^8.0.0', express: '^4' } }),
+    });
+    try {
+        const r = detectSystemDeps(dir);
+        assert.deepEqual(r.services.sort(), ['postgres']);
+        assert.ok(r.signals.some((s) => s.service === 'postgres' && /server\/package\.json/.test(s.evidence)));
+    } finally { rm(dir); }
+});
+
+test('detectSystemDeps: finds go pgx + mysql via go.mod', () => {
+    const dir = makeProject({
+        'go.mod': 'module github.com/example/app\n\ngo 1.22\n\nrequire (\n\tgithub.com/jackc/pgx/v5 v5.5.0\n\tgithub.com/go-sql-driver/mysql v1.7.0\n)\n',
+    });
+    try {
+        const r = detectSystemDeps(dir);
+        assert.deepEqual(r.services.sort(), ['mysql', 'postgres']);
+    } finally { rm(dir); }
+});
+
+test('detectSystemDeps: finds postgres + redis via DATABASE_URL/REDIS_URL in .env', () => {
+    const dir = makeProject({
+        'server/.env': 'DATABASE_URL=postgres://user:pass@127.0.0.1:5432/app\nREDIS_URL=redis://127.0.0.1:6379\n',
+    });
+    try {
+        const r = detectSystemDeps(dir);
+        assert.deepEqual(r.services.sort(), ['postgres', 'redis']);
+    } finally { rm(dir); }
+});
+
+test('detectSystemDeps: finds mongo via docker-compose image + python pymongo', () => {
+    const dir = makeProject({
+        'docker-compose.yml': 'services:\n  db:\n    image: mongo:7\n',
+        'requirements.txt': 'pymongo==4.6.0\n',
+    });
+    try {
+        const r = detectSystemDeps(dir);
+        assert.deepEqual(r.services.sort(), ['mongodb']);
+    } finally { rm(dir); }
+});
+
+test('detectSystemDeps: no false positive for vanilla node project', () => {
+    const dir = makeProject({
+        'package.json': JSON.stringify({ dependencies: { express: '^4' } }),
+    });
+    try {
+        const r = detectSystemDeps(dir);
+        assert.deepEqual(r.services, []);
+    } finally { rm(dir); }
+});
+
+test('detectSystemDeps: null path returns empty', () => {
+    const r = detectSystemDeps(null);
+    assert.deepEqual(r.services, []);
+    assert.deepEqual(r.signals, []);
 });
