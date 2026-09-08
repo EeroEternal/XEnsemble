@@ -27,7 +27,7 @@ function withTimeout(promiseFactory, ms, label) {
     return Promise.race([promiseFactory(), timeout]).finally(() => clearTimeout(timer));
 }
 
-const withCause = (err) => `${err?.message || err}${err?.cause ? ` | cause: ${err.cause.message || err.cause}` : ''}`;
+const withCause = (err) => `${err?.message || err}${err?.cause ? ` | cause: ${err.cause.message || err.cause}` : ''}${err?.stack ? ` | at: ${err.stack.split('\n').slice(1, 3).map((l) => l.trim()).join(' <- ')}` : ''}`;
 
 async function clonePrimary(project, primary, opts) {
     const { baseBranch, workBranchName, autoCreateBranch } = opts;
@@ -71,7 +71,12 @@ async function clonePrimary(project, primary, opts) {
         await svc.updateCloneStatus(primary.id, 'ready', null);
     } catch (err) {
         stage(`FAILED: ${withCause(err)}`);
-        await svc.updateCloneStatus(primary.id, 'failed', err?.message || String(err));
+        // 状态回写兜底：写失败也不能让异常逃出（否则 unhandledRejection 使服务 crash）
+        try {
+            await svc.updateCloneStatus(primary.id, 'failed', err?.message || String(err));
+        } catch (e2) {
+            stage(`status write also failed: ${withCause(e2)}`);
+        }
     }
 }
 
@@ -92,7 +97,11 @@ async function cloneSecondary(project, repo) {
         await svc.updateCloneStatus(repo.id, 'ready', null);
     } catch (err) {
         stage(`FAILED: ${withCause(err)}`);
-        await svc.updateCloneStatus(repo.id, 'failed', err?.message || String(err));
+        try {
+            await svc.updateCloneStatus(repo.id, 'failed', err?.message || String(err));
+        } catch (e2) {
+            stage(`status write also failed: ${withCause(e2)}`);
+        }
     }
 }
 
