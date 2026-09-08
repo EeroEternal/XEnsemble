@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  Sparkles, Search, Download, User, Clock, Eye, X, Loader2,
+  Sparkles, Search, Download, User, Clock, Eye, X, Loader2, ArrowLeft,
   Database, GitBranch, Bug, ShieldCheck, Cloud, Puzzle, Layers, CheckCircle, FileEdit, Check, Copy, RefreshCw,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
@@ -153,11 +153,19 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
     <div className={`flex h-full min-h-0 flex-1 flex-col bg-surface ${className}`} aria-hidden={ariaHidden}>
       {/* Header */}
       <div className="shrink-0 border-b border-zinc-200 px-6 py-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-zinc-900">{t('skills:market_title')}</h1>
-            <p className="mt-1 text-sm text-zinc-500">{t('skills:subtitle')}</p>
-          </div>
+        <div className="flex items-center gap-3 mb-2">
+          <button
+            type="button"
+            onClick={() => navigate('/skills')}
+            className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-900 transition-colors"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            {t('skills:my_skills', { defaultValue: 'My Skills' })}
+          </button>
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-900">{t('skills:market_title', { defaultValue: 'Skills Market' })}</h1>
+          <p className="mt-1 text-sm text-zinc-500">{t('skills:subtitle')}</p>
         </div>
       </div>
 
