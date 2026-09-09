@@ -15,27 +15,47 @@ const fs = require('fs');
 const path = require('path');
 
 const args = process.argv.slice(2);
+// --api-prefixes= 是 key=value flag，先剥离再解析位置参数（追加在末尾不打乱位置）。
+const apiPrefixesArg = args.find((a) => a.startsWith('--api-prefixes='));
+const backendPortFlag = args.find((a) => a.startsWith('--backend-port='));
+const rest = args.filter((a) => !a.startsWith('--api-prefixes=') && !a.startsWith('--backend-port='));
+let apiPrefixes = apiPrefixesArg
+    ? apiPrefixesArg.slice('--api-prefixes='.length).split(',').map((s) => s.trim()).filter((s) => s.startsWith('/') && s.length > 1)
+    : [];
 let upstreamPort = null;
 let devPort = null;
 let liveBase = '';
 let distDirArg, listenPort, backendPort, spaFallbackArg;
 let distDir = null;
 let spaFallback = true;
-if (args[0] === '--upstream') {
-    upstreamPort = Number(args[1]);
-    listenPort = Number(args[2]);
-    liveBase = args[3] || '';
-} else if (args[0] === '--live') {
-    devPort = Number(args[1]);
-    backendPort = Number(args[2]);
-    listenPort = Number(args[3]);
-    liveBase = args[4] || '';
+if (rest[0] === '--upstream') {
+    upstreamPort = Number(rest[1]);
+    listenPort = Number(rest[2]);
+    liveBase = rest[3] || '';
+} else if (rest[0] === '--live') {
+    devPort = Number(rest[1]);
+    backendPort = Number(rest[2]);
+    listenPort = Number(rest[3]);
+    liveBase = rest[4] || '';
 } else {
-    [distDirArg, listenPort, backendPort, spaFallbackArg, liveBase] = args;
+    [distDirArg, listenPort, backendPort, spaFallbackArg, liveBase] = rest;
     distDir = path.resolve(distDirArg);
     spaFallback = spaFallbackArg !== '0';
     liveBase = liveBase || '';
 }
+// --backend-port= flag 优先于位置参数：--upstream 模式没有 backendPort 位置位，
+// 多前缀分流（dify 的 /console/api 等）由此 flag 提供。
+if (backendPortFlag) {
+    const bp = Number(backendPortFlag.slice('--backend-port='.length));
+    if (Number.isInteger(bp) && bp > 0) backendPort = bp;
+}
+// 非标准 API 前缀（verify agent 从前端代码上报，如 dify 的 /console/api）：
+// 命中前缀的请求（含 WebSocket upgrade）转发到 backendPort，其余走默认路径。
+// 前缀匹配：/api（默认面）或任一上报前缀（精确段匹配，/console/api 不吞 /console/apix）
+const isBackendApiPath = (p) => {
+    if (/^\/api(\/|$)/i.test(p) || /^\/ws(\/|$)/i.test(p)) return true;
+    return apiPrefixes.some((pre) => p === pre || p.startsWith(pre + '/'));
+};
 const MIME = {
     '.html': 'text/html; charset=utf-8',
     '.js': 'application/javascript; charset=utf-8',
@@ -224,7 +244,7 @@ function proxyTo(req, res, port, allowFallback = true, overridePath = null) {
         headers: sameOriginHeaders(req.headers, port),
     }, (pRes) => {
         const isNav = /\btext\/html\b/i.test(String(req.headers.accept || ''));
-        const isApi = /^\/api(\/|$)/i.test(String(targetPath || ''));
+        const isApi = isBackendApiPath(String(targetPath || ''));
         const hasExt = /\/[^/]+\.[A-Za-z0-9]+$/.test(String(targetPath || '').split('?')[0]);
         // 仅对 SPA history 路由（非 /api、非静态资源、浏览器导航请求）做 fallback，
         // 避免后端真实 404 / 缺失资源被 index.html 顶掉（返回 HTML 会破坏 JS/CSS 解析）
@@ -307,7 +327,7 @@ function handleLiveMode(req, res) {
         pathname = q >= 0 ? req.url.slice(0, q) : req.url;
         search = q >= 0 ? req.url.slice(q) : '';
     }
-    if (pathname.startsWith('/api')) {
+    if (isBackendApiPath(pathname)) {
         proxyTo(req, res, backendPort, false);
         return;
     }
@@ -374,7 +394,7 @@ function handleLiveUpgrade(req, socket, head) {
         pathname = q >= 0 ? req.url.slice(0, q) : req.url;
         search = q >= 0 ? req.url.slice(q) : '';
     }
-    if (pathname.startsWith('/api') || pathname.startsWith('/ws')) {
+    if (isBackendApiPath(pathname)) {
         forwardUpgrade(req, socket, head, backendPort, req.url);
         return;
     }
@@ -395,7 +415,7 @@ const server = http.createServer((req, res) => {
     }
     let urlPath;
     try { urlPath = new URL(req.url, 'http://local').pathname; } catch { urlPath = '/'; }
-    if (urlPath.startsWith('/api')) {
+    if (isBackendApiPath(urlPath)) {
         const proxy = http.request({
             host: '127.0.0.1',
             port: Number(backendPort),

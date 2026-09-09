@@ -42,7 +42,10 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo 
   const [frameKey, setFrameKey] = useState(0);
 
   const deployment = preview.deployment;
-  const isLive = deployment?.mode === 'live';
+  // live 模式 UI（LIVE 徽章 + 刷新按钮）暂时下线：实时预览能力仍在开发中，先不在
+  // 前端暴露（部署侧 live 逻辑保留不受影响）。恢复时删除下一行的强制 false 即可。
+  const LIVE_UI_ENABLED = false;
+  const isLive = LIVE_UI_ENABLED && deployment?.mode === 'live';
 
   useEffect(() => {
     let cancelled = false;

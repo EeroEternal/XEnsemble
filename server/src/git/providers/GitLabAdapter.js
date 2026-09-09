@@ -140,10 +140,15 @@ class GitLabAdapter extends GitProviderService {
             throw new GitLabError('OAuth response did not contain an access_token', 'oauth_failed');
         }
 
+        // Doorkeeper（GitLab OAuth）的响应没有 expires_in，只有 created_at（unix 秒）。
+        // 按标准 2 小时有效期估算，否则 tokenExpiresAt=null → 自动刷新永不触发 →
+        // 过期的 access_token 被一直使用（"HTTP Basic: Access denied"，多仓库导入实测）。
+        const expiresIn = data.expires_in
+            || (data.created_at ? (data.created_at + 7200) - Math.floor(Date.now() / 1000) : 7200);
         return {
             accessToken: data.access_token,
             refreshToken: data.refresh_token || null,
-            expiresIn: data.expires_in || null,
+            expiresIn: Math.max(expiresIn, 300),
             scope: data.scope || null,
         };
     }
@@ -171,10 +176,12 @@ class GitLabAdapter extends GitProviderService {
             throw new GitLabError(data.error_description || data.error || 'token refresh failed', 'refresh_failed');
         }
 
+        const expiresIn = data.expires_in
+            || (data.created_at ? (data.created_at + 7200) - Math.floor(Date.now() / 1000) : 7200);
         return {
             accessToken: data.access_token,
             refreshToken: data.refresh_token || null,
-            expiresIn: data.expires_in || null,
+            expiresIn: Math.max(expiresIn, 300),
         };
     }
 

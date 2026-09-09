@@ -209,8 +209,9 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
     // 挂载先查该 session 的部署状态：有进行中/已完成的 kind='deploy' 则恢复展示，不重复触发。
     // 主动部署（requestedRef=true，由 requestDeploy 触发）时跳过本逻辑。
     // 无该 session 的部署记录 → 保持 idle 空态，等用户点"Deploy"再部署，绝不自动重新部署。
-    // 新鲜度守卫：只恢复"最近 RECOVER_FRESH_MS 内有更新"的记录——更早的终态
-    // （比如一小时前手动停掉的孤儿）不展示，避免打开页面就看到莫名的"已中止"。
+    // 新鲜度守卫只约束"终态"记录（一小时前手动停掉的孤儿不展示）；进行中的 building/pending
+    // 不受窗口限制——部署的长阶段（LLM 慢轮次/大构建）可能 5 分钟以上不更新记录，切走再
+    // 切回必须仍能恢复（否则"部署页面消失但部署还在跑"）。
     const RECOVER_FRESH_MS = 5 * 60 * 1000;
     const isFresh = (d) => (Date.now() - Number(d.updated_at || d.created_at || 0)) < RECOVER_FRESH_MS;
     useEffect(() => {
@@ -226,7 +227,7 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 const deployRows = list
                     .filter((d) => d.kind === 'deploy' && (!sessionId || d.session_id === sessionId))
                     .sort((a, b) => b.created_at - a.created_at);
-                const active = deployRows.find((d) => (d.status === 'building' || d.status === 'pending') && isFresh(d));
+                const active = deployRows.find((d) => d.status === 'building' || d.status === 'pending');
                 if (active) {
                     setRunState('running');
                     // 恢复时 DB 只有阶段（A/B/preview），没有子阶段；按阶段下限播种，

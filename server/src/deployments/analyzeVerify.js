@@ -20,7 +20,7 @@ const MAX_AGENT_ROUNDS = Number(process.env.OPENCODE_VERIFY_MAX_ROUNDS) || 60;
 const REPEAT_CMD_HARD_LIMIT = Number(process.env.DEPLOY_VERIFY_REPEAT_CMD_LIMIT) || 5;
 // 常见应用端口，用于给监听端口探测/后端兜底排序（findListeningBackendPort 与
 // assertAppIsServed 共用，避免两处列表漂移）。
-const COMMON_APP_PORTS = [3000, 3888, 3889, 5173, 4173, 8080, 8000, 9000, 5000, 3001, 4000, 8081];
+const COMMON_APP_PORTS = [3000, 3888, 3889, 5173, 4173, 8080, 8000, 9000, 5000, 5001, 5002, 3001, 4000, 8081, 9001];
 const SHELL_TIMEOUT_MS = 240000;
 // install/build 类命令单独放宽：大 monorepo 冷 install 常超 240s，被截断 kill 后 agent
 // 只能重试（实测一条 npm install 打满 240s 超时后重跑，时间双倍）。这类命令"截断重来"
@@ -311,6 +311,12 @@ async function probePort({ runtimeRef, workspacePath, port, boxDefaultPorts }) {
         if (!body) {
             return { ok: false, listen: true, reason: `端口 ${port} 空响应` };
         }
+        // 过短纯文本响应不是应用页面（dify 实测：健康检查服务根路径只返回 "ok" 2 字节，
+        // 被当成应用内容 → preview 隧道指向它 → 预览整页只有一个 "ok"）。真实前端/应用
+        // 页面至少是 HTML 或有实质内容；纯文本小响应判定为非应用，继续探测其它端口。
+        if (body.length < 50 && !/<[a-z!]/i.test(body)) {
+            return { ok: false, listen: true, reason: `端口 ${port} 响应过短（${body.length}B 纯文本 "${body.slice(0, 30)}"），不像应用页面` };
+        }
         return { ok: true, httpCode, snippet: body.slice(0, 120) };
     } catch (e) {
         return { ok: false, listen: false, reason: `端口 ${port} 探测失败: ${e.message}` };
@@ -512,7 +518,24 @@ async function verifyBackendAlive(runtimeRef, workspacePath, reportedPorts, plan
     };
 }
 
-async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, backendPorts, backendEvidence = null }) {
+// 非标准 API 前缀（如 dify 的 /console/api、/v1）清洗：/ 开头、无空白、去尾斜杠、上限 5 个。
+// preview 代理按这些前缀把请求分流到 backendPort（dify 白屏事故的修复：/console/api
+// 不在默认 /api 面内，后端 Flask 起了也到不了）。
+function sanitizeApiPrefixes(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const item of raw) {
+        const s = String(item || '').trim();
+        if (!s.startsWith('/') || /\s/.test(s) || s.length > 60) continue;
+        const norm = s.length > 1 ? s.replace(/\/+$/, '') : s;
+        if (norm === '/' || norm === '/api' || norm === '/ws') continue; // 默认面已覆盖
+        if (!out.includes(norm)) out.push(norm);
+        if (out.length >= 5) break;
+    }
+    return out;
+}
+
+async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, backendPorts, backendEvidence = null, plan = null, defaultPort = null }) {
     const targets = sanitizeApiEndpoints(endpoints);
 
     // 分支 1：agent 上报了真实 API 路由 → 在前端端口上 HTTP 探测。
@@ -609,6 +632,20 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
                     ok: false,
                     verdict: 'backend_unverified',
                     reason: `API 端点全部 404（${results.map((x) => `${x.path}=${x.code}`).join(', ')}），但项目扫描到后端证据（${(backendEvidence.evidence || []).slice(0, 3).join('; ')}）且未上报 backendPort —— 无法确认后端已启动`,
+                    probed,
+                    endpoints: targets,
+                };
+            }
+            // 通用兜底（不依赖 backendEvidence——Python/Go 等非 Node 后端扫不到证据）：
+            // 全 404 的常见真因是「API 前缀不在探测面」（如 dify 的 /console/api）而后端
+            // 实际在跑。扫 guest 监听端口，发现非系统端口的应用服务即判活，并把端口
+            // 带回给 preview 代理按 apiPrefixes 分流。
+            const aliveFallback = await verifyBackendAlive(runtimeRef, workspacePath, reportedPorts, plan, defaultPort).catch(() => null);
+            if (aliveFallback && aliveFallback.backendPort) {
+                return {
+                    ok: true,
+                    verdict: 'backend_listening',
+                    backendPort: aliveFallback.backendPort,
                     probed,
                     endpoints: targets,
                 };
@@ -905,7 +942,7 @@ function buildSystemPrompt(plan, toolchain) {
         '- Detect: the backend reads a built frontend dir (dist / public / build) and serves it, and there is no separate frontend dev server needed for the app to be usable.',
         '- Build the frontend into the location the server expects (check its config / README for the expected output dir), then start the backend WITH the config it needs — many servers do NOT auto-load their .env, so source it or export the required DATABASE_URL etc. (e.g. `cd server && set -a && . ./.env && set +a && npm start`).',
         '- The app answers on the backend port: verify it returns real HTML for / and JSON for an API endpoint. That port IS the app — do not start a second static file server on top of it.',
-        'API ENDPOINTS REPORT (important for full-stack apps): the platform runs a code-side backend check after your final answer to detect a dead backend (root 200 but backend dead = white-screen app). It uses ONLY what you report — there is no path guessing. Include "apiEndpoints": 1-3 REAL API paths that pass through the frontend proxy to the backend — read them from the code (router definitions, next.config rewrites destination, vite proxy target, axios/fetch baseURL + routes, e.g. "/api/v1/auth/login"). PREFER WRITE ENDPOINTS with an explicit method prefix like "POST /api/v1/users/signup" — a GET probe on a POST-only route answers 405 WITHOUT touching the business/DB layer, so it cannot detect a missing migration or a dead database; POSTing an empty JSON body reaches the app validation layer and proves it works. Same for the auth/login endpoint ("POST /api/v1/login/access-token"). If you cannot name concrete API paths but know the backend listens on a fixed port (e.g. rewrites destination http://localhost:8080, vite proxy target), include "backendPort": 8080 instead — the platform only checks that the port is LISTENING. Report neither field only if the app truly has no backend.',
+        'API ENDPOINTS REPORT (important for full-stack apps): the platform runs a code-side backend check after your final answer to detect a dead backend (root 200 but backend dead = white-screen app). It uses ONLY what you report — there is no path guessing. Include "apiEndpoints": 1-3 REAL API paths that pass through the frontend proxy to the backend — read them from the code (router definitions, next.config rewrites destination, vite proxy target, axios/fetch baseURL + routes, e.g. "/api/v1/auth/login"). PREFER WRITE ENDPOINTS with an explicit method prefix like "POST /api/v1/users/signup" — a GET probe on a POST-only route answers 405 WITHOUT touching the business/DB layer, so it cannot detect a missing migration or a dead database; POSTing an empty JSON body reaches the app validation layer and proves it works. Same for the auth/login endpoint ("POST /api/v1/login/access-token"). If the frontend calls the backend through a NON-standard prefix (e.g. "/console/api", "/v1", "/gateway/api" — read the frontend fetch/axios baseURL and route definitions to find it), ALSO include "apiPrefixes": ["/console/api"] — the platform preview proxy will route those prefixes to your reported backendPort, so a split-frontend/backend app (Next web + Flask/Go/Node api as separate processes) MUST have BOTH processes running: start the backend first (nohup), then the frontend, and report "backendPort" (the backend listen port) plus "apiPrefixes". If you cannot name concrete API paths but know the backend listens on a fixed port (e.g. rewrites destination http://localhost:8080, vite proxy target), include "backendPort": 8080 instead — the platform only checks that the port is LISTENING. Report neither field only if the app truly has no backend.',
         'When the app responds correctly, output your final answer:',
         '{"action":"final","result":{"ok":true,"tested":["npm install","npm run build","curl /"],"apiEndpoints":["POST /api/v1/users/signup","POST /api/v1/login/access-token"],"backendPort":8080,"finalStderr":"","summary":"<1-2 sentences>"}}',
         'If you cannot make it pass after exhaustive fixes, output:',
@@ -932,6 +969,7 @@ function buildResumeHint(trail) {
 
 // 续修历史压缩摘要：接回的对话超过阈值时，被丢弃的中间历史压缩成这一条。
 // 从 trail 尾部提取关键动作序列（成功/失败的命令），让模型不丢主线又不被长历史淹没。
+// 轮数预算已重置（roundStart=0），文案说明「上次用了 N 轮」仅为背景信息。
 function buildCompressedResumeSummary(trail, roundsUsed) {
     const t = Array.isArray(trail) ? trail : [];
     const actions = t.slice(-16).map((x) => {
@@ -945,7 +983,7 @@ function buildCompressedResumeSummary(trail, roundsUsed) {
         return `r${x.round}: ${x.action}`;
     }).join('\n');
     return [
-        `RESUME CONTEXT — history compressed. ${roundsUsed} of ${MAX_AGENT_ROUNDS} rounds were already used in the previous attempt; it stopped before the deploy was healthy.`,
+        `RESUME CONTEXT — history compressed. The previous attempt ran ${roundsUsed} rounds and was stopped before the deploy was healthy; your round budget has been RESET to a fresh ${MAX_AGENT_ROUNDS} rounds, and the worktree source changes made by that attempt have been reverted (start clean).`,
         'Key actions from that attempt (newest last):',
         actions,
         'Learn from what already failed above; do NOT redo successful steps or re-explore the same files. Converge to final as fast as possible.',
@@ -978,16 +1016,16 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
     };
 
     if (resume && Array.isArray(resume.messages) && resume.messages.length > 0) {
-        // 断点续修：接回上次的对话历史，注入进度提示后从上次轮数继续，不从头重跑。
-        // 历史压缩：原样接回全部历史会让弱模型在超长上下文里迷失（实测 glm-flash 接回
-        // 24 轮失败历史后，36 轮里十几次重复 cat 同一个 package.json 打转直到轮数耗尽）。
-        // 超过阈值时只保留 system + 最近 12 条（≈6 轮），中间历史压缩为一条摘要消息。
+        // 断点续修（方案乙）：接回上次的对话历史（压缩），但**轮数预算重置为全新 60 轮**。
+        // 不再接续上次的 roundStart——上次烧到 43 轮后续修只剩 17 轮，基本注定再次超限
+        // （「失败→续修→更失败」死循环）。干净环境（worktree 回滚见 twoStage）+ 全新预算
+        // + 压缩后的断点知识，让每次续修都是一次有完整预算的新尝试。
         const KEEP_RECENT = 12;
-        roundStart = Math.min(Number(resume.roundsUsed) || 0, MAX_AGENT_ROUNDS - 1);
+        roundStart = 0;
         if (resume.messages.length > KEEP_RECENT + 2) {
             messages = [
                 resume.messages[0],
-                { role: 'user', content: buildCompressedResumeSummary(resume.trail, roundStart) },
+                { role: 'user', content: buildCompressedResumeSummary(resume.trail, resume.roundsUsed || 0) },
                 ...resume.messages.slice(-KEEP_RECENT),
             ];
         } else {
@@ -1299,6 +1337,8 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
             }
             let appPort = null;
             let apiVerdict = null;
+            let backendPortOut = null;
+            let apiPrefixesOut = [];
             if (ok && lastResult.ok) {
                 const probe = await assertAppIsServed({ runtimeRef, workspacePath, preferredPort: defaultPort });
                 if (!probe.ok) {
@@ -1315,7 +1355,7 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                 // 依据全部来自 agent 上报：apiEndpoints（HTTP 探测）或 backendPort（监听检查），
                 // 无写死路径猜测。失败先 nudge 自修复（启动后端/补数据库/migrate），超限硬失败。
                 const apiEndpoints = Array.isArray(r.apiEndpoints) ? r.apiEndpoints : [];
-                const api = await probeApiHealth({ runtimeRef, workspacePath, port: probe.port, endpoints: apiEndpoints, backendPorts: r.backendPort, backendEvidence });
+                const api = await probeApiHealth({ runtimeRef, workspacePath, port: probe.port, endpoints: apiEndpoints, backendPorts: r.backendPort, backendEvidence, plan, defaultPort });
                 if (!api.ok) {
                     trail.push({ round, action: 'api_probe_failed', verdict: api.verdict, reason: api.reason, endpoints: api.endpoints, nudges: apiNudges });
                     console.error(`[analyzeVerify] round ${round}: API probe FAILED (nudge ${apiNudges + 1}/${MAX_API_NUDGES}, verdict=${api.verdict}, endpoints=${JSON.stringify(api.endpoints)}): ${api.reason}`);
@@ -1350,6 +1390,11 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                 // 显式带出本次探测结论（alive/backend_listening/skipped/inconclusive），
                 // twoStage 据此决定 serve 类命令能否进入 successRun 缓存（2a 过滤）。
                 apiVerdict = api.verdict;
+                // 后端端口 + API 前缀透传：preview 代理按 apiPrefixes 把非标准前缀
+                // （如 dify 的 /console/api）分流到 backendPort。
+                if (api.backendPort) backendPortOut = api.backendPort;
+                else if (!backendPortOut) backendPortOut = Number(r.backendPort) || null;
+                apiPrefixesOut = sanitizeApiPrefixes(r.apiPrefixes);
             } else if (!ok && backendEvidence && backendEvidence.hasBackend) {
                 // agent 报 ok:false 但有确定性后端证据 → 平台端口监听兜底复核。
                 // 背景：agent 猜错健康/API 路径（如 multica 真实 /health、agent 猜 /api/health
@@ -1366,6 +1411,7 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                         ok: true,
                         appPort: alive.appPort,
                         apiVerdict: 'backend_listening',
+                        frontendServed: alive.frontendServed === true,
                         source: 'ai',
                         warning: `agent reported ok:false but platform re-probe found backend ${alive.backendPort} listening (appPort ${alive.appPort}) — deployment accepted`,
                         finalStderr: `[platform re-probe] backend is listening on ${alive.backendPort}${alive.frontendServed ? `, app served on ${alive.appPort}` : ' (no frontend page detected, using backend port)'} — agent's ok:false overridden. Original: ${lastResult.finalStderr || ''}`.slice(0, 4000),
@@ -1375,7 +1421,17 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                     };
                 }
             }
-            return { ...lastResult, appPort, apiVerdict, source: 'ai', warning: ok ? '' : 'verify agent reported failure', trail, messages: trimContext(messages), roundsUsed: round + 1 };
+            return {
+                ...lastResult,
+                appPort,
+                apiVerdict,
+                frontendServed: true, // assertAppIsServed 内容探测已通过：appPort 是真前端
+                backendPort: backendPortOut || undefined,
+                apiPrefixes: apiPrefixesOut.length ? apiPrefixesOut : undefined,
+                source: 'ai',
+                warning: ok ? '' : 'verify agent reported failure',
+                trail, messages: trimContext(messages), roundsUsed: round + 1,
+            };
         }
         trail.push({ round, action: 'unknown', name: String(parsed.action).slice(0, 50) });
         // 空转硬终止：连续 N 轮 LLM 输出既不是 tool 也不是 final（被 tryParseJson 成功但

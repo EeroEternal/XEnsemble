@@ -32,6 +32,9 @@ const VERIFY_STATE_TTL_MS = 30 * 60 * 1000;
 // 单次部署（阶段 1 分析 + 阶段 2 验证）整体超时：verify agent 可能因 run_shell 启动服务未正确
 // 后台化（缺少 &/nohup）而挂起，必须有总超时自动中止，否则部署永不结束、前端一直显示 running。
 const DEPLOY_TOTAL_TIMEOUT_MS = Number(process.env.DEPLOY_TOTAL_TIMEOUT_MS) || 40 * 60 * 1000;
+// 缓存版本：verify 判定逻辑每次升级（如 "ok" 页面拒绝、backend_listening 兜底）时 +1。
+// 旧版本缓存自动作废——判定标准变了，旧标准盖的"成功"章不可信，重新生成。
+const CACHE_VERSION = 2;
 
 // apt/dpkg 防卡死统一参数（实测 verify agent 现场 apt-get 装 postgres 卡住 → 60 轮耗尽）：
 //  - DPkg::Lock::Timeout：dpkg 锁等待有界（默认无限等），避免与残留 apt 进程互卡
@@ -285,6 +288,12 @@ async function loadVerifyState(projectId) {
         const row = rows[0];
         if (!Array.isArray(row.messages) || !row.messages.length) return null;
         if (Date.now() - Number(row.updatedAt || 0) > VERIFY_STATE_TTL_MS) return null; // 过期失效
+        // 版本化：判定逻辑升级（CACHE_VERSION 递增）后续修点作废——旧续修点的"成功步骤"
+        // 与 agent 认知基于旧判定标准，接回来会误导新一轮修复。
+        if (Number(row.plan?.cacheVersion || 0) !== CACHE_VERSION) {
+            console.error(`[twoStage] verify state stale (cacheVersion ${row.plan?.cacheVersion || 0} != ${CACHE_VERSION}), 续修点作废`);
+            return null;
+        }
         return {
             plan: row.plan || {},
             messages: row.messages,
@@ -301,7 +310,7 @@ async function saveVerifyState(projectId, state) {
     const now = Date.now();
     const values = {
         projectId,
-        plan: JSON.parse(JSON.stringify(state.plan || {})),
+        plan: JSON.parse(JSON.stringify({ ...(state.plan || {}), cacheVersion: CACHE_VERSION })),
         messages: state.messages || [],
         trail: state.trail || [],
         roundsUsed: state.roundsUsed || 0,
@@ -398,6 +407,12 @@ async function loadPlanCache(projectId, fingerprint) {
             console.error(`[twoStage] plan cache stale (fingerprint ${plan.context?.fingerprint ? 'changed' : 'missing'}), re-analyzing`);
             return null;
         }
+        // 缓存版本化：判定逻辑升级（CACHE_VERSION 递增）后，旧版本缓存自动作废——
+        // 旧标准验证通过的"成功"（如 "ok" 页面部署）在新标准下可能不合格。
+        if (Number(plan.context?.cacheVersion || 0) !== CACHE_VERSION) {
+            console.error(`[twoStage] plan cache stale (cacheVersion ${plan.context?.cacheVersion || 0} != ${CACHE_VERSION}, 判定逻辑已升级), re-analyzing`);
+            return null;
+        }
         return { steps: plan.steps, configFiles: plan.configFiles || [], source: row.source || 'cache', context: plan.context || {} };
     } catch (e) {
         console.error('[twoStage] loadPlanCache error:', e.message);
@@ -412,7 +427,7 @@ async function savePlanCache(projectId, plan) {
             plan: JSON.parse(JSON.stringify({
                 steps: plan.steps || [],
                 configFiles: plan.configFiles || [],
-                context: plan.context || {},
+                context: { ...(plan.context || {}), cacheVersion: CACHE_VERSION },
             })),
             source: plan.source || null,
             updatedAt: Date.now(),
@@ -639,7 +654,7 @@ async function startLiveDevServer({ runtimeRef, workspacePath, devKind, devDir, 
 
 // live 模式聚合代理：/api/* → 后端；其它 → vite dev server（实时预览，前后端都可用）。
 // base 传给代理，转发 vite 请求时补回 /preview/<id>/ 前缀（vite 配了该 base，不带会 302 死循环）。
-async function startViteAggregateProxy({ runtimeRef, workspacePath, devPort, backendPort, listenPort, base, onLog }) {
+async function startViteAggregateProxy({ runtimeRef, workspacePath, devPort, backendPort, listenPort, base, apiPrefixes = [], onLog }) {
     const runtime = getRuntime();
     let proxyPath = null;
     try {
@@ -653,7 +668,8 @@ async function startViteAggregateProxy({ runtimeRef, workspacePath, devPort, bac
     try {
         await runtime.exec.spawn(
             'node',
-            [proxyPath, '--live', String(devPort), String(backendPort), String(listenPort), base || ''],
+            [proxyPath, '--live', String(devPort), String(backendPort), String(listenPort), base || '',
+                ...(Array.isArray(apiPrefixes) && apiPrefixes.length ? [`--api-prefixes=${apiPrefixes.join(',')}`] : [])],
             { HOME: process.env.HOME || '/root', PATH: process.env.PATH || '/usr/bin:/bin' },
             { runtimeRef, cwd: workspacePath },
         );
@@ -2168,7 +2184,7 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
         // go.mod）、docker-compose（postgres 服务）、启动脚本/Makefile（DATABASE_URL 写死在
         // start-server.sh 这类文件里，如 AgentHarness 的 Go 后端）。
         const r = await runtime.exec.exec('sh', ['-c', `
-            grep -lE '\\"(pg|postgres)\\"|pg-promise|pgx|postgres://' package.json server/package.json apps/*/package.json go.mod 2>/dev/null
+            grep -lE '\\"(pg|postgres)\\"|pg-promise|pgx|postgres://' package.json server/package.json apps/*/package.json go.mod */go.mod 2>/dev/null
             find . -maxdepth 3 \\( -name 'schema.sql' -o -name 'init.sql' \\) 2>/dev/null | grep -v node_modules | head -3
             grep -lE 'DATABASE_URL|POSTGRES_HOST|POSTGRES_DB|POSTGRES_USER' .env server/.env .env.example server/.env.example apps/*/.env apps/*/.env.example start-server.sh Makefile docker-compose.yml docker-compose.deploy.yml docker-compose.selfhost.yml 2>/dev/null
         `], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
@@ -2585,7 +2601,7 @@ done
 // 原样反代全部请求（保留 /plugins、后端 API 等运行时资源），仅把 upstream 返回的 HTML 里的
 // 绝对资源路径改写为相对路径（/assets/… → ./assets/…），适配 /preview/<id>/ 子路径，
 // 避免绝对路径泄漏到宿主源（否则 /assets 落到宿主 SPA fallback 变 text-html、/api 落宿主接口 401）。
-async function startRewriteProxy({ runtimeRef, workspacePath, upstreamPort, listenPort, base, onLog }) {
+async function startRewriteProxy({ runtimeRef, workspacePath, upstreamPort, listenPort, base, backendPort = 0, apiPrefixes = [], onLog }) {
     const runtime = getRuntime();
     let proxyPath = null;
     try {
@@ -2600,7 +2616,9 @@ async function startRewriteProxy({ runtimeRef, workspacePath, upstreamPort, list
     try {
         await runtime.exec.spawn(
             'node',
-            [proxyPath, '--upstream', String(upstreamPort), String(listenPort), base || ''],
+            [proxyPath, '--upstream', String(upstreamPort), String(listenPort), base || '',
+                ...(backendPort ? [`--backend-port=${backendPort}`] : []),
+                ...(Array.isArray(apiPrefixes) && apiPrefixes.length ? [`--api-prefixes=${apiPrefixes.join(',')}`] : [])],
             { HOME: process.env.HOME || '/root', PATH: process.env.PATH || '/usr/bin:/bin' },
             { runtimeRef, cwd: workspacePath },
         );
@@ -3042,6 +3060,26 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         }
     }
 
+    // 方案乙（续修干净化）：上次失败的 agent 对源码的半成品修改全部回滚。
+    // 失败部署的 agent 修改通常是未完成/错误的（sed 乱改 auth.js、随手降级依赖等），
+    // 带着它们续修 = agent 在错误认知 + 脏状态上继续，越修越糟（实测续修 17 轮打转）。
+    // 只回滚已跟踪文件的修改（git checkout -- .）；未跟踪内容（.env、node_modules、
+    // 构建产物、.agents、.pnpm-store）全部保留——依赖缓存与用户配置不丢，重装秒级。
+    // 同时清掉上次部署起的残留服务进程，避免端口占用污染本次 verify。
+    if (resumeState && ref) {
+        try {
+            await runtime.exec.exec('sh', ['-c',
+                'git checkout -- . 2>&1 | head -3; '
+                + 'pkill -f "node src/server.js" 2>/dev/null; pkill -f "next dev" 2>/dev/null; pkill -f "next-server" 2>/dev/null; '
+                + 'pkill -f uvicorn 2>/dev/null; pkill -f gunicorn 2>/dev/null; pkill -f "npx serve" 2>/dev/null; '
+                + 'pkill -f "python3 -m http.server" 2>/dev/null; pkill -f "vite --host" 2>/dev/null; sleep 1; true'],
+                {}, { runtimeRef: ref, cwd: wsPath, timeoutMs: 30000 });
+            console.error('[twoStage] resume: worktree tracked changes reverted + stale service processes killed (clean continuation env)');
+        } catch (e) {
+            console.error(`[twoStage] resume: worktree reset failed (non-fatal): ${e.message}`);
+        }
+    }
+
     // 先查跨次部署的计划缓存：命中则跳过 opencode/LLM 探索分析（二次部署省 1~4 分钟）。
     // 用项目内容指纹做失效判断：内容变了即使 TTL 内也会重新分析。
     // 用真实 host 路径（hostPath）而非 hostWs/wsPath —— boxlite 下 hostWs 可能 undefined、
@@ -3385,7 +3423,12 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         const { detectBackendSignature } = require('./detectStack');
         const apiAlive = verify.apiVerdict === 'alive' || verify.apiVerdict === 'backend_listening';
         const hasBackend = detectBackendSignature(hostPath || null).hasBackend;
-        const allowServe = apiAlive || !hasBackend;
+        // 质量门槛：appPort 必须是内容探测确认的真前端（frontendServed）。端口扫描兜底
+        // 判活的部署（backend_listening），其 appPort 可能指向只返回 "ok" 的健康服务
+        // （dify 实测：预览整页只有一个 "ok"）——这类部署照常成功展示，但 serve 类命令
+        // 与 successRun 不进缓存，防止坏部署污染二次部署的重放轨迹。
+        const frontendVerified = verify.frontendServed !== false; // undefined（正常内容探测路径）= 通过
+        const allowServe = (apiAlive || !hasBackend) && frontendVerified;
         const successRun = extractSuccessCommands(verify.trail, allowServe);
         if (successRun.length) {
             await savePlanCache(project.id, {
@@ -3414,6 +3457,11 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         const deploymentId = `dep_${crypto.randomBytes(8).toString('hex')}`;
         // 用 verify 探测到的真实应用端口（agent 可能在非默认端口上 serve），兜底回退 defaultPort。
         let port = verify?.appPort || detected.defaultPort || 3000;
+        // 多前缀 API 分流：verify agent 上报的非标准 API 前缀（如 dify 的 /console/api）
+        // 与其后端端口（agent 起的后端 / 端口扫描兜底发现）→ 传给 preview 代理分流，
+        // 前端的 /console/api/* 请求才能到达独立的后端进程。
+        const apiPrefixes = Array.isArray(verify?.apiPrefixes) ? verify.apiPrefixes : [];
+        const backendPortFromVerify = Number(verify?.backendPort) || 0;
         let served = null;
         let mode = 'static';
         const previewLog = (m) => console.error(`[twoStage] ${m}`);
@@ -3459,11 +3507,11 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
                 const aggPort = (await getGuestFreePort(ref)) || 0;
                 // /api 反代目标：优先用系统侧拉起的真实后端端口（xensBackend），
                 // 否则用 verify.appPort（可能是静态 serve 误报，但不阻塞 live 前端展示）。
-                const backendForApi = xensBackend?.port || verify?.appPort || 0;
+                const backendForApi = xensBackend?.port || backendPortFromVerify || verify?.appPort || 0;
                 const aggOk = aggPort ? await startViteAggregateProxy({
                     runtimeRef: ref, workspacePath: wsPath,
                     devPort: live.port, backendPort: backendForApi, listenPort: aggPort,
-                    base: `/preview/${deploymentId}/`,
+                    base: `/preview/${deploymentId}/`, apiPrefixes,
                     onLog: previewLog,
                 }) : false;
                 if (aggOk) {
@@ -3516,6 +3564,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
                     runtimeRef: ref, workspacePath: wsPath,
                     upstreamPort: verify.appPort, listenPort: proxyPort,
                     base: staticBase,
+                    backendPort: backendPortFromVerify, apiPrefixes,
                     onLog: (m) => console.error(`[twoStage] ${m}`),
                 });
                 if (proxyOk) {
