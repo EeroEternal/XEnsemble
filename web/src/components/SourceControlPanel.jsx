@@ -108,6 +108,11 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   const [fileDiffs, setFileDiffs] = useState({});
   const [loadingDiff, setLoadingDiff] = useState(null);
   const [resolvedPaths, setResolvedPaths] = useState(new Set());
+  // per-repo commit：commitTarget 非 null 时，提交弹窗只作用于该 repo（null = 提交全部仓库）。
+  // 必须在 handleCommit/handleGenerateMessage/handleAuthorConfirm 之前声明——它们的依赖数组在
+  // const 声明前求值会触发 TDZ（ReferenceError: can't access lexical declaration 'commitTarget'），
+  // 生产构建压缩后表现为 "can't access lexical declaration 'at' before initialization"。
+  const [commitTarget, setCommitTarget] = useState(null);
   const authorNameRef = useRef(null);
   const commitMsgRef = useRef(null);
   const actionMenuBtnRef = useRef(null);
@@ -178,6 +183,25 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   const branch = gitChanges?.branch || '';
   const isLocalGit = !provider || provider === 'none' || provider === 'local_git';
   const conflictFiles = (gitChanges?.conflicts || []).filter((f) => !resolvedPaths.has(f.path));
+
+  // ─── 多仓库（VSCode multi-root worktree 风格）───
+  // 服务端聚合 status 附带 repos[] 每仓库明细（含前缀路径 + 各自 branch/ahead），
+  // 前端据此把 Changes 面板按仓库分组展示，并可对单个仓库 push。
+  // 必须在 handleCommit/handleAuthorConfirm 之前声明：它们的依赖数组引用 repoGroups，
+  // 后置声明会让依赖数组在 const 初始化前求值 → TDZ（生产压缩后 "can't access
+  // lexical declaration 'at' before initialization"，xensemble 实测白屏）。
+  const multiRepos = gitChanges?.multiRepo && Array.isArray(gitChanges?.repos) ? gitChanges.repos : [];
+  const repoGroups = useMemo(() => {
+    if (multiRepos.length === 0) return [];
+    return multiRepos.map((repo) => {
+      const seen = new Set();
+      const files = [];
+      for (const f of [...(repo.stagedFiles || []), ...(repo.unstagedFiles || [])]) {
+        if (f?.path && !seen.has(f.path)) { seen.add(f.path); files.push(f); }
+      }
+      return { ...repo, files, count: files.length };
+    });
+  }, [multiRepos]);
 
   const handleConflictResolved = useCallback((resolvedPath) => {
     setResolvedPaths((prev) => new Set([...prev, resolvedPath]));
@@ -457,21 +481,6 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     });
   }, []);
 
-  // ─── 多仓库（VSCode multi-root worktree 风格）───
-  // 服务端聚合 status 附带 repos[] 每仓库明细（含前缀路径 + 各自 branch/ahead），
-  // 前端据此把 Changes 面板按仓库分组展示，并可对单个仓库 push。
-  const multiRepos = gitChanges?.multiRepo && Array.isArray(gitChanges?.repos) ? gitChanges.repos : [];
-  const repoGroups = useMemo(() => {
-    if (multiRepos.length === 0) return [];
-    return multiRepos.map((repo) => {
-      const seen = new Set();
-      const files = [];
-      for (const f of [...(repo.stagedFiles || []), ...(repo.unstagedFiles || [])]) {
-        if (f?.path && !seen.has(f.path)) { seen.add(f.path); files.push(f); }
-      }
-      return { ...repo, files, count: files.length };
-    });
-  }, [multiRepos]);
   const [collapsedRepos, setCollapsedRepos] = useState(() => new Set());
   const toggleRepoCollapse = useCallback((id) => {
     setCollapsedRepos((prev) => {
@@ -513,8 +522,6 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     }
   }, [projectId, showToast, gitChanges, t]);
 
-  // per-repo commit：commitTarget 非 null 时，提交弹窗只作用于该 repo（null = 提交全部仓库）
-  const [commitTarget, setCommitTarget] = useState(null);
   const openCommitForRepo = useCallback((repo) => {
     setCommitTarget({ repoId: repo.id, subPath: repo.subPath });
     setShowCommitDialog(true);
