@@ -76,6 +76,7 @@
   },
   "dialog": {
     "stage_commit_title": "暂存并提交更改",
+    "stage_commit_title_repo": "提交 {{repo}} 的更改",
     "commit_placeholder": "描述你做了哪些更改",
     "set_author_title": "设置 Git 作者信息",
     "name": "姓名",

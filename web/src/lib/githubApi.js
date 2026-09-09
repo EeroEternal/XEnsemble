@@ -30,9 +30,11 @@ export const getGitStatusLight = (projectId) =>
 export const getCloneStatus = (projectId) =>
   request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/clone-status`);
 
-export const commitStaged = (projectId, message, author) => {
+export const commitStaged = (projectId, message, author, repoId) => {
   const body = { message };
   if (author) body.author = author;
+  // 多仓库：repoId 指定时只提交该仓库（per-repo commit），缺省提交全部有暂存的仓库
+  if (repoId) body.repo_id = repoId;
   return request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/commit`, {
     method: 'POST',
     body: JSON.stringify(body),
@@ -70,6 +72,8 @@ export const pushBranch = (projectId, branch, repoId) => {
 export const pullLatest = (projectId, options = {}) => {
   const body = {};
   if (options.force) body.force = true;
+  // 多仓库：repoId 指定时只拉取该仓库（per-repo pull）
+  if (options.repoId) body.repo_id = options.repoId;
   return request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/pull`, {
     method: 'POST',
     body: JSON.stringify(body),

@@ -450,12 +450,17 @@ function registerProjectGitRoutes(fastify) {
         }
         try {
             const author = { name: authorName, email: authorEmail };
-            // 多仓库：对每个有暂存内容的 repo 分别提交（stage 已按前缀路由到各 repo）
+            // 多仓库：对每个有暂存内容的 repo 分别提交（stage 已按前缀路由到各 repo）；
+            // repo_id 显式指定时只提交该 repo（前端 per-repo commit 按钮）。
             const multi = await buildMultiRepoServices(request);
             if (multi) {
+                const targetRepoId = request.body?.repo_id || request.query?.repo_id || null;
+                const targets = targetRepoId
+                    ? multi.services.filter((s) => s.row.id === targetRepoId)
+                    : multi.services;
                 let sha = null;
                 const committedRepos = [];
-                for (const { svc, row } of multi.services) {
+                for (const { svc, row } of targets) {
                     const s = await svc.getStatus(project).catch(() => null);
                     if (!s || !(s.stagedFiles || []).length) continue;
                     const r = await svc.commitStaged(project, message, author);

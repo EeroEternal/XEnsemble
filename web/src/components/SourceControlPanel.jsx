@@ -246,17 +246,28 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     if (!commitMessage.trim()) return;
     setCommitting(true);
     try {
-      // Stage and commit in one action: stage every changed (unstaged) file,
-      // then commit the resulting index.
-      const unstagedPaths = gitUnstagedFiles.map((f) => f.path).filter(Boolean);
-      if (unstagedPaths.length > 0) {
-        await gitChanges?.stage(unstagedPaths);
-      }
       const author = authorName && authorEmail ? { name: authorName, email: authorEmail } : undefined;
-      await gitChanges?.commit(commitMessage.trim(), author);
+      if (commitTarget) {
+        // per-repo：只暂存该 repo 的未暂存文件，并按 repo_id 提交
+        const targetRepo = repoGroups.find((r) => r.id === commitTarget.repoId);
+        const unstagedPaths = (targetRepo?.unstagedFiles || []).map((f) => f.path).filter(Boolean);
+        if (unstagedPaths.length > 0) {
+          await githubApi.stageFiles(projectId, unstagedPaths);
+        }
+        await githubApi.commitStaged(projectId, commitMessage.trim(), author, commitTarget.repoId);
+      } else {
+        // 全部：暂存所有未暂存文件后提交（现有逻辑）
+        const unstagedPaths = gitUnstagedFiles.map((f) => f.path).filter(Boolean);
+        if (unstagedPaths.length > 0) {
+          await gitChanges?.stage(unstagedPaths);
+        }
+        await gitChanges?.commit(commitMessage.trim(), author);
+      }
       setCommitMessage('');
       setShowCommitDialog(false);
+      setCommitTarget(null);
       showToast('success', 'Committed.');
+      gitChanges?.fetchStatus?.({ silent: true });
     } catch (err) {
       if (err.code === 'AUTHOR_REQUIRED' || (err.message && err.message.includes('author'))) {
         setShowAuthorDialog(true);
@@ -265,15 +276,17 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     } finally {
       setCommitting(false);
     }
-  }, [commitMessage, gitChanges, authorName, authorEmail, gitUnstagedFiles]);
+  }, [commitMessage, gitChanges, authorName, authorEmail, gitUnstagedFiles, commitTarget, repoGroups, projectId]);
 
   const handleGenerateMessage = useCallback(async () => {
     setGeneratingMsg(true);
     try {
+      // per-repo 提交时按 repo_id 生成对应仓库的 commit message
+      const body = commitTarget ? JSON.stringify({ repo_id: commitTarget.repoId }) : '{}';
       const res = await apiFetch(withSessionId(`/api/v1/projects/${encodeURIComponent(projectId)}/git/commit-message`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: '{}',
+        body,
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t('git:error.generate_message_failed'));
@@ -284,7 +297,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     } finally {
       setGeneratingMsg(false);
     }
-  }, [projectId, showToast]);
+  }, [projectId, showToast, commitTarget]);
 
   // 打开 commit 对话框时自动用 AI 总结当前变更并填入 commit 信息（无需手动点 AI draft）
   useEffect(() => {
@@ -316,14 +329,25 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     setCommitting(true);
     try {
       const author = { name: authorName.trim(), email: authorEmail.trim() };
-      await gitChanges?.commit(commitMessage.trim(), author);
+      if (commitTarget) {
+        const targetRepo = repoGroups.find((r) => r.id === commitTarget.repoId);
+        const unstagedPaths = (targetRepo?.unstagedFiles || []).map((f) => f.path).filter(Boolean);
+        if (unstagedPaths.length > 0) {
+          await githubApi.stageFiles(projectId, unstagedPaths);
+        }
+        await githubApi.commitStaged(projectId, commitMessage.trim(), author, commitTarget.repoId);
+      } else {
+        await gitChanges?.commit(commitMessage.trim(), author);
+      }
       setCommitMessage('');
       setShowCommitDialog(false);
+      setCommitTarget(null);
+      gitChanges?.fetchStatus?.({ silent: true });
     } catch (_) {
     } finally {
       setCommitting(false);
     }
-  }, [commitMessage, gitChanges, authorName, authorEmail]);
+  }, [commitMessage, gitChanges, authorName, authorEmail, commitTarget, repoGroups, projectId]);
 
   const handlePush = useCallback(async () => {
     setActionMenuOpen(false);
@@ -470,6 +494,35 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       gitChanges?.fetchStatus?.({ silent: true });
     }
   }, [projectId, showToast, gitChanges, t]);
+
+  const [pullingRepo, setPullingRepo] = useState(null);
+  const pullRepo = useCallback(async (repo) => {
+    setPullingRepo(repo.id);
+    try {
+      await githubApi.pullLatest(projectId, { repoId: repo.id });
+      showToast('success', t('git:toast.pulled_latest', { defaultValue: 'Pulled latest changes.' }));
+    } catch (err) {
+      if (err.code === 'pull_conflict') {
+        showToast('error', t('git:pull_conflict_message', { defaultValue: 'There are conflicts between your local changes and the remote.' }));
+      } else {
+        showToast('error', err.message || 'Pull failed');
+      }
+    } finally {
+      setPullingRepo(null);
+      gitChanges?.fetchStatus?.({ silent: true });
+    }
+  }, [projectId, showToast, gitChanges, t]);
+
+  // per-repo commit：commitTarget 非 null 时，提交弹窗只作用于该 repo（null = 提交全部仓库）
+  const [commitTarget, setCommitTarget] = useState(null);
+  const openCommitForRepo = useCallback((repo) => {
+    setCommitTarget({ repoId: repo.id, subPath: repo.subPath });
+    setShowCommitDialog(true);
+  }, []);
+  const closeCommitDialog = useCallback(() => {
+    setShowCommitDialog(false);
+    setCommitTarget(null);
+  }, []);
 
   const renderFileRow = (f, depth) => {
     // 折叠的 untracked 大目录（服务端下发 type=untracked-dir + count）：
@@ -761,6 +814,17 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                               ? t('workspace:label.changed_count', { count: repo.count, defaultValue: `${repo.count} changed` })
                               : t('workspace:label.no_changes_repo', { defaultValue: 'No changes' })}
                           </span>
+                          {hasFiles && (
+                            <button
+                              type="button"
+                              onClick={() => openCommitForRepo(repo)}
+                              disabled={committing}
+                              title={t('git:commit', { defaultValue: 'Commit' })}
+                              className={`shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 ${consoleButtonFocusClass}`}
+                            >
+                              <GitCommit className="h-3 w-3" />
+                            </button>
+                          )}
                           {repo.ahead > 0 && (
                             <button
                               type="button"
@@ -771,6 +835,18 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                             >
                               {pushingRepo === repo.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
                               {repo.ahead}
+                            </button>
+                          )}
+                          {repo.behind > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => pullRepo(repo)}
+                              disabled={pullingRepo === repo.id}
+                              title={t('workspace:action.pull_latest', { defaultValue: 'Pull latest changes' })}
+                              className={`shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-zinc-500 hover:bg-zinc-100 disabled:opacity-40 ${consoleButtonFocusClass}`}
+                            >
+                              {pullingRepo === repo.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                              {repo.behind}
                             </button>
                           )}
                         </div>
@@ -878,9 +954,13 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
 
       {/* Commit dialog */}
       {showCommitDialog && (
-        <ConsoleDialogShell onClose={() => setShowCommitDialog(false)} panelClassName={consoleDialogSmClass}>
+        <ConsoleDialogShell onClose={closeCommitDialog} panelClassName={consoleDialogSmClass}>
           <div className="px-5 pt-5 pb-2 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-zinc-900">{t('workspace:dialog.stage_commit_title')}</h3>
+            <h3 className="text-sm font-semibold text-zinc-900">
+              {commitTarget
+                ? t('workspace:dialog.stage_commit_title_repo', { repo: commitTarget.subPath, defaultValue: `Commit changes in ${commitTarget.subPath}` })
+                : t('workspace:dialog.stage_commit_title')}
+            </h3>
           </div>
           <div className="px-5 pb-5 flex flex-col gap-3">
             <textarea
@@ -916,7 +996,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           <div className="flex justify-end gap-2 px-5 py-3 border-t border-zinc-200">
             <button
               type="button"
-              onClick={() => setShowCommitDialog(false)}
+              onClick={closeCommitDialog}
               className={buttonClass('secondary', 'sm')}
             >
               {t('workspace:action.cancel')}

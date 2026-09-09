@@ -214,3 +214,26 @@ test('POST /git/push 指定 repo_id：只推该仓库', async () => {
   assert.equal(body.pushed[0].repoId, 'pr_r2');
   assert.ok(body.pushed[0].sha);
 });
+
+test('POST /git/commit 指定 repo_id：只提交该仓库', async () => {
+  const headOf = (repo) => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: path.join(projectDir, repo) }).toString().trim();
+  const r1Before = headOf('r1');
+  const r2Before = headOf('r2');
+  // 给 r1 制造一个未跟踪文件并暂存
+  fs.writeFileSync(path.join(projectDir, 'r1', 'scoped.txt'), 'scoped\n');
+  const stageRes = await fastify.inject({
+    method: 'POST', url: '/api/v1/projects/pm/git/stage',
+    payload: { files: ['r1/scoped.txt'] },
+  });
+  assert.equal(stageRes.statusCode, 200);
+  const res = await fastify.inject({
+    method: 'POST', url: '/api/v1/projects/pm/git/commit',
+    payload: { message: 'scoped commit', author: { name: 't', email: 't@t' }, repo_id: 'pr_r1' },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = JSON.parse(res.body);
+  assert.equal(body.committedRepos.length, 1);
+  assert.equal(body.committedRepos[0].repoId, 'pr_r1');
+  assert.notEqual(headOf('r1'), r1Before); // r1 已提交
+  assert.equal(headOf('r2'), r2Before);    // r2 未动
+});

@@ -77,6 +77,7 @@
   },
   "dialog": {
     "stage_commit_title": "Stage & commit changes",
+    "stage_commit_title_repo": "Commit changes in {{repo}}",
     "commit_placeholder": "Describe what changed",
     "set_author_title": "Set Git author info",
     "name": "Name",
