@@ -1176,7 +1176,7 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                     } else {
                         messages.push({
                             role: 'user',
-                            content: `You already ran \`${dupSig}\` successfully earlier (round ${prev.round}) and have not edited any files since.${evidence} Do NOT re-run it. If its output is missing, read the build/dev script (package.json / scripts/*) to find where it outputs, then serve that; do not rebuild.`,
+                            content: `You already ran \`${dupSig}\` successfully earlier (round ${prev.round}) and have not edited any files since.${evidence} That dependency is INSTALLED and satisfied — do NOT re-run it, and do NOT rm -rf node_modules again. Move ON to the next step of the deploy plan NOW: run the migrations / build the frontend / start the app / curl the health check. Do not spend more rounds on dependencies.`,
                         });
                     }
                     prevToolSig = '';

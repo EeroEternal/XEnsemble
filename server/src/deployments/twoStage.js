@@ -910,8 +910,14 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
     // --ignore-scripts 跳过其 postinstall，补装循环直接排除该子包。
     const electronSubs = detectElectronDesktopSubpackages(hostWorkspacePath);
     const electronSubPaths = new Set(electronSubs.map((e) => e.path));
-    const run = async (cmd, cwd, timeoutMs = 600000, useGhProxy = false) => {
-        log(`platform install: ${cmd}${cwd ? ` (cwd=${cwd})` : ''}${useGhProxy ? ' [ghproxy fallback]' : ''}`);
+    const run = async (cmd, cwd, timeoutMs = 600000, useGhProxy = false, cleanFirst = false) => {
+        log(`platform install: ${cmd}${cwd ? ` (cwd=${cwd})` : ''}${useGhProxy ? ' [ghproxy fallback]' : ''}${cleanFirst ? ' [clean node_modules first]' : ''}`);
+        const clean = cwd ? `${cwd}/` : '';
+        // STALE 子包本来就要重装，旧 node_modules 只会在增量更新时引入权限/残留坑
+        // （xensemble 实测：14:22 部署的旧 node_modules 上做 npm 增量更新，建
+        // @esbuild/android-arm 目录 EACCES → 平台 install 秒失败 → 甩给 agent 修 →
+        // 修好后 agent 又陷入重装空转）。主动清空再干净安装，确定成功且更快。
+        const cleanPrefix = `rm -rf '${clean}node_modules' 2>/dev/null || true; `;
         const execOnce = async (prefix) => {
             try {
                 const r = await runtime.exec.exec('sh', ['-c',
@@ -925,16 +931,11 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
                 return { ec: -1, tail: String(e.message).slice(0, 800) };
             }
         };
-        let { ec, tail } = await execOnce('');
+        let { ec, tail } = await execOnce(cleanFirst ? cleanPrefix : '');
         if (ec !== 0 && /EACCES|permission denied|not permitted/i.test(tail)) {
-            // node_modules 残留属主/只读问题（virtiofs idmap、旧部署 root 属主等）导致
-            // npm 无法写入深层子目录——xensemble 实测 server 子包 install 秒失败
-            // EACCES（path=.../node_modules/@esbuild-kit/...）。清掉该 node_modules 重试
-            // 一次（agent 的 rm -rf + 重装已验证可行），避免把 install 失败丢给 agent
-            // 触发后续重装空转。
-            const clean = cwd ? `${cwd}/` : '';
+            // 兜底（主动清后理论上不该出现）：仍 EACCES（如属主分裂/只读挂载）→ 再清一次重试
             log(`platform install: ${cmd}${cwd ? ` (cwd=${cwd})` : ''} hit EACCES — clearing node_modules and retrying`);
-            ({ ec, tail } = await execOnce(`rm -rf '${clean}node_modules' 2>/dev/null || true; `));
+            ({ ec, tail } = await execOnce(cleanPrefix));
         }
         const ok = ec === 0;
         cmds.push({ cmd, cwd: cwd || '.', ok, logTail: ok ? undefined : tail });
@@ -1058,7 +1059,9 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
                 const workers = Array.from({ length: concurrency }, async () => {
                     while (queue.length) {
                         const sub = queue.shift();
-                        const subOk = await run(effectiveCmd, sub);
+                        // STALE 子包：先清空该子包 node_modules 再装（干净安装，避免旧目录
+                        // 增量更新踩 EACCES/残留坑——xensemble 实测 EACCES 秒失败 + agent 空转）
+                        const subOk = await run(effectiveCmd, sub, 600000, false, true);
                         if (!subOk) ok = false;
                     }
                 });
