@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight, ExternalLink, GitPullRequest, Loader2, Search } from 'lucide-react';
 import { openExternal } from '../../lib/githubApi';
 import * as gitApi from '../../lib/gitApi';
+import SelectMenu from '../SelectMenu';
 import {
   consoleIconButtonClass,
   consoleButtonFocusClass,
@@ -59,8 +60,9 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
   const [page, setPage] = useState(1);
   // 当前用户在该仓库的写权限（merge/approve/close/reopen），来自列表接口
   const [permissions, setPermissions] = useState(null);
-  // 多仓库：后端返回 repos[]（[{id, subPath, isPrimary}]），MR 按 repoId 分组展示
+  // 多仓库：后端返回 repos[]（[{id, subPath, isPrimary}]），表头下拉选择展示哪一个仓库的 PR
   const [repoMeta, setRepoMeta] = useState(null);
+  const [activeRepoId, setActiveRepoId] = useState(null);
 
   const label = provider === 'gitlab' ? t('git:merge_requests') : t('git:pull_requests');
 
@@ -128,38 +130,51 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
     return sorted;
   }, [mergeRequests, statusFilter, searchQuery]);
 
+  // 多仓库：表头下拉展示某一个仓库的 PR（分页/筛选/搜索全部复用单仓库逻辑）
+  const repos = repoMeta && repoMeta.length > 0 ? repoMeta : [];
+  const isMultiRepo = repos.length > 1;
+  const activeRepo = repos.find((r) => r.id === activeRepoId) || repos.find((r) => r.isPrimary) || repos[0] || null;
+
+  // repos 加载完成后，若当前未选中有效仓库则回落到 primary
+  useEffect(() => {
+    if (repos.length === 0) return;
+    setActiveRepoId((cur) => (cur && repos.some((r) => r.id === cur)
+      ? cur
+      : ((repos.find((r) => r.isPrimary) || repos[0]).id)));
+  }, [repoMeta]);
+
+  // 当前选中仓库的 PR（存量/未标注 repoId 的 MR 归入 primary）
+  const scopedByRepo = useMemo(() => {
+    if (!isMultiRepo) return null;
+    if (!activeRepo) return null;
+    const primaryId = (repos.find((r) => r.isPrimary) || repos[0]).id;
+    const isOwn = (mr) => (mr.repoId ? mr.repoId === activeRepo.id : activeRepo.id === primaryId);
+    return {
+      all: mergeRequests.filter(isOwn),
+      filtered: filteredMRs.filter(isOwn),
+    };
+  }, [isMultiRepo, activeRepo, repos, mergeRequests, filteredMRs]);
+  // 当前仓库的 PR（含筛选前总量，用于区分"该仓库无 PR"与"被筛选过滤"）
+  const scopedAllMRs = scopedByRepo ? scopedByRepo.all : mergeRequests;
+  const scopedMRs = scopedByRepo ? scopedByRepo.filtered : filteredMRs;
+
   const countByStatus = useMemo(() => {
-    const counts = { all: mergeRequests.length, open: 0, merged: 0, closed: 0 };
-    for (const mr of mergeRequests) {
+    const counts = { all: scopedMRs.length, open: 0, merged: 0, closed: 0 };
+    for (const mr of scopedMRs) {
       if (counts[mr.status] != null) counts[mr.status]++;
     }
     return counts;
-  }, [mergeRequests]);
+  }, [scopedMRs]);
 
   const PAGE_SIZE = 10;
-  useEffect(() => { setPage(1); }, [statusFilter, searchQuery]);
-  const totalItems = filteredMRs.length;
+  useEffect(() => { setPage(1); }, [statusFilter, searchQuery, activeRepoId]);
+  const totalItems = scopedMRs.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pagedMRs = useMemo(
-    () => filteredMRs.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
-    [filteredMRs, currentPage],
+    () => scopedMRs.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [scopedMRs, currentPage],
   );
-
-  // 多仓库：MR 按仓库分组展示（类似 Changes 模块）；存量/未标注仓库的 MR 归入 primary
-  const isMultiRepo = Boolean(repoMeta && repoMeta.length > 1);
-  const repoGroups = useMemo(() => {
-    if (!isMultiRepo) return null;
-    const primary = repoMeta.find((r) => r.isPrimary) || repoMeta[0];
-    const groups = repoMeta.map((r) => ({ ...r, mrs: [] }));
-    for (const mr of filteredMRs) {
-      const g = groups.find((x) => x.id === mr.repoId)
-        || groups.find((x) => x.id === primary.id)
-        || groups[0];
-      if (g) g.mrs.push(mr);
-    }
-    return groups;
-  }, [isMultiRepo, repoMeta, filteredMRs]);
 
   const renderMrRow = (mr) => {
     const meta = STATUS_META[mr.status] || STATUS_META.closed;
@@ -168,7 +183,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
     const tgt = mr.target_branch || mr.targetBranch;
     const remoteUrl = mr.remoteMrUrl || mr.remote_mr_url || mr.remote_url || mr.remoteUrl;
     // 多仓库：permissions 是按 repoId 的映射，行内取该 MR 所属仓库的权限
-    const mrPerms = isMultiRepo ? (permissions?.[mr.repoId] || null) : permissions;
+    const mrPerms = permissions?.[mr.repoId] || permissions;
     return (
       <li
         key={mr.id}
@@ -253,6 +268,14 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
             );
           })}
         </div>
+        {isMultiRepo && activeRepo && (
+          <SelectMenu
+            value={activeRepo.id}
+            onChange={setActiveRepoId}
+            options={repos.map((r) => ({ value: r.id, label: r.subPath }))}
+            className="shrink-0 w-44"
+          />
+        )}
         <div className="relative flex-1 min-w-0 max-w-[200px]">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400 pointer-events-none" />
           <input
@@ -283,55 +306,21 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
             <Loader2 className="h-5 w-5 animate-spin" />
             <span className="text-xs">{t('common:state.loading')} {label.toLowerCase()}…</span>
           </div>
-        ) : isMultiRepo && mergeRequests.length === 0 ? (
-          // 多仓库且没有任何 PR：也按仓库展示区块（每个仓库独立空态），
-          // 新建 PR 按钮统一在右上角，不在中间重复
-          <div className="flex flex-col">
-            {repoGroups.map((g) => (
-              <div key={g.id} className="border-b border-zinc-200">
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100/80 sticky top-0 z-10 border-b border-zinc-200">
-                  <span className="truncate text-[11px] font-semibold text-zinc-800">{g.subPath}</span>
-                  <span className="ml-auto shrink-0 text-[10px] text-zinc-400">{g.mrs.length}</span>
-                </div>
-                <div className="px-3 py-3 text-[11px] text-zinc-400">
-                  {t('git:empty.no_prs', { defaultValue: 'No pull requests' })}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : filteredMRs.length === 0 ? (
+        ) : scopedMRs.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-100 text-zinc-400">
               <GitPullRequest className="h-5 w-5" />
             </div>
             <div>
               <p className="text-sm font-medium text-zinc-700">
-                {mergeRequests.length === 0 ? t('git:empty.no_prs') : t('git:empty.no_match', { defaultValue: 'No matching results' })}
+                {scopedAllMRs.length === 0 ? t('git:empty.no_prs') : t('git:empty.no_match', { defaultValue: 'No matching results' })}
               </p>
               <p className="mt-0.5 text-xs text-zinc-400">
-                {mergeRequests.length === 0
+                {scopedAllMRs.length === 0
                   ? (onCreatePR ? t('git:empty.no_prs_hint_create') : t('git:empty.no_prs_hint_wait'))
                   : t('git:empty.no_match_hint', { defaultValue: 'Try a different filter or search term.' })}
               </p>
             </div>
-          </div>
-        ) : isMultiRepo ? (
-          <div className="flex flex-col">
-            {repoGroups.map((g) => (
-              <div key={g.id} className="border-b border-zinc-200">
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100/80 sticky top-0 z-10 border-b border-zinc-200">
-                  <span className="truncate text-[11px] font-semibold text-zinc-800">{g.subPath}</span>
-                  <span className="ml-auto shrink-0 text-[10px] text-zinc-400">{g.mrs.length}</span>
-                </div>
-                {g.mrs.length > 0 ? (
-                  <ul className="divide-y divide-zinc-100">{g.mrs.map(renderMrRow)}</ul>
-                ) : (
-                  <div className="px-3 py-3 text-[11px] text-zinc-400">
-                    {t('git:empty.no_prs', { defaultValue: 'No pull requests' })}
-                  </div>
-                )}
-              </div>
-            ))}
           </div>
         ) : (
           <ul className="divide-y divide-zinc-100">
@@ -340,7 +329,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
         )}
       </div>
 
-      {!isMultiRepo && totalPages > 1 && (
+      {totalPages > 1 && (
         <div className="flex items-center justify-between gap-2 border-t border-zinc-200 px-3 py-1.5 shrink-0 bg-surface">
           <span className="text-[11px] text-zinc-500 tabular-nums">
             {currentPage * PAGE_SIZE - PAGE_SIZE + 1}-{Math.min(currentPage * PAGE_SIZE, totalItems)} of {totalItems}
