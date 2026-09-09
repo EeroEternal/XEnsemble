@@ -2104,6 +2104,22 @@ async function parseDbInfoFromGuest(runtimeRef, workspacePath) {
 // plan 命令透明生效。任何一步失败都不阻断部署（best-effort，退回官方源只是慢）。
 async function configureGuestMirrors(runtimeRef, workspacePath, onLog) {
     const runtime = getRuntime();
+    // npm 私有 scope registry 注入（平台级配置，通用）：XENSEMBLE_NPM_SCOPE_REGISTRIES
+    // 格式 `scope=url;scope2=url2`（如 @schkzy=https://npm-registry.schkzy.com/）。
+    // 沙箱默认源 npmmirror 不含私有包，私有 scope 必须指向私有源，否则 pnpm/npm install
+    // 报 ERR_PNPM_FETCH_404（server-manage-frontend 实测 verify 60 轮全耗在绕私有包）。
+    // 只对声明的 scope 追加 :registry，不改变默认源、不强制任何项目；任何私有源配一行即可。
+    const scopeShell = String(process.env.XENSEMBLE_NPM_SCOPE_REGISTRIES || '')
+        .split(';').map((kv) => kv.trim()).filter(Boolean)
+        .map((kv) => {
+            const idx = kv.indexOf('=');
+            if (idx <= 0) return '';
+            const scope = kv.slice(0, idx).trim();
+            const url = kv.slice(idx + 1).trim();
+            return (scope && url) ? `printf '%s\\n' '${scope}:registry=${url}' >> /root/.npmrc 2>/dev/null || true` : '';
+        })
+        .filter(Boolean)
+        .join('\n');
     const script = `
 # 1) apt 源：deb.debian.org/security.debian.org → mirrors.aliyun.com（兼容传统 list 与 bookworm deb822）
 if [ -f /etc/apt/sources.list ]; then
