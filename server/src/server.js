@@ -102,6 +102,7 @@ const unigateway = require('./gateway/unigatewayManager');
 const { registerGatewayAdminRoutes } = require('./gateway/adminProxy');
 const { deleteProjectForUser } = require('./projects/deleteProject');
 const { getAgentResume, getAgentResumeLevel, buildStateArgs } = require('./agents/agentResume');
+const { getUserSkillDirs } = require('./agents/defaultAgents');
 const { applyProjectGitEnv } = require('./agents/projectGitEnv');
 const { ensureSessionStateDir, prepareHomeRedirect } = require('./session/stateDir');
 const { resolveRuntimeProvider, DEFAULT_RUNTIME_PROVIDER } = require('./config/runtimeProvider');
@@ -1912,11 +1913,13 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
         //     导致沙箱挂载目录里看不到技能（历史 bug，已修复）。
         if (skillInjectEnabled()) {
             try {
-                // 配置根被重定向到 stateDir 的 Agent（如 claude-code 的
-                // CLAUDE_CONFIG_DIR=stateDir，见 resumeSession stateEnv），
-                // 技能发现路径是 <stateDir>/skills——VM 内复制必须落到那里
-                const stateSkillsDir = resumeSpec?.stateEnv && sessionStateDir?.stateDirPath
-                    ? `${sessionStateDir.stateDirPath}/skills`
+                // Claude Code 的 CLAUDE_CONFIG_DIR 改变扫描根为 <configDir>/skills。
+                // 其他 Agent 的 stateEnv 若改变扫描根，子目录应与 userSkillDirs[0] 一致。
+                const stateSkillsSubdir = agent_id === 'claude-code'
+                    ? 'skills'
+                    : (getUserSkillDirs(agent_id)[0] || 'skills');
+                const stateSkillsDir = resumeSpec?.stateEnv && sessionStateDir?.stateDirPath && stateSkillsSubdir
+                    ? `${sessionStateDir.stateDirPath}/${stateSkillsSubdir}`
                     : null;
                 const injectResult = await injectSkillsForSession({
                     userId: request.user.id,
