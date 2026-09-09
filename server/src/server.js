@@ -1920,7 +1920,7 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
                     : (getUserSkillDirs(agent_id)[0] || 'skills');
                 // Cline / OpenCode 的 stateEnv 不影响 skills 发现，走 /root/<userSkillDirs>
                 const stateSkillsDir = (agent_id !== 'cline' && agent_id !== 'opencode')
-                    && resumeSpec?.stateEnv && sessionStateDir?.stateDirPath && stateSkillsSubdir
+                    && (resumeSpec?.stateEnv || resumeSpec?.redirectHome) && sessionStateDir?.stateDirPath && stateSkillsSubdir
                     ? `${sessionStateDir.stateDirPath}/${stateSkillsSubdir}`
                     : null;
                 const injectResult = await injectSkillsForSession({

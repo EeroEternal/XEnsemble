@@ -208,6 +208,7 @@ const DEFAULT_AGENTS = [
         cmd: 'zai',
         args: [],
         env_required: [],
+        userSkillDirs: ['.zai/skills'],
         resume: {
             level: 'L2',
             redirectHome: true,
