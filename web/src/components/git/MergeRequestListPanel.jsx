@@ -60,6 +60,8 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
   const [page, setPage] = useState(1);
   // 当前用户在该仓库的写权限（merge/approve/close/reopen），来自列表接口
   const [permissions, setPermissions] = useState(null);
+  // 多仓库：后端返回 repos[]（[{id, subPath, isPrimary}]），MR 按 repoId 分组展示
+  const [repoMeta, setRepoMeta] = useState(null);
 
   const label = provider === 'gitlab' ? t('git:merge_requests') : t('git:pull_requests');
 
@@ -71,6 +73,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
       const rows = data.merge_requests || data.pull_requests || data;
       setMergeRequests(Array.isArray(rows) ? rows : []);
       setPermissions(data.permissions || null);
+      setRepoMeta(Array.isArray(data.repos) && data.repos.length > 0 ? data.repos : null);
     } catch (err) {
       showToast('error', err.message);
     } finally {
@@ -143,6 +146,88 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
     () => filteredMRs.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
     [filteredMRs, currentPage],
   );
+
+  // 多仓库：MR 按仓库分组展示（类似 Changes 模块）；存量/未标注仓库的 MR 归入 primary
+  const isMultiRepo = Boolean(repoMeta && repoMeta.length > 1);
+  const repoGroups = useMemo(() => {
+    if (!isMultiRepo) return null;
+    const primary = repoMeta.find((r) => r.isPrimary) || repoMeta[0];
+    const groups = repoMeta.map((r) => ({ ...r, mrs: [] }));
+    for (const mr of filteredMRs) {
+      const g = groups.find((x) => x.id === mr.repoId)
+        || groups.find((x) => x.id === primary.id)
+        || groups[0];
+      if (g) g.mrs.push(mr);
+    }
+    return groups;
+  }, [isMultiRepo, repoMeta, filteredMRs]);
+
+  const renderMrRow = (mr) => {
+    const meta = STATUS_META[mr.status] || STATUS_META.closed;
+    const number = mr.remote_mr_number || mr.remoteMrNumber || mr.github_pr_number;
+    const src = mr.source_branch || mr.sourceBranch;
+    const tgt = mr.target_branch || mr.targetBranch;
+    const remoteUrl = mr.remoteMrUrl || mr.remote_mr_url || mr.remote_url || mr.remoteUrl;
+    // 多仓库：permissions 是按 repoId 的映射，行内取该 MR 所属仓库的权限
+    const mrPerms = isMultiRepo ? (permissions?.[mr.repoId] || null) : permissions;
+    return (
+      <li
+        key={mr.id}
+        className="group relative flex items-start gap-3 px-3 py-2.5 transition-colors hover:bg-zinc-100/60 focus-within:bg-zinc-100/60"
+      >
+        <button
+          type="button"
+          onClick={() => onSelectMR?.({ ...mr, permissions: mrPerms })}
+          className={`absolute inset-0 z-0 ${consoleButtonFocusClass}`}
+          aria-label={t('git:open_pr', { defaultValue: 'Open pull request', number: number != null ? ` #${number}` : '', title: mr.title ? `: ${mr.title}` : '' })}
+        />
+        <span className={`relative z-10 mt-1.5 h-2 w-2 shrink-0 rounded-full ${meta.dot}`} />
+        <div className="relative z-10 min-w-0 flex-1 pointer-events-none">
+          <div className="flex items-start gap-2 min-w-0">
+            {number != null && (
+              <span className="font-mono text-xs text-zinc-400 shrink-0 mt-0.5">#{number}</span>
+            )}
+            <span className="break-words text-sm font-medium leading-snug text-zinc-900">
+              {mr.title || t('git:untitled', { defaultValue: 'Untitled' })}
+            </span>
+          </div>
+          <div className="mt-1 flex items-start gap-1.5 min-w-0 text-[11px] text-zinc-500">
+            {src && (
+              <span className="font-mono break-all" title={src}>{src}</span>
+            )}
+            {src && tgt && (
+              <span className="text-zinc-300 shrink-0">{'→'}</span>
+            )}
+            {tgt && (
+              <span className="font-mono break-all" title={tgt}>{tgt}</span>
+            )}
+            {(src || tgt) && (
+              <span className="text-zinc-300 shrink-0">·</span>
+            )}
+            <span className="shrink-0 text-zinc-400">
+              {formatRelative(mr.created_at || mr.createdAt, t)}
+            </span>
+          </div>
+        </div>
+        <div className="relative z-10 ml-auto flex items-center gap-1 shrink-0 pointer-events-none">
+          <span className={`pointer-events-none inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${meta.pill}`}>
+            {mr.status}
+          </span>
+          {remoteUrl && (
+            <button
+              type="button"
+              onClick={() => openExternal(remoteUrl)}
+              title={t('git:open_on_provider', { provider, defaultValue: `Open on ${provider}` })}
+              aria-label={t('git:open_on_provider', { provider, defaultValue: `Open on ${provider}` })}
+              className={`${consoleIconButtonClass} pointer-events-auto`}
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </li>
+    );
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -225,77 +310,37 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
               </button>
             )}
           </div>
+        ) : isMultiRepo ? (
+          <div className="flex flex-col">
+            {repoGroups.map((g) => (
+              <div key={g.id} className="border-b border-zinc-200">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100/80 sticky top-0 z-10 border-b border-zinc-200">
+                  <span className="truncate text-[11px] font-semibold text-zinc-800">{g.subPath}</span>
+                  {g.isPrimary && (
+                    <span className="shrink-0 px-1 py-px rounded bg-blue-50 border border-blue-200 text-[9px] font-medium text-blue-600">
+                      {t('workspace:label.primary_repo_badge', { defaultValue: 'primary' })}
+                    </span>
+                  )}
+                  <span className="ml-auto shrink-0 text-[10px] text-zinc-400">{g.mrs.length}</span>
+                </div>
+                {g.mrs.length > 0 ? (
+                  <ul className="divide-y divide-zinc-100">{g.mrs.map(renderMrRow)}</ul>
+                ) : (
+                  <div className="px-3 py-3 text-[11px] text-zinc-400">
+                    {t('git:empty.no_prs', { defaultValue: 'No pull requests' })}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         ) : (
           <ul className="divide-y divide-zinc-100">
-            {pagedMRs.map((mr) => {
-              const meta = STATUS_META[mr.status] || STATUS_META.closed;
-              const number = mr.remote_mr_number || mr.remoteMrNumber || mr.github_pr_number;
-              const src = mr.source_branch || mr.sourceBranch;
-              const tgt = mr.target_branch || mr.targetBranch;
-              const remoteUrl = mr.remoteMrUrl || mr.remote_mr_url || mr.remote_url || mr.remoteUrl;
-              return (
-                <li
-                  key={mr.id}
-                  className="group relative flex items-start gap-3 px-3 py-2.5 transition-colors hover:bg-zinc-100/60 focus-within:bg-zinc-100/60"
-                >
-                  <button
-                    type="button"
-                    onClick={() => onSelectMR?.({ ...mr, permissions })}
-                    className={`absolute inset-0 z-0 ${consoleButtonFocusClass}`}
-                    aria-label={t('git:open_pr', { defaultValue: 'Open pull request', number: number != null ? ` #${number}` : '', title: mr.title ? `: ${mr.title}` : '' })}
-                  />
-                  <span className={`relative z-10 mt-1.5 h-2 w-2 shrink-0 rounded-full ${meta.dot}`} />
-                  <div className="relative z-10 min-w-0 flex-1 pointer-events-none">
-                    <div className="flex items-start gap-2 min-w-0">
-                      {number != null && (
-                        <span className="font-mono text-xs text-zinc-400 shrink-0 mt-0.5">#{number}</span>
-                      )}
-                      <span className="break-words text-sm font-medium leading-snug text-zinc-900">
-                        {mr.title || t('git:untitled', { defaultValue: 'Untitled' })}
-                      </span>
-                    </div>
-                    <div className="mt-1 flex items-start gap-1.5 min-w-0 text-[11px] text-zinc-500">
-                      {src && (
-                        <span className="font-mono break-all" title={src}>{src}</span>
-                      )}
-                      {src && tgt && (
-                        <span className="text-zinc-300 shrink-0">{'→'}</span>
-                      )}
-                      {tgt && (
-                        <span className="font-mono break-all" title={tgt}>{tgt}</span>
-                      )}
-                      {(src || tgt) && (
-                        <span className="text-zinc-300 shrink-0">·</span>
-                      )}
-                      <span className="shrink-0 text-zinc-400">
-                        {formatRelative(mr.created_at || mr.createdAt, t)}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="relative z-10 ml-auto flex items-center gap-1 shrink-0 pointer-events-none">
-                    <span className={`pointer-events-none inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${meta.pill}`}>
-                      {mr.status}
-                    </span>
-                    {remoteUrl && (
-                      <button
-                        type="button"
-                        onClick={() => openExternal(remoteUrl)}
-                        title={t('git:open_on_provider', { provider, defaultValue: `Open on ${provider}` })}
-                        aria-label={t('git:open_on_provider', { provider, defaultValue: `Open on ${provider}` })}
-                        className={`${consoleIconButtonClass} pointer-events-auto`}
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
+            {pagedMRs.map(renderMrRow)}
           </ul>
         )}
       </div>
 
-      {totalPages > 1 && (
+      {!isMultiRepo && totalPages > 1 && (
         <div className="flex items-center justify-between gap-2 border-t border-zinc-200 px-3 py-1.5 shrink-0 bg-surface">
           <span className="text-[11px] text-zinc-500 tabular-nums">
             {currentPage * PAGE_SIZE - PAGE_SIZE + 1}-{Math.min(currentPage * PAGE_SIZE, totalItems)} of {totalItems}

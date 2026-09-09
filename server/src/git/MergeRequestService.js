@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { eq, and } = require('drizzle-orm');
+const { eq, and, isNull } = require('drizzle-orm');
 
 const { db } = require('../db/index');
 const schema = require('../db/schema');
@@ -13,6 +13,28 @@ class MergeRequestService {
     constructor(deps = {}) {
         this.gitConnectionService = deps.gitConnectionService ?? new GitConnectionService();
         this.gitOperationService = deps.gitOperationService ?? new GitOperationService();
+        // 多仓库：目标 project_repo 行（{ id, subPath, remoteFullName }）；单仓库/未指定 = null（用 project 主仓库字段）
+        this.repo = deps.repo || null;
+    }
+
+    /** 当前操作目标仓库的 remoteFullName（多仓库取 repo 行，否则回退 project 主仓库字段）。 */
+    _repoFullName(project) {
+        return this.repo?.remoteFullName || project.remoteFullName || project.githubFullName;
+    }
+
+    /** 构造按 repo 过滤的 merge_requests 查询条件（单仓库用 repoId IS NULL，兼容存量数据）。 */
+    _repoCond(projectId, providerName, num = null) {
+        const conds = [
+            eq(schema.mergeRequests.projectId, projectId),
+            eq(schema.mergeRequests.provider, providerName),
+        ];
+        if (num != null) conds.push(eq(schema.mergeRequests.remoteMrNumber, num));
+        if (this.repo?.id) {
+            conds.push(eq(schema.mergeRequests.repoId, this.repo.id));
+        } else {
+            conds.push(isNull(schema.mergeRequests.repoId));
+        }
+        return and(...conds);
     }
 
     _generateId() {
@@ -25,7 +47,7 @@ class MergeRequestService {
     async getCurrentUserPermissions(project, currentUserId) {
         const providerName = project.repoProvider || 'github';
         if (!providerName || providerName === 'none' || providerName === 'local_git') return null;
-        const repoFullName = project.remoteFullName || project.githubFullName;
+        const repoFullName = this._repoFullName(project);
         if (!repoFullName) return null;
         const denied = { can_merge: false, can_approve: false, can_close: false, can_reopen: false, can_comment: true, can_edit: false };
         const token = await this.gitConnectionService.getDecryptedToken(currentUserId, providerName);
@@ -70,12 +92,9 @@ class MergeRequestService {
 
     async _findLocalOpen(projectId, providerName, src, tgt) {
         const rows = await db.select().from(schema.mergeRequests)
-            .where(and(
-                eq(schema.mergeRequests.projectId, projectId),
-                eq(schema.mergeRequests.provider, providerName),
-                eq(schema.mergeRequests.status, 'open'),
-            ));
-        return rows.find((row) => this._sameBranch(row.sourceBranch, src) && this._sameBranch(row.targetBranch, tgt)) || null;
+            .where(this._repoCond(projectId, providerName));
+        return rows.find((row) => row.status === 'open'
+            && this._sameBranch(row.sourceBranch, src) && this._sameBranch(row.targetBranch, tgt)) || null;
     }
 
     async _findLocalOpenSynced(project, providerName, src, tgt) {
@@ -84,7 +103,7 @@ class MergeRequestService {
 
         const provider = getProvider(providerName);
         const config = await getProviderConfig(providerName);
-        const repoFullName = project.remoteFullName || project.githubFullName;
+        const repoFullName = this._repoFullName(project);
         const token = await this.gitConnectionService.getDecryptedToken(project.userId, providerName);
         try {
             const prInfo = await provider.getPR(token, repoFullName, localOpen.remoteMrNumber, {
@@ -119,11 +138,7 @@ class MergeRequestService {
     async _upsertFromRemote(project, providerName, prInfo, { title, body, src, tgt, actorUserId }) {
         const now = Date.now();
         const existingByNumber = await db.select().from(schema.mergeRequests)
-            .where(and(
-                eq(schema.mergeRequests.projectId, project.id),
-                eq(schema.mergeRequests.provider, providerName),
-                eq(schema.mergeRequests.remoteMrNumber, prInfo.number),
-            ));
+            .where(this._repoCond(project.id, providerName, prInfo.number));
         if (existingByNumber[0]) {
             await db.update(schema.mergeRequests)
                 .set({
@@ -149,6 +164,7 @@ class MergeRequestService {
         const record = {
             id,
             projectId: project.id,
+            repoId: this.repo?.id ?? null,
             provider: providerName,
             remoteMrNumber: prInfo.number,
             remoteMrUrl: prInfo.url,
@@ -175,7 +191,7 @@ class MergeRequestService {
                 throw new Error('Project is not connected to an external Git provider');
             }
 
-            const repoFullName = project.remoteFullName || project.githubFullName;
+            const repoFullName = this._repoFullName(project);
             if (!repoFullName) throw new Error('Project does not have a remote repository identifier');
 
             const token = await this.gitConnectionService.getDecryptedToken(project.userId, providerName);
@@ -259,7 +275,7 @@ class MergeRequestService {
 
     async sync(project, mrId) {
         const providerName = project.repoProvider;
-        const repoFullName = project.remoteFullName || project.githubFullName;
+        const repoFullName = this._repoFullName(project);
         if (!repoFullName) throw new Error('Project does not have a remote repository identifier');
 
         const token = await this.gitConnectionService.getDecryptedToken(project.userId, providerName);
@@ -296,9 +312,10 @@ class MergeRequestService {
         return rows[0];
     }
 
-    async list(projectId) {
-        return db.select().from(schema.mergeRequests)
-            .where(eq(schema.mergeRequests.projectId, projectId));
+    async list(projectId, { repoId } = {}) {
+        const conds = [eq(schema.mergeRequests.projectId, projectId)];
+        if (repoId) conds.push(eq(schema.mergeRequests.repoId, repoId));
+        return db.select().from(schema.mergeRequests).where(and(...conds));
     }
 
     async syncAll(project) {
@@ -306,7 +323,7 @@ class MergeRequestService {
         if (!providerName || providerName === 'none' || providerName === 'local_git') {
             return { synced: 0 };
         }
-        const repoFullName = project.remoteFullName || project.githubFullName;
+        const repoFullName = this._repoFullName(project);
         if (!repoFullName) return { synced: 0 };
 
         const ctx = await this._resolveProvider(project, null);
@@ -344,7 +361,7 @@ class MergeRequestService {
     async _resolveProvider(project, mr) {
         const providerName = project.repoProvider || mr?.provider;
         if (!providerName || providerName === 'none' || providerName === 'local_git') return null;
-        const repoFullName = project.remoteFullName || project.githubFullName;
+        const repoFullName = this._repoFullName(project);
         if (!repoFullName) return null;
         const token = await this.gitConnectionService.getDecryptedToken(project.userId, providerName);
         const provider = getProvider(providerName);

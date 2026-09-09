@@ -451,6 +451,7 @@ const gitOAuthStates = pgTable('git_oauth_states', {
 const mergeRequests = pgTable('merge_requests', {
   id: text('id').primaryKey(),
   projectId: text('project_id').notNull().references(() => projects.id),
+  repoId: text('repo_id'), // 多仓库：所属 project_repos 行；单仓库/存量 = NULL
   provider: text('provider').notNull(),
   remoteMrNumber: integer('remote_mr_number').notNull(),
   remoteMrUrl: text('remote_mr_url').notNull(),
@@ -466,7 +467,7 @@ const mergeRequests = pgTable('merge_requests', {
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   lastSyncedAt: bigint('last_synced_at', { mode: 'number' }),
 }, (table) => ({
-  unqProjectProviderMr: unique().on(table.projectId, table.provider, table.remoteMrNumber),
+  unqProjectProviderMr: unique().on(table.projectId, table.provider, table.repoId, table.remoteMrNumber),
 }));
 
 const agentBoxImages = pgTable('agent_box_images', {

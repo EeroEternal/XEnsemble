@@ -247,11 +247,11 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
     }
   }, [projectId, showToast, fetchStatusFull]);
 
-  const switchBranch = useCallback(async (name) => {
+  const switchBranch = useCallback(async (name, repoId) => {
     if (!projectId || !name) return;
     setOperation('switch');
     try {
-      await githubApi.switchBranch(projectId, name);
+      await githubApi.switchBranch(projectId, name, repoId);
       showToast('success', t('git:toast.switched_branch', { name, defaultValue: 'Switched to {{name}}.' }));
       fetchStatusFull({ silent: true });
     } catch (err) {
@@ -262,11 +262,11 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
     }
   }, [projectId, showToast, fetchStatusFull]);
 
-  const createBranch = useCallback(async (name) => {
+  const createBranch = useCallback(async (name, repoId) => {
     if (!projectId || !name) return;
     setOperation('switch');
     try {
-      await githubApi.createBranch(projectId, name);
+      await githubApi.createBranch(projectId, name, undefined, repoId);
       showToast('success', t('git:toast.created_and_switched', { name, defaultValue: 'Created and switched to {{name}}.' }));
       fetchStatusFull({ silent: true });
     } catch (err) {

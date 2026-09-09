@@ -1,8 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { GitBranch, Loader2, Check, Plus } from 'lucide-react';
 import * as githubApi from '../../lib/githubApi';
+import { useProjectRepos } from '../../hooks/useProjectRepos';
+import SelectMenu from '../SelectMenu';
 import {
   consoleButtonFocusClass,
   consoleDropdownPanelClass,
@@ -23,6 +25,11 @@ export default function BranchSwitcher({ projectId, project, git }) {
   const operation = git?.operation;
   const switchBranch = git?.switchBranch;
   const createBranch = git?.createBranch;
+  const { repos } = useProjectRepos(projectId);
+  // 多仓库：支持按仓库切分支；单仓库保持原逻辑
+  const multiRepos = repos.length > 1 ? repos : [];
+  const [selectedRepoId, setSelectedRepoId] = useState(null);
+  const activeRepo = multiRepos.find((r) => r.id === selectedRepoId) || multiRepos.find((r) => r.isPrimary) || null;
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuRect, setMenuRect] = useState(null);
@@ -33,16 +40,11 @@ export default function BranchSwitcher({ projectId, project, git }) {
   const btnRef = useRef(null);
   const newInputRef = useRef(null);
 
-  const openMenu = async () => {
-    if (btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      setMenuRect({ top: rect.bottom + 4, left: rect.left, width: 220 });
-    }
-    setMenuOpen(true);
+  const loadBranches = useCallback(async (repoId) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await githubApi.listBranches(projectId);
+      const data = await githubApi.listBranches(projectId, repoId);
       setBranches(data.branches || []);
     } catch (err) {
       setBranches([]);
@@ -50,12 +52,28 @@ export default function BranchSwitcher({ projectId, project, git }) {
     } finally {
       setLoading(false);
     }
+  }, [projectId, t]);
+
+  const openMenu = async () => {
+    if (btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setMenuRect({ top: rect.bottom + 4, left: rect.left, width: 220 });
+    }
+    setMenuOpen(true);
+    // 多仓库默认选中 primary；切换仓库时重载该仓库分支
+    const repoId = activeRepo?.id;
+    await loadBranches(repoId);
+  };
+
+  const handleRepoChange = async (id) => {
+    setSelectedRepoId(id);
+    await loadBranches(id);
   };
 
   const handleSwitch = async (name) => {
     setMenuOpen(false);
     if (name === (branch || project?.currentBranch)) return;
-    await switchBranch?.(name);
+    await switchBranch?.(name, activeRepo?.id);
   };
 
   const handleCreate = async () => {
@@ -63,7 +81,7 @@ export default function BranchSwitcher({ projectId, project, git }) {
     if (!name) return;
     setNewName('');
     setMenuOpen(false);
-    await createBranch?.(name);
+    await createBranch?.(name, activeRepo?.id);
   };
 
   useEffect(() => {
@@ -98,23 +116,38 @@ export default function BranchSwitcher({ projectId, project, git }) {
           onClick={openMenu}
           disabled={operation === 'switch'}
           title={t('git:switch_branch', { defaultValue: 'Switch branch' })}
-          className={`flex items-center gap-1 max-w-[14rem] truncate rounded-md px-2 py-1 text-[13px] font-medium ${transitionBase} ${consoleButtonFocusClass} ${
+          className={`flex items-center gap-1 max-w-[16rem] truncate rounded-md px-2 py-1 text-[13px] font-medium ${transitionBase} ${consoleButtonFocusClass} ${
             menuOpen ? `${bgSecondary} ${textPrimary}` : `text-zinc-700 ${hoverBgTertiary}`
           } disabled:opacity-50`}
         >
           {operation === 'switch' ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : null}
-          <span className="truncate">{current}</span>
+          <span className="truncate">
+            {activeRepo ? `${activeRepo.subPath}:${current}` : current}
+          </span>
         </button>
       </div>
 
       {menuOpen && menuRect && createPortal(
         <div
           id="branch-switcher-menu"
-          className={`fixed ${consoleMenuDropdownZClass} ${consoleDropdownPanelClass} py-1 max-h-72 overflow-auto`}
+          className={`fixed ${consoleMenuDropdownZClass} ${consoleDropdownPanelClass} py-1 max-h-80 overflow-auto`}
           style={{ top: menuRect.top, left: menuRect.left, width: menuRect.width }}
         >
+          {multiRepos.length > 0 && (
+            <div className="px-2 pb-1.5 border-b border-zinc-200 mb-1">
+              <span className="block text-[10px] uppercase tracking-wide text-zinc-400 mb-1">
+                {t('git:repository', { defaultValue: 'Repository' })}
+              </span>
+              <SelectMenu
+                value={activeRepo?.id}
+                onChange={handleRepoChange}
+                options={multiRepos.map((r) => ({ value: r.id, label: r.subPath }))}
+                placeholder={t('git:select_repository', { defaultValue: 'Select repository' })}
+              />
+            </div>
+          )}
           {loading ? (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />

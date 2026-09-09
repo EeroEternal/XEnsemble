@@ -12,6 +12,7 @@ import Button from '../Button';
 import SelectMenu from '../SelectMenu';
 import { useToast } from '../Toast';
 import * as githubApi from '../../lib/githubApi';
+import { useProjectRepos } from '../../hooks/useProjectRepos';
 import { consoleDialogMdClass } from '../../lib/consoleTokens';
 
 export default function CreatePRDialog({
@@ -24,6 +25,13 @@ export default function CreatePRDialog({
 }) {
   const { showToast } = useToast();
   const { t } = useTranslation();
+  const { repos } = useProjectRepos(projectId);
+  // 多仓库：提 PR 前先选仓库（默认 primary），各 API 都带 repo_id
+  const multiRepos = repos.length > 1 ? repos : [];
+  const [repoId, setRepoId] = useState(null);
+  const activeRepo = multiRepos.find((r) => r.id === repoId) || multiRepos.find((r) => r.isPrimary) || null;
+  // 目标仓库的当前分支（source branch 只对该仓库有效）
+  const [repoSourceBranch, setRepoSourceBranch] = useState('');
   const [branches, setBranches] = useState([]);
   const [branchesError, setBranchesError] = useState(null);
   const [targetBranch, setTargetBranch] = useState(defaultTargetBranch || 'main');
@@ -38,19 +46,25 @@ export default function CreatePRDialog({
   const [aiLoading, setAiLoading] = useState(false);
   const aiLoadedRef = useRef(false);
 
+  // 生效的 source branch：多仓库用所选仓库当前分支；单仓库用父级传入的分支
+  const effectiveSourceBranch = (activeRepo ? repoSourceBranch : sourceBranch) || sourceBranch || '';
+
   useEffect(() => {
     if (!open || !projectId) return;
     githubApi
-      .listBranches(projectId)
+      .listBranches(projectId, activeRepo?.id)
       .then(({ branches: rows }) => {
         setBranches(Array.isArray(rows) ? rows : []);
         setBranchesError(null);
+        const cur = (Array.isArray(rows) ? rows : []).find((b) => b.current)?.name || '';
+        setRepoSourceBranch(cur);
       })
       .catch((err) => {
         setBranches([]);
+        setRepoSourceBranch('');
         setBranchesError(err.message || t('git:error.load_branches_failed', { defaultValue: 'Failed to load branches' }));
       });
-  }, [open, projectId]);
+  }, [open, projectId, activeRepo?.id, t]);
 
   useEffect(() => {
     if (!open) {
@@ -62,14 +76,16 @@ export default function CreatePRDialog({
       setShowDiff(false);
       setTargetBranch(defaultTargetBranch || 'main');
       aiLoadedRef.current = false;
+      setRepoId(null);
+      setRepoSourceBranch('');
     }
   }, [open, defaultTargetBranch]);
 
   useEffect(() => {
-    if (!open || !projectId || !sourceBranch) return;
+    if (!open || !projectId || !effectiveSourceBranch) return;
     setDiffLoading(true);
     githubApi
-      .getGitDiff(projectId, { base: targetBranch, head: sourceBranch })
+      .getGitDiff(projectId, { base: targetBranch, head: effectiveSourceBranch, repoId: activeRepo?.id })
       .then((data) => {
         setDiff(data?.diff || '');
         setDiffBinary(Boolean(data?.binary));
@@ -81,16 +97,16 @@ export default function CreatePRDialog({
         setDiffTruncated(false);
       })
       .finally(() => setDiffLoading(false));
-  }, [open, projectId, sourceBranch, targetBranch]);
+  }, [open, projectId, effectiveSourceBranch, targetBranch, activeRepo?.id]);
 
   useEffect(() => {
-    if (!open || !projectId || !sourceBranch) return;
+    if (!open || !projectId || !effectiveSourceBranch) return;
     if (aiLoadedRef.current) return;
     if (diffLoading) return;
     if (!diff || diffBinary) return;
     setAiLoading(true);
     githubApi
-      .generatePRDescription(projectId, { sourceBranch, targetBranch })
+      .generatePRDescription(projectId, { sourceBranch: effectiveSourceBranch, targetBranch, repoId: activeRepo?.id })
       .then((data) => {
         if (data?.title) setTitle(data.title);
         if (data?.body) setBody(data.body);
@@ -98,7 +114,7 @@ export default function CreatePRDialog({
       .catch(() => {})
       .finally(() => setAiLoading(false));
     aiLoadedRef.current = true;
-  }, [open, projectId, sourceBranch, diffLoading, diff, diffBinary]);
+  }, [open, projectId, effectiveSourceBranch, diffLoading, diff, diffBinary, targetBranch, activeRepo?.id]);
 
   const branchOptions = useMemo(
     () => branches.map((b) => ({ value: b.name, label: b.name })),
@@ -106,14 +122,15 @@ export default function CreatePRDialog({
   );
 
   const handleCreate = async () => {
-    if (!projectId || !sourceBranch || !title.trim() || sourceBranch === targetBranch) return;
+    if (!projectId || !effectiveSourceBranch || !title.trim() || effectiveSourceBranch === targetBranch) return;
     setCreating(true);
     try {
       const pr = await githubApi.createPullRequest(projectId, {
         title: title.trim(),
         body: body.trim(),
-        source_branch: sourceBranch,
+        source_branch: effectiveSourceBranch,
         target_branch: targetBranch,
+        repo_id: activeRepo?.id,
       });
       showToast('success', t('git:toast.pr_created'));
       if (pr?.remoteMrUrl || pr?.remote_mr_url || pr?.github_pr_url || pr?.githubPrUrl) {
@@ -142,15 +159,28 @@ export default function CreatePRDialog({
     <ConsoleDialogShell onClose={onClose} panelClassName={`${consoleDialogMdClass} max-h-[calc(100vh-2rem)]`}>
       <ConsoleStructuredDialogHeader
         title={t('git:create_pull_request')}
-        subtitle={t('git:pr.from_source', { branch: sourceBranch || t('git:pr.current_branch', { defaultValue: 'current branch' }) })}
+        subtitle={t('git:pr.from_source', { branch: effectiveSourceBranch || t('git:pr.current_branch', { defaultValue: 'current branch' }) })}
       />
       <ConsoleStructuredDialogBody>
+        {multiRepos.length > 0 && (
+          <div className="mb-3">
+            <FormLabel htmlFor="pr-repo">{t('git:repository', { defaultValue: 'Repository' })}</FormLabel>
+            <SelectMenu
+              id="pr-repo"
+              value={activeRepo?.id}
+              onChange={setRepoId}
+              options={multiRepos.map((r) => ({ value: r.id, label: r.subPath }))}
+              placeholder={t('git:select_repository', { defaultValue: 'Select repository' })}
+              className="mt-1.5"
+            />
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <FormLabel htmlFor="pr-source">{t('git:source_branch')}</FormLabel>
             <Input
               id="pr-source"
-              value={sourceBranch || ''}
+              value={effectiveSourceBranch || ''}
               readOnly
               className="mt-1.5 bg-zinc-100"
             />
@@ -232,7 +262,7 @@ export default function CreatePRDialog({
           )}
         </div>
       </ConsoleStructuredDialogBody>
-      {sourceBranch === targetBranch && (
+      {effectiveSourceBranch === targetBranch && (
         <div className="px-5 py-1.5 text-[11px] text-amber-700 bg-amber-50 border-t border-amber-200">
           {t('git:pr.same_branch_error', { defaultValue: 'Source and target branches must be different.' })}
         </div>
@@ -244,7 +274,7 @@ export default function CreatePRDialog({
         <Button
           type="button"
           size="sm"
-          disabled={!title.trim() || !sourceBranch || sourceBranch === targetBranch || creating}
+          disabled={!title.trim() || !effectiveSourceBranch || effectiveSourceBranch === targetBranch || creating}
           onClick={handleCreate}
         >
           {creating ? (

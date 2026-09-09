@@ -176,6 +176,13 @@
       "when": 1788861000000,
       "tag": "0024_repo_clone_reap_job",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788928000000,
+      "tag": "0025_merge_requests_repo_id",
+      "breakpoints": true
     }
   ]
 }

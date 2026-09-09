@@ -181,6 +181,37 @@ async function probeDefaultBranch(repoUrl) {
     }
 }
 
+/**
+ * 多仓库：解析目标 project_repo 行（repo_id 指定，否则 primary；非 git_multi 返回 null）。
+ */
+async function resolveMrRepo(project, repoId) {
+    if (project.workspaceMode !== 'git_multi') return null;
+    try {
+        const rows = await db.select().from(schema.projectRepos)
+            .where(eq(schema.projectRepos.projectId, project.id));
+        if (!rows || rows.length === 0) return null;
+        return (repoId && rows.find((r) => r.id === repoId)) || rows.find((r) => r.isPrimary) || rows[0] || null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * 构建按仓库作用域的 MergeRequestService（多仓库路由到对应 worktree / 远程仓库）。
+ */
+async function buildMrService(request, project, repoId) {
+    const repo = await resolveMrRepo(project, repoId);
+    const runtimeId = await resolveRuntimeId(request.user.id, request.query?.session_id || request.body?.session_id);
+    const gitOperationService = new GitOperationService({ runtimeId, repoSubPath: repo?.subPath || null });
+    return { mrService: new MergeRequestService({ gitOperationService, repo }), repo };
+}
+
+/** 读取 merge_requests 行（含 repoId），用于按仓库路由后续操作。 */
+async function loadMrRow(mrId) {
+    const rows = await db.select().from(schema.mergeRequests).where(eq(schema.mergeRequests.id, mrId));
+    return rows[0] || null;
+}
+
 function registerGitRoutes(fastify) {
     const connectionService = new GitConnectionService();
     const mergeRequestService = new MergeRequestService();
@@ -732,6 +763,22 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+        // 多仓库：逐个仓库同步远端 PR，返回全部 MR + 每仓库权限/元信息（前端按仓库分组展示，类似 Changes 模块）
+        if (project.workspaceMode === 'git_multi') {
+            const repoRows = await db.select().from(schema.projectRepos)
+                .where(eq(schema.projectRepos.projectId, project.id));
+            for (const r of repoRows) {
+                const { mrService } = await buildMrService(request, project, r.id);
+                await mrService.syncAll(project).catch(() => {});
+            }
+            const rows = await mergeRequestService.list(project.id);
+            const permissions = {};
+            for (const r of repoRows) {
+                permissions[r.id] = await new MergeRequestService({ repo: r }).getCurrentUserPermissions(project, request.user.id);
+            }
+            const repos = repoRows.map((r) => ({ id: r.id, subPath: r.subPath, role: r.role, isPrimary: Boolean(r.isPrimary) }));
+            return { merge_requests: rows, permissions, repos };
+        }
         try {
             await mergeRequestService.syncAll(project);
         } catch (_) {}
@@ -747,28 +794,9 @@ function registerGitRoutes(fastify) {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try {
-            // Resolve runtimeId from session_id so fetchAndRebase/push operate
-            // on the session's worktree, not the bare main repo.
-            const runtimeId = await resolveRuntimeId(
-                request.user.id,
-                request.body?.session_id || request.query?.session_id,
-            );
-            // 多仓库：布局标记为 git_multi 时默认路由 primary repo（repo_id 可显式指定）
-            let repoSubPath = null;
-            if (project.workspaceMode === 'git_multi') {
-                const repoRows = await db.select().from(schema.projectRepos)
-                    .where(eq(schema.projectRepos.projectId, project.id));
-                if (repoRows.length > 0) {
-                    const repoId = request.body?.repo_id || request.query?.repo_id || null;
-                    const target = (repoId && repoRows.find((r) => r.id === repoId))
-                        || repoRows.find((r) => r.isPrimary)
-                        || repoRows[0];
-                    repoSubPath = target.subPath;
-                }
-            }
-            const gitOperationService = new GitOperationService({ runtimeId, repoSubPath });
-            const mergeRequestService = new MergeRequestService({ gitOperationService });
-            const record = await mergeRequestService.create(
+            // 多仓库：repo_id 指定目标仓库（默认 primary）；单仓库用原逻辑
+            const { mrService } = await buildMrService(request, project, request.body?.repo_id || request.query?.repo_id);
+            const record = await mrService.create(
                 project, request.body || {}, request.user.id);
             return reply.code(201).send(record);
         } catch (err) {
@@ -795,12 +823,14 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
-        try { await mergeRequestService.sync(project, request.params.mrId); } catch (_) {}
-        const record = await mergeRequestService.get(request.params.mrId);
-        if (!record || record.projectId !== project.id) {
+        const mr = await loadMrRow(request.params.mrId);
+        if (!mr || mr.projectId !== project.id) {
             return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
         }
-        const permissions = await mergeRequestService.getCurrentUserPermissions(project, request.user.id);
+        const { mrService } = await buildMrService(request, project, mr.repoId);
+        try { await mrService.sync(project, request.params.mrId); } catch (_) {}
+        const record = await mrService.get(request.params.mrId);
+        const permissions = await mrService.getCurrentUserPermissions(project, request.user.id);
         return { ...record, permissions };
     });
 
@@ -809,11 +839,13 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+        const mr = await loadMrRow(request.params.mrId);
+        if (!mr || mr.projectId !== project.id) {
+            return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
+        }
         try {
-            const record = await mergeRequestService.sync(project, request.params.mrId);
-            if (!record || record.projectId !== project.id) {
-                return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
-            }
+            const { mrService } = await buildMrService(request, project, mr.repoId);
+            const record = await mrService.sync(project, request.params.mrId);
             return record;
         } catch (err) {
             request.log.error(err);
@@ -827,6 +859,17 @@ function registerGitRoutes(fastify) {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         try {
+            // 多仓库：逐个仓库同步远端 PR（与列表接口一致）
+            if (project.workspaceMode === 'git_multi') {
+                const repoRows = await db.select().from(schema.projectRepos)
+                    .where(eq(schema.projectRepos.projectId, project.id));
+                for (const r of repoRows) {
+                    const { mrService } = await buildMrService(request, project, r.id);
+                    await mrService.syncAll(project).catch(() => {});
+                }
+                const rows = await mergeRequestService.list(project.id);
+                return { synced: repoRows.length, merge_requests: rows };
+            }
             const result = await mergeRequestService.syncAll(project);
             const rows = await mergeRequestService.list(project.id);
             return { ...result, merge_requests: rows };
@@ -841,8 +884,13 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+        const mr = await loadMrRow(request.params.mrId);
+        if (!mr || mr.projectId !== project.id) {
+            return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
+        }
         try {
-            const result = await mergeRequestService.mergePR(project, request.params.mrId);
+            const { mrService } = await buildMrService(request, project, mr.repoId);
+            const result = await mrService.mergePR(project, request.params.mrId);
             return result;
         } catch (err) {
             request.log.error(err);
@@ -856,8 +904,13 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+        const mr = await loadMrRow(request.params.mrId);
+        if (!mr || mr.projectId !== project.id) {
+            return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
+        }
         try {
-            const result = await mergeRequestService.closePR(project, request.params.mrId);
+            const { mrService } = await buildMrService(request, project, mr.repoId);
+            const result = await mrService.closePR(project, request.params.mrId);
             return result;
         } catch (err) {
             request.log.error(err);
@@ -871,8 +924,13 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+        const mr = await loadMrRow(request.params.mrId);
+        if (!mr || mr.projectId !== project.id) {
+            return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
+        }
         try {
-            const result = await mergeRequestService.reopenPR(project, request.params.mrId);
+            const { mrService } = await buildMrService(request, project, mr.repoId);
+            const result = await mrService.reopenPR(project, request.params.mrId);
             return result;
         } catch (err) {
             request.log.error(err);
@@ -886,8 +944,13 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+        const mr = await loadMrRow(request.params.mrId);
+        if (!mr || mr.projectId !== project.id) {
+            return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
+        }
         try {
-            const result = await mergeRequestService.approvePR(project, request.params.mrId);
+            const { mrService } = await buildMrService(request, project, mr.repoId);
+            const result = await mrService.approvePR(project, request.params.mrId);
             return result;
         } catch (err) {
             request.log.error(err);
@@ -904,12 +967,17 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+        const mr = await loadMrRow(request.params.mrId);
+        if (!mr || mr.projectId !== project.id) {
+            return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
+        }
         const body = request.body?.body;
         if (!body || !String(body).trim()) {
             return reply.code(400).send({ error: t('errors:comment_body_required', { defaultValue: 'Comment body is required' }, request.locale || 'en'), code: 'comment_body_required' });
         }
         try {
-            const result = await mergeRequestService.addComment(project, request.params.mrId, String(body).trim());
+            const { mrService } = await buildMrService(request, project, mr.repoId);
+            const result = await mrService.addComment(project, request.params.mrId, String(body).trim());
             return reply.code(201).send(result);
         } catch (err) {
             request.log.error(err);
@@ -924,12 +992,17 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+        const mr = await loadMrRow(request.params.mrId);
+        if (!mr || mr.projectId !== project.id) {
+            return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
+        }
         const body = request.body?.body;
         if (!body || !String(body).trim()) {
             return reply.code(400).send({ error: t('errors:comment_body_required', { defaultValue: 'Comment body is required' }, request.locale || 'en'), code: 'comment_body_required' });
         }
         try {
-            const result = await mergeRequestService.replyToReviewComment(
+            const { mrService } = await buildMrService(request, project, mr.repoId);
+            const result = await mrService.replyToReviewComment(
                 project, request.params.mrId, request.params.commentId, String(body).trim(),
                 { discussionId: request.body?.discussionId },
             );
@@ -947,13 +1020,18 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+        const mr = await loadMrRow(request.params.mrId);
+        if (!mr || mr.projectId !== project.id) {
+            return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
+        }
         const body = request.body?.body;
         if (!body || !String(body).trim()) {
             return reply.code(400).send({ error: t('errors:comment_body_required', { defaultValue: 'Comment body is required' }, request.locale || 'en'), code: 'comment_body_required' });
         }
         const commentType = request.query?.type || 'issue';
         try {
-            const result = await mergeRequestService.editComment(
+            const { mrService } = await buildMrService(request, project, mr.repoId);
+            const result = await mrService.editComment(
                 project, request.params.mrId, request.params.commentId,
                 String(body).trim(), commentType,
             );
@@ -971,9 +1049,14 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+        const mr = await loadMrRow(request.params.mrId);
+        if (!mr || mr.projectId !== project.id) {
+            return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
+        }
         const commentType = request.query?.type || 'issue';
         try {
-            const result = await mergeRequestService.deleteComment(
+            const { mrService } = await buildMrService(request, project, mr.repoId);
+            const result = await mrService.deleteComment(
                 project, request.params.mrId, request.params.commentId, commentType,
             );
             return result;
@@ -991,8 +1074,13 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+        const mr = await loadMrRow(request.params.mrId);
+        if (!mr || mr.projectId !== project.id) {
+            return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
+        }
         try {
-            const reviews = await mergeRequestService.listReviews(project, request.params.mrId);
+            const { mrService } = await buildMrService(request, project, mr.repoId);
+            const reviews = await mrService.listReviews(project, request.params.mrId);
             return { reviews };
         } catch (err) {
             request.log.error(err);
@@ -1005,10 +1093,15 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+        const mr = await loadMrRow(request.params.mrId);
+        if (!mr || mr.projectId !== project.id) {
+            return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
+        }
         try {
             const page = request.query?.page ? Number(request.query.page) : 1;
             const perPage = request.query?.per_page ? Number(request.query.per_page) : 30;
-            const comments = await mergeRequestService.listReviewComments(project, request.params.mrId, { page, perPage });
+            const { mrService } = await buildMrService(request, project, mr.repoId);
+            const comments = await mrService.listReviewComments(project, request.params.mrId, { page, perPage });
             return { comments };
         } catch (err) {
             request.log.error(err);
@@ -1021,10 +1114,15 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+        const mr = await loadMrRow(request.params.mrId);
+        if (!mr || mr.projectId !== project.id) {
+            return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
+        }
         try {
             const page = request.query?.page ? Number(request.query.page) : 1;
             const perPage = request.query?.per_page ? Number(request.query.per_page) : 30;
-            const comments = await mergeRequestService.listIssueComments(project, request.params.mrId, { page, perPage });
+            const { mrService } = await buildMrService(request, project, mr.repoId);
+            const comments = await mrService.listIssueComments(project, request.params.mrId, { page, perPage });
             return { comments };
         } catch (err) {
             request.log.error(err);
@@ -1037,8 +1135,13 @@ function registerGitRoutes(fastify) {
     }, async (request, reply) => {
         const project = await getProjectForUser(request.user.id, request.params.id);
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+        const mr = await loadMrRow(request.params.mrId);
+        if (!mr || mr.projectId !== project.id) {
+            return reply.code(404).send({ error: t('errors:merge_request_not_found', { defaultValue: 'Merge request not found' }, request.locale || 'en'), code: 'merge_request_not_found' });
+        }
         try {
-            const files = await mergeRequestService.listMrFiles(project, request.params.mrId);
+            const { mrService } = await buildMrService(request, project, mr.repoId);
+            const files = await mrService.listMrFiles(project, request.params.mrId);
             return { files };
         } catch (err) {
             request.log.error(err);

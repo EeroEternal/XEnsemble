@@ -21,8 +21,10 @@ export function openExternal(url) {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
-export const getGitStatus = (projectId) =>
-  request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/status`);
+export const getGitStatus = (projectId, repoId) => {
+  const qs = repoId ? `?repo_id=${encodeURIComponent(repoId)}` : '';
+  return request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/status${qs}`);
+};
 
 export const getGitStatusLight = (projectId) =>
   request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/status?mode=light`);
@@ -85,10 +87,11 @@ export const fetchRemote = (projectId) =>
     method: 'POST',
   });
 
-export const getGitDiff = (projectId, { base, head } = {}) => {
+export const getGitDiff = (projectId, { base, head, repoId } = {}) => {
   const qs = new URLSearchParams();
   if (base) qs.set('base', base);
   if (head) qs.set('head', head);
+  if (repoId) qs.set('repo_id', repoId);
   const query = qs.toString();
   return request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/diff${query ? `?${query}` : ''}`);
 };
@@ -102,29 +105,38 @@ export const getGitFileDiffView = (projectId, filePath) =>
 export const getGitFileContent = (projectId, filePath, ref = 'HEAD') =>
   request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/file-content?path=${encodeURIComponent(filePath)}&ref=${encodeURIComponent(ref)}`);
 
-export const listBranches = (projectId) =>
-  request(`/api/v1/projects/${encodeURIComponent(projectId)}/branches`);
+export const listBranches = (projectId, repoId) => {
+  const qs = repoId ? `?repo_id=${encodeURIComponent(repoId)}` : '';
+  return request(`/api/v1/projects/${encodeURIComponent(projectId)}/branches${qs}`);
+};
 
-export const switchBranch = (projectId, name) =>
-  request(`/api/v1/projects/${encodeURIComponent(projectId)}/branches/switch`, {
+export const switchBranch = (projectId, name, repoId) => {
+  const body = { name };
+  if (repoId) body.repo_id = repoId;
+  return request(`/api/v1/projects/${encodeURIComponent(projectId)}/branches/switch`, {
     method: 'POST',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(body),
   });
+};
 
-export const createBranch = (projectId, name, baseBranch) => {
+export const createBranch = (projectId, name, baseBranch, repoId) => {
   const body = { name };
   if (baseBranch) body.base_branch = baseBranch;
+  if (repoId) body.repo_id = repoId;
   return request(`/api/v1/projects/${encodeURIComponent(projectId)}/branches`, {
     method: 'POST',
     body: JSON.stringify(body),
   });
 };
 
-export const generatePRDescription = (projectId, { sourceBranch, targetBranch } = {}) =>
-  request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/pr-description`, {
+export const generatePRDescription = (projectId, { sourceBranch, targetBranch, repoId } = {}) => {
+  const body = { source_branch: sourceBranch, target_branch: targetBranch };
+  if (repoId) body.repo_id = repoId;
+  return request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/pr-description`, {
     method: 'POST',
-    body: JSON.stringify({ source_branch: sourceBranch, target_branch: targetBranch }),
+    body: JSON.stringify(body),
   });
+};
 
 export const createPullRequest = (projectId, payload) =>
   request(withSessionId(`/api/v1/projects/${encodeURIComponent(projectId)}/merge-requests`), {
