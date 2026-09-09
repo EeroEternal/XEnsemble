@@ -63,6 +63,19 @@ function isDirEntry(f) {
   return f?.type === 'untracked-dir' || (typeof f?.path === 'string' && f.path.endsWith('/'));
 }
 
+/** 计算下拉菜单的 fixed 定位：优先向下展开，空间不足时向上。 */
+function computeMenuRect(el, menuWidth, menuEstHeight) {
+  const rect = el.getBoundingClientRect();
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const openAbove = spaceBelow < menuEstHeight + 8 && rect.top > menuEstHeight + 8;
+  return {
+    top: openAbove ? null : rect.bottom + 4,
+    bottom: openAbove ? window.innerHeight - rect.top + 4 : null,
+    left: Math.max(8, rect.right - menuWidth),
+    width: menuWidth,
+  };
+}
+
 /**
  * 把变更文件构建为目录树。多仓库场景传入 stripPrefix（如 `frontend`），
  * 该仓库的路径在树结构上剥掉仓库前缀（仅影响展示层级），
@@ -102,6 +115,9 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   const [createPROpen, setCreatePROpen] = useState(false);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [actionMenuRect, setActionMenuRect] = useState(null);
+  // 多仓库每仓库下拉菜单：{ repo, rect }，null = 未打开
+  const [repoMenu, setRepoMenu] = useState(null);
+  const repoMenuBtnRefs = useRef({});
   const [authorName, setAuthorName] = useState(() => localStorage.getItem('xe_git_author_name') || '');
   const [authorEmail, setAuthorEmail] = useState(() => localStorage.getItem('xe_git_author_email') || '');
   const [expandedFiles, setExpandedFiles] = useState(new Set());
@@ -143,31 +159,32 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   }, [showCommitDialog]);
 
   useEffect(() => {
-    if (!actionMenuOpen) {
-      setActionMenuRect(null);
+    if (!actionMenuOpen && !repoMenu) {
+      if (!actionMenuOpen) setActionMenuRect(null);
       return undefined;
     }
     const update = () => {
-      const el = actionMenuBtnRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const menuWidth = 180;
-      const menuEstHeight = 160;
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const openAbove = spaceBelow < menuEstHeight + 8 && rect.top > menuEstHeight + 8;
-      setActionMenuRect({
-        top: openAbove ? null : rect.bottom + 4,
-        bottom: openAbove ? window.innerHeight - rect.top + 4 : null,
-        left: Math.max(8, rect.right - menuWidth),
-        width: menuWidth,
-      });
+      if (actionMenuOpen) {
+        const el = actionMenuBtnRef.current;
+        if (!el) return;
+        setActionMenuRect(computeMenuRect(el, 180, 160));
+      }
+      if (repoMenu) {
+        const el = repoMenuBtnRefs.current[repoMenu.repo.id];
+        if (!el) return;
+        setRepoMenu((prev) => (prev ? { ...prev, rect: computeMenuRect(el, 200, 200) } : prev));
+      }
     };
     update();
     const onDoc = (e) => {
       if (actionMenuBtnRef.current?.contains(e.target)) return;
       const menu = document.getElementById('changes-action-menu');
       if (menu?.contains(e.target)) return;
+      if (Object.values(repoMenuBtnRefs.current).some((el) => el?.contains(e.target))) return;
+      const repoMenuEl = document.getElementById('changes-repo-menu');
+      if (repoMenuEl?.contains(e.target)) return;
       setActionMenuOpen(false);
+      setRepoMenu(null);
     };
     window.addEventListener('resize', update);
     document.addEventListener('mousedown', onDoc);
@@ -175,7 +192,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       window.removeEventListener('resize', update);
       document.removeEventListener('mousedown', onDoc);
     };
-  }, [actionMenuOpen]);
+  }, [actionMenuOpen, repoMenu]);
 
   const gitStagedFiles = gitChanges?.stagedFiles || [];
   const gitUnstagedFiles = gitChanges?.unstagedFiles || [];
@@ -531,6 +548,29 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     setCommitTarget(null);
   }, []);
 
+  // 多仓库每仓库下拉菜单：打开/关闭（点击同一仓库按钮再次关闭）
+  const toggleRepoMenu = useCallback((repo) => {
+    setRepoMenu((prev) => {
+      if (prev && prev.repo.id === repo.id) return null;
+      const el = repoMenuBtnRefs.current[repo.id];
+      if (!el) return { repo, rect: null };
+      return { repo, rect: computeMenuRect(el, 200, 200) };
+    });
+  }, []);
+
+  // 丢弃某个仓库的全部变更（与全局 discard all 同一后端接口，只传该仓库的 paths）
+  const requestDiscardRepoAll = useCallback((repo) => {
+    const paths = (repo.files || []).map((f) => f.path).filter(Boolean);
+    if (paths.length === 0) return;
+    setDiscardConfirm({
+      kind: 'all',
+      paths,
+      title: t('workspace:action.discard_all_dialog_title', { defaultValue: 'Discard All Changes' }),
+      message: t('workspace:action.discard_all_dialog_message', { count: paths.length, defaultValue: `Discard all ${paths.length} change(s)? This cannot be undone.` }),
+      confirmLabel: t('workspace:action.discard_all'),
+    });
+  }, [t]);
+
   const renderFileRow = (f, depth) => {
     // 折叠的 untracked 大目录（服务端下发 type=untracked-dir + count）：
     // 渲染为目录行 + 文件数徽标，无 diff/展开/丢弃操作
@@ -661,6 +701,8 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
           )}
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
+          {/* 多仓库：每个仓库都有自己的按钮组，顶部全局按钮组隐藏（避免重复） */}
+          {repoGroups.length === 0 && (
           <div className="flex items-stretch shrink-0 rounded-md border border-zinc-200 overflow-hidden">
             {gitHasChanges ? (
               <button
@@ -721,6 +763,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               <ChevronDown className="h-3.5 w-3.5" />
             </button>
           </div>
+          )}
           {gitHasChanges && (
             <button
               title={allExpanded ? t('workspace:action.collapse_all') : t('workspace:action.expand_all')}
@@ -864,6 +907,19 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                                 {t('git:pull')}{repo.behind > 0 ? ` (${repo.behind})` : ''}
                               </button>
                             )}
+                            {/* 更多操作下拉（Pull / Push / Commit / Create PR / Discard all），作用于该仓库 */}
+                            <button
+                              ref={(el) => { repoMenuBtnRefs.current[repo.id] = el; }}
+                              type="button"
+                              onClick={() => toggleRepoMenu(repo)}
+                              title={t('workspace:action.more_git_actions')}
+                              aria-label={t('workspace:action.more_git_actions')}
+                              aria-haspopup="menu"
+                              aria-expanded={repoMenu?.repo.id === repo.id}
+                              className={`flex items-center px-1.5 text-zinc-500 hover:bg-zinc-100 border-l border-zinc-200 ${consoleButtonFocusClass} ${repoMenu?.repo.id === repo.id ? 'bg-zinc-100 text-zinc-900' : ''}`}
+                            >
+                              <ChevronDown className="h-3.5 w-3.5" />
+                            </button>
                           </div>
                         </div>
                         {!collapsed && (
@@ -955,6 +1011,80 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
               {t('workspace:action.discard_all')}
             </button>
           )}
+        </div>,
+        document.body,
+      )}
+
+      {repoMenu?.rect && createPortal(
+        <div
+          id="changes-repo-menu"
+          className={`fixed ${consoleMenuDropdownZClass} ${consoleDropdownPanelClass} py-1 shadow-lg`}
+          style={{ top: repoMenu.rect.top, bottom: repoMenu.rect.bottom, left: repoMenu.rect.left, width: repoMenu.rect.width }}
+          role="menu"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            disabled={pullingRepo === repoMenu.repo.id}
+            onClick={() => { pullRepo(repoMenu.repo); setRepoMenu(null); }}
+            className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
+          >
+            {pullingRepo === repoMenu.repo.id ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
+            {t('git:pull')}{repoMenu.repo.behind > 0 ? ` (${repoMenu.repo.behind})` : ''}
+          </button>
+          {!isLocalGit && (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={pushingRepo === repoMenu.repo.id}
+              onClick={() => { pushRepo(repoMenu.repo); setRepoMenu(null); }}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
+            >
+              {pushingRepo === repoMenu.repo.id ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Upload className="h-3.5 w-3.5" />
+              )}
+              {t('git:push')}{repoMenu.repo.ahead > 0 ? ` (${repoMenu.repo.ahead})` : ''}
+            </button>
+          )}
+          <button
+            type="button"
+            role="menuitem"
+            disabled={repoMenu.repo.count === 0 || committing}
+            onClick={() => { openCommitForRepo(repoMenu.repo); setRepoMenu(null); }}
+            className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
+          >
+            <GitCommit className="h-3.5 w-3.5" />
+            {t('git:commit')}
+          </button>
+          {!isLocalGit && (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!repoMenu.repo.branch}
+              onClick={() => { setActionMenuOpen(false); setRepoMenu(null); setCreatePROpen(true); }}
+              title={t('workspace:action.create_pr_hint')}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
+            >
+              <GitPullRequest className="h-3.5 w-3.5" />
+              {t('git:create_pr')}
+            </button>
+          )}
+          <button
+            type="button"
+            role="menuitem"
+            disabled={repoMenu.repo.count === 0 || discarding}
+            onClick={() => { requestDiscardRepoAll(repoMenu.repo); setRepoMenu(null); }}
+            className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-red-600 hover:bg-red-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
+          >
+            {discarding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+            {t('workspace:action.discard_all')}
+          </button>
         </div>,
         document.body,
       )}

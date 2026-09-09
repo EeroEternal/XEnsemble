@@ -50,7 +50,13 @@ class MergeRequestService {
         const repoFullName = this._repoFullName(project);
         if (!repoFullName) return null;
         const denied = { can_merge: false, can_approve: false, can_close: false, can_reopen: false, can_comment: true, can_edit: false };
-        const token = await this.gitConnectionService.getDecryptedToken(currentUserId, providerName);
+        let token;
+        try {
+            token = await this.gitConnectionService.getDecryptedToken(currentUserId, providerName);
+        } catch {
+            // 未连接/未知 provider（如 URL 导入的仓库）：查询接口不应因此 500，按无权限处理
+            return denied;
+        }
         if (!token) return denied;
         const provider = getProvider(providerName);
         if (!provider || typeof provider.getRepo !== 'function') return denied;
@@ -363,7 +369,12 @@ class MergeRequestService {
         if (!providerName || providerName === 'none' || providerName === 'local_git') return null;
         const repoFullName = this._repoFullName(project);
         if (!repoFullName) return null;
-        const token = await this.gitConnectionService.getDecryptedToken(project.userId, providerName);
+        let token;
+        try {
+            token = await this.gitConnectionService.getDecryptedToken(project.userId, providerName);
+        } catch {
+            return null;
+        }
         const provider = getProvider(providerName);
         const config = await getProviderConfig(providerName);
         return { token, provider, repoFullName, apiBase: config?.apiBase };
