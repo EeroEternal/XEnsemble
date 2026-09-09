@@ -14,17 +14,9 @@ const LS_USER = 'user';
 // spec, sessionStorage is scoped to origin + top-level browsing context), but
 // the console never stores auth tokens in sessionStorage, so there is no
 // cross-contamination.
-// 预览上下文识别的第三个信号：路由引导 shim（沙箱 previewProxyServer 注入）剥掉
-// /preview/<id>/ 前缀后，pop-out 的地址栏不再命中上面的正则。shim 在剥前缀前写入
-// sessionStorage 标记（仅独立窗口，iframe 跳过以避免污染父控制台），据此维持
-// sessionStorage 隔离，防止嵌套部署间 token 经 localStorage 串扰。
-function hasPreviewSessionMarker() {
-  try { return !!window.sessionStorage.getItem('xe_preview_dep'); } catch { return false; }
-}
 const IS_PREVIEW_CONTEXT = typeof window !== 'undefined'
   && (window.self !== window.top
-      || /\/preview\/[^/]+/.test(window.location.pathname)
-      || hasPreviewSessionMarker());
+      || /\/preview\/[^/]+/.test(window.location.pathname));
 const store = IS_PREVIEW_CONTEXT ? sessionStorage : localStorage;
 
 export function getCurrentApiBase() {
