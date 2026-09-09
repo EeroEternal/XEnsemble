@@ -792,6 +792,7 @@ function buildSystemPrompt(plan, toolchain) {
                     'PLATFORM INSTALL ATTEMPTED, some steps FAILED:',
                     ...cmds.map((c) => `  - [${c.ok ? 'ok' : 'FAILED'}] (cwd=${c.cwd}) ${c.cmd}${c.ok ? '' : `\n    log tail:\n    ${(c.logTail || '').split('\n').join('\n    ')}`}`),
                     'Fix the FAILED installs yourself (use the log tails above to find the root cause). Do NOT redo the [ok] ones.',
+                    'CONVERGENCE RULE: once an install command you run returns exit=0 ("added N packages" / "up to date"), that dependency is INSTALLED — do NOT re-run install or rm -rf node_modules again. Proceed to build / migrate / serve immediately.',
                     '',
                 ].join('\n');
             }

@@ -912,20 +912,33 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
     const electronSubPaths = new Set(electronSubs.map((e) => e.path));
     const run = async (cmd, cwd, timeoutMs = 600000, useGhProxy = false) => {
         log(`platform install: ${cmd}${cwd ? ` (cwd=${cwd})` : ''}${useGhProxy ? ' [ghproxy fallback]' : ''}`);
-        try {
-            const r = await runtime.exec.exec('sh', ['-c',
-                `${PATH_PREFIX}${useGhProxy ? GH_PROXY_ENV : MIRROR_ENV}${cmd} > /tmp/_pi.log 2>&1; ec=$?; tail -15 /tmp/_pi.log; echo "__PI_EXIT__=\${ec}"`],
-                {}, { runtimeRef, cwd: cwd ? `${workspacePath}/${cwd}` : workspacePath, timeoutMs });
-            const out = String(r.stdout || '');
-            const m = out.match(/__PI_EXIT__=(-?\d+)/);
-            const ec = m ? parseInt(m[1], 10) : (Number.isInteger(r.exitCode) ? r.exitCode : 1);
-            const tail = out.replace(/__PI_EXIT__=-?\d+\s*/, '').trim().slice(-800);
-            cmds.push({ cmd, cwd: cwd || '.', ok: ec === 0, logTail: ec === 0 ? undefined : tail });
-            return ec === 0;
-        } catch (e) {
-            cmds.push({ cmd, cwd: cwd || '.', ok: false, logTail: String(e.message).slice(0, 800) });
-            return false;
+        const execOnce = async (prefix) => {
+            try {
+                const r = await runtime.exec.exec('sh', ['-c',
+                    `${PATH_PREFIX}${useGhProxy ? GH_PROXY_ENV : MIRROR_ENV}${prefix}${cmd} > /tmp/_pi.log 2>&1; ec=$?; tail -15 /tmp/_pi.log; echo "__PI_EXIT__=\${ec}"`],
+                    {}, { runtimeRef, cwd: cwd ? `${workspacePath}/${cwd}` : workspacePath, timeoutMs });
+                const out = String(r.stdout || '');
+                const m = out.match(/__PI_EXIT__=(-?\d+)/);
+                const ec = m ? parseInt(m[1], 10) : (Number.isInteger(r.exitCode) ? r.exitCode : 1);
+                return { ec, tail: out.replace(/__PI_EXIT__=-?\d+\s*/, '').trim().slice(-800) };
+            } catch (e) {
+                return { ec: -1, tail: String(e.message).slice(0, 800) };
+            }
+        };
+        let { ec, tail } = await execOnce('');
+        if (ec !== 0 && /EACCES|permission denied|not permitted/i.test(tail)) {
+            // node_modules 残留属主/只读问题（virtiofs idmap、旧部署 root 属主等）导致
+            // npm 无法写入深层子目录——xensemble 实测 server 子包 install 秒失败
+            // EACCES（path=.../node_modules/@esbuild-kit/...）。清掉该 node_modules 重试
+            // 一次（agent 的 rm -rf + 重装已验证可行），避免把 install 失败丢给 agent
+            // 触发后续重装空转。
+            const clean = cwd ? `${cwd}/` : '';
+            log(`platform install: ${cmd}${cwd ? ` (cwd=${cwd})` : ''} hit EACCES — clearing node_modules and retrying`);
+            ({ ec, tail } = await execOnce(`rm -rf '${clean}node_modules' 2>/dev/null || true; `));
         }
+        const ok = ec === 0;
+        cmds.push({ cmd, cwd: cwd || '.', ok, logTail: ok ? undefined : tail });
+        return ok;
     };
 
     // native 编译链预装：依赖里有 node-gyp 类原生包（node-pty/bcrypt/sharp 等）时，
@@ -2958,6 +2971,9 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
     let stageAMs = 0;
     let verifyStart = 0;
     let provisionMs = 0;
+    // 函数级声明：provision 裸块（L3051 起）内的 let 是块作用域，verify 失败分支（裸块外）
+    // 引用会 ReferenceError: dbProvision is not defined（xensemble 实测部署因此崩溃）。
+    let dbProvision = { ready: false, reason: 'not needed' };
 
     // A new deploy attempt supersedes any existing 'running' deployment for
     // this project. Mark them 'stopped' so a failed retry doesn't leave a
@@ -3166,8 +3182,8 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             }
         }
         // dbProvision 从上方并行 provision 的结果解析（PG 预配由 provisionPostgresIfNeeded
-        // 内部权威判定，这里只解析结果）。
-        let dbProvision = { ready: false, reason: 'not needed' };
+        // 内部权威判定，这里只解析结果）。变量已在函数顶部声明（裸块外），这里仅赋值。
+        dbProvision = { ready: false, reason: 'not needed' };
         if (pgResult.status === 'fulfilled') {
             dbProvision = pgResult.value;
         } else {
