@@ -380,7 +380,7 @@ function registerGitRoutes(fastify) {
         // 跳过顶层单仓库必填校验与 getRepo 解析（每项在下方循环各自解析）
         const isMultiRepoImport = Array.isArray(body.repos) && body.repos.length > 1;
 
-        const projectName = String(name || (parsedUrl ? parsedUrl.repoName : '') || (repo_full_name || '').split('/').pop() || 'project').trim();
+        let projectName = String(name || (parsedUrl ? parsedUrl.repoName : '') || (repo_full_name || '').split('/').pop() || 'project').trim();
         if (!projectName) return reply.code(400).send({ error: t('errors:name_required', { defaultValue: 'name is required' }, request.locale || 'en'), code: 'name_required' });
 
         if (!repo_url && !isMultiRepoImport) {
@@ -531,6 +531,13 @@ function registerGitRoutes(fastify) {
                     }
                 }
             }
+        }
+
+        // 多仓库默认名称：未显式命名时用所有仓库名以 "+" 连接
+        //（如 test-sub-project+test-sub-project2），不能只用第一个仓库名
+        if (resolvedRepos && !name) {
+            const joinedName = resolvedRepos.map((r) => r.name || r.subPath).filter(Boolean).join('+');
+            if (joinedName) projectName = joinedName;
         }
 
         // 多仓库：project 行取 primary repo 的信息（保持 projects 表兼容）

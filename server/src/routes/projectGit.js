@@ -65,6 +65,116 @@ async function getGitService(request) {
     return new GitOperationService({ runtimeId, repoSubPath });
 }
 
+// ─── 多仓库（git_multi）Changes 聚合 ───
+// 布局：projectDir/<subPath> 各自是独立 git 仓，/workspace 根不是仓库。
+// 单仓库路由只能看到 primary 的变动；这里为每个 repo 构建服务实例，
+// status 聚合展示（路径加 <subPath>/ 前缀），stage/unstage/discard/commit
+// 按路径前缀路由到所属 repo。
+
+/**
+ * git_multi 项目的全部 project_repos 行（非 git_multi / 异常 → []）。
+ */
+async function listGitMultiRepos(projectId) {
+    try {
+        const pRows = await db.select({ workspaceMode: schema.projects.workspaceMode })
+            .from(schema.projects)
+            .where(eq(schema.projects.id, projectId))
+            .limit(1);
+        if (pRows[0]?.workspaceMode !== 'git_multi') return [];
+        return await db.select().from(schema.projectRepos)
+            .where(eq(schema.projectRepos.projectId, projectId));
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * 为 git_multi 项目每个 repo 构建一个 GitOperationService。
+ * 返回 null 表示非 git_multi（调用方走原单仓库逻辑）。
+ */
+async function buildMultiRepoServices(request) {
+    const rows = await listGitMultiRepos(request.params?.id);
+    if (!rows || rows.length === 0) return null;
+    const runtimeId = await resolveRuntimeId(
+        request.user.id,
+        request.query?.session_id || request.body?.session_id,
+    );
+    const primary = rows.find((r) => r.isPrimary) || rows[0];
+    const services = rows.map((row) => ({
+        row,
+        svc: new GitOperationService({ runtimeId, repoSubPath: row.subPath }),
+    }));
+    return { rows, primary, services };
+}
+
+/** 最长前缀匹配：把 `<subPath>/...` 路由到所属 repo（返回其服务实例与仓库内相对路径）。 */
+function matchRepoForPath(multi, filePath) {
+    const sorted = [...multi.rows].sort((a, b) => b.subPath.length - a.subPath.length);
+    const hit = sorted.find((r) => filePath.startsWith(`${r.subPath}/`));
+    if (!hit) return null;
+    return {
+        row: hit,
+        svc: multi.services.find((s) => s.row.id === hit.id)?.svc,
+        relPath: filePath.slice(hit.subPath.length + 1),
+    };
+}
+
+/** 把文件路径按所属 repo 分组（丢弃无法归属的路径）。 */
+function groupPathsByRepo(multi, filePaths) {
+    const groups = new Map();
+    for (const p of filePaths) {
+        const hit = matchRepoForPath(multi, p);
+        if (!hit || !hit.svc) continue;
+        if (!groups.has(hit.row.id)) groups.set(hit.row.id, { svc: hit.svc, paths: [] });
+        groups.get(hit.row.id).paths.push(hit.relPath);
+    }
+    return [...groups.values()];
+}
+
+const prefixEntries = (list, prefix) => (list || []).map((e) => ({ ...e, path: `${prefix}/${e.path}` }));
+
+/**
+ * 聚合所有仓库的 status：文件路径加 `<subPath>/` 前缀；
+ * branch/sha/ahead/behind 取 primary（UI 呈现单一分支），dirty 等布尔取并集。
+ */
+async function aggregateGitStatus(project, multi, mode) {
+    const statuses = [];
+    for (const { row, svc } of multi.services) {
+        const s = await (mode === 'light'
+            ? svc.getStatusLight(project)
+            : svc.getStatus(project)).catch(() => null);
+        if (s) statuses.push({ row, s });
+    }
+    if (statuses.length === 0) {
+        throw new Error('git status failed for all repositories');
+    }
+    const head = statuses.find((x) => x.row.id === multi.primary.id) || statuses[0];
+    const merged = { ...head.s, multiRepo: true };
+    merged.files = [];
+    merged.stagedFiles = [];
+    merged.unstagedFiles = [];
+    merged.conflicts = [];
+    merged.dirty = false;
+    merged.staged = false;
+    merged.unstaged = false;
+    merged.untracked = false;
+    merged.merging = false;
+    merged.truncated = false;
+    for (const { row, s } of statuses) {
+        merged.files.push(...prefixEntries(s.files, row.subPath));
+        merged.stagedFiles.push(...prefixEntries(s.stagedFiles, row.subPath));
+        merged.unstagedFiles.push(...prefixEntries(s.unstagedFiles, row.subPath));
+        merged.conflicts.push(...prefixEntries(s.conflicts, row.subPath));
+        merged.dirty = Boolean(merged.dirty || s.dirty);
+        merged.staged = Boolean(merged.staged || s.staged);
+        merged.unstaged = Boolean(merged.unstaged || s.unstaged);
+        merged.untracked = Boolean(merged.untracked || s.untracked);
+        merged.merging = Boolean(merged.merging || s.merging);
+        merged.truncated = Boolean(merged.truncated || s.truncated);
+    }
+    return merged;
+}
+
 // Generate a commit message from the working-tree diff using the configured
 // DeepSeek-compatible LLM (same env as session titleService).
 async function generateCommitMessage(project, gitOperationService, { locale } = {}) {
@@ -276,11 +386,16 @@ function registerProjectGitRoutes(fastify) {
         try {
             const runtimeId = await resolveRuntimeId(request.user.id, request.query?.session_id);
             project = await ensureLocalGitReady(project, request.log, runtimeId);
+            const mode = request.query.mode === 'light' ? 'light' : 'full';
+            // 多仓库：聚合所有 repo 的 status（文件路径带 <subPath>/ 前缀）
+            const multi = await buildMultiRepoServices(request);
+            if (multi) {
+                return await aggregateGitStatus(project, multi, mode);
+            }
             const gitOperationService = new GitOperationService({
                 runtimeId,
                 repoSubPath: await resolveRepoSubPath(project.id, request),
             });
-            const mode = request.query.mode === 'light' ? 'light' : 'full';
             const status = mode === 'light'
                 ? await gitOperationService.getStatusLight(project)
                 : await gitOperationService.getStatus(project);
@@ -311,6 +426,19 @@ function registerProjectGitRoutes(fastify) {
         }
         try {
             const author = { name: authorName, email: authorEmail };
+            // 多仓库：对每个有暂存内容的 repo 分别提交（stage 已按前缀路由到各 repo）
+            const multi = await buildMultiRepoServices(request);
+            if (multi) {
+                let sha = null;
+                for (const { svc } of multi.services) {
+                    const s = await svc.getStatus(project).catch(() => null);
+                    if (!s || !(s.stagedFiles || []).length) continue;
+                    const r = await svc.commitStaged(project, message, author);
+                    if (!sha) sha = r.sha;
+                }
+                const status = await aggregateGitStatus(project, multi, 'full').catch(() => null);
+                return { sha, committed: Boolean(sha), status };
+            }
             const result = await gitOperationService.commitStaged(project, message, author);
             const status = await gitOperationService.getStatus(project).catch(() => null);
             return { ...result, status };
@@ -365,6 +493,14 @@ function registerProjectGitRoutes(fastify) {
             return reply.code(400).send({ error: t('errors:files_array_required', { defaultValue: 'files array is required' }, request.locale || 'en'), code: 'files_array_required' });
         }
         try {
+            // 多仓库：按路径前缀路由到所属 repo 分别 stage
+            const multi = await buildMultiRepoServices(request);
+            if (multi) {
+                for (const { svc, paths } of groupPathsByRepo(multi, files)) {
+                    await svc.stageFiles(project, paths);
+                }
+                return { ok: true };
+            }
             await gitOperationService.stageFiles(project, files);
             return { ok: true };
         } catch (err) {
@@ -384,6 +520,14 @@ function registerProjectGitRoutes(fastify) {
             return reply.code(400).send({ error: t('errors:files_array_required', { defaultValue: 'files array is required' }, request.locale || 'en'), code: 'files_array_required' });
         }
         try {
+            // 多仓库：按路径前缀路由到所属 repo 分别 unstage
+            const multi = await buildMultiRepoServices(request);
+            if (multi) {
+                for (const { svc, paths } of groupPathsByRepo(multi, files)) {
+                    await svc.unstageFiles(project, paths);
+                }
+                return { ok: true };
+            }
             await gitOperationService.unstageFiles(project, files);
             return { ok: true };
         } catch (err) {
@@ -403,6 +547,14 @@ function registerProjectGitRoutes(fastify) {
             return reply.code(400).send({ error: t('errors:files_array_required', { defaultValue: 'files array is required' }, request.locale || 'en'), code: 'files_array_required' });
         }
         try {
+            // 多仓库：按路径前缀路由到所属 repo 分别 discard
+            const multi = await buildMultiRepoServices(request);
+            if (multi) {
+                for (const { svc, paths } of groupPathsByRepo(multi, files)) {
+                    await svc.discardChanges(project, paths);
+                }
+                return { ok: true };
+            }
             await gitOperationService.discardChanges(project, files);
             return { ok: true };
         } catch (err) {
@@ -461,7 +613,18 @@ function registerProjectGitRoutes(fastify) {
         const filePath = request.query?.path;
         if (!filePath) return reply.code(400).send({ error: t('errors:path_required', { defaultValue: 'path is required' }, request.locale || 'en'), code: 'path_required' });
         try {
-            const result = await gitOperationService.getFileDiff(project, filePath);
+            // 多仓库：按路径前缀路由到所属 repo
+            let svc = gitOperationService;
+            let targetPath = filePath;
+            const multi = await buildMultiRepoServices(request);
+            if (multi) {
+                const hit = matchRepoForPath(multi, filePath);
+                if (hit?.svc) {
+                    svc = hit.svc;
+                    targetPath = hit.relPath;
+                }
+            }
+            const result = await svc.getFileDiff(project, targetPath);
             return {
                 diff: result.diff,
                 truncated: Boolean(result.truncated),
@@ -484,7 +647,18 @@ function registerProjectGitRoutes(fastify) {
         const ref = request.query?.ref || 'HEAD';
         if (!filePath) return reply.code(400).send({ error: t('errors:path_required', { defaultValue: 'path is required' }, request.locale || 'en'), code: 'path_required' });
         try {
-            const content = await gitOperationService.getFileContentAtRef(project, filePath, ref);
+            // 多仓库：按路径前缀路由到所属 repo
+            let svc = gitOperationService;
+            let targetPath = filePath;
+            const multi = await buildMultiRepoServices(request);
+            if (multi) {
+                const hit = matchRepoForPath(multi, filePath);
+                if (hit?.svc) {
+                    svc = hit.svc;
+                    targetPath = hit.relPath;
+                }
+            }
+            const content = await svc.getFileContentAtRef(project, targetPath, ref);
             return { content, ref };
         } catch (err) {
             request.log.error(err);
@@ -501,7 +675,18 @@ function registerProjectGitRoutes(fastify) {
         const filePath = request.query?.path;
         if (!filePath) return reply.code(400).send({ error: t('errors:path_required', { defaultValue: 'path is required' }, request.locale || 'en'), code: 'path_required' });
         try {
-            const view = await gitOperationService.getFileDiffView(project, filePath);
+            // 多仓库：按路径前缀路由到所属 repo
+            let svc = gitOperationService;
+            let targetPath = filePath;
+            const multi = await buildMultiRepoServices(request);
+            if (multi) {
+                const hit = matchRepoForPath(multi, filePath);
+                if (hit?.svc) {
+                    svc = hit.svc;
+                    targetPath = hit.relPath;
+                }
+            }
+            const view = await svc.getFileDiffView(project, targetPath);
             return {
                 original: view.original,
                 modified: view.modified,

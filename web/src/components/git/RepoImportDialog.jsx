@@ -249,7 +249,8 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
 
   useEffect(() => {
     if (selectedRepo) {
-      setName(selectedRepo.name || '');
+      // 多选时 name 由 handleToggle 以 "repoA+repoB" 连接填充，这里只锚定单选
+      if (selectedIds.length <= 1) setName(selectedRepo.name || '');
       setBranch(selectedRepo.default_branch || 'main');
     }
   }, [selectedRepo]);
@@ -298,6 +299,18 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
     // 锚定第一个勾选仓库，驱动 name/branch 默认值
     const first = next.length > 0 ? reposWithIds.find((r) => r.id === next[0]) : null;
     setSelectedFullName(first ? first.full_name : '');
+    // 多仓库：默认名称 = 所选仓库名以 "+" 连接（保持仓库列表顺序）；
+    // 单选恢复为该仓库名
+    if (next.length > 1) {
+      const joined = reposWithIds
+        .filter((r) => next.includes(r.id))
+        .map((r) => r.name)
+        .filter(Boolean)
+        .join('+');
+      if (joined) setName(joined);
+    } else if (next.length === 1 && first) {
+      setName(first.name || '');
+    }
   };
 
   const handleImport = async () => {

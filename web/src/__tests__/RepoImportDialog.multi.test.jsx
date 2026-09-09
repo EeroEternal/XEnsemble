@@ -94,5 +94,7 @@ describe('RepoImportDialog 多选勾选（同前缀锁定组）', () => {
     expect(payload.repos[0].repo_full_name).toBe('a/b/c');
     expect(payload.repos[0].sub_path).toBe('c');
     expect(payload.repos[1].repo_full_name).toBe('a/b/d');
+    // 多仓库名称 = 所选仓库名以 "+" 连接
+    expect(payload.name).toBe('c+d');
   });
 });
