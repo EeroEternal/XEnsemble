@@ -50,17 +50,46 @@ async function aptSafeInstall({ runtime, runtimeRef, workspacePath, packages, on
         await runtime.exec.exec('sh', ['-c', `${APT_CLEAR_LOCKS}`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => {});
         const t = Math.floor(timeoutMs / 1000);
         const updateT = Math.min(120, t); // update 独立短超时，避免镜像源卡住拖死 install
-        const cmd = `export DEBIAN_FRONTEND=noninteractive; (timeout ${updateT} apt-get update -qq ${APT_SAFE_FLAGS} 2>&1 | tail -8; timeout ${t} apt-get install -y -qq ${APT_SAFE_FLAGS} ${packages} 2>&1 | tail -20; ec=$?; echo "__APT_EXIT__=\${ec}")`;
+        // 与 install 同一条命令串行执行（同一沙箱内不与其它 apt 并发），避免并发
+        // clean/install 的锁竞争与误删已下载的 .deb。预检：根盘可用 < 400MB 时先回收
+        // 纯缓存（apt deb 缓存 / npm cache / /tmp）再装，降低 ENOSPC 概率；best-effort，
+        // 清理失败不阻断。安装完成后 apt-get clean 释放下载缓存，防止大包（postgresql
+        // 等）缓存累积占满根盘（沙箱默认根盘偏小，xensemble 实测 2G 根盘被占满后任何
+        // apt 安装都 ENOSPC）。
+        // 退出码必须取 apt-get 自身的（重定向到文件 + 单独捕获），不能用管道尾命令的
+        // 退出码——`apt-get ... | tail` 的 $? 是 tail 的（恒 0），会把 apt 失败（含
+        // timeout 124 被杀）掩盖成成功（xensemble 实测：PG 安装 ENOSPC 被误记 ok）。
+        const cmd = `export DEBIAN_FRONTEND=noninteractive; `
+            + `avail=$(df -k / | awk 'NR==2{print $4}'); `
+            + `if [ "$avail" -lt 409600 ]; then apt-get clean 2>/dev/null || true; rm -rf /root/.npm/_cacache 2>/dev/null || true; rm -rf /root/.cache 2>/dev/null || true; find /tmp -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true; fi; `
+            + `(timeout ${updateT} apt-get update -qq ${APT_SAFE_FLAGS} >/dev/null 2>&1 || true); `
+            + `timeout ${t} apt-get install -y -qq ${APT_SAFE_FLAGS} ${packages} > /tmp/_aptSafeInstall.log 2>&1; ec=$?; `
+            + `tail -20 /tmp/_aptSafeInstall.log; rm -f /tmp/_aptSafeInstall.log; `
+            + `apt-get clean 2>/dev/null || true; `
+            + `echo "__APT_EXIT__=${ec}"`;
         const r = await runtime.exec.exec('sh', ['-c', cmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: timeoutMs + 30000 });
         const out = String(r.stdout || '');
         const m = out.match(/__APT_EXIT__=(-?\d+)/);
-        const ok = m ? Number(m[1]) === 0 : false;
-        log(`apt install ${packages}: ${ok ? 'ok' : 'FAILED'} ${out.replace(/__APT_EXIT__=-?\d+/, '').trim().slice(-400)}`);
-        return { ok, logTail: out.slice(-600) };
+        const ec = m ? Number(m[1]) : null;
+        const ok = ec === 0;
+        log(`apt install ${packages}: ${ok ? 'ok' : `FAILED (exit=${ec})`} ${out.replace(/__APT_EXIT__=-?\d+/, '').trim().slice(-400)}`);
+        return { ok, exitCode: ec, logTail: out.slice(-600) };
     } catch (e) {
         log(`apt install ${packages} error (non-fatal): ${e.message?.slice(0, 200)}`);
-        return { ok: false, logTail: String(e.message || '').slice(0, 400) };
+        return { ok: false, exitCode: null, logTail: String(e.message || '').slice(0, 400) };
     }
+}
+
+// 安装失败归因：从 apt/dpkg 输出里识别可操作的失败类别（与具体依赖无关，通用）。
+// 供 provisionPostgresIfNeeded 失败时返回结构化 code/reason，并透传到部署记录与
+// verify prompt——让"系统依赖预配失败"以真实原因呈现，而不是笼统的"阶段 2 失败"。
+function classifyAptFailure(logTail) {
+    const t = String(logTail || '');
+    if (/No space left on device|ENOSPC/i.test(t)) return { code: 'ENOSPC', reason: '沙箱根盘空间不足（No space left on device）' };
+    if (/dpkg was interrupted/i.test(t)) return { code: 'dpkg_broken', reason: 'dpkg 状态损坏（dpkg was interrupted）' };
+    if (/Unable to fetch|Could not resolve|Connection timed out|Failed to connect|Temporary failure resolving/i.test(t)) return { code: 'network', reason: '镜像源网络失败' };
+    if (/dpkg-deb|Corrupt|Hash Sum mismatch|Method gave invalid/i.test(t)) return { code: 'dpkg_error', reason: '包解压/完整性错误' };
+    return { code: 'apt_error', reason: 'apt-get install 失败' };
 }
 
 // 在 stage A 之前 fetch sandbox projectDir 的 origin/main，让 stage A LLM 看到最新代码。
@@ -2130,6 +2159,9 @@ async function ensureDependencyExcludeInGuest(runtimeRef, workspacePath, onLog) 
 // 并尝试从配置解析出连接信息后直接建库建用户（幂等），使 verify agent 只需跑 migration。
 async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
     const runtime = getRuntime();
+    // 单次 apt 安装 postgres 的预算（首次冷装 40 包约需 3~5 分钟；太短会在超时边界被杀，
+    // 留下半装/锁残留——xensemble 实测 240s 恰好撞上边界）
+    const PG_APT_TIMEOUT_MS = 240000;
     let needs = false;
     try {
         // 检测面覆盖多语言后端：Node（package.json 里的 pg/pg-promise）、Go（pgx / postgres:// 连接串、
@@ -2154,11 +2186,16 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
                 runtime, runtimeRef, workspacePath,
                 packages: 'postgresql postgresql-contrib',
                 onLog: (m) => console.error(`[twoStage] ${m}`),
-                timeoutMs: 240000,
+                timeoutMs: PG_APT_TIMEOUT_MS,
             });
             if (!installRes.ok) {
-                console.error('[twoStage] postgres apt install failed (fallback to agent):', installRes.logTail);
-                return { ready: false };
+                // 结构化归因（通用，非 PG 专用）：超时（exit=124）与 ENOSPC/dpkg 损坏等
+                // 分别映射 code，供部署记录与 verify prompt 透传，避免 agent 盲目重试。
+                const cls = installRes.exitCode === 124
+                    ? { code: 'apt_timeout', reason: `apt 安装超时（>${Math.floor(PG_APT_TIMEOUT_MS / 1000)}s）被中止，可能留下半装/锁残留` }
+                    : classifyAptFailure(installRes.logTail);
+                console.error('[twoStage] postgres apt install failed:', installRes.logTail);
+                return { ready: false, code: cls.code, reason: cls.reason, detail: installRes.logTail.slice(0, 400) };
             }
         }
         await runtime.exec.exec('sh', ['-c', `(service postgresql start 2>/dev/null || pg_ctlcluster $(ls /etc/postgresql 2>/dev/null | head -1) main start 2>/dev/null) || true`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 30000 });
@@ -2172,13 +2209,21 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
             } catch { /* retry */ }
         }
         if (!pgReady) {
+            // 已装但起不来：可能是集群未创建（dpkg 中断/安装半程被杀）。带真实原因返回，
+            // 由上层透传；这里不再把半装环境甩给 verify agent 自行修复。
+            const clusterInfo = await runtime.exec.exec('sh', ['-c', 'pg_lsclusters 2>&1; ls /etc/postgresql 2>/dev/null'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 10000 }).catch(() => ({ stdout: '' }));
             console.error('[twoStage] postgres start failed: pg_isready not UP after 30s (fallback to agent)');
-            return { ready: false };
+            return {
+                ready: false,
+                code: 'service_not_up',
+                reason: 'postgres 已安装但启动失败（pg_isready 30s 未 UP）',
+                detail: String(clusterInfo.stdout || '').slice(0, 300),
+            };
         }
         console.error('[twoStage] postgres provisioned and ready (pg_isready UP)');
     } catch (e) {
         console.error('[twoStage] postgres start failed (fallback to agent):', e.message);
-        return { ready: false };
+        return { ready: false, code: 'provision_error', reason: String(e.message || '').slice(0, 200), detail: null };
     }
 
     // PG 已运行后，若能从配置解析出连接信息则直接建库建用户（幂等），免去 agent 试错。
@@ -2867,7 +2912,12 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
                 .set({
                     status: finalStatus,
                     updatedAt: Date.now(),
-                    // 超时中止落 last_error_*，前端据此区分"超时"与"用户中止"（均 status=stopped）
+                    // 失败/中止都落 last_error_*（前端据此展示真实原因；超时与用户中止均 status=stopped，
+                    // 用 code 区分）。错误信息取 result.error（已优先透传系统依赖预配归因）。
+                    ...(result && !result.ok && !result.aborted ? {
+                        lastErrorCode: String(result.code || 'verify_failed').slice(0, 80),
+                        lastErrorMessage: String(result.error || result.finalStderr || result.verify?.warning || '部署失败').slice(0, 500),
+                    } : {}),
                     ...(result?.code === 'deploy_timeout' ? {
                         lastErrorCode: 'deploy_timeout',
                         lastErrorMessage: String(result.error || '部署验证超时').slice(0, 500),
@@ -3122,9 +3172,9 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             dbProvision = pgResult.value;
         } else {
             console.error(`[twoStage] postgres provision failed: ${pgResult.reason}`);
-            dbProvision = { ready: false, reason: pgResult.reason?.message || String(pgResult.reason) };
+            dbProvision = { ready: false, code: 'provision_error', reason: pgResult.reason?.message || String(pgResult.reason), detail: null };
         }
-        console.error(`[twoStage] postgres provision: ready=${dbProvision.ready} reason=${dbProvision.reason}`);
+        console.error(`[twoStage] postgres provision: ready=${dbProvision.ready} code=${dbProvision.code || '-'} reason=${dbProvision.reason || '-'}`);
         // 平台侧确定性 install（在 agent 启动前把依赖装齐）：结果注入 verify prompt，
         // agent 不再重复 install——这是部署时长最大的单项优化（实测 install 占 60%+）。
         let platformInstall = { ran: false };
@@ -3168,7 +3218,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             await injectGatewayBinary(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
         }
         // 改动 2：plan.context 同时存 depsCached (boolean, 向后兼容) + depsStatus (per-subpackage)
-        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, runtimeVersions: runtimeVersions.ran ? runtimeVersions : null, stack: { type: detected?.type, framework: detected?.framework }, systemDeps: systemDeps.services, startCandidates, dbReady: dbProvision.ready, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, dbPassword: dbProvision.dbPassword || null, successRun: plan._successRun || null } };
+        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, runtimeVersions: runtimeVersions.ran ? runtimeVersions : null, stack: { type: detected?.type, framework: detected?.framework }, systemDeps: systemDeps.services, startCandidates, dbReady: dbProvision.ready, dbProvision: dbProvision.ready ? { ready: true } : { ready: false, code: dbProvision.code || null, reason: dbProvision.reason || null }, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, dbPassword: dbProvision.dbPassword || null, successRun: plan._successRun || null } };
         delete plan._successRun;
         // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）。
         // 缓存策略：只缓存真正从 LLM 出的 plan（source='opencode'/'ai'）。detectStack 兜底
@@ -3305,7 +3355,22 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         } catch (e) {
             console.error('[twoStage] mark plan cache failed error:', e.message);
         }
-        return { ok: false, stage: 'verify', plan, verify, error: verify.warning || '阶段 2 验证失败', finalStderr: verify.finalStderr, elapsedMs: Date.now() - startedAt };
+        // 失败优先透传"平台系统依赖预配失败"的真实归因（ENOSPC/dpkg_broken/service_not_up 等），
+        // 其次是 verify agent 的 warning——让部署记录/前端展示可操作的原因，而不是笼统文案。
+        const dbFailReason = (!dbProvision.ready && dbProvision.code)
+            ? `系统依赖 postgres 平台预配失败（${dbProvision.code}）：${dbProvision.reason || ''}`
+            : null;
+        const primaryError = dbFailReason || verify.warning || '阶段 2 验证失败';
+        return {
+            ok: false,
+            stage: 'verify',
+            plan,
+            verify,
+            code: dbFailReason ? `system_dep_provision_failed` : undefined,
+            error: primaryError,
+            finalStderr: dbFailReason ? `${dbFailReason}\n${verify.finalStderr || ''}` : verify.finalStderr,
+            elapsedMs: Date.now() - startedAt,
+        };
     }
 
     // 通过 → 清理可续状态

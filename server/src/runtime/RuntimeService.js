@@ -12,7 +12,10 @@ const workspace = require('../workspace');
 
 const PROVIDER = resolveRuntimeProvider();
 
-const DEFAULT_DISK_SIZE_GB = Number(process.env.XENSEMBLE_DEFAULT_DISK_SIZE_GB) || 2;
+// 根盘默认大小：与 BoxLiteRuntimeProvider 的 BOXLITE_DISK_SIZE_GB 默认（4G）对齐。
+// 2G 实测会被 Go 工具链/系统服务（postgres 等）/npm 缓存占满后 ENOSPC，导致依赖安装失败
+// （xensemble 案例）。仍可经 XENSEMBLE_DEFAULT_DISK_SIZE_GB 覆盖；仅对新建 runtime 生效。
+const DEFAULT_DISK_SIZE_GB = Number(process.env.XENSEMBLE_DEFAULT_DISK_SIZE_GB) || 4;
 
 function resolveVmResources(opts) {
     const resources = {};
