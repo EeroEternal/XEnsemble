@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight, ExternalLink, GitPullRequest, Loader2, Search } from 'lucide-react';
 import { openExternal } from '../../lib/githubApi';
 import * as gitApi from '../../lib/gitApi';
-import { buttonClass } from '../../lib/buttonStyles';
 import {
   consoleIconButtonClass,
   consoleButtonFocusClass,
@@ -284,6 +283,22 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
             <Loader2 className="h-5 w-5 animate-spin" />
             <span className="text-xs">{t('common:state.loading')} {label.toLowerCase()}…</span>
           </div>
+        ) : isMultiRepo && mergeRequests.length === 0 ? (
+          // 多仓库且没有任何 PR：也按仓库展示区块（每个仓库独立空态），
+          // 新建 PR 按钮统一在右上角，不在中间重复
+          <div className="flex flex-col">
+            {repoGroups.map((g) => (
+              <div key={g.id} className="border-b border-zinc-200">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100/80 sticky top-0 z-10 border-b border-zinc-200">
+                  <span className="truncate text-[11px] font-semibold text-zinc-800">{g.subPath}</span>
+                  <span className="ml-auto shrink-0 text-[10px] text-zinc-400">{g.mrs.length}</span>
+                </div>
+                <div className="px-3 py-3 text-[11px] text-zinc-400">
+                  {t('git:empty.no_prs', { defaultValue: 'No pull requests' })}
+                </div>
+              </div>
+            ))}
+          </div>
         ) : filteredMRs.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-100 text-zinc-400">
@@ -299,16 +314,6 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
                   : t('git:empty.no_match_hint', { defaultValue: 'Try a different filter or search term.' })}
               </p>
             </div>
-            {mergeRequests.length === 0 && onCreatePR && (
-              <button
-                type="button"
-                onClick={onCreatePR}
-                className={buttonClass('primary', 'sm')}
-              >
-                <GitPullRequest className="h-3.5 w-3.5 mr-1.5 inline" />
-                {t('git:new_pull_request')}
-              </button>
-            )}
           </div>
         ) : isMultiRepo ? (
           <div className="flex flex-col">

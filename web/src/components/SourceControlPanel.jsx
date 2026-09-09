@@ -816,41 +816,55 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                               ? t('workspace:label.changed_count', { count: repo.count, defaultValue: `${repo.count} changed` })
                               : t('workspace:label.no_changes_repo', { defaultValue: 'No changes' })}
                           </span>
-                          {hasFiles && (
-                            <button
-                              type="button"
-                              onClick={() => openCommitForRepo(repo)}
-                              disabled={committing}
-                              title={t('git:commit', { defaultValue: 'Commit' })}
-                              className={`shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 ${consoleButtonFocusClass}`}
-                            >
-                              <GitCommit className="h-3 w-3" />
-                            </button>
-                          )}
-                          {repo.ahead > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => pushRepo(repo)}
-                              disabled={pushingRepo === repo.id}
-                              title={t('workspace:label.unpushed_title', { count: repo.ahead, defaultValue: `${repo.ahead} committed but not pushed` })}
-                              className={`shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
-                            >
-                              {pushingRepo === repo.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-                              {repo.ahead}
-                            </button>
-                          )}
-                          {repo.behind > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => pullRepo(repo)}
-                              disabled={pullingRepo === repo.id}
-                              title={t('workspace:action.pull_latest', { defaultValue: 'Pull latest changes' })}
-                              className={`shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-zinc-500 hover:bg-zinc-100 disabled:opacity-40 ${consoleButtonFocusClass}`}
-                            >
-                              {pullingRepo === repo.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
-                              {repo.behind}
-                            </button>
-                          )}
+                          {/* 与单仓库顶部一致的按钮组：按仓库状态切换 Commit / Push / Pull */}
+                          <div className="flex items-stretch shrink-0 rounded-md border border-zinc-200 overflow-hidden">
+                            {hasFiles ? (
+                              <button
+                                type="button"
+                                onClick={() => openCommitForRepo(repo)}
+                                disabled={committing || gitChanges?.operation === 'commit'}
+                                title={t('workspace:action.stage_all_and_commit')}
+                                className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`}
+                              >
+                                {committing || gitChanges?.operation === 'commit' ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <GitCommit className="h-3.5 w-3.5" />
+                                )}
+                                {t('git:commit')}
+                              </button>
+                            ) : repo.ahead > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => pushRepo(repo)}
+                                disabled={pushingRepo === repo.id || gitChanges?.operation === 'push'}
+                                title={t('workspace:label.unpushed_title', { count: repo.ahead, defaultValue: `${repo.ahead} committed but not pushed` })}
+                                className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`}
+                              >
+                                {pushingRepo === repo.id || gitChanges?.operation === 'push' ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Upload className="h-3.5 w-3.5" />
+                                )}
+                                {t('git:push')}{repo.ahead > 1 ? ` (${repo.ahead})` : ''}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => pullRepo(repo)}
+                                disabled={pullingRepo === repo.id || gitChanges?.operation === 'pull'}
+                                title={t('workspace:action.pull_latest', { defaultValue: 'Pull latest changes' })}
+                                className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`}
+                              >
+                                {pullingRepo === repo.id || gitChanges?.operation === 'pull' ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Download className="h-3.5 w-3.5" />
+                                )}
+                                {t('git:pull')}{repo.behind > 0 ? ` (${repo.behind})` : ''}
+                              </button>
+                            )}
+                          </div>
                         </div>
                         {!collapsed && (
                           <div className="flex flex-col">
