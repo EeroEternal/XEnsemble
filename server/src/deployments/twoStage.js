@@ -2117,6 +2117,13 @@ printf 'registry=https://registry.npmmirror.com\\n' > /root/.npmrc 2>/dev/null |
 # 的 apps/desktop 使 pnpm install 卡满 20 分钟超时）；.npmrc 的 electron_mirror 会被
 # electron/@electron/get 读取，走 npmmirror 镜像
 printf 'electron_mirror=https://npmmirror.com/mirrors/electron/\\n' >> /root/.npmrc 2>/dev/null || true
+# pnpm 预装：base 镜像无 pnpm 二进制，corepack 按需下载走官方源（registry.npmjs.org），
+# 在沙箱网络下常中断 → 缓存残缺（pnpm.cjs 缺失）→ 之后所有 pnpm 命令崩
+# （xensemble 实测：Cannot find module .../pnpm/12.3.4/bin/pnpm.cjs）。直接 npm 全局
+# 装 pnpm@9（走 npmmirror，秒级），覆盖 corepack shim，任何项目首次用到 pnpm 即就绪。
+if ! command -v pnpm >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+  npm install -g pnpm@9 --no-audit --no-fund --registry=https://registry.npmmirror.com >/dev/null 2>&1 || true
+fi
 # pnpm 专用配置：corepack pnpm 可能不读取 /root/.npmrc，显式写 pnpm config
 if command -v pnpm >/dev/null 2>&1 || command -v corepack >/dev/null 2>&1; then
   pnpm config set registry https://registry.npmmirror.com --global 2>/dev/null || true
