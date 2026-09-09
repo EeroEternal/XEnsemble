@@ -125,6 +125,7 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         super();
         this.client = new BoxLiteClient();
         this._hostWorkspacePaths = new Map();
+        this._skillCarrierGuestRoots = new Map();
     }
 
     workspacePath() {
@@ -627,6 +628,7 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         // 会让 index.html 误触发 detectStaticStack → plan 走 python3 -m http.server
         // → 后端永不启动 → POST 5xx）。仅 boxlite 路径写，local/k8s 不受影响。
         this._hostWorkspacePaths.set(name, workspaceVolume.host_path);
+        this._skillCarrierGuestRoots.set(name, skillCarrierGuestRoot || null);
         // skillCarrierGuestRoot：技能载体 guest 根，供 spawn 前把宿主载体复制为
         // VM 内真目录时使用（见 injectForSession 的 runtimeExec 分支）。
         return {
@@ -640,7 +642,7 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
     }
 
     async attach(runtimeRef) {
-        return { runtimeRef, recoverable: false, hostWorkspacePath: this._hostWorkspacePaths.get(runtimeRef) || null };
+        return { runtimeRef, recoverable: false, hostWorkspacePath: this._hostWorkspacePaths.get(runtimeRef) || null, skillCarrierGuestRoot: this._skillCarrierGuestRoots.get(runtimeRef) || null };
     }
 
     supportsHibernate() {

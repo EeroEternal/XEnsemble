@@ -2,6 +2,7 @@ const { eq } = require('drizzle-orm');
 const { sessionStateDirExists, prepareHomeRedirect } = require('./stateDir');
 const { getAgentResume, getAgentResumeLevel, isSessionRecoverable, buildStateArgs } = require('../agents/agentResume');
 const { applyProjectGitEnv } = require('../agents/projectGitEnv');
+const { getUserSkillDirs } = require('../agents/defaultAgents');
 const transcriptStore = require('../runtime/TranscriptStore');
 
 const CRASH_UPTIME_MS = 30000;
@@ -452,6 +453,30 @@ async function resumeSession({
                         runtimeRef, cwd: '/', timeoutMs: 10000,
                     });
                 } catch (_) { /* best-effort */ }
+            }
+
+            // 重启会话时从 carrier 重新复制最新 skills 到 VM
+            const dirs = getUserSkillDirs(agentMeta.id);
+            if (dirs.length > 0) {
+                // worktree 会话 → /workspace.git/xe-skills；默认会话 → /workspace/.git/xe-skills
+                const carrierGuestRoots = runtimeReady.skillCarrierGuestRoot
+                    ? [runtimeReady.skillCarrierGuestRoot]
+                    : ['/workspace.git/xe-skills', '/workspace/.git/xe-skills'];
+                const isSkillsDir = agentMeta.id === 'claude-code' || agentMeta.id === 'codebuddy'
+                    || agentMeta.id === 'qwen-code' || agentMeta.id === 'openclaw' || agentMeta.id === 'hermes';
+                const isRootDir = agentMeta.id === 'cline' || agentMeta.id === 'opencode';
+                const vmDir = isRootDir ? `/root/${dirs[0]}`
+                    : `/var/lib/xensemble/state/${session.id}/${isSkillsDir ? 'skills' : dirs[0]}`;
+                for (const carrierGuestRoot of carrierGuestRoots) {
+                    const carrierDirGuest = `${carrierGuestRoot}/${dirs[0]}`;
+                    try {
+                        const result = await runtime.exec.exec('sh', ['-c',
+                            `test -d ${JSON.stringify(carrierDirGuest)} && rm -rf ${JSON.stringify(vmDir)} && mkdir -p ${JSON.stringify(vmDir)} `
+                            + `&& cp -a ${JSON.stringify(carrierDirGuest)}/. ${JSON.stringify(vmDir)}/`],
+                        {}, { runtimeRef, cwd: '/' });
+                        if (result.exitCode === 0) break;
+                    } catch (_) { /* 继续尝试下一个路径 */ }
+                }
             }
 
             const resumeSpawnArgs = resolveAgentSpawnArgs(agentMeta.id, mergedConfigFiles, {
