@@ -9,6 +9,21 @@ const { GitConnectionService, getProviderConfig } = require('./GitConnectionServ
 const { GitOperationService } = require('./GitOperationService');
 const { withProjectGitLock } = require('./gitMutationLock');
 
+/**
+ * 仓库实际所在实例的 API base：GitLab/Gitea 私有部署时，全局 GITLAB_API_BASE 可能与
+ * 仓库真实 host 不一致（不同实例），导致 API 调用返回 "404 Project Not Found"。
+ * 优先从 repo/cloneUrl 的 host 推断 API base，回退全局配置。
+ */
+function repoApiBase(project, repo) {
+    const raw = repo?.repoUrl || project.repoUrl;
+    if (!raw) return null;
+    try {
+        const u = new URL(raw);
+        if (u.hostname) return `${u.protocol}//${u.host}`;
+    } catch { /* ignore */ }
+    return null;
+}
+
 class MergeRequestService {
     constructor(deps = {}) {
         this.gitConnectionService = deps.gitConnectionService ?? new GitConnectionService();
@@ -62,7 +77,7 @@ class MergeRequestService {
         if (!provider || typeof provider.getRepo !== 'function') return denied;
         const config = await getProviderConfig(providerName);
         try {
-            const info = await provider.getRepo(token, repoFullName, { apiBase: config?.apiBase });
+            const info = await provider.getRepo(token, repoFullName, { apiBase: repoApiBase(project, this.repo) || config?.apiBase });
             const perms = info?.permissions || {};
             let canWrite = false;
             if (providerName === 'gitlab') {
@@ -113,7 +128,7 @@ class MergeRequestService {
         const token = await this.gitConnectionService.getDecryptedToken(project.userId, providerName);
         try {
             const prInfo = await provider.getPR(token, repoFullName, localOpen.remoteMrNumber, {
-                apiBase: config?.apiBase,
+                apiBase: repoApiBase(project, this.repo) || config?.apiBase,
             });
             const mappedStatus = this._mapStatus({ state: prInfo.state, merged: prInfo.merged });
             if (mappedStatus !== 'open') {
@@ -203,6 +218,8 @@ class MergeRequestService {
             const token = await this.gitConnectionService.getDecryptedToken(project.userId, providerName);
             const provider = getProvider(providerName);
             const config = await getProviderConfig(providerName);
+            // API base 优先取仓库实际 host（私有部署下全局配置可能与仓库实例不一致 → 404 Project Not Found）
+            const apiBase = repoApiBase(project, this.repo) || config?.apiBase;
 
             const src = sourceBranch || source_branch || project.currentBranch;
             const tgt = targetBranch || target_branch || project.repoDefaultBranch || 'main';
@@ -213,7 +230,7 @@ class MergeRequestService {
             if (localOpen) return localOpen;
 
             const remoteOpen = await this._findRemoteOpen(
-                provider, token, repoFullName, src, tgt, config?.apiBase,
+                provider, token, repoFullName, src, tgt, apiBase,
             );
             if (remoteOpen) {
                 return this._upsertFromRemote(project, providerName, remoteOpen, {
@@ -243,12 +260,12 @@ class MergeRequestService {
                     body,
                     head: src,
                     base: tgt,
-                    apiBase: config?.apiBase,
+                    apiBase,
                 });
             } catch (err) {
                 // Another client may have created the same PR between list and create.
                 const raced = await this._findRemoteOpen(
-                    provider, token, repoFullName, src, tgt, config?.apiBase,
+                    provider, token, repoFullName, src, tgt, apiBase,
                 );
                 if (!raced) throw err;
                 return this._upsertFromRemote(project, providerName, raced, {
@@ -294,7 +311,7 @@ class MergeRequestService {
         const existing = existingRows[0];
 
         const prInfo = await provider.getPR(token, repoFullName, existing.remoteMrNumber, {
-            apiBase: config?.apiBase,
+            apiBase: repoApiBase(project, this.repo) || config?.apiBase,
         });
 
         const now = Date.now();
@@ -377,7 +394,7 @@ class MergeRequestService {
         }
         const provider = getProvider(providerName);
         const config = await getProviderConfig(providerName);
-        return { token, provider, repoFullName, apiBase: config?.apiBase };
+        return { token, provider, repoFullName, apiBase: repoApiBase(project, this.repo) || config?.apiBase };
     }
 
     async listReviews(project, mrId) {
