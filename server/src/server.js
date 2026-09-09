@@ -1913,9 +1913,10 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
         //     导致沙箱挂载目录里看不到技能（历史 bug，已修复）。
         if (skillInjectEnabled()) {
             try {
-                // Claude Code 的 CLAUDE_CONFIG_DIR 改变扫描根为 <configDir>/skills。
+                // Claude Code / CodeBuddy 的 config 目录 env 改变扫描根为 <configDir>/skills
+                // （源码确认：getHomeSkillsDir() = join(getHomeDir(), "skills")）。
                 // 其他 Agent 的 stateEnv 若改变扫描根，子目录应与 userSkillDirs[0] 一致。
-                const stateSkillsSubdir = agent_id === 'claude-code'
+                const stateSkillsSubdir = (agent_id === 'claude-code' || agent_id === 'codebuddy')
                     ? 'skills'
                     : (getUserSkillDirs(agent_id)[0] || 'skills');
                 const stateSkillsDir = resumeSpec?.stateEnv && sessionStateDir?.stateDirPath && stateSkillsSubdir
