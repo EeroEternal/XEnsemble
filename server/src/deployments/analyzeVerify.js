@@ -56,7 +56,14 @@ async function callLlm(messages, abortSignal) {
         try {
             // thinking disabled：reasoning 模型输出慢，显式关闭。部分模型不支持该字段
             // （见 noThinkingModels）——400 自愈后自动降级为不带。
-            const bodyObj = { model: MODEL, messages, max_tokens: 16000, temperature: 0.2, response_format: { type: 'json_object' } };
+            // response_format json_object 默认关闭：实测 glm-5.3-flash 的 json_object
+            // 模式有服务端 bug——输出里所有 "json" token 被剥掉（package.json→package.、
+            // application/json→application/、import json→import ），agent 每条命令都被
+            // 隐形截肢，60 轮全部烧在与幻影搏斗上（curl 一直 415 Unsupported Media
+            // Type）。提示词已强制纯 JSON 输出，解析侧有围栏/括号平衡/action 提取三层
+            // 容错，去掉该参数不影响其他模型；行为良好的模型可用 LLM_JSON_MODE=1 开启。
+            const bodyObj = { model: MODEL, messages, max_tokens: 16000, temperature: 0.2 };
+            if (process.env.LLM_JSON_MODE === '1') bodyObj.response_format = { type: 'json_object' };
             if (!noThinkingModels.has(MODEL)) bodyObj.thinking = { type: 'disabled' };
             const res = await fetch(API_URL, {
                 method: 'POST',

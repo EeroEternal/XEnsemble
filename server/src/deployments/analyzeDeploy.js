@@ -513,7 +513,11 @@ async function callLlm(messages) {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
         try {
-            const bodyObj = { model: MODEL, messages, max_tokens: 16000, temperature: 0.2, response_format: { type: 'json_object' } };
+            // response_format json_object 默认关闭：glm-5.3-flash 的 json_object 模式
+            // 有服务端 bug——输出里所有 "json" token 被剥掉（详见 analyzeVerify.js
+            // callLlm 注释）。LLM_JSON_MODE=1 可为行为良好的模型重新开启。
+            const bodyObj = { model: MODEL, messages, max_tokens: 16000, temperature: 0.2 };
+            if (process.env.LLM_JSON_MODE === '1') bodyObj.response_format = { type: 'json_object' };
             if (!noThinkingModels.has(MODEL)) bodyObj.thinking = { type: 'disabled' };
             const res = await fetch(API_URL, {
                 method: 'POST',
