@@ -1915,7 +1915,7 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
             try {
                 // Claude Code / CodeBuddy / Qwen Code / OpenClaw 的 config 目录 env
                 // 改变扫描根为 <configDir>/skills。其余 Agent 若改变扫描根，子目录应与 userSkillDirs[0] 一致。
-                const stateSkillsSubdir = (agent_id === 'claude-code' || agent_id === 'codebuddy' || agent_id === 'qwen-code' || agent_id === 'openclaw')
+                const stateSkillsSubdir = (agent_id === 'claude-code' || agent_id === 'codebuddy' || agent_id === 'qwen-code' || agent_id === 'openclaw' || agent_id === 'hermes')
                     ? 'skills'
                     : (getUserSkillDirs(agent_id)[0] || 'skills');
                 // Cline / OpenCode 的 stateEnv 不影响 skills 发现，走 /root/<userSkillDirs>
