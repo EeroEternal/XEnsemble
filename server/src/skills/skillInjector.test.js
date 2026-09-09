@@ -262,20 +262,18 @@ test('injectForSession writes instruction file via fsAdapter', async () => {
 // 0021：getSkillTargets / isLandableSkill / 原生目录落盘
 // ---------------------------------------------------------------------------
 
-test('getSkillTargets resolves instructionFile + nativeSkillDirs per agent', () => {
+test('getInstructionFile + getUserSkillDirs per agent', () => {
     const defs = ctx.reloaded['../agents/defaultAgents'];
-    assert.equal(defs.getSkillTargets('claude-code').instructionFile, 'CLAUDE.md');
-    assert.deepEqual(defs.getSkillTargets('claude-code').nativeSkillDirs, ['.claude/skills']);
-    assert.deepEqual(defs.getSkillTargets('qwen-code').nativeSkillDirs, ['.qwen/skills']);
-    assert.deepEqual(defs.getSkillTargets('codebuddy').nativeSkillDirs, ['.codebuddy/skills']);
-    assert.deepEqual(defs.getSkillTargets('kimi-code').nativeSkillDirs, ['.kimi-code/skills']);
-    assert.deepEqual(defs.getSkillTargets('opencode').nativeSkillDirs, ['.opencode/skills', '.agents/skills']);
-    assert.deepEqual(defs.getSkillTargets('pi').nativeSkillDirs, ['.pi/skills']);
-    // 未确认的 Agent → 空数组（AGENTS.md 兜底）
-    // 0030：github-copilot 已确认支持 skills（~/.copilot/skills/ 等，Microsoft 官方文档）
-    assert.deepEqual(defs.getSkillTargets('github-copilot').nativeSkillDirs, []);
-    assert.deepEqual(defs.getUserSkillDirs('github-copilot'), ['.copilot/skills', '.claude/skills', '.agents/skills']);
-    // glm-agent / minimax-cli：工具型 CLI，无 SKILL.md 发现机制 → 全空（AGENTS.md 兜底）
+    assert.equal(defs.getInstructionFile('claude-code'), 'CLAUDE.md');
+    assert.equal(defs.getInstructionFile('qwen-code'), 'AGENTS.md');
+    assert.deepEqual(defs.getUserSkillDirs('claude-code'), ['.claude/skills']);
+    assert.deepEqual(defs.getUserSkillDirs('qwen-code'), ['.qwen/skills']);
+    assert.deepEqual(defs.getUserSkillDirs('codebuddy'), ['.codebuddy/skills']);
+    assert.deepEqual(defs.getUserSkillDirs('kimi-code'), ['.kimi/skills']);
+    assert.deepEqual(defs.getUserSkillDirs('opencode'), ['.config/opencode/skills']);
+    assert.deepEqual(defs.getUserSkillDirs('pi'), ['.pi/agent/skills']);
+    assert.deepEqual(defs.getUserSkillDirs('github-copilot'), ['.copilot/skills']);
+    // glm-agent / minimax-cli：无 skills 支持
     assert.deepEqual(defs.getUserSkillDirs('glm-agent'), []);
     assert.deepEqual(defs.getUserSkillDirs('minimax-cli'), []);
 });
@@ -776,25 +774,22 @@ test('0025 injection matrix: every registered agent receives platform index + po
                 userId: user, projectId: proj, agentId: agent.id, workspacePath: '/ws', fsAdapter, bumpUsage: false,
             });
 
-            const { instructionFile, nativeSkillDirs } = defs.getSkillTargets(agent.id);
+            const instructionFile = defs.getInstructionFile(agent.id);
             const problems = [];
             if (!res.injected) problems.push(`injected=false (${res.reason})`);
             if (!files['.xensemble/AGENTS.md']) problems.push('platform index missing');
             else if (!files['.xensemble/AGENTS.md'].includes('### DB migrate')) problems.push('platform index lacks skill');
             if (!files[instructionFile]) problems.push(`instruction file ${instructionFile} not written`);
             else if (!files[instructionFile].includes('.xensemble/AGENTS.md')) problems.push(`${instructionFile} lacks pointer`);
-            for (const dir of nativeSkillDirs || []) {
-                if (!files[`${dir}/db-migrate/SKILL.md`]) problems.push(`native dir ${dir} missing`);
-            }
 
-            results.push({ agent: agent.id, instructionFile, nativeSkillDirs: nativeSkillDirs || [], ok: problems.length === 0, problems });
+            results.push({ agent: agent.id, instructionFile, ok: problems.length === 0, problems });
         }
 
         // 汇总输出（便于人工核对覆盖矩阵）
         // eslint-disable-next-line no-console
         console.log('\n[0025 injection matrix]');
         for (const r of results) {
-            console.log(`${r.ok ? '  OK ' : 'FAIL '} ${r.agent.padEnd(16)} → ${r.instructionFile}${r.nativeSkillDirs.length ? ' + ' + r.nativeSkillDirs.join(', ') : ''}${r.problems.length ? '  ✗ ' + r.problems.join('; ') : ''}`);
+            console.log(`${r.ok ? '  OK ' : 'FAIL '} ${r.agent.padEnd(16)} → ${r.instructionFile}${r.problems.length ? '  ✗ ' + r.problems.join('; ') : ''}`);
         }
 
         const failed = results.filter((r) => !r.ok);

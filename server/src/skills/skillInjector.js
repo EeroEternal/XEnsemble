@@ -25,26 +25,13 @@ const path = require('path');
 const { db } = require('../db');
 const schema = require('../db/schema');
 const workspace = require('../workspace');
-const { DEFAULT_AGENTS, getSkillTargets, getUserSkillDirs } = require('../agents/defaultAgents');
+const { DEFAULT_AGENTS, getInstructionFile, getUserSkillDirs } = require('../agents/defaultAgents');
 const { resolveRuntimeProvider } = require('../config/runtimeProvider');
 const { recordEvent } = require('../events/recordEvent');
 
 const SECTION_START = '<!-- xe-skills:start -->';
 const SECTION_END = '<!-- xe-skills:end -->';
 const SECTION_TITLE = '## XEnsemble Skills';
-// 0020：脚本级 Skill 落盘根目录（相对 workspace），目录名 = 技能名 slug
-const SKILLS_ROOT = '.xensemble/skills';
-// 0025（方案 B）：平台自己的技能索引文件（相对 workspace）。
-// 索引段不写入用户 AGENTS.md/CLAUDE.md（避免污染用户 git），统一收敛到 .xensemble/ 下。
-const PLATFORM_INDEX_FILE = '.xensemble/AGENTS.md';
-// 0025：用户指令文件中的一行引导指针（幂等、可移除）。仅当用户文件已存在时写入；
-// 用户文件不存在时不创建（避免新增 untracked 污染 changes）。
-const POINTER_START = '<!-- xe-skills-pointer:start -->';
-const POINTER_END = '<!-- xe-skills-pointer:end -->';
-// 0021：全部已注册 Agent 的原生技能目录（去重；用于重渲染时覆盖所有 Agent）
-const DEFAULT_AGENT_NATIVE_DIRS = [...new Set(
-    DEFAULT_AGENTS.flatMap((a) => a.nativeSkillDirs || []),
-)];
 // 0030：全部已注册 Agent 的主用户级技能目录（去重；.git 载体模式重渲染的落盘目标）
 const DEFAULT_AGENT_USER_SKILL_DIRS = [...new Set(
     DEFAULT_AGENTS.flatMap((a) => (a.userSkillDirs?.length ? [a.userSkillDirs[0]] : [])),
@@ -78,13 +65,6 @@ function isSkillCarrierEnabled() {
     return resolveRuntimeProvider() === 'boxlite';
 }
 
-/**
- * 0030：解析某工程的技能载体宿主目录 projectDir/.git/xe-skills。
- * 工程非 git 仓库（无 .git）→ null（无污染顾虑，回落工程内平台根落盘）。
- * @param {string} userId
- * @param {string} projectId
- * @returns {string|null}
- */
 function skillCarrierDir(userId, projectId) {
     if (!userId || !projectId) return null;
     const projectDir = workspace.projectDir(userId, projectId);
@@ -203,7 +183,7 @@ function parseDescription(content) {
  *   0030 技能载体模式传沙箱内挂载路径，如 /root/.claude/skills）
  * @returns {{ section: string, truncated: boolean, count: number, skillIds: string[], slugs: string[] }}
  */
-function renderSkillsSection(skills, rootRef = SKILLS_ROOT) {
+function renderSkillsSection(skills, rootRef) {
     const countLimit = maxCount();
     const byteLimit = maxBytes();
     const sorted = [...skills].sort((a, b) => {
@@ -279,62 +259,6 @@ function removeSection(existing) {
 }
 
 // ---------------------------------------------------------------------------
-// 0025（方案 B）：用户指令文件引导指针
-// 用户 AGENTS.md/CLAUDE.md 不再承载索引段（避免污染用户 git changes），
-// 只放一行指针指向平台索引 .xensemble/AGENTS.md。文件不存在时不创建。
-// ---------------------------------------------------------------------------
-
-/**
- * 渲染一行引导指针（幂等标记包裹，可被 removePointer 移除）。
- * @returns {string}
- */
-function renderPointer() {
-    return `${POINTER_START}\nXEnsemble Skills 索引详见 \`${PLATFORM_INDEX_FILE}\`（技能列表按需加载）\n${POINTER_END}`;
-}
-
-/**
- * 把引导指针合并进用户指令文件内容：
- * - 已有指针块 → 整块替换（段外用户内容不动）
- * - 无指针块 → 追加到末尾
- * - existing == null（文件不存在）→ 返回 null，调用方跳过（不创建用户文件）
- * @param {string|null} existing
- * @returns {string|null}
- */
-function applyPointer(existing) {
-    if (existing == null) return null;
-    const text = String(existing);
-    const pointer = renderPointer();
-    const startIdx = text.indexOf(POINTER_START);
-    const endIdx = text.indexOf(POINTER_END);
-    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-        const before = text.slice(0, startIdx);
-        const after = text.slice(endIdx + POINTER_END.length);
-        return `${before}${pointer}${after}`;
-    }
-    const trimmed = text.replace(/\s*$/, '');
-    if (!trimmed) return `${pointer}\n`;
-    return `${trimmed}\n\n${pointer}\n`;
-}
-
-/**
- * 移除引导指针（无指针时原样返回；existing == null → null）。
- * @param {string|null} existing
- * @returns {string|null}
- */
-function removePointer(existing) {
-    if (existing == null) return null;
-    const text = String(existing);
-    const startIdx = text.indexOf(POINTER_START);
-    const endIdx = text.indexOf(POINTER_END);
-    if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) return text;
-    const before = text.slice(0, startIdx);
-    const after = text.slice(endIdx + POINTER_END.length);
-    return (before + after)
-        .replace(/[ \t]*\n{3,}/g, '\n\n')
-        .replace(/\n{2,}$/, '\n');
-}
-
-// ---------------------------------------------------------------------------
 // 默认本地 fs 适配器（Local provider / 控制面可见 workspace）
 // ---------------------------------------------------------------------------
 
@@ -402,7 +326,7 @@ function normalizeFrontmatterName(content, slug) {
  *   （MANAGED_MARKER），cleanup 只清理带标记目录，不覆盖用户/Agent 自建技能
  * @returns {Promise<string>} 目录相对路径（不含 targetRoot）
  */
-async function writeSkillDirectory(adapter, rootDir, skill, targetRoot = SKILLS_ROOT, options = {}) {
+async function writeSkillDirectory(adapter, rootDir, skill, targetRoot, options = {}) {
     const slug = slugify(skill.title);
     const dirRel = safeRel(slug, '');
     const content = normalizeFrontmatterName(skill.content, slug);
@@ -447,7 +371,7 @@ async function writeSkillDirectories(adapter, rootDir, skill, targetRoots, optio
  * 会滞留（迁移期一次性影响，无害：仅 Agent 可见的旧技能快照）。
  * @param {{ onlyManaged?: boolean }} [options] 默认 true；显式 false 恢复旧行为（不推荐）
  */
-async function cleanupSkillDirectories(adapter, rootDir, activeSlugs, targetRoots = [SKILLS_ROOT], options = {}) {
+async function cleanupSkillDirectories(adapter, rootDir, activeSlugs, targetRoots, options = {}) {
     const onlyManaged = options.onlyManaged !== false;
     if (typeof adapter.rmrf !== 'function') return;
     for (const targetRoot of targetRoots) {
@@ -520,61 +444,35 @@ async function listActiveSkills(userId, projectId) {
  *   未传则默认 /root/<agent userSkillDirs[0]>
  * @returns {Promise<{ injected: boolean, reason?: string, instructionFile?: string, count?: number, truncated?: boolean, skillIds?: string[] }>}
  */
-async function injectForSession({ userId, projectId, agentId, workspacePath, fsAdapter, bumpUsage = true, useSkillCarrier, runtimeExec = null, runtimeRef = null, carrierGuestRoot = null, vmSkillsDir = null }) {
+async function injectForSession({ userId, projectId, agentId, fsAdapter, bumpUsage = true, useSkillCarrier, runtimeExec = null, runtimeRef = null, carrierGuestRoot = null, vmSkillsDir = null }) {
     if (!isEnabled()) return { injected: false, reason: 'disabled' };
 
     const allSkills = await listActiveSkills(userId, projectId);
-    // 0021：落盘门槛——只有格式合法 + 置信度达标的 active skill 才注入
     const skills = allSkills.filter(isLandableSkill);
     if (skills.length === 0) return { injected: false, reason: 'no_landable_skills' };
 
-    const { instructionFile, nativeSkillDirs } = getSkillTargets(agentId);
-    // 0030（.git 搭车）：载体模式——技能落 projectDir/.git/xe-skills/<agent 主技能目录>，
-    // 沙箱内由 symlink 引导映射为 /root/<dir>（Agent 原生发现，零新增挂载设备）。
-    // 载体不可用（Local / 载体停用 / 工程非 git / agent 无 userSkillDirs）→ 工程内回落。
+    const instructionFile = getInstructionFile(agentId);
     const carrierEnabled = useSkillCarrier == null ? isSkillCarrierEnabled() : useSkillCarrier;
     const userSkillDirs = getUserSkillDirs(agentId);
     const carrierDir = (carrierEnabled && userSkillDirs.length > 0)
         ? skillCarrierDir(userId, projectId)
         : null;
-    // 索引段引用的技能根：载体模式 = 沙箱内 symlink 路径；否则 = 工程内平台根
-    const rootRef = carrierDir ? `/root/${userSkillDirs[0]}` : SKILLS_ROOT;
-    const { section, truncated, count, skillIds, slugs } = renderSkillsSection(skills, rootRef);
+    if (!carrierDir) return { injected: false, reason: 'no_carrier' };
+
+    const rootRef = `/root/${userSkillDirs[0]}`;
+    const { truncated, count, skillIds, slugs } = renderSkillsSection(skills, rootRef);
     const adapter = fsAdapter || localFs;
 
-    // 0030：载体模式（git 工程 + Agent 原生发现）下，技能经 .git/xe-skills symlink
-    // 暴露为 /root/<dir>，Agent 原生扫描发现——不再需要 .xensemble/AGENTS.md 索引，
-    // 也不在用户 AGENTS.md/CLAUDE.md 写指针（二者都会污染 git 工作区）。
-    if (!carrierDir) {
-        // 0025（方案 B）：索引段写入平台文件 .xensemble/AGENTS.md（gitignore 内，不污染用户 git）
-        await adapter.writeFile(workspacePath, PLATFORM_INDEX_FILE, section);
-        // 用户指令文件只写一行引导指针；文件不存在则跳过（不创建 untracked）
-        const existing = await adapter.readFile(workspacePath, instructionFile);
-        const next = skills.length > 0 ? applyPointer(existing) : removePointer(existing);
-        if (next != null && next !== existing) {
-            await adapter.writeFile(workspacePath, instructionFile, next);
-        }
-    }
-
-    // 0020/0021/0030：技能目录落盘。markManaged 统一开启：cleanup 只清理平台
-    // 写入的目录，不碰用户/Agent 自建技能（P0 修复对两种模式一致生效）。
-    const skillRoot = carrierDir || workspacePath;
-    const targetRoots = carrierDir ? [userSkillDirs[0]] : [SKILLS_ROOT, ...nativeSkillDirs];
+    const targetRoots = [userSkillDirs[0]];
     const writtenSlugs = [];
     for (const s of skills) {
-        if (!slugs.includes(slugify(s.title))) continue; // 只写入选索引的技能
-        writtenSlugs.push(...await writeSkillDirectories(adapter, skillRoot, s, targetRoots, { markManaged: true }));
+        if (!slugs.includes(slugify(s.title))) continue;
+        writtenSlugs.push(...await writeSkillDirectories(adapter, carrierDir, s, targetRoots, { markManaged: true }));
     }
-    await cleanupSkillDirectories(adapter, skillRoot, writtenSlugs, targetRoots, { onlyManaged: true });
+    await cleanupSkillDirectories(adapter, carrierDir, writtenSlugs, targetRoots, { onlyManaged: true });
 
-    // P4 增强：载体模式且提供沙箱 exec + 载体 guest 根时，把宿主载体（spawn 前
-    // 已落盘最新）全量复制为 VM 内真目录——1 次 exec（rm+cp），对所有 Agent 的
-    // 目录遍历实现一致（实测 Claude Code 拒绝目录级软链而 opencode 正常；
-    // libkrun 内 mount --bind 无权限）。每次会话启动全量刷新，无 stale；失败仅跳过。
-    // 目标目录：vmSkillsDir 优先（CLAUDE_CONFIG_DIR 等 stateEnv 重定向场景——
-    // Claude Code 的扫描根是 <configDir>/skills，/root/.claude/skills 对它不可见），
-    // 否则 /root/<agent userSkillDirs[0]>。
-    if (runtimeExec && runtimeRef && carrierDir && carrierGuestRoot) {
+// 载体模式：把宿主载体全量复制为 VM 内真目录
+    if (runtimeExec && runtimeRef && carrierGuestRoot) {
         const carrierDirGuest = `${carrierGuestRoot}/${userSkillDirs[0]}`;
         const vmSkillsDirs = vmSkillsDir ? [vmSkillsDir] : userSkillDirs.map((d) => `/root/${d}`);
         for (const vmDir of vmSkillsDirs) {
@@ -617,7 +515,10 @@ async function injectForSession({ userId, projectId, agentId, workspacePath, fsA
         } catch (_) { /* 审计失败不影响注入 */ }
     }
 
-    return { injected: true, instructionFile, count, truncated, skillIds };
+    return { injected: true, instructionFile, count, truncated, skillIds,
+        targetDirs: (runtimeExec && runtimeRef && carrierGuestRoot)
+            ? (vmSkillsDir ? [vmSkillsDir] : userSkillDirs.map((d) => `/root/${d}`))
+            : [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -660,64 +561,21 @@ async function reRenderForSkillChange({ userId, projectId = null, fsAdapter, use
 
     let reRendered = 0;
     for (const pid of projectIds) {
-        // 0021：落盘门槛过滤（项目作用域：项目级 + 用户全局）
         const allSkills = await listActiveSkills(userId, pid);
         const skills = allSkills.filter(isLandableSkill);
-        // 0030：逐工程解析载体（git 工程才有 .git/xe-skills）
         const carrierDir = carrierAvailable ? skillCarrierDir(userId, pid) : null;
-        const targetRoots = carrierDir
-            ? DEFAULT_AGENT_USER_SKILL_DIRS
-            : [...new Set([SKILLS_ROOT, ...DEFAULT_AGENT_NATIVE_DIRS])];
-        const rootRef = carrierDir ? carrierRootRef : SKILLS_ROOT;
-        const wsPath = workspace.projectDir(userId, pid);
-        // 0020/0021/0030：目录落盘/清理 —— 即使有 running session 也执行，
-        // 载体模式写入 .git/xe-skills（沙箱内 symlink 热加载，无需重启会话）；
-        // 回落模式写入工程内平台根 + Agent 原生目录（.claude/skills 等）。
-        // markManaged 统一开启：cleanup 只清平台目录，不碰用户/Agent 自建技能。
-        const { section, slugs } = skills.length > 0
-            ? renderSkillsSection(skills, rootRef)
-            : { section: '', slugs: [] };
+        if (!carrierDir) continue;
+        const targetRoots = DEFAULT_AGENT_USER_SKILL_DIRS;
+        const { slugs } = skills.length > 0
+            ? renderSkillsSection(skills, carrierRootRef)
+            : { slugs: [] };
         if (skills.length > 0) {
             for (const s of skills) {
                 if (!slugs.includes(slugify(s.title))) continue;
-                await writeSkillDirectories(adapter, carrierDir || wsPath, s, targetRoots, { markManaged: true });
+                await writeSkillDirectories(adapter, carrierDir, s, targetRoots, { markManaged: true });
             }
         }
-        await cleanupSkillDirectories(adapter, carrierDir || wsPath, slugs, targetRoots, { onlyManaged: true });
-
-        // 0030：载体模式跳过索引 + 指针（原生 symlink 发现替代；避免污染 git 工作区）。
-        if (!carrierDir) {
-            // 0025（方案 B）：平台索引文件 .xensemble/AGENTS.md 始终更新（gitignore 内，
-            // 不污染用户 git；Agent 不直接读它，无需避开 running session）
-            try {
-                await adapter.writeFile(wsPath, PLATFORM_INDEX_FILE, section);
-            } catch (_) { /* 索引文件写入失败不阻断 */ }
-
-            // 用户指令文件（AGENTS.md/CLAUDE.md）：只写/移除一行引导指针。
-            // 有 running/pending session 则跳过，避免与 Agent 读取竞争（下次 spawn 自然更新）
-            const running = await db
-                .select({ id: schema.sessions.id })
-                .from(schema.sessions)
-                .where(and(
-                    eq(schema.sessions.userId, userId),
-                    eq(schema.sessions.projectId, pid),
-                    inArray(schema.sessions.status, ['running', 'pending']),
-                ))
-                .limit(1);
-            if (running.length > 0) continue;
-
-            for (const file of ['AGENTS.md', 'CLAUDE.md']) {
-                const existing = await adapter.readFile(wsPath, file);
-                if (existing == null) continue; // 用户文件不存在则不创建（避免 untracked 污染）
-                const next = skills.length > 0
-                    ? applyPointer(existing)
-                    : removePointer(existing);
-                if (next !== existing) {
-                    await adapter.writeFile(wsPath, file, next);
-                    reRendered += 1;
-                }
-            }
-        }
+        await cleanupSkillDirectories(adapter, carrierDir, slugs, targetRoots, { onlyManaged: true });
     }
     return { reRendered };
 }
@@ -726,11 +584,6 @@ module.exports = {
     SECTION_START,
     SECTION_END,
     SECTION_TITLE,
-    SKILLS_ROOT,
-    PLATFORM_INDEX_FILE,
-    POINTER_START,
-    POINTER_END,
-    DEFAULT_AGENT_NATIVE_DIRS,
     DEFAULT_AGENT_USER_SKILL_DIRS,
     SKILL_CARRIER_ROOT,
     MANAGED_MARKER,
@@ -749,9 +602,6 @@ module.exports = {
     renderSkillsSection,
     applyToContent,
     removeSection,
-    renderPointer,
-    applyPointer,
-    removePointer,
     listActiveSkills,
     writeSkillDirectory,
     writeSkillDirectories,

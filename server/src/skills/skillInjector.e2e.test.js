@@ -151,12 +151,6 @@ test('E2E: 技能注入真实落盘 → git changes 干净 → Agent 可消费',
     assert.ok(indexContent.includes('DB migrate'), '平台索引应含技能');
     const skillContent = assertFile('.xensemble/skills/db-migrate/SKILL.md');
     assert.ok(skillContent.includes('## Steps'), 'SKILL.md 应含正文');
-    // 各 Agent 原生目录真实落盘
-    for (const agent of defs.DEFAULT_AGENTS) {
-        for (const dir of agent.nativeSkillDirs || []) {
-            assertFile(`${dir}/db-migrate/SKILL.md`);
-        }
-    }
 
     // 2. git 不污染：changes 应只有用户自己的文件，平台注入文件被忽略
     const status = execFileSync('git', ['status', '--porcelain', '-uall'], { cwd: wsPath, encoding: 'utf8' });

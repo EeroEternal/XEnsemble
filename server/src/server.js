@@ -1913,13 +1913,14 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
         //     导致沙箱挂载目录里看不到技能（历史 bug，已修复）。
         if (skillInjectEnabled()) {
             try {
-                // Claude Code / CodeBuddy 的 config 目录 env 改变扫描根为 <configDir>/skills
-                // （源码确认：getHomeSkillsDir() = join(getHomeDir(), "skills")）。
-                // 其他 Agent 的 stateEnv 若改变扫描根，子目录应与 userSkillDirs[0] 一致。
-                const stateSkillsSubdir = (agent_id === 'claude-code' || agent_id === 'codebuddy')
+                // Claude Code / CodeBuddy / Qwen Code / OpenClaw 的 config 目录 env
+                // 改变扫描根为 <configDir>/skills。其余 Agent 若改变扫描根，子目录应与 userSkillDirs[0] 一致。
+                const stateSkillsSubdir = (agent_id === 'claude-code' || agent_id === 'codebuddy' || agent_id === 'qwen-code' || agent_id === 'openclaw')
                     ? 'skills'
                     : (getUserSkillDirs(agent_id)[0] || 'skills');
-                const stateSkillsDir = resumeSpec?.stateEnv && sessionStateDir?.stateDirPath && stateSkillsSubdir
+                // Cline / OpenCode 的 stateEnv 不影响 skills 发现，走 /root/<userSkillDirs>
+                const stateSkillsDir = (agent_id !== 'cline' && agent_id !== 'opencode')
+                    && resumeSpec?.stateEnv && sessionStateDir?.stateDirPath && stateSkillsSubdir
                     ? `${sessionStateDir.stateDirPath}/${stateSkillsSubdir}`
                     : null;
                 const injectResult = await injectSkillsForSession({
@@ -1936,7 +1937,7 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
                 });
                 if (injectResult.injected) {
                     fastify.log.info(
-                        `[skills] injected ${injectResult.count} skill(s) into ${injectResult.instructionFile} for ${agentMeta.id} (session ${sessionId})`,
+                        `[skills] injected ${injectResult.count} skill(s) for ${agentMeta.id} (session ${sessionId}) → ${injectResult.targetDirs?.join(', ') || 'host carrier only'}`,
                     );
                 }
             } catch (err) {

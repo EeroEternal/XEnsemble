@@ -8,10 +8,7 @@ const DEFAULT_AGENTS = [
         args: [],
         // Kimi Code authenticates via `kimi login` / config.toml - no BYOK env injection.
         env_required: [],
-        // 0021：原生技能目录（项目级 .kimi-code/skills，官方确认）
-        nativeSkillDirs: ['.kimi-code/skills'],
-        // 0030：用户级技能目录（HOME 相对路径；沙箱内由 .git 载体 symlink 暴露）
-        userSkillDirs: ['.kimi/skills', '.claude/skills', '.agents/skills'],
+        userSkillDirs: ['.kimi/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'KIMI_CODE_HOME',
@@ -48,8 +45,6 @@ const DEFAULT_AGENTS = [
         env_required: ['ANTHROPIC_API_KEY'],
         // P4：技能注入目标文件（仅 claude-code 用 CLAUDE.md，其余默认 AGENTS.md）
         instructionFile: 'CLAUDE.md',
-        // 0021：原生技能目录（项目级 .claude/skills，官方确认）
-        nativeSkillDirs: ['.claude/skills'],
         userSkillDirs: ['.claude/skills'],
         resume: {
             level: 'L2',
@@ -91,9 +86,7 @@ const DEFAULT_AGENTS = [
         cmd: 'opencode',
         args: [],
         env_required: [],
-        // 0021：原生技能目录（官方支持 .opencode/skills、.claude/skills、.agents/skills）
-        nativeSkillDirs: ['.opencode/skills', '.agents/skills'],
-        userSkillDirs: ['.config/opencode/skills', '.claude/skills', '.agents/skills'],
+        userSkillDirs: ['.config/opencode/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'XDG_DATA_HOME',
@@ -171,8 +164,6 @@ const DEFAULT_AGENTS = [
         cmd: 'codebuddy',
         args: [],
         env_required: [],
-        // 0021：原生技能目录（.codebuddy/skills，腾讯官方文档确认）
-        nativeSkillDirs: ['.codebuddy/skills'],
         userSkillDirs: ['.codebuddy/skills'],
         resume: {
             level: 'L2',
@@ -260,8 +251,6 @@ const DEFAULT_AGENTS = [
         cmd: 'qwen',
         args: [],
         env_required: ['DASHSCOPE_API_KEY'],
-        // 0021：原生技能目录（项目级 .qwen/skills，官方文档确认）
-        nativeSkillDirs: ['.qwen/skills'],
         userSkillDirs: ['.qwen/skills'],
         resume: {
             level: 'L2',
@@ -318,8 +307,6 @@ const DEFAULT_AGENTS = [
         cmd: 'pi',
         args: [],
         env_required: ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'],
-        // 0021：原生技能目录（官方项目级 .pi/skills、全局 ~/.pi/agent/skills）
-        nativeSkillDirs: ['.pi/skills'],
         userSkillDirs: ['.pi/agent/skills'],
         resume: {
             level: 'L2',
@@ -356,11 +343,7 @@ const DEFAULT_AGENTS = [
         cmd: 'copilot',
         args: [],
         env_required: [],
-        // 0030：用户级技能目录（Microsoft 官方文档确认 ~/.copilot/skills/、~/.claude/skills/、
-        // ~/.agents/skills/；见 learn.microsoft.com copilot-agent-skills）。
-        // 故意不声明 nativeSkillDirs: ['.github/skills'] —— 该目录设计上就是提交进仓库的，
-        // 平台写入会污染用户 git。
-        userSkillDirs: ['.copilot/skills', '.claude/skills', '.agents/skills'],
+        userSkillDirs: ['.copilot/skills'],
     },
     {
         id: 'commandcode',
@@ -414,8 +397,6 @@ const DEFAULT_AGENTS = [
         cmd: 'openclaw',
         args: [],
         env_required: [],
-        // 0021：原生技能目录（workspace 级 skills/，官方 ClawHub 文档确认）
-        nativeSkillDirs: ['skills'],
         userSkillDirs: ['.openclaw/skills'],
         resume: {
             level: 'L2',
@@ -475,34 +456,9 @@ function getInstructionFile(agentId) {
 }
 
 /**
- * 0021：解析某 agent 的原生技能目录（相对 workspace）。
- * - 已确认官方原生支持 Agent Skills 目录的 → 写入其原生目录（Agent 自动发现，零配置）
- * - 未确认 / 原生目录在用户主目录（跨项目共享，避免污染）→ null，走 AGENTS.md 索引兜底
- * @param {string} agentId
- * @returns {string[]} 原生技能目录列表（可为空数组 = 仅 AGENTS.md 兜底）
- */
-function getNativeSkillDirs(agentId) {
-    const agent = DEFAULT_AGENTS.find((a) => a.id === agentId);
-    return agent?.nativeSkillDirs || [];
-}
-
-/**
- * 0021：完整技能注入目标（指令文件 + 原生技能目录）。
- * @param {string} agentId
- * @returns {{ instructionFile: string, nativeSkillDirs: string[] }}
- */
-function getSkillTargets(agentId) {
-    return {
-        instructionFile: getInstructionFile(agentId),
-        nativeSkillDirs: getNativeSkillDirs(agentId),
-    };
-}
-
-/**
  * 0030（.git 搭车）：解析某 agent 的用户级技能目录（HOME 相对路径，如 .claude/skills）。
  * BoxLite 下载体把技能写进 projectDir/.git/xe-skills/<dir>，沙箱内由 symlink 引导
- * 映射为 /root/<dir>——Agent 原生扫描发现（零新增挂载设备）。未声明（github-copilot
- * 等）→ 空数组，注入回落工程内 .xensemble/skills。
+ * 映射为 /root/<dir>——Agent 原生扫描发现（零新增挂载设备）。未声明 → 空数组。
  * @param {string} agentId
  * @returns {string[]}
  */
@@ -511,4 +467,4 @@ function getUserSkillDirs(agentId) {
     return agent?.userSkillDirs || [];
 }
 
-module.exports = { DEFAULT_AGENTS, getInstructionFile, getNativeSkillDirs, getSkillTargets, getUserSkillDirs };
+module.exports = { DEFAULT_AGENTS, getInstructionFile, getUserSkillDirs };
