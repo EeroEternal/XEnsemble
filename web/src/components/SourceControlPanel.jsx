@@ -18,7 +18,7 @@ import { ConsoleDialogShell } from './ConsoleDialog';
 import CreatePRDialog from './git/CreatePRDialog';
 import { ConflictFileItem } from './git/ConflictResolutionPanel';
 import { DiffText } from './git/DiffText';
-import { getGitFileDiff } from '../lib/githubApi';
+import * as githubApi from '../lib/githubApi';
 import { apiFetch } from '../lib/api';
 import { withSessionId } from '../lib/sessionContext';
 import { useToast } from './Toast';
@@ -57,6 +57,36 @@ function getGitStatusDesc(status, t) {
     default:
       return '';
   }
+}
+
+function isDirEntry(f) {
+  return f?.type === 'untracked-dir' || (typeof f?.path === 'string' && f.path.endsWith('/'));
+}
+
+/**
+ * 把变更文件构建为目录树。多仓库场景传入 stripPrefix（如 `frontend`），
+ * 该仓库的路径在树结构上剥掉仓库前缀（仅影响展示层级），
+ * 文件条目本身保留完整 `<subPath>/...` 路径，diff/discard/跳转不受影响。
+ */
+function buildTree(files, stripPrefix) {
+  const root = { dirs: {}, files: [] };
+  for (const f of files) {
+    let p = isDirEntry(f) ? f.path.replace(/\/$/, '') : f.path;
+    if (stripPrefix) {
+      const pre = `${stripPrefix}/`;
+      if (p.startsWith(pre)) p = p.slice(pre.length);
+    }
+    if (!p) continue;
+    const parts = p.split('/');
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const part = parts[i];
+      node.dirs[part] = node.dirs[part] || { dirs: {}, files: [] };
+      node = node.dirs[part];
+    }
+    node.files.push(f);
+  }
+  return root;
 }
 
 export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile, onCollapse, provider, sessionLive }) {
@@ -338,7 +368,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       if (!fileDiffs[filePath]) {
         setLoadingDiff(filePath);
         try {
-          const data = await getGitFileDiff(projectId, filePath);
+          const data = await githubApi.getGitFileDiff(projectId, filePath);
           setFileDiffs((prev) => ({ ...prev, [filePath]: normalizeDiffEntry(data) }));
         } catch (_) {
           setFileDiffs((prev) => ({
@@ -351,8 +381,6 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       }
     }
   }, [expandedFiles, fileDiffs, projectId, normalizeDiffEntry]);
-
-  const isDirEntry = (f) => f?.type === 'untracked-dir' || (typeof f?.path === 'string' && f.path.endsWith('/'));
 
   const allFiles = useMemo(() => {
     const map = new Map();
@@ -377,7 +405,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
     setLoadingDiff('batch');
     try {
       const results = await Promise.all(
-        toFetch.map((p) => getGitFileDiff(projectId, p)
+        toFetch.map((p) => githubApi.getGitFileDiff(projectId, p)
           .then((d) => [p, normalizeDiffEntry(d)])
           .catch(() => [p, normalizeDiffEntry({ diff: 'Failed to load diff' })])),
       );
@@ -392,23 +420,9 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   }, [allExpanded, expandableFiles, fileDiffs, projectId, normalizeDiffEntry]);
 
   // Build a directory tree from the deduped changed files.
-  const changesTree = useMemo(() => {
-    const root = { dirs: {}, files: [] };
-    for (const f of allFiles) {
-      // 目录条目（node_modules/ 等）：尾斜杠剥离后整体作为一个"文件节点"
-      // 渲染为目录行，不能再按 / 切分建目录树，否则会展开出上万子节点
-      const p = isDirEntry(f) ? f.path.replace(/\/$/, '') : f.path;
-      const parts = p.split('/');
-      let node = root;
-      for (let i = 0; i < parts.length - 1; i++) {
-        const part = parts[i];
-        node.dirs[part] = node.dirs[part] || { dirs: {}, files: [] };
-        node = node.dirs[part];
-      }
-      node.files.push(f);
-    }
-    return root;
-  }, [allFiles]);
+  // 目录条目（node_modules/ 等）：尾斜杠剥离后整体作为一个"文件节点"
+  // 渲染为目录行，不能再按 / 切分建目录树，否则会展开出上万子节点
+  const changesTree = useMemo(() => buildTree(allFiles), [allFiles]);
 
   const [collapsedDirs, setCollapsedDirs] = useState(() => new Set());
   const toggleDir = useCallback((dirPath) => {
@@ -418,6 +432,44 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       return next;
     });
   }, []);
+
+  // ─── 多仓库（VSCode multi-root worktree 风格）───
+  // 服务端聚合 status 附带 repos[] 每仓库明细（含前缀路径 + 各自 branch/ahead），
+  // 前端据此把 Changes 面板按仓库分组展示，并可对单个仓库 push。
+  const multiRepos = gitChanges?.multiRepo && Array.isArray(gitChanges?.repos) ? gitChanges.repos : [];
+  const repoGroups = useMemo(() => {
+    if (multiRepos.length === 0) return [];
+    return multiRepos.map((repo) => {
+      const seen = new Set();
+      const files = [];
+      for (const f of [...(repo.stagedFiles || []), ...(repo.unstagedFiles || [])]) {
+        if (f?.path && !seen.has(f.path)) { seen.add(f.path); files.push(f); }
+      }
+      return { ...repo, files, count: files.length };
+    });
+  }, [multiRepos]);
+  const [collapsedRepos, setCollapsedRepos] = useState(() => new Set());
+  const toggleRepoCollapse = useCallback((id) => {
+    setCollapsedRepos((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+  const [pushingRepo, setPushingRepo] = useState(null);
+  const pushRepo = useCallback(async (repo) => {
+    setActionMenuOpen(false);
+    setPushingRepo(repo.id);
+    try {
+      await githubApi.pushBranch(projectId, repo.branch || undefined, repo.id);
+      showToast('success', t('git:toast.repo_pushed', { repo: repo.subPath, defaultValue: `${repo.subPath} pushed.` }));
+    } catch (err) {
+      showToast('error', err.message || t('git:toast.push_failed_repo', { repo: repo.subPath, error: err.message, defaultValue: `Failed to push ${repo.subPath}` }));
+    } finally {
+      setPushingRepo(null);
+      gitChanges?.fetchStatus?.({ silent: true });
+    }
+  }, [projectId, showToast, gitChanges, t]);
 
   const renderFileRow = (f, depth) => {
     // 折叠的 untracked 大目录（服务端下发 type=untracked-dir + count）：
@@ -660,7 +712,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 </div>
               </div>
             )}
-            {!gitHasChanges && conflictFiles.length === 0 ? (
+            {!gitHasChanges && conflictFiles.length === 0 && repoGroups.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 gap-2 text-zinc-400">
                 <GitCommit className="h-6 w-6" />
                 <p className="text-[10px]">{t('git:empty.no_changes_yet', { defaultValue: 'No changes yet' })}</p>
@@ -673,7 +725,66 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                     {t('workspace:label.changes_truncated')}
                   </div>
                 )}
-                {renderNodes(changesTree, 0, '')}
+                {repoGroups.length > 0 ? (
+                  repoGroups.map((repo) => {
+                    const collapsed = collapsedRepos.has(repo.id);
+                    const tree = buildTree(repo.files, repo.subPath);
+                    const hasFiles = repo.count > 0;
+                    return (
+                      <div key={repo.id} className="border-b border-zinc-200">
+                        <div className="flex items-center gap-1.5 px-2 py-1.5 bg-zinc-100/80 sticky top-0 z-10 border-b border-zinc-200">
+                          <button
+                            type="button"
+                            onClick={() => toggleRepoCollapse(repo.id)}
+                            title={collapsed ? t('workspace:action.expand_all') : t('workspace:action.collapse_all')}
+                            className={`shrink-0 p-0.5 text-zinc-500 hover:text-zinc-700 ${consoleButtonFocusClass}`}
+                          >
+                            {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleRepoCollapse(repo.id)}
+                            className={`flex items-center gap-1.5 min-w-0 text-left ${consoleButtonFocusClass}`}
+                          >
+                            <span className="truncate text-[11px] font-semibold text-zinc-800">{repo.subPath}</span>
+                            {repo.isPrimary && (
+                              <span className="shrink-0 px-1 py-px rounded bg-blue-50 border border-blue-200 text-[9px] font-medium text-blue-600">
+                                {t('workspace:label.primary_repo_badge', { defaultValue: 'primary' })}
+                              </span>
+                            )}
+                            {repo.branch && (
+                              <span className="truncate font-mono text-[10px] text-zinc-400">{repo.branch}</span>
+                            )}
+                          </button>
+                          <span className="ml-auto shrink-0 text-[10px] text-zinc-400">
+                            {hasFiles
+                              ? t('workspace:label.changed_count', { count: repo.count, defaultValue: `${repo.count} changed` })
+                              : t('workspace:label.no_changes_repo', { defaultValue: 'No changes' })}
+                          </span>
+                          {repo.ahead > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => pushRepo(repo)}
+                              disabled={pushingRepo === repo.id}
+                              title={t('workspace:label.unpushed_title', { count: repo.ahead, defaultValue: `${repo.ahead} committed but not pushed` })}
+                              className={`shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-40 ${consoleButtonFocusClass}`}
+                            >
+                              {pushingRepo === repo.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+                              {repo.ahead}
+                            </button>
+                          )}
+                        </div>
+                        {!collapsed && (
+                          <div className="flex flex-col">
+                            {hasFiles ? renderNodes(tree, 0, '') : null}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                ) : (
+                  renderNodes(changesTree, 0, '')
+                )}
               </div>
             )}
           </div>

@@ -136,6 +136,8 @@ const prefixEntries = (list, prefix) => (list || []).map((e) => ({ ...e, path: `
 /**
  * 聚合所有仓库的 status：文件路径加 `<subPath>/` 前缀；
  * branch/sha/ahead/behind 取 primary（UI 呈现单一分支），dirty 等布尔取并集。
+ * 同时输出 `repos[]` 每仓库明细（id/subPath/branch/ahead/files 等），
+ * 供前端按仓库分组展示（VSCode multi-root worktree 风格）。
  */
 async function aggregateGitStatus(project, multi, mode) {
     const statuses = [];
@@ -160,6 +162,7 @@ async function aggregateGitStatus(project, multi, mode) {
     merged.untracked = false;
     merged.merging = false;
     merged.truncated = false;
+    const repos = [];
     for (const { row, s } of statuses) {
         merged.files.push(...prefixEntries(s.files, row.subPath));
         merged.stagedFiles.push(...prefixEntries(s.stagedFiles, row.subPath));
@@ -171,7 +174,28 @@ async function aggregateGitStatus(project, multi, mode) {
         merged.untracked = Boolean(merged.untracked || s.untracked);
         merged.merging = Boolean(merged.merging || s.merging);
         merged.truncated = Boolean(merged.truncated || s.truncated);
+        repos.push({
+            id: row.id,
+            subPath: row.subPath,
+            role: row.role || 'custom',
+            isPrimary: Boolean(row.isPrimary),
+            branch: s.branch || null,
+            sha: s.sha || null,
+            ahead: s.ahead ?? null,
+            behind: s.behind ?? null,
+            dirty: Boolean(s.dirty),
+            staged: Boolean(s.staged),
+            unstaged: Boolean(s.unstaged),
+            untracked: Boolean(s.untracked),
+            merging: Boolean(s.merging),
+            truncated: Boolean(s.truncated),
+            files: prefixEntries(s.files, row.subPath),
+            stagedFiles: prefixEntries(s.stagedFiles, row.subPath),
+            unstagedFiles: prefixEntries(s.unstagedFiles, row.subPath),
+            conflicts: prefixEntries(s.conflicts, row.subPath),
+        });
     }
+    merged.repos = repos;
     return merged;
 }
 
@@ -430,14 +454,16 @@ function registerProjectGitRoutes(fastify) {
             const multi = await buildMultiRepoServices(request);
             if (multi) {
                 let sha = null;
-                for (const { svc } of multi.services) {
+                const committedRepos = [];
+                for (const { svc, row } of multi.services) {
                     const s = await svc.getStatus(project).catch(() => null);
                     if (!s || !(s.stagedFiles || []).length) continue;
                     const r = await svc.commitStaged(project, message, author);
+                    committedRepos.push({ repoId: row.id, subPath: row.subPath, branch: s.branch || null, sha: r.sha });
                     if (!sha) sha = r.sha;
                 }
                 const status = await aggregateGitStatus(project, multi, 'full').catch(() => null);
-                return { sha, committed: Boolean(sha), status };
+                return { sha, committed: Boolean(sha), committedRepos, status };
             }
             const result = await gitOperationService.commitStaged(project, message, author);
             const status = await gitOperationService.getStatus(project).catch(() => null);
@@ -572,6 +598,37 @@ function registerProjectGitRoutes(fastify) {
         const branchName = request.body?.branch || project.currentBranch;
         if (!branchName) return reply.code(400).send({ error: 'No current branch to push' });
         try {
+            // 多仓库：每个 repo 推各自当前分支（worktree 分支），
+            // 避免只有 primary 上推到远程、其余 repo 的提交永远留在本地。
+            // repo_id 显式指定时只推该 repo（前端 per-repo push 按钮）。
+            const multi = await buildMultiRepoServices(request);
+            if (multi) {
+                const targetRepoId = request.body?.repo_id || request.query?.repo_id || null;
+                const targets = targetRepoId
+                    ? multi.services.filter((s) => s.row.id === targetRepoId)
+                    : multi.services;
+                const pushed = [];
+                let sha = null;
+                for (const { svc, row } of targets) {
+                    let branch = null;
+                    try {
+                        const out = await svc._execGit(project, ['rev-parse', '--abbrev-ref', 'HEAD']);
+                        branch = out.stdout.trim();
+                        if (!branch || branch === 'HEAD') continue;
+                    } catch {
+                        continue;
+                    }
+                    try {
+                        const r = await svc.pushBranch(project, branch);
+                        pushed.push({ repoId: row.id, subPath: row.subPath, branch, sha: r.sha });
+                        if (row.id === multi.primary.id) sha = r.sha;
+                    } catch (err) {
+                        pushed.push({ repoId: row.id, subPath: row.subPath, branch, error: err.message });
+                    }
+                }
+                const status = await aggregateGitStatus(project, multi, 'full').catch(() => null);
+                return { pushed, sha, status };
+            }
             const result = await gitOperationService.pushBranch(project, branchName);
             const status = await gitOperationService.getStatus(project).catch(() => null);
             return { ...result, status };

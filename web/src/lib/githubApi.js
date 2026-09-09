@@ -57,11 +57,15 @@ export const discardFiles = (projectId, files) =>
     body: JSON.stringify({ files }),
   });
 
-export const pushBranch = (projectId, branch) =>
-  request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/push`, {
+export const pushBranch = (projectId, branch, repoId) => {
+  const body = { branch };
+  // 多仓库：repoId 指定时只推该仓库（per-repo push），缺省推全部仓库
+  if (repoId) body.repo_id = repoId;
+  return request(`/api/v1/projects/${encodeURIComponent(projectId)}/git/push`, {
     method: 'POST',
-    body: JSON.stringify({ branch }),
+    body: JSON.stringify(body),
   });
+};
 
 export const pullLatest = (projectId, options = {}) => {
   const body = {};

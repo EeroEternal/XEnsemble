@@ -70,7 +70,10 @@
     "no_author": "No author identity set",
     "untracked_dir_files_one": "{{count}} file",
     "untracked_dir_files_other": "{{count}} files",
-    "changes_truncated": "Too many changes — showing a subset; remaining directories collapsed"
+    "changes_truncated": "Too many changes — showing a subset; remaining directories collapsed",
+    "changed_count": "{{count}} changed",
+    "no_changes_repo": "No changes",
+    "primary_repo_badge": "primary"
   },
   "dialog": {
     "stage_commit_title": "Stage & commit changes",

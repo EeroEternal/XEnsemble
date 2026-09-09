@@ -131,6 +131,9 @@
   "toast": {
     "committed": "Changes committed.",
     "pushed": "Changes pushed.",
+    "repos_pushed": "{{count}} repositories pushed.",
+    "repo_pushed": "{{repo}} pushed.",
+    "push_failed_repo": "Failed to push {{repo}}: {{error}}",
     "pulled": "Changes pulled.",
     "pr_created": "Pull request created.",
     "rebase_conflict": "Rebase failed: conflicts with target branch. Please resolve locally and push again.",

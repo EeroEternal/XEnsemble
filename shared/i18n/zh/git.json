@@ -129,6 +129,9 @@
   "toast": {
     "committed": "更改已提交。",
     "pushed": "更改已推送。",
+    "repos_pushed": "已推送 {{count}} 个仓库。",
+    "repo_pushed": "{{repo}} 已推送。",
+    "push_failed_repo": "推送 {{repo}} 失败：{{error}}",
     "pulled": "更改已拉取。",
     "pr_created": "Pull request 已创建。",
     "rebase_conflict": "Rebase 失败：与目标分支存在冲突，请在本地解决冲突后重新推送。",

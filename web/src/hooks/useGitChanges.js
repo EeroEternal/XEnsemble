@@ -152,6 +152,8 @@ export function useGitChanges(projectId, fullPollEnabledRef, sessionId, ready) {
     untracked: merged?.untracked,
     merging: merged?.merging || false,
     truncated: Boolean(merged?.truncated),
+    multiRepo: Boolean(merged?.multiRepo),
+    repos: merged?.repos || [],
     files: merged?.files || [],
     stagedFiles: merged?.stagedFiles || [],
     unstagedFiles: merged?.unstagedFiles || [],

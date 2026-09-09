@@ -157,7 +157,24 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
     setOperation('push');
     try {
       const result = await githubApi.pushBranch(projectId, status?.branch);
-      showToast('success', t('git:toast.branch_pushed', { defaultValue: 'Branch pushed.' }));
+      // 多仓库：后端返回 pushed[]，每个 repo 各自结果（含失败项）
+      if (Array.isArray(result.pushed) && result.pushed.length > 0) {
+        const failed = result.pushed.filter((p) => p.error);
+        if (failed.length > 0) {
+          showToast('error', t('git:toast.push_failed_repo', {
+            repo: failed[0].subPath,
+            error: failed[0].error,
+            defaultValue: `Failed to push ${failed[0].subPath}: ${failed[0].error}`,
+          }));
+        } else {
+          showToast('success', t('git:toast.repos_pushed', {
+            count: result.pushed.length,
+            defaultValue: `${result.pushed.length} repositories pushed.`,
+          }));
+        }
+      } else {
+        showToast('success', t('git:toast.branch_pushed', { defaultValue: 'Branch pushed.' }));
+      }
       if (result.status) {
         setStatus(result.status);
       } else {
@@ -170,7 +187,7 @@ export function useGitStatus(projectId, fullPollEnabledRef, sessionId, ready) {
     } finally {
       setOperation(null);
     }
-  }, [projectId, status?.branch, showToast, fetchStatusFull]);
+  }, [projectId, status?.branch, showToast, t, fetchStatusFull]);
 
   const pull = useCallback(async () => {
     if (!projectId) return;
