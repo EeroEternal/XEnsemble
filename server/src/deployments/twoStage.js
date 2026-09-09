@@ -2817,7 +2817,19 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
                 elapsedMs: Date.now() - Number(inFlight.createdAt || Date.now()),
             };
         }
-        // 注册表有条目但没有 building 记录（陈旧注册）→ 走新部署并接管该键
+        // 注册表有条目但没有本 session 的 building 记录 → 其他 session 正在本项目上
+        // 部署（项目级互斥）：拒绝而不是并发跑第二条流水线——部署操作的是项目级共享
+        // 沙箱，并发会互相清 worktree/杀服务/损坏并发安装的临时文件。
+        const otherSessionInFlight = await findBuildingDeployRecord(project.id, null, userId);
+        if (otherSessionInFlight) {
+            console.error(`[twoStage] deploy_in_progress: project=${project.id} requested by session=${sessionId || '-'} but in-flight deploy=${otherSessionInFlight.id} (other session)`);
+            return {
+                ok: false,
+                code: 'deploy_in_progress',
+                error: `该项目已有部署在进行中（${otherSessionInFlight.stage || 'A'} 阶段，由其他会话发起），请等它完成或到对应会话中止后再试`,
+            };
+        }
+        // 注册表有条目但项目内无任何 building 记录（陈旧注册）→ 走新部署并接管该键
     }
     // per-user 并发闸门：进行中的部署 + 运行中的预览 ≤ 该用户个人配额（admin 同普通用户，
     // 均在用户管理/个人配额里配置，避免无限制并发部署同时跑多个 VM 耗尽沙箱资源）。
@@ -2841,6 +2853,19 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
                 deploymentId: inFlight.id,
                 stage: inFlight.stage || 'A',
                 elapsedMs: Date.now() - Number(inFlight.createdAt || Date.now()),
+            };
+        }
+        // 抢注窗口内没有本 session 的 building 记录 → 其他 session 的部署刚起步（项目级
+        // 互斥）：拒绝。注意不能 unregister——键属于在飞部署，注销会破坏它的 abort 通道；
+        // 它自己结束时 finally 会注销。仅当项目内确实无任何 building 记录（对方在插入
+        // 记录前死亡）才接管该键继续新部署。
+        const otherSessionRace = await findBuildingDeployRecord(project.id, null, userId);
+        if (otherSessionRace) {
+            console.error(`[twoStage] deploy_in_progress(race): project=${project.id} requested by session=${sessionId || '-'} but in-flight deploy=${otherSessionRace.id} (other session)`);
+            return {
+                ok: false,
+                code: 'deploy_in_progress',
+                error: `该项目已有部署在进行中（${otherSessionRace.stage || 'A'} 阶段，由其他会话发起），请等它完成或到对应会话中止后再试`,
             };
         }
         // 接管：registerDeploy 已把条目覆盖为新鲜状态（aborted=false），继续新部署

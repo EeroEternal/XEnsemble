@@ -1,12 +1,18 @@
 // 进行中的一键部署注册表：供「中止部署」快速 abort 当前 auto-deploy，
 // 并统计每个用户"进行中的部署任务"数（配合 preview 配额做并发闸门）。
-// 部署与 session 强绑定：每个 (projectId, sessionId) 一条 { userId, aborted, startedAt }，
-// 多 session 并发部署时各自独立（同 project 不同 session 的部署互不干扰 abort）。
+// 部署与项目互斥绑定：一个项目同时只允许一个部署在飞（不分 session）。
+// 背景（实测事故）：同 session 的重复部署请求共享同一沙箱 VM（worktree、服务
+// 端口、工具链目录全部共享），后启动的部署 resume 时 revert worktree/杀服务
+// 进程，会毁掉前一部署正在验证的环境；并发 pnpm/go 工具链安装也会损坏同一
+// 临时文件（gzip: invalid compressed data）。跨 session 部署虽各用独立 VM，
+// 但同项目多部署仍会产生交错失败弹窗与部署记录竞态，一并串行化。
 // 部署结束（finally）必须注销释放名额。
 const activeDeploys = new Map();
 
 function deployKey(projectId, sessionId) {
-    return sessionId ? `${projectId}:${sessionId}` : projectId;
+    // sessionId 参数保留以兼容既有调用点（abort/unregister 等），但不再参与分键：
+    // 同项目同时只有一个在飞部署，abort/注销天然按项目生效。
+    return projectId;
 }
 
 function registerDeploy(projectId, userId, sessionId) {

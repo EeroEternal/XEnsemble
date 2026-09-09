@@ -199,12 +199,27 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
     // autoStartVersion：父组件"Deploy"按钮自增，本组件以它为 key 重挂载。
     // 挂载 effect 里直接 startRun——挂载与发起在同一生命周期内，无 ref 时序
     // 竞态。必须在挂载恢复 effect 之前声明（先置 requestedRef 才能跳过恢复）。
+    // ⚠️ 重放防护（实测事故）：本组件 key 含 sessionId，切 session / 重挂载时
+    // lastAutoStartRef 归零，会把"用户在别的 session 点的那一次 Deploy"当成新指令
+    // 重放——一次点击后切 session/刷新导致连续多次 auto-deploy，同 session 的重放
+    // 与在飞部署共享同一 VM，重放启动时的 revert worktree/杀服务会毁掉正在验证的
+    // 环境。autoStartVersion 按项目持久化到 sessionStorage：消费过即不再重放，
+    // 重新部署必须再次点击火箭（version 递增）。
+    const autoStartStoreKey = `xe_deploy_autostart_${projectId || 'p'}`;
     const lastAutoStartRef = useRef(0);
     useEffect(() => {
         if (!autoStartVersion || autoStartVersion === lastAutoStartRef.current) return;
+        try {
+            const consumed = Number(sessionStorage.getItem(autoStartStoreKey)) || 0;
+            if (autoStartVersion <= consumed) {
+                lastAutoStartRef.current = autoStartVersion;
+                return;
+            }
+            sessionStorage.setItem(autoStartStoreKey, String(autoStartVersion));
+        } catch { /* ignore */ }
         lastAutoStartRef.current = autoStartVersion;
         requestDeploy();
-    }, [autoStartVersion, requestDeploy]);
+    }, [autoStartVersion, requestDeploy, autoStartStoreKey]);
 
     // 挂载先查该 session 的部署状态：有进行中/已完成的 kind='deploy' 则恢复展示，不重复触发。
     // 主动部署（requestedRef=true，由 requestDeploy 触发）时跳过本逻辑。
