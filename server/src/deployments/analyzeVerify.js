@@ -18,6 +18,9 @@ const MAX_AGENT_ROUNDS = Number(process.env.OPENCODE_VERIFY_MAX_ROUNDS) || 60;
 // 不再让 LLM 反复重跑同一命令空转（xensemble 实测 LLM 连续 55 轮决定重跑 su 死循环，
 // 其中"成功命令被重复"与"失败命令被重试"都是循环形态，统一有界）。
 const REPEAT_CMD_HARD_LIMIT = Number(process.env.DEPLOY_VERIFY_REPEAT_CMD_LIMIT) || 5;
+// 触发硬上限后不再直接退出，而是注入强纠偏继续循环（60 轮是底线预算）；
+// 只有连续拦截达到此安全阀（默认 12）才真正退出交给兜底，防无限烧 token。
+const REPEAT_CMD_CIRCUIT_BREAK = Number(process.env.DEPLOY_VERIFY_REPEAT_CIRCUIT_BREAK) || 12;
 // 常见应用端口，用于给监听端口探测/后端兜底排序（findListeningBackendPort 与
 // assertAppIsServed 共用，避免两处列表漂移）。
 const COMMON_APP_PORTS = [3000, 3888, 3889, 5173, 4173, 8080, 8000, 9000, 5000, 5001, 5002, 3001, 4000, 8081, 9001];
@@ -106,14 +109,20 @@ function summarizeArgs(args) {
     return out;
 }
 
-// 语义化命令签名：剥离 shell 装饰（日志重定向、tail/echo 收尾、cd 前缀、nohup/括号包裹、后台 &，环境变量、常见 flag），
-// 只保留核心命令本身。用于跨工具调用的命令级去重——agent 换个日志文件名就绕过精确匹配的情况。
+// 语义化命令签名：剥离 shell 装饰（日志重定向、head/tee 管道收尾、echo/sleep 收尾、
+// cd 前缀、nohup/setsid、括号包裹、后台 &、环境变量前缀、常见 install flag）后，
+// 签名 = 可执行名 + 全部有效参数。
+// 参数是语义本体，不能只看命令名就判重复：cat 不同文件、node 不同入口、起服务不同
+// 端口、git 不同子命令都是不同操作。而"换个日志文件名/收尾装饰重跑"的绕过手法已被
+// 上方的装饰剥离中和（> /tmp/x.log、| tee /tmp/x.log、; tail 等不参与签名），原始
+// 去重意图（install/build 类防换皮重跑）保留。
 function normalizeCmdSig(rawCmd) {
     let c = String(rawCmd || '');
     // 去掉重定向与 2>&1 / 2>/dev/null
     c = c.replace(/\s*(?:2>&1|\d?>\/dev\/null|>>?\s*[^\s;&|]+)/g, ' ');
-    // 去掉管道收尾（| head / | tail / | grep …）
-    c = c.replace(/\s*\|\s*(?:head|tail|grep|cat|wc|awk|sed)\b[^;]*$/g, '');
+    // 去掉管道收尾（| head / | tail / | grep / | tee …）——tee 必须剥，否则
+    // `npm install | tee /tmp/a.log` 与 `| tee /tmp/b.log` 会因日志名不同绕过去重。
+    c = c.replace(/\s*\|\s*(?:head|tail|grep|cat|wc|awk|sed|tee)\b[^;]*$/g, '');
     // 去掉 ; echo / ; sleep / ; tail 等收尾装饰（到下一个 ; 为止）
     c = c.replace(/\s*;\s*(?:echo|printf|sleep|tail|head|cat|test|\[)\b[^;]*/g, ' ');
     // 去掉前导 cd X && / cd X; 以及 nohup/setsid、括号包裹、结尾 &
@@ -125,22 +134,9 @@ function normalizeCmdSig(rawCmd) {
     c = c.replace(/^\s*(?:[A-Z_][A-Z0-9_]*=[^\s;]+\s*)+/, '');
     // 去掉常见 flag：--no-audit --no-fund --prefer-offline 等
     c = c.replace(/\s*--(?:no-audit|no-fund|prefer-offline|legacy-peer-deps|frozen-lockfile)\b/g, ' ');
-    // 只保留核心命令：可执行名 + 第一个子命令（如 npm install、pnpm run build、go build）
     const parts = c.replace(/\s+/g, ' ').trim().toLowerCase().split(/\s+/);
     if (parts.length === 0) return '';
-    const main = parts[0];
-    const sub = parts[1] || '';
-    // 常见包管理器/构建工具的子命令归一化
-    if (/(npm|pnpm|yarn|bun)$/.test(main) && /^(install|ci|add|run|build)$/.test(sub)) {
-        return `${main} ${sub}`;
-    }
-    if (/(go|cargo|pip|pip3|uv|mvn|gradle)$/.test(main) && /^(build|install|run|test)$/.test(sub)) {
-        return `${main} ${sub}`;
-    }
-    if (/(make|cmake|ninja)$/.test(main)) {
-        return main;
-    }
-    return main; // 兜底只返回可执行名
+    return parts.join(' ').slice(0, 160);
 }
 
 // 泛化判定：pkill/kill 是否指向安装/构建类进程（agent 常误杀自己刚起的 install/build）。
@@ -217,8 +213,25 @@ async function runTool(tool, args, runtimeRef, workspacePath) {
         if (tool === 'read_file') {
             const path = String(args.path || '');
             if (!path) return '(no path)';
-            const c = await runtime.fs.fsRead(workspacePath, path, { runtimeRef, encoding: 'utf8' });
-            return String(c || '').slice(0, MAX_TOOL_OUTPUT);
+            let content;
+            try {
+                content = await runtime.fs.fsRead(workspacePath, path, { runtimeRef, encoding: 'utf8' });
+            } catch (e) {
+                // 反馈必须可自纠正：回显模型请求的确切路径（否则模型看不到自己的笔误，
+                // 只会盲目重试同一错误），并尽力给出相近文件名建议。
+                let hint = '';
+                try {
+                    const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) || '/' : '.';
+                    const base = path.slice(path.lastIndexOf('/') + 1).toLowerCase();
+                    const ls = await runtime.exec.exec('sh', ['-c', `ls -1 ${shellQuote(dir)} 2>/dev/null | head -60`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+                    const names = String(ls.stdout || '').split('\n').map((s) => s.trim()).filter(Boolean);
+                    const near = names.find((n) => n.toLowerCase().startsWith(base) && n.toLowerCase() !== base)
+                        || names.find((n) => n.toLowerCase().includes(base.replace(/\.[a-z0-9]+$/i, '')) && n.toLowerCase() !== base);
+                    if (near) hint = ` A similar file exists: "${dir === '/' ? `/${near}` : `${dir}/${near}`}". Use that exact name.`;
+                } catch { /* best-effort */ }
+                return `read_file failed for "${path}": ${e.message}. The exact path does not exist under /workspace — check for typos or a truncated filename/extension.${hint} Run list_dir to confirm the real filename, then retry with the exact path.`;
+            }
+            return String(content || '').slice(0, MAX_TOOL_OUTPUT);
         }
         if (tool === 'edit_file') {
             const path = String(args.path || '');
@@ -226,7 +239,11 @@ async function runTool(tool, args, runtimeRef, workspacePath) {
             if (!path) return '(no path)';
             if (path.includes('..')) return '(invalid path)';
             if (content.length > 200000) return '(content too large, max 200000 bytes)';
-            await runtime.fs.fsWrite(workspacePath, path, content, { runtimeRef });
+            try {
+                await runtime.fs.fsWrite(workspacePath, path, content, { runtimeRef });
+            } catch (e) {
+                return `edit_file failed for "${path}": ${e.message}. Verify the directory exists (list_dir) and the path is exact, then retry.`;
+            }
             return `wrote ${content.length} bytes to ${path}`;
         }
         if (tool === 'run_shell') {
@@ -1072,6 +1089,9 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
         // 监控 unknown 累计轮数，超阈值立即 break，让 MAX_ROUNDS fallback 接管。
         let unknownActions = 0;
         const MAX_UNKNOWN_ACTIONS = 3;
+        // 循环退出原因记录：warning 必须报告实际轮数与真实原因，
+        // 不能把"第 9 轮熔断"笼统说成"60 轮耗尽"误导排障方向。
+        let loopExit = null; // { round, reason } | null（null = 自然跑满轮数）
         // 阶段 B 内子阶段上报（prepare/install/build/serve/check/fix）：让前端分步展示，
         // 驱动信号来自每轮实际执行的工具/命令，不影响 verify 逻辑本身。
         let lastSubstage = null;
@@ -1183,24 +1203,33 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                 if (prev && lastEditRound < prev.round) {
                     trail.push({ round, action: 'repeat_cmd', cmd: dupSig, prevOk: prev.ok });
                     const evidence = prev.evidence || '';
-                    // 硬上限：同一条命令被拦截累计 >= REPEAT_CMD_HARD_LIMIT 次 → 直接进兜底，
-                    // 不再给 LLM 机会继续空转（成功命令的重跑与失败命令的重试同样计数）。
                     const rptKey = prev.ok ? `ok:${dupSig}` : `fail:${dupSig}`;
                     const rptN = (repeatCmdCounts.get(rptKey) || 0) + 1;
                     repeatCmdCounts.set(rptKey, rptN);
-                    if (rptN >= REPEAT_CMD_HARD_LIMIT) {
+                    if (rptN >= REPEAT_CMD_CIRCUIT_BREAK) {
+                        // 最终安全阀（默认 12 次，远高于原 5）：极端情况下模型无视一切纠偏
+                        // 持续空转，此时才提前退出交给兜底，避免无限烧 LLM token。
                         messages.push({
                             role: 'user',
-                            content: `You have been blocked from re-running \`${dupSig}\` ${rptN} times in a row with no file edits. The platform will now verify the app directly. If the app is already started or healthy, output your final answer with the current status; otherwise state the real blocker in finalStderr.`,
+                            content: `You have been blocked from re-running \`${dupSig}\` ${rptN} times and every corrective hint was ignored. The platform will now verify the app directly. If the app is already started or healthy, output your final answer with the current status; otherwise state the real blocker in finalStderr.`,
                         });
-                        console.error(`[analyzeVerify] breaking verify loop: \`${dupSig}\` blocked ${rptN} times (hard limit ${REPEAT_CMD_HARD_LIMIT})`);
+                        console.error(`[analyzeVerify] circuit break: \`${dupSig}\` blocked ${rptN} times (limit ${REPEAT_CMD_CIRCUIT_BREAK})`);
+                        loopExit = { round: round + 1, reason: `重复命令熔断（\`${dupSig}\` 被拦 ${rptN} 次，模型持续未纠正）` };
                         break;
                     }
                     if (!prev.ok) {
                         // 同一失败命令再次出现：升级为"重新探测启动命令"强提醒（≥2 次重复失败）
                         const fails = (repeatFailCounts.get(dupSig) || 0) + 1;
                         repeatFailCounts.set(dupSig, fails);
-                        if (fails >= 2) {
+                        if (rptN >= REPEAT_CMD_HARD_LIMIT) {
+                            // 达到原硬上限不再直接退出（60 轮预算内让模型继续尝试），
+                            // 而是注入强纠偏：指出重复模式 + 给出具体可行的替代动作。
+                            messages.push({
+                                role: 'user',
+                                content: `CRITICAL: \`${dupSig}\` has now been blocked ${rptN} times — repeating it or trivial variants is FORBIDDEN. Retrying the identical command will be blocked again and wastes rounds. Change strategy NOW, pick ONE: (1) the command references a file/path that may not exist — run \`ls -la\` in the relevant directory (or list_dir) to see the REAL filenames, then use the exact name; (2) read the last error output above carefully and fix the ROOT CAUSE with edit_file; (3) run a DIFFERENT diagnostic command that you have not tried yet; (4) if the app is actually running/healthy, verify it with curl and output final; (5) if truly stuck, output final with ok:false and the REAL error in finalStderr.`,
+                            });
+                            console.error(`[analyzeVerify] round ${round}: strong corrective nudge for \`${dupSig}\` (blocked ${rptN} times)`);
+                        } else if (fails >= 2) {
                             messages.push({
                                 role: 'user',
                                 content: `You have retried \`${dupSig}\` ${fails} times and it keeps failing (round ${prev.round}), with no file edits since. STOP retrying it. This is likely the WRONG start command (multica-style projects fail with "./server: No such file" or "unknown command" because the real entry point differs). RE-DISCOVER the real start command from the project: read README / SELF_HOSTING.md / start-*.sh / Makefile \`run:\`/\`start:\` target / \`./<binary> --help\`, and check next.config rewrites / vite proxy target for the backend port. Then start the app with the correct command.`,
@@ -1441,6 +1470,7 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
         console.error(`[analyzeVerify] round ${round}: UNKNOWN action "${String(parsed.action).slice(0, 30)}" content_len=${String(llmResult.content || '').length} (unknownActions=${unknownActions}/${MAX_UNKNOWN_ACTIONS})`);
         if (unknownActions >= MAX_UNKNOWN_ACTIONS) {
             console.error(`[analyzeVerify] breaking verify loop: ${unknownActions} consecutive UNKNOWN actions (LLM output malformed or stale state)`);
+            loopExit = { round: round + 1, reason: `连续 ${unknownActions} 轮输出未知 action（LLM 输出畸形或上下文状态失效）` };
             break;
         }
         messages.push({ role: 'user', content: 'Unknown action. Respond with a single tool call or the final answer JSON.' });
@@ -1495,22 +1525,26 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
         }
     }
     const ok = lastResult ? lastResult.ok : fallbackOk;
-    console.error('[analyzeVerify] MAX ROUNDS reached; fallback ok=', fallbackOk, 'appPort=', appPort, 'trail=', JSON.stringify(trail.slice(-24)));
+    const usedRounds = loopExit ? loopExit.round : MAX_AGENT_ROUNDS;
+    const exitDesc = loopExit
+        ? `第 ${loopExit.round} 轮提前退出（${loopExit.reason}）`
+        : `跑满 ${MAX_AGENT_ROUNDS} 轮`;
+    console.error('[analyzeVerify] verify loop ended:', exitDesc, '; fallback ok=', fallbackOk, 'appPort=', appPort, 'trail=', JSON.stringify(trail.slice(-24)));
     return {
         ...(lastResult || { ok, tested: [], finalStderr: '', summary: '' }),
         ok,
         appPort,
         source: 'ai',
         warning: fallbackOk
-            ? `AI 自动修复达到轮数上限（${MAX_AGENT_ROUNDS} 轮），但按计划直接执行确认服务可用`
+            ? `AI 自动修复${exitDesc}，但按计划直接执行确认服务可用`
             : (fallbackFailed
-                ? `AI 自动修复达到轮数上限（${MAX_AGENT_ROUNDS} 轮），已按计划直跑定位到失败步骤`
-                : `AI 自动修复达到轮数上限（${MAX_AGENT_ROUNDS} 轮），未能给出最终结论`),
+                ? `AI 自动修复${exitDesc}，已按计划直跑定位到失败步骤`
+                : `AI 自动修复${exitDesc}，未能给出最终结论`),
         finalStderr: concreteStderr,
         fallback: fallbackResult || null,
         trail: trail.slice(-40),
         messages: trimContext(messages),
-        roundsUsed: MAX_AGENT_ROUNDS,
+        roundsUsed: usedRounds,
     };
 }
 
