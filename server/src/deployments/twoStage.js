@@ -2117,15 +2117,13 @@ printf 'registry=https://registry.npmmirror.com\\n' > /root/.npmrc 2>/dev/null |
 # 的 apps/desktop 使 pnpm install 卡满 20 分钟超时）；.npmrc 的 electron_mirror 会被
 # electron/@electron/get 读取，走 npmmirror 镜像
 printf 'electron_mirror=https://npmmirror.com/mirrors/electron/\\n' >> /root/.npmrc 2>/dev/null || true
-# pnpm 预装（corepack 方案）：base 镜像无 pnpm 二进制，corepack 首次按需下载走官方源
-# （registry.npmjs.org），沙箱网络下常中断 → 缓存残缺（pnpm.cjs 缺失）→ 所有 pnpm
-# 命令 Cannot find module 崩溃（server-manage-frontend 实测，platform install 4 秒即败）。
-# 注意：npm i -g pnpm 无效——本镜像 npm prefix=/usr（bin 落 /usr/bin），PATH 优先
-# /usr/local/bin（corepack shim），装上也不生效。正确做法：COREPACK_NPM_REGISTRY 走
-# npmmirror + corepack prepare --activate，让 corepack 缓存完整、shim 指向完整版本
-# （实测 pnpm -v=9.15.9 可用）。pnpm -v 失败（shim 崩/缺失）时才触发，幂等。
-if ! pnpm -v >/dev/null 2>&1 && command -v corepack >/dev/null 2>&1; then
-  COREPACK_NPM_REGISTRY=https://registry.npmmirror.com corepack prepare pnpm@9.15.9 --activate >/dev/null 2>&1 || true
+# pnpm 预装：base 镜像无 pnpm 二进制，corepack 按需下载走官方源常中断（缓存残缺），
+# 且 corepack prepare --activate 在此镜像上激活行为异常（实测只写缓存不铺 shim，
+# pnpm 仍 not found）。确定性方案：npm 全局装 pnpm 并显式 --prefix /usr/local——
+# 本镜像 npm 默认 prefix=/usr（bin 落 /usr/bin，PATH 优先 /usr/local/bin 的 corepack
+# shim 会盖住），--prefix /usr/local 强制落 /usr/local/bin（PATH 最前），实测可用。
+if ! pnpm -v >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+  npm install -g pnpm@9.15.9 --prefix /usr/local --no-audit --no-fund --registry=https://registry.npmmirror.com >/dev/null 2>&1 || true
 fi
 # pnpm 专用配置：corepack pnpm 可能不读取 /root/.npmrc，显式写 pnpm config
 if command -v pnpm >/dev/null 2>&1 || command -v corepack >/dev/null 2>&1; then
