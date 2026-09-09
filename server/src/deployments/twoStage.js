@@ -910,36 +910,22 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
     // --ignore-scripts 跳过其 postinstall，补装循环直接排除该子包。
     const electronSubs = detectElectronDesktopSubpackages(hostWorkspacePath);
     const electronSubPaths = new Set(electronSubs.map((e) => e.path));
-    const run = async (cmd, cwd, timeoutMs = 600000, useGhProxy = false, cleanFirst = false) => {
-        log(`platform install: ${cmd}${cwd ? ` (cwd=${cwd})` : ''}${useGhProxy ? ' [ghproxy fallback]' : ''}${cleanFirst ? ' [clean node_modules first]' : ''}`);
-        const clean = cwd ? `${cwd}/` : '';
-        // STALE 子包本来就要重装，旧 node_modules 只会在增量更新时引入权限/残留坑
-        // （xensemble 实测：14:22 部署的旧 node_modules 上做 npm 增量更新，建
-        // @esbuild/android-arm 目录 EACCES → 平台 install 秒失败 → 甩给 agent 修 →
-        // 修好后 agent 又陷入重装空转）。主动清空再干净安装，确定成功且更快。
-        const cleanPrefix = `rm -rf '${clean}node_modules' 2>/dev/null || true; `;
-        const execOnce = async (prefix) => {
-            try {
-                const r = await runtime.exec.exec('sh', ['-c',
-                    `${PATH_PREFIX}${useGhProxy ? GH_PROXY_ENV : MIRROR_ENV}${prefix}${cmd} > /tmp/_pi.log 2>&1; ec=$?; tail -15 /tmp/_pi.log; echo "__PI_EXIT__=\${ec}"`],
-                    {}, { runtimeRef, cwd: cwd ? `${workspacePath}/${cwd}` : workspacePath, timeoutMs });
-                const out = String(r.stdout || '');
-                const m = out.match(/__PI_EXIT__=(-?\d+)/);
-                const ec = m ? parseInt(m[1], 10) : (Number.isInteger(r.exitCode) ? r.exitCode : 1);
-                return { ec, tail: out.replace(/__PI_EXIT__=-?\d+\s*/, '').trim().slice(-800) };
-            } catch (e) {
-                return { ec: -1, tail: String(e.message).slice(0, 800) };
-            }
-        };
-        let { ec, tail } = await execOnce(cleanFirst ? cleanPrefix : '');
-        if (ec !== 0 && /EACCES|permission denied|not permitted/i.test(tail)) {
-            // 兜底（主动清后理论上不该出现）：仍 EACCES（如属主分裂/只读挂载）→ 再清一次重试
-            log(`platform install: ${cmd}${cwd ? ` (cwd=${cwd})` : ''} hit EACCES — clearing node_modules and retrying`);
-            ({ ec, tail } = await execOnce(cleanPrefix));
+    const run = async (cmd, cwd, timeoutMs = 600000, useGhProxy = false) => {
+        log(`platform install: ${cmd}${cwd ? ` (cwd=${cwd})` : ''}${useGhProxy ? ' [ghproxy fallback]' : ''}`);
+        try {
+            const r = await runtime.exec.exec('sh', ['-c',
+                `${PATH_PREFIX}${useGhProxy ? GH_PROXY_ENV : MIRROR_ENV}${cmd} > /tmp/_pi.log 2>&1; ec=$?; tail -15 /tmp/_pi.log; echo "__PI_EXIT__=\${ec}"`],
+                {}, { runtimeRef, cwd: cwd ? `${workspacePath}/${cwd}` : workspacePath, timeoutMs });
+            const out = String(r.stdout || '');
+            const m = out.match(/__PI_EXIT__=(-?\d+)/);
+            const ec = m ? parseInt(m[1], 10) : (Number.isInteger(r.exitCode) ? r.exitCode : 1);
+            const tail = out.replace(/__PI_EXIT__=-?\d+\s*/, '').trim().slice(-800);
+            cmds.push({ cmd, cwd: cwd || '.', ok: ec === 0, logTail: ec === 0 ? undefined : tail });
+            return ec === 0;
+        } catch (e) {
+            cmds.push({ cmd, cwd: cwd || '.', ok: false, logTail: String(e.message).slice(0, 800) });
+            return false;
         }
-        const ok = ec === 0;
-        cmds.push({ cmd, cwd: cwd || '.', ok, logTail: ok ? undefined : tail });
-        return ok;
     };
 
     // native 编译链预装：依赖里有 node-gyp 类原生包（node-pty/bcrypt/sharp 等）时，
@@ -1059,9 +1045,7 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
                 const workers = Array.from({ length: concurrency }, async () => {
                     while (queue.length) {
                         const sub = queue.shift();
-                        // STALE 子包：先清空该子包 node_modules 再装（干净安装，避免旧目录
-                        // 增量更新踩 EACCES/残留坑——xensemble 实测 EACCES 秒失败 + agent 空转）
-                        const subOk = await run(effectiveCmd, sub, 600000, false, true);
+                        const subOk = await run(effectiveCmd, sub);
                         if (!subOk) ok = false;
                     }
                 });
