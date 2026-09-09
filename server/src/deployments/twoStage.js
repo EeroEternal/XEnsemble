@@ -69,7 +69,11 @@ async function aptSafeInstall({ runtime, runtimeRef, workspacePath, packages, on
             + `timeout ${t} apt-get install -y -qq ${APT_SAFE_FLAGS} ${packages} > /tmp/_aptSafeInstall.log 2>&1; ec=$?; `
             + `tail -20 /tmp/_aptSafeInstall.log; rm -f /tmp/_aptSafeInstall.log; `
             + `apt-get clean 2>/dev/null || true; `
-            + `echo "__APT_EXIT__=${ec}"`;
+            // 注意 ${ec} 必须转义为 \${ec}：这是 shell 变量（ec=$? 的结果），不能让 JS
+            // 模板字符串在此处插值——ec 的 const 声明在下方，插值会抛 TDZ
+            // ReferenceError（"Cannot access 'ec' before initialization"），apt 安装
+            // 直接崩（全新沙箱预配 postgres 必走此路径，实测连续部署失败）。
+            + `echo "__APT_EXIT__=\${ec}"`;
         const r = await runtime.exec.exec('sh', ['-c', cmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: timeoutMs + 30000 });
         const out = String(r.stdout || '');
         const m = out.match(/__APT_EXIT__=(-?\d+)/);
