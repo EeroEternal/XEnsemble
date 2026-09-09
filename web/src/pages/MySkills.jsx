@@ -340,12 +340,12 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
                       <RowActionsMenu
                         label={t('skills:actions_for', { title: s.title, defaultValue: 'Actions for skill' })}
                         items={[
-                          { icon: Pencil, label: t('common:action.edit'), onClick: () => openEdit(s) },
+                          s.status !== 'active' && s.source !== 'installed' && { icon: Pencil, label: t('common:action.edit'), onClick: () => openEdit(s) },
                           s.status === 'draft' && { icon: CheckCircle, label: t('skills:action_activate', { defaultValue: 'Activate' }), onClick: () => act(() => changeStatus(s.id, 'activate'), t('skills:toast_updated', { defaultValue: 'Done.' })) },
                           s.status === 'active' && { icon: Archive, label: t('skills:action_archive', { defaultValue: 'Archive' }), onClick: () => act(() => changeStatus(s.id, 'archive'), t('skills:toast_updated', { defaultValue: 'Done.' })) },
                           s.status === 'archived' && { icon: Play, label: t('skills:action_restore', { defaultValue: 'Restore' }), onClick: () => act(() => changeStatus(s.id, 'restore'), t('skills:toast_updated', { defaultValue: 'Done.' })) },
                           // P0-2：仅 active 技能可上架（后端 skill_publish_requires_active 兜底）
-                          s.status === 'active' && { icon: s.visibility === 'public' ? ArrowDownToLine : UploadCloud, label: t(s.visibility === 'public' ? 'skills:action_unpublish' : 'skills:action_publish', { defaultValue: 'Toggle market' }), onClick: () => togglePublish(s) },
+                          s.status === 'active' && s.source !== 'installed' && { icon: s.visibility === 'public' ? ArrowDownToLine : UploadCloud, label: t(s.visibility === 'public' ? 'skills:action_unpublish' : 'skills:action_publish', { defaultValue: 'Toggle market' }), onClick: () => togglePublish(s) },
                           s.updateInfo?.hasUpdate && { icon: ArrowUpCircle, label: t('skills:action_sync', { defaultValue: 'Sync to latest' }), onClick: () => handleSync(s) },
                           { icon: Trash2, label: t('common:action.delete'), danger: true, onClick: () => handleDelete(s) },
                         ].filter(Boolean)}

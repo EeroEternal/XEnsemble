@@ -245,6 +245,17 @@ async function listMySkills(userId, { status = null, q = '' } = {}) {
     // 安装技能标注源更新状态（P2 forkedFrom 更新检测）
     for (const item of items) {
         if (item.source !== 'installed' || !item.forkedFrom) continue;
+        // 旧数据回填：安装时 sourceHash 缺失则从源计算并补写
+        if (!item.sourceHash) {
+            try {
+                const src = await getSkill(userId, item.forkedFrom, { allowPublic: true });
+                const hash = computeSourceHash(src.content, src.scripts);
+                await db.update(schema.skills)
+                    .set({ sourceHash: hash, updatedAt: Date.now() })
+                    .where(eq(schema.skills.id, item.id));
+                item.sourceHash = hash;
+            } catch (_) { /* 源不可达则跳过 */ }
+        }
         const info = await checkInstallUpdate(userId, item);
         if (info) item.updateInfo = info;
     }
@@ -298,6 +309,17 @@ async function attachAuthorName(skill) {
 async function updateSkill(userId, skillId, patch = {}) {
     const skill = await getSkill(userId, skillId);
     requireOwner(skill, userId);
+
+    if (skill.status === 'active') {
+        const err = new Error('active skills cannot be edited (archive the skill first)');
+        err.statusCode = 409;
+        throw err;
+    }
+    if (skill.source === 'installed') {
+        const err = new Error('installed skills cannot be edited (sync from source instead)');
+        err.statusCode = 409;
+        throw err;
+    }
 
     const next = {};
     if (patch.title !== undefined) {
@@ -404,6 +426,12 @@ async function publishSkill(userId, skillId) {
         err.statusCode = 400;
         throw err;
     }
+    if (skill.source === 'installed') {
+        const err = new Error('installed skills cannot be published to the market');
+        err.code = 'skill_publish_installed';
+        err.statusCode = 400;
+        throw err;
+    }
     // 0021/P2：发布门槛——只有能落盘的技能才允许上架（格式合法 + 置信度达标），
     // 避免低质量 auto draft 或非法格式直接进公共市场。
     const { isLandableSkill } = require('./skillInjector');
@@ -492,17 +520,31 @@ async function listMarket({ q = '', category = null, sort = 'hot', page = 1, pag
     if (excludeUserId && items.length > 0) {
         const sourceIds = items.map((s) => s.id);
         const forkRows = await db
-            .select({ forkedFrom: schema.skills.forkedFrom, sourceHash: schema.skills.sourceHash })
+            .select({ id: schema.skills.id, forkedFrom: schema.skills.forkedFrom, sourceHash: schema.skills.sourceHash })
             .from(schema.skills)
             .where(and(
                 eq(schema.skills.userId, excludeUserId),
                 inArray(schema.skills.forkedFrom, sourceIds),
             ));
-        const forkMap = new Map(forkRows.map((f) => [f.forkedFrom, f.sourceHash]));
+        const forkMap = new Map(forkRows.map((f) => [f.forkedFrom, { id: f.id, sourceHash: f.sourceHash }]));
+        // 用原始行（含 content/scripts）做 hash 比较，避免 mapMarketRow 丢失字段
+        const sourceMap = new Map(listResult.map((r) => [r.id, r]));
         for (const s of items) {
             if (!forkMap.has(s.id)) continue;
+            const src = sourceMap.get(s.id);
+            if (!src) continue;
             s.isInstalled = true;
-            s.hasUpdate = forkMap.get(s.id) !== s.sourceHash;
+            const fork = forkMap.get(s.id);
+            let forkHash = fork.sourceHash;
+            if (!forkHash) {
+                forkHash = computeSourceHash(src.content, src.scripts);
+                await db.update(schema.skills)
+                    .set({ sourceHash: forkHash, updatedAt: Date.now() })
+                    .where(eq(schema.skills.id, fork.id));
+                s.hasUpdate = false;
+            } else {
+                s.hasUpdate = forkHash !== computeSourceHash(src.content, src.scripts);
+            }
         }
     }
 
@@ -550,7 +592,17 @@ async function installSkill(userId, skillId) {
             eq(schema.skills.forkedFrom, source.id),
         ))
         .limit(1);
-    if (existing[0]) return mapRow(existing[0]);
+    if (existing[0]) {
+        const existingSkill = mapRow(existing[0]);
+        if (!existingSkill.sourceHash) {
+            const hash = computeSourceHash(source.content, source.scripts);
+            await db.update(schema.skills)
+                .set({ sourceHash: hash, updatedAt: Date.now() })
+                .where(eq(schema.skills.id, existingSkill.id));
+            existingSkill.sourceHash = hash;
+        }
+        return existingSkill;
+    }
 
     const id = newSkillId();
     const now = Date.now();

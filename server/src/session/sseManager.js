@@ -11,7 +11,6 @@ function broadcastSse(event) {
     if (sseClients.size === 0) return;
     const data = `data: ${JSON.stringify(event)}\n\n`;
     for (const [res, userId] of sseClients) {
-        // 事件必须带 userId 且只发给匹配用户；无 userId 的事件不发（防止跨账号广播）
         if (!event.userId || event.userId !== userId) continue;
         try {
             res.write(data);

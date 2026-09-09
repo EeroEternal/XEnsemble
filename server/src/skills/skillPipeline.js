@@ -536,6 +536,15 @@ async function extractFromSession(sessionId, { userId, log = console } = {}) {
     }
     await markExtracted(sessionId);
 
+    try {
+        broadcastSse({
+            type: 'skill_draft_created',
+            skillId: skill.id,
+            title: skill.title,
+            userId: userId || session.userId,
+        });
+    } catch (_) { /* SSE 失败不影响主流程 */ }
+
     return skill;
 }
 

@@ -87,6 +87,7 @@ async function updatePreferences(userId, updates = {}) {
 
 module.exports = {
     getPreferences,
+    setPreference,
     getTerminalThemeId,
     updatePreferences,
 };
