@@ -68,7 +68,7 @@ deploy:
          export NVM_DIR=\"\$HOME/.nvm\"
          [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"
          [ -s \"\$HOME/.cargo/env\" ] && . \"\$HOME/.cargo/env\"
-         cd /home/zxs/xensemble
+         cd /home/workspace/dev/xensemble
          git fetch origin main
          git reset --hard origin/main
          DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY \
