@@ -23,6 +23,10 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 [ -s "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 
+# CN 网络直连 nodejs.org 不稳定：nvm install <major> 每次都会解析远程版本索引，
+# 拉取失败即报 "Version '22' not found"（即使本机已装该版本）。切到 npmmirror 消除该依赖。
+export NVM_NODEJS_ORG_MIRROR="${NVM_NODEJS_ORG_MIRROR:-https://npmmirror.com/mirrors/node}"
+
 echo "==> Node $(cat .nvmrc)"
 nvm install "$(cat .nvmrc)"
 nvm use "$(cat .nvmrc)"
