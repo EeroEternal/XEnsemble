@@ -158,13 +158,15 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
   const scopedAllMRs = scopedByRepo ? scopedByRepo.all : mergeRequests;
   const scopedMRs = scopedByRepo ? scopedByRepo.filtered : filteredMRs;
 
+  // 各状态计数基于当前仓库的全部 PR（未按状态筛选），保证 Open/Merged/Closed 各自显示
+  // 真实数量、All 恒为总数；而不是随当前点击的状态筛选一起变化
   const countByStatus = useMemo(() => {
-    const counts = { all: scopedMRs.length, open: 0, merged: 0, closed: 0 };
-    for (const mr of scopedMRs) {
+    const counts = { all: scopedAllMRs.length, open: 0, merged: 0, closed: 0 };
+    for (const mr of scopedAllMRs) {
       if (counts[mr.status] != null) counts[mr.status]++;
     }
     return counts;
-  }, [scopedMRs]);
+  }, [scopedAllMRs]);
 
   const PAGE_SIZE = 10;
   useEffect(() => { setPage(1); }, [statusFilter, searchQuery, activeRepoId]);
