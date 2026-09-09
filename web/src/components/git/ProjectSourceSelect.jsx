@@ -327,24 +327,6 @@ export default function ProjectSourceSelect({
                     </button>
                   );
                 })}
-                {/* 常驻确认按钮：未勾选时 disabled 占位，避免勾选后按钮突然出现导致高度跳动 */}
-                <button
-                  type="button"
-                  data-testid="pss-import-submit"
-                  onClick={submitMultiImport}
-                  disabled={selectedIds.length === 0}
-                  className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium ${
-                    selectedIds.length > 0
-                      ? 'bg-zinc-900 text-white hover:bg-zinc-800'
-                      : 'bg-zinc-100 text-zinc-400 cursor-not-allowed'
-                  }`}
-                >
-                  {selectedIds.length > 1
-                    ? t('git:import_multi_submit', { count: selectedIds.length, defaultValue: 'Import {{count}} repositories' })
-                    : selectedIds.length === 1
-                      ? t('git:import_repository', { defaultValue: 'Import Repository' })
-                      : t('git:import_multi_pick_hint', { defaultValue: 'Select repositories to import' })}
-                </button>
                 {isLoading && (
                   <div className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-400">
                     <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
@@ -421,6 +403,32 @@ export default function ProjectSourceSelect({
                 <span className="flex-1 truncate">{t('git:import_by_url', { defaultValue: 'Import by URL' })}</span>
               </button>
             )}
+          </div>
+
+          {/* 底部固定操作条：导入确认按钮常驻（不随列表滚动），未勾选时 disabled 占位，避免勾选后按钮突然出现导致高度跳动 */}
+          <div className="shrink-0 border-t border-zinc-200 bg-zinc-50/80 px-3 py-2 flex items-center justify-between gap-2">
+            {selectedIds.length > 0 && (
+              <span className="min-w-0 truncate text-xs text-zinc-500">
+                {t('git:import_multi_selected', { count: selectedIds.length, defaultValue: '{{count}} repositories selected' })}
+              </span>
+            )}
+            <button
+              type="button"
+              data-testid="pss-import-submit"
+              onClick={submitMultiImport}
+              disabled={selectedIds.length === 0}
+              className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                selectedIds.length > 0
+                  ? 'bg-zinc-900 text-white hover:bg-zinc-800'
+                  : 'border border-zinc-200 bg-zinc-50 text-zinc-400 cursor-not-allowed'
+              }`}
+            >
+              {selectedIds.length > 1
+                ? t('git:import_multi_submit', { count: selectedIds.length, defaultValue: 'Import {{count}} repositories' })
+                : selectedIds.length === 1
+                  ? t('git:import_repository', { defaultValue: 'Import Repository' })
+                  : t('git:import_multi_pick_hint', { defaultValue: 'Select repositories to import' })}
+            </button>
           </div>
         </div>
       )}
