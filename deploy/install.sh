@@ -27,9 +27,23 @@ export NVM_DIR="$HOME/.nvm"
 # 拉取失败即报 "Version '22' not found"（即使本机已装该版本）。切到 npmmirror 消除该依赖。
 export NVM_NODEJS_ORG_MIRROR="${NVM_NODEJS_ORG_MIRROR:-https://npmmirror.com/mirrors/node}"
 
-echo "==> Node $(cat .nvmrc)"
-nvm install "$(cat .nvmrc)"
-nvm use "$(cat .nvmrc)"
+# 关键：优先 nvm use（纯本地解析，不需要网络）——本机已装目标版本时零网络依赖，
+# 避免外部索引临时不可达导致 CI 偶发失败；本地确实没有时才 nvm install（走上面镜像）。
+NODE_VERSION="$(cat .nvmrc)"
+echo "==> Node ${NODE_VERSION}"
+if ! nvm use "$NODE_VERSION" >/dev/null 2>&1; then
+  echo "==> Node ${NODE_VERSION} not installed; installing (mirror=${NVM_NODEJS_ORG_MIRROR:-default})"
+  if ! nvm install "$NODE_VERSION" >&2; then
+    echo "==> ERROR: nvm install ${NODE_VERSION} failed" >&2
+    echo "    HOME=$HOME NVM_DIR=$NVM_DIR nvm_version=$(nvm --version 2>/dev/null || echo n/a)" >&2
+    timeout 15 curl -sL -o /dev/null -w "    index.tab probe: http=%{http_code} size=%{size_download}\n" \
+      "${NVM_NODEJS_ORG_MIRROR:-https://nodejs.org/dist}/index.tab" 2>&1 \
+      || echo "    index.tab probe: unreachable"
+    exit 1
+  fi
+  nvm use "$NODE_VERSION"
+fi
+node --version
 
 echo "==> Build UniGateway"
 (cd server && npm run build:gateway)

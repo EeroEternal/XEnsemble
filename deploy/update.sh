@@ -16,7 +16,11 @@ echo "==> Pull latest code from GitHub"
 git pull origin "$(git rev-parse --abbrev-ref HEAD)"
 
 echo "==> Node $(cat .nvmrc)"
-nvm use "$(cat .nvmrc)"
+# 优先本地解析（nvm use 不需要网络），本机没有目标版本时才联网安装
+if ! nvm use "$(cat .nvmrc)"; then
+  nvm install "$(cat .nvmrc)"
+  nvm use "$(cat .nvmrc)"
+fi
 
 echo "==> Server dependencies"
 (cd server && npm install)
