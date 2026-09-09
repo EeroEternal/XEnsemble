@@ -116,6 +116,10 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
       showToast('error', t('skills:toast_required', { defaultValue: 'Title and content are required' }));
       return;
     }
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(title)) {
+      showToast('error', t('skills:name_invalid', { defaultValue: 'Only lowercase letters, numbers, and hyphens allowed (e.g. my-skill)' }));
+      return;
+    }
     let scripts = [];
     try {
       scripts = textToScripts(form.scripts);
@@ -369,8 +373,11 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
           />
           <ConsoleStructuredDialogBody>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field_title', { defaultValue: 'Title' })}</label>
-              <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
+              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field_name', { defaultValue: 'Name (slug)' })}</label>
+              <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="my-skill-name" autoFocus />
+              {form.title && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(form.title) && (
+                <p className="text-xs text-red-500 mt-1">{t('skills:name_invalid', { defaultValue: 'Only lowercase letters, numbers, and hyphens allowed (e.g. my-skill)' })}</p>
+              )}
             </div>
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field_category', { defaultValue: 'Category' })}</label>

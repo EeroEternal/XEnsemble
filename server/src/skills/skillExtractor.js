@@ -13,6 +13,7 @@ const { and, eq } = require('drizzle-orm');
 const { db } = require('../db');
 const schema = require('../db/schema');
 const analyzeClient = require('../llm/analyzeClient');
+const { slugify } = require('./skillInjector');
 
 const EXTRACT_MAX_TOKENS = 1500;
 const DEDUP_MAX_TOKENS = 10;
@@ -277,10 +278,10 @@ async function extract({ summary, turns = [] }) {
         throw err;
     }
     return {
-        title: validated.name,
+        title: slugify(validated.name),
         description: validated.description,
         content: buildSkillMarkdown({
-            name: validated.name,
+            name: slugify(validated.name),
             description: validated.description,
             content: validated.body,
         }),

@@ -14,6 +14,7 @@ const { and, eq, desc, sql, or, ilike, inArray } = require('drizzle-orm');
 const { db } = require('../db');
 const schema = require('../db/schema');
 const { assertSkillSafe } = require('./skillScriptScanner');
+const { slugify } = require('./skillInjector');
 
 const CATEGORIES = ['workflow', 'convention', 'debug', 'database', 'devops', 'codegen'];
 
@@ -162,6 +163,12 @@ function validateCreate({ title, content }) {
     const trimmedContent = String(content ?? '').trim();
     if (!trimmedTitle) {
         const err = new Error('title is required');
+        err.code = 'skill_validation_failed';
+        err.statusCode = 400;
+        throw err;
+    }
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(trimmedTitle)) {
+        const err = new Error('title must be lowercase letters, numbers, and hyphens (e.g. my-skill)');
         err.code = 'skill_validation_failed';
         err.statusCode = 400;
         throw err;
@@ -852,7 +859,7 @@ async function importSkillFromPath(userId, dirPath) {
         try {
             const skill = await createSkill({
                 userId,
-                title: fm.name,
+                title: slugify(fm.name),
                 content,
                 scripts,
                 category: null,
