@@ -575,16 +575,24 @@ async function injectForSession({ userId, projectId, agentId, workspacePath, fsA
     // Claude Code 的扫描根是 <configDir>/skills，/root/.claude/skills 对它不可见），
     // 否则 /root/<agent userSkillDirs[0]>。
     if (runtimeExec && runtimeRef && carrierDir && carrierGuestRoot) {
-        try {
-            const carrierDirGuest = `${carrierGuestRoot}/${userSkillDirs[0]}`;
-            const vmSkillsDirs = vmSkillsDir ? [vmSkillsDir] : userSkillDirs.map((d) => `/root/${d}`);
-            for (const vmDir of vmSkillsDirs) {
-                await runtimeExec.exec('sh', ['-c',
+        const carrierDirGuest = `${carrierGuestRoot}/${userSkillDirs[0]}`;
+        const vmSkillsDirs = vmSkillsDir ? [vmSkillsDir] : userSkillDirs.map((d) => `/root/${d}`);
+        for (const vmDir of vmSkillsDirs) {
+            try {
+                const result = await runtimeExec.exec('sh', ['-c',
                     `rm -rf ${JSON.stringify(vmDir)} && mkdir -p ${JSON.stringify(vmDir)} `
                     + `&& cp -a ${JSON.stringify(carrierDirGuest)}/. ${JSON.stringify(vmDir)}/`],
                 {}, { runtimeRef, cwd: '/' });
+                if (result.exitCode !== 0) {
+                    console.error('[skills] VM copy non-zero exit:', result.exitCode,
+                        JSON.stringify({ vmDir, carrierDirGuest, runtimeRef }),
+                        'stderr:', (result.stderr || '').slice(0, 500));
+                }
+            } catch (e) {
+                console.error('[skills] VM copy exec failed:', e.message || e,
+                    JSON.stringify({ vmDir, carrierDirGuest, runtimeRef }));
             }
-        } catch (_) { /* VM 内复制失败不阻断（引导脚本兜底） */ }
+        }
     }
 
     // T4.3：注入成功后对入选 skills 批量 usage_count+1（审计/计数失败不阻断）

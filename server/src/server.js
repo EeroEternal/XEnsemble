@@ -1915,7 +1915,7 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
                 // 配置根被重定向到 stateDir 的 Agent（如 claude-code 的
                 // CLAUDE_CONFIG_DIR=stateDir，见 resumeSession stateEnv），
                 // 技能发现路径是 <stateDir>/skills——VM 内复制必须落到那里
-                const stateSkillsDir = agentMeta.resume?.stateEnv && sessionStateDir?.stateDirPath
+                const stateSkillsDir = resumeSpec?.stateEnv && sessionStateDir?.stateDirPath
                     ? `${sessionStateDir.stateDirPath}/skills`
                     : null;
                 const injectResult = await injectSkillsForSession({

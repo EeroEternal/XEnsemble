@@ -147,7 +147,7 @@ const DEFAULT_AGENTS = [
         cmd: 'cline',
         args: ['-i'],
         env_required: ['ANTHROPIC_API_KEY'],
-        userSkillDirs: ['.claude/skills'],
+        userSkillDirs: ['.cline/skills'],
         resume: {
             level: 'L2',
             stateEnv: 'CLINE_DATA_DIR',
