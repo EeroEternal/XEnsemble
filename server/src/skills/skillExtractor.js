@@ -102,7 +102,7 @@ function buildExtractPrompt({ overview, keyDecisions = [], filesTouched = [], tu
         '',
         'Respond with ONLY a JSON object:',
         '{',
-        '  "name": "short imperative skill name (≤100 chars)",',
+        '  "name": "imperative skill name (3-5 words, \u226460 chars, e.g. \'Run DB Migrations\', \'Fix Lint Errors\', \'Deploy to Staging\')",',
         '  "description": "one-sentence description of when to use this skill",',
         '  "content": "markdown body with ## When to use, ## Steps, ## Notes (no YAML frontmatter here)",',
         '  "tags": ["up to 5 short tags"],',
