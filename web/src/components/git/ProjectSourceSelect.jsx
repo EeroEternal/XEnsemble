@@ -160,8 +160,9 @@ export default function ProjectSourceSelect({
     if (selectedRepos.length === 1) {
       onImported?.(selectedRepos[0]);
     } else {
+      // 多仓库工作空间命名：用所有仓库名以 "+" 连接（如 repoA+repoB+repoC）
       onImported?.({
-        name: selectedRepos[0].name,
+        name: selectedRepos.map((r) => r.name).filter(Boolean).join('+'),
         repos: selectedRepos.map((r) => ({ ...r })),
       });
     }

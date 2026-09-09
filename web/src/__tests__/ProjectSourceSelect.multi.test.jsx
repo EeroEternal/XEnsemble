@@ -96,7 +96,8 @@ describe('ProjectSourceSelect 多选勾选（同前缀锁定组）', () => {
     expect(payload.repos).toHaveLength(2);
     expect(payload.repos[0].full_name).toBe('org/frontend');
     expect(payload.repos[1].full_name).toBe('org/backend');
-    expect(payload.name).toBe('frontend');
+    // 多仓库命名：所有仓库名以 "+" 连接（repoA+repoB）
+    expect(payload.name).toBe('frontend+backend');
   });
 
   it('单选提交：保持原 repo 对象形态（向后兼容）', async () => {
