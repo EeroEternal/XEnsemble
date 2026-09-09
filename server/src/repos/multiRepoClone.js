@@ -13,11 +13,21 @@
 const path = require('path');
 const { db } = require('../db/index');
 const schema = require('../db/schema');
+const workspace = require('../workspace');
 const { GitOperationService } = require('../github/GitOperationService');
 const { ProjectRepoService } = require('./ProjectRepoService');
+const { ensureGitignoreEntries } = require('../workspace/agentBootstrap');
 
 // 单仓库 clone 的硬超时（含 runtime provision / fetch / checkout 全程）
 const CLONE_TIMEOUT_MS = Number(process.env.MULTI_REPO_CLONE_TIMEOUT_MS || 10 * 60_000);
+
+/** 平台元数据目录（.xensemble/ .agents/ 技能目录）写入该仓库的 .git/info/exclude，
+ *  避免脚手架/会话落盘后以 untracked 污染 Changes 面板（多仓库每个 <subPath> 是独立 git 仓）。 */
+function ensureRepoGitExcludes(project, subPath) {
+    try {
+        ensureGitignoreEntries(path.join(workspace.projectDir(project.userId, project.id), subPath));
+    } catch { /* best-effort */ }
+}
 
 function withTimeout(promiseFactory, ms, label) {
     let timer;
@@ -67,6 +77,8 @@ async function clonePrimary(project, primary, opts) {
                 autoCommitOnExit: true,
             });
             stage(`scaffold done in ${Date.now() - t}ms`);
+            // 平台目录写入 .git/info/exclude，避免 scaffold 落盘污染 Changes 面板
+            ensureRepoGitExcludes(project, primary.subPath);
         }, CLONE_TIMEOUT_MS, `primary repo "${primary.subPath}" clone`);
         await svc.updateCloneStatus(primary.id, 'ready', null);
     } catch (err) {
@@ -93,6 +105,8 @@ async function cloneSecondary(project, repo) {
                 branch: repo.repoDefaultBranch || 'main',
             });
             stage(`clone done in ${Date.now() - t}ms`);
+            // 平台目录写入 .git/info/exclude（secondary 无 scaffold，但会话运行会落盘 .xensemble/）
+            ensureRepoGitExcludes(project, repo.subPath);
         }, CLONE_TIMEOUT_MS, `repo "${repo.subPath}" clone`);
         await svc.updateCloneStatus(repo.id, 'ready', null);
     } catch (err) {

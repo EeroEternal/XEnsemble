@@ -245,6 +245,13 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         const gitDir = path.join(mainDir, '.git');
         if (!fs.existsSync(gitDir)) return null;
 
+        // 平台元数据目录（.xensemble/ .agents/ 技能目录）写入该仓库主 .git/info/exclude——
+        // worktree 共享主仓库 exclude，会话运行落盘的 .xensemble/ 不会以 untracked 污染 Changes 面板。
+        try {
+            const { ensureGitignoreEntries } = require('../workspace/agentBootstrap');
+            ensureGitignoreEntries(mainDir);
+        } catch { /* best-effort */ }
+
         const wtDir = workspace.repoWorktreePath(project.userId, project.id, runtimeId, repo.subPath);
         if (fs.existsSync(path.join(wtDir, '.git'))) return wtDir;
 
