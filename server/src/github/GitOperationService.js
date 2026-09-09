@@ -31,14 +31,27 @@ const DIR_EXPAND_FILE_LIMIT = 50;
 // 展开后条目总量软上限：达到后剩余 untracked 目录一律保持折叠并标记 truncated。
 const MAX_EXPANDED_ENTRIES = 500;
 
+async function defaultResolveTokenCandidates(userId, repoUrl, preferredProvider) {
+    const { GitConnectionService } = require('../git/GitConnectionService');
+    return new GitConnectionService().resolveTokenCandidates(userId, repoUrl, preferredProvider);
+}
+
+/**
+ * 默认凭据解析：返回 { token, username } 或 undefined。
+ * 走 GitConnectionService.resolveTokenCandidates 的候选链，取第一个已连接候选
+ * （项目 provider → 域名匹配 → 默认 gitlab → 其余已连接 provider）。
+ * 这样即使 project.repoProvider 是 'url'（URL 导入、域名无法识别），
+ * 只要用户连接过对应域名 / gitlab 账号，远程操作也能带上凭据。
+ */
 async function defaultGetToken(project) {
     const provider = project.repoProvider;
-    if (!provider || provider === 'none' || provider === 'local_git' || provider === 'url') {
+    if (!provider || provider === 'none' || provider === 'local_git') {
         return undefined;
     }
-    const { GitConnectionService } = require('../git/GitConnectionService');
     try {
-        return await new GitConnectionService().getDecryptedToken(project.userId, provider);
+        const candidates = await defaultResolveTokenCandidates(project.userId, project.repoUrl, provider);
+        const first = candidates[0];
+        return first ? { token: first.token, username: first.username } : undefined;
     } catch (err) {
         // No connected account for this provider (e.g. URL import without
         // connecting). Fall back to unauthenticated access so public repos
@@ -46,6 +59,22 @@ async function defaultGetToken(project) {
         if (err?.message?.includes('not_connected')) return undefined;
         throw err;
     }
+}
+
+/**
+ * 判断 git 错误是否为"凭据不正确"类失败（HTTP Basic / 认证失败 / 401/403）。
+ * 只有这类失败才值得换用其他 provider 凭据重试；仓库不存在（404）、网络错误等
+ * 换凭据无意义，直接抛出。
+ */
+function isAuthFailure(err) {
+    const msg = err?.message || err?.stderr || '';
+    return /HTTP Basic: Access denied/i.test(msg)
+        || /Authentication failed/i.test(msg)
+        || /could not read (Username|Password) for/i.test(msg)
+        || /invalid username or password/i.test(msg)
+        || /authorization failed/i.test(msg)
+        || /authentication required/i.test(msg)
+        || /requested URL returned error: 40[13]/i.test(msg);
 }
 
 class GitOperationService {
@@ -60,6 +89,9 @@ class GitOperationService {
             return origEnsure(project, { ...(this._runtimeId ? { runtimeId: this._runtimeId } : {}), ...opts });
         };
         this.getToken = deps.getToken ?? defaultGetToken;
+        // 凭据候选链解析器（clone/fetch 认证失败时按序换凭据重试）。
+        // 单测可注入以控制候选；默认为 GitConnectionService.resolveTokenCandidates。
+        this.resolveTokenCandidates = deps.resolveTokenCandidates ?? defaultResolveTokenCandidates;
         // local/boxlite：workspace 在宿主机（BoxLite virtiofs），Changes 用 host git，
         // 避免依赖 VM 内是否安装 git / runtime 是否 ready。
         this.usesHostWorkspace = deps.usesHostWorkspace ?? usesHostWorkspace;
@@ -97,7 +129,14 @@ class GitOperationService {
 
     async _execGitOnce(project, args, options = {}) {
         const needsToken = options.needsToken ?? REMOTE_GIT_COMMANDS.has(args[0]);
-        const token = needsToken ? await this._resolveToken(project) : undefined;
+        // options.credential 显式指定（clone 凭据兜底链，null 表示匿名）；
+        // 未指定时才走默认解析。
+        const explicitCredential = options.credential !== undefined;
+        const credential = explicitCredential
+            ? options.credential
+            : (needsToken ? await this._resolveCredential(project) : undefined);
+        const token = credential ? credential.token : undefined;
+        const credentialUsername = credential ? credential.username : undefined;
         let hostPath = workspace.projectDir(project.userId, project.id);
         let gitDir = null;
         let workTree = null;
@@ -130,7 +169,7 @@ class GitOperationService {
 
         if (this.usesHostWorkspace()) {
             fs.mkdirSync(hostPath, { recursive: true });
-            const credentials = token ? buildCredentialEnv(token, hostPath, hostPath) : null;
+            const credentials = token ? buildCredentialEnv(token, hostPath, hostPath, { username: credentialUsername }) : null;
             try {
                 const result = await this.hostGit(hostPath, args, {
                     timeoutMs: options.timeoutMs || 120_000,
@@ -153,7 +192,7 @@ class GitOperationService {
         const ready = await this.ensureProjectRuntime(project);
         const workspacePath = ready.workspacePath;
         const runtimeRef = ready.runtime ? ready.runtime.runtimeRef : undefined;
-        const credentials = token ? buildCredentialEnv(token, hostPath, workspacePath) : null;
+        const credentials = token ? buildCredentialEnv(token, hostPath, workspacePath, { username: credentialUsername }) : null;
 
         try {
             const exec = this._execFn();
@@ -194,11 +233,64 @@ class GitOperationService {
         }
     }
 
-    async _resolveToken(project) {
+    /**
+     * 解析一次 git 调用要用的凭据，兼容两种 getToken 形态：
+     *   - 注入的 getToken 返回纯 token 字符串（单测 / 旧调用方）
+     *   - 默认解析返回 { token, username }（username 供 HTTP Basic 使用）
+     * 统一返回 { token, username } 或 undefined。
+     */
+    async _resolveCredential(project) {
         if (!this.getToken) {
             return undefined;
         }
-        return this.getToken(project);
+        const result = await this.getToken(project);
+        if (result == null) return undefined;
+        if (typeof result === 'string') {
+            return result ? { token: result } : undefined;
+        }
+        if (result && result.token) {
+            return { token: result.token, username: result.username };
+        }
+        return undefined;
+    }
+
+    /**
+     * 执行需要凭据的 git 调用（clone 的 fetch 阶段）。主凭据失败且为
+     * "凭据不正确"类错误时，按 resolveTokenCandidates 候选链换其他 provider
+     * 凭据重试，最后兜底匿名一次（公共仓库仍可克隆）。非凭据类错误
+     * （404 仓库不存在、网络错误等）不重试，直接抛出。
+     */
+    async _execGitWithCredentialFallback(project, args, repoUrl) {
+        let candidates = [];
+        try {
+            const extras = await this.resolveTokenCandidates(
+                project.userId, repoUrl || project.repoUrl, project.repoProvider,
+            );
+            for (const c of extras || []) {
+                if (c && c.token) candidates.push({ token: c.token, username: c.username });
+            }
+        } catch { /* 候选链解析失败（如未连接任何账号）→ 走主凭据 / 匿名兜底 */ }
+
+        // 候选链为空（单测注入 getToken / 解析失败）：退回默认解析的单一凭据
+        if (candidates.length === 0) {
+            try {
+                const primary = await this._resolveCredential(project);
+                if (primary && primary.token) candidates.push(primary);
+            } catch { /* token 解析失败也照常进入匿名兜底 */ }
+        }
+
+        candidates.push(null); // 匿名兜底（公共仓库 / 所有凭据均失败时最后一次尝试）
+
+        let lastErr = null;
+        for (const candidate of candidates) {
+            try {
+                return await this._execGit(project, args, { credential: candidate, needsToken: true });
+            } catch (err) {
+                lastErr = err;
+                if (!isAuthFailure(err)) throw err;
+            }
+        }
+        throw lastErr;
     }
 
     _mutate(project, fn) {
@@ -244,7 +336,10 @@ class GitOperationService {
         if (depth) {
             fetchArgs.push('--depth', String(depth));
         }
-        await this._execGit(project, fetchArgs);
+        // URL 导入可能识别不出 provider（repoProvider='url'）：凭据候选链
+        // 依次尝试「域名匹配 → 默认 gitlab → 全部已连接 provider」，凭据错误时
+        // 自动换下一候选，最后匿名兜底（公共仓库）。
+        await this._execGitWithCredentialFallback(project, fetchArgs, cleanUrl);
 
         let localBranch = branch;
         if (!localBranch) {

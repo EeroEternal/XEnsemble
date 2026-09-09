@@ -118,12 +118,20 @@ function removeAskpassScript(scriptPath) {
  * helper. Returns the env object and a no-op cleanup function (the
  * cached script is reused across calls and cleaned up on process exit).
  *
+ * When a username is supplied it is injected via git's GIT_CONFIG_*
+ * environment variables as `credential.username`. Git then uses that
+ * username without prompting, so the askpass helper only ever answers the
+ * password prompt — this avoids askpass having to distinguish localized
+ * "Username/Password" prompt text, and is required for GitLab/Gitea OAuth
+ * tokens (HTTP Basic username must be `oauth2`).
+ *
  * @param {string} token
  * @param {string} [hostPath] - host directory for the script
  * @param {string} [sandboxPath] - sandbox-visible path corresponding to hostPath
- * @returns {{ env: { GIT_ASKPASS: string, GIT_ASKPASS_TOKEN: string }, cleanup: () => void }}
+ * @param {{ username?: string }} [options]
+ * @returns {{ env: { GIT_ASKPASS: string, GIT_ASKPASS_TOKEN: string, ... }, cleanup: () => void }}
  */
-function buildCredentialEnv(token, hostPath, sandboxPath) {
+function buildCredentialEnv(token, hostPath, sandboxPath, options = {}) {
     const scriptPath = getOrCreateAskpassScript(hostPath);
     const scriptName = path.basename(scriptPath);
     const askpassSubdir = '.xensemble/git';
@@ -131,11 +139,17 @@ function buildCredentialEnv(token, hostPath, sandboxPath) {
     const sandboxScriptPath = sandboxPath
         ? path.join(sandboxPath, askpassSubdir, scriptName)
         : scriptPath;
+    const env = {
+        GIT_ASKPASS: sandboxScriptPath,
+        GIT_ASKPASS_TOKEN: token,
+    };
+    if (options.username) {
+        env.GIT_CONFIG_COUNT = '1';
+        env.GIT_CONFIG_KEY_0 = 'credential.username';
+        env.GIT_CONFIG_VALUE_0 = options.username;
+    }
     return {
-        env: {
-            GIT_ASKPASS: sandboxScriptPath,
-            GIT_ASKPASS_TOKEN: token,
-        },
+        env,
         cleanup: () => { /* cached script, reused across calls */ },
     };
 }

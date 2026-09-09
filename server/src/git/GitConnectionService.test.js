@@ -297,4 +297,85 @@ describe('GitConnectionService (PAT)', { concurrency: false }, () => {
         const fine = await service.connectWithPat(userId3, 'github', 'ghp_c');
         assert.equal(fine.warning, undefined);
     });
+
+    // ── provider 识别 & 凭据候选链 ──
+
+    it('matchProviderByUrl maps known public hosts', async () => {
+        assert.equal(await service.matchProviderByUrl('https://github.com/owner/repo.git'), 'github');
+        assert.equal(await service.matchProviderByUrl('https://gitlab.com/group/sub/repo.git'), 'gitlab');
+        assert.equal(await service.matchProviderByUrl('https://gitea.com/x/y.git'), 'gitea');
+        assert.equal(await service.matchProviderByUrl('https://codeberg.org/x/y.git'), 'gitea');
+        // www 前缀、协议无关、无 .git 后缀均不影响
+        assert.equal(await service.matchProviderByUrl('http://www.github.com/owner/repo'), 'github');
+    });
+
+    it('matchProviderByUrl returns null for unknown hosts', async () => {
+        assert.equal(await service.matchProviderByUrl('https://git.schkzy.com/owner/repo.git'), null);
+        assert.equal(await service.matchProviderByUrl('not a url'), null);
+        assert.equal(await service.matchProviderByUrl(''), null);
+    });
+
+    it('resolveTokenCandidates returns the connected provider with PAT username', async () => {
+        const userId = await createUser();
+        mockGetAuthenticatedUser = async () => ({
+            id: '42', username: 'octocat', displayName: 'Octocat', avatarUrl: null, tokenScope: 'repo',
+        });
+        await service.connectWithPat(userId, 'github', 'ghp_chain_token');
+
+        const candidates = await service.resolveTokenCandidates(
+            userId, 'https://github.com/owner/repo.git', undefined,
+        );
+        assert.equal(candidates.length, 1);
+        assert.equal(candidates[0].provider, 'github');
+        assert.equal(candidates[0].token, 'ghp_chain_token');
+        assert.equal(candidates[0].username, 'octocat'); // PAT → 远端用户名
+    });
+
+    it('resolveTokenCandidates yields nothing when no provider is connected', async () => {
+        const userId = await createUser();
+        const candidates = await service.resolveTokenCandidates(
+            userId, 'https://git.schkzy.com/owner/repo.git', 'url',
+        );
+        assert.deepEqual(candidates, []);
+    });
+
+    it('resolveTokenCandidates prefers the explicit provider over the matched one', async () => {
+        const userId = await createUser();
+        mockGetAuthenticatedUser = async () => ({
+            id: '43', username: 'octocat', displayName: 'Octocat', avatarUrl: null, tokenScope: 'repo',
+        });
+        await service.connectWithPat(userId, 'github', 'ghp_preferred');
+        const candidates = await service.resolveTokenCandidates(
+            userId, 'https://github.com/owner/repo.git', 'github',
+        );
+        assert.equal(candidates.length, 1);
+        assert.equal(candidates[0].provider, 'github');
+        assert.equal(candidates[0].token, 'ghp_preferred');
+    });
+
+    it('OAuth connection for gitlab/gitea uses oauth2 username', async () => {
+        const userId = await createUser();
+        await db.insert(schema.gitConnections).values({
+            id: `gitconn_oauth_${userId}`,
+            userId,
+            provider: 'gitlab',
+            providerConfig: null,
+            remoteUserId: '9',
+            remoteUsername: 'gl-user',
+            remoteAvatar: null,
+            accessTokenEnc: auth.encryptSecrets({ token: 'enc-gitlab-oauth' }),
+            refreshTokenEnc: null,
+            tokenScope: 'api',
+            tokenExpiresAt: null,
+            connectedAt: Date.now(),
+            lastUsedAt: Date.now(),
+            revokedAt: null,
+        });
+        const candidates = await service.resolveTokenCandidates(
+            userId, 'https://git.schkzy.com/owner/repo.git', undefined,
+        );
+        assert.equal(candidates.length, 1);
+        assert.equal(candidates[0].provider, 'gitlab');
+        assert.equal(candidates[0].username, 'oauth2'); // OAuth → oauth2
+    });
 });

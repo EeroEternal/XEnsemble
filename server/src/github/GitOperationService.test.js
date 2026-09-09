@@ -192,6 +192,77 @@ describe('GitOperationService (mock exec)', () => {
         assert.strictEqual(setUrlCall.args[3], 'https://github.com/owner/repo.git');
     });
 
+    it('cloneRepo falls back to the next credential on auth failure and tries anonymous last', async () => {
+        const fetchAttempts = [];
+        const exec = async (cmd, args, env, options) => {
+            if (args[0] === 'fetch' && args[1] === 'origin') {
+                fetchAttempts.push({ env });
+                if (fetchAttempts.length === 1) {
+                    return { exitCode: 128, stdout: '', stderr: "remote: HTTP Basic: Access denied\nfatal: Authentication failed for 'https://git.schkzy.com/x/y.git/'" };
+                }
+                if (fetchAttempts.length === 2) {
+                    return { exitCode: 128, stdout: '', stderr: "remote: HTTP Basic: Access denied\nfatal: Authentication failed for 'https://git.schkzy.com/x/y.git/'" };
+                }
+                return { exitCode: 0, stdout: '', stderr: '' };
+            }
+            if (args[0] === 'rev-parse' && args[1] === 'HEAD') {
+                return { exitCode: 0, stdout: 'sha2\n', stderr: '' };
+            }
+            return { exitCode: 0, stdout: '', stderr: '' };
+        };
+        exec.calls = [];
+        const service = new GitOperationService({
+            exec,
+            ensureProjectRuntime: async () => ({ workspacePath: '/workspace' }),
+            resolveTokenCandidates: async () => [
+                { provider: 'gitlab', token: 'token_bad', username: 'oauth2' },
+                { provider: 'github', token: 'token_github', username: 'octocat' },
+            ],
+            usesHostWorkspace: () => false,
+        });
+
+        const result = await service.cloneRepo(
+            { id: 'p1', userId: 'u1', repoProvider: 'url', repoUrl: 'https://git.schkzy.com/x/y.git' },
+            { repoUrl: 'https://git.schkzy.com/x/y.git', branch: 'master' },
+        );
+
+        assert.strictEqual(result.sha, 'sha2');
+        assert.strictEqual(fetchAttempts.length, 3, 'should try 2 credentials then anonymous');
+        assert.strictEqual(fetchAttempts[0].env.GIT_ASKPASS_TOKEN, 'token_bad');
+        assert.strictEqual(fetchAttempts[0].env.GIT_CONFIG_VALUE_0, 'oauth2');
+        assert.strictEqual(fetchAttempts[1].env.GIT_ASKPASS_TOKEN, 'token_github');
+        assert.strictEqual(fetchAttempts[2].env.GIT_ASKPASS_TOKEN, undefined, 'anonymous attempt has no askpass');
+    });
+
+    it('cloneRepo does not retry with other credentials on non-auth failures', async () => {
+        const fetchAttempts = [];
+        const exec = async (cmd, args, env, options) => {
+            if (args[0] === 'fetch' && args[1] === 'origin') {
+                fetchAttempts.push({ env });
+                return { exitCode: 128, stdout: '', stderr: "fatal: repository 'https://git.schkzy.com/x/y.git/' not found" };
+            }
+            return { exitCode: 0, stdout: '', stderr: '' };
+        };
+        const service = new GitOperationService({
+            exec,
+            ensureProjectRuntime: async () => ({ workspacePath: '/workspace' }),
+            resolveTokenCandidates: async () => [
+                { provider: 'gitlab', token: 'token_bad', username: 'oauth2' },
+                { provider: 'github', token: 'token_github', username: 'octocat' },
+            ],
+            usesHostWorkspace: () => false,
+        });
+
+        await assert.rejects(
+            () => service.cloneRepo(
+                { id: 'p1', userId: 'u1', repoProvider: 'url' },
+                { repoUrl: 'https://git.schkzy.com/x/y.git', branch: 'master' },
+            ),
+            (err) => /not found/.test(err.message),
+        );
+        assert.strictEqual(fetchAttempts.length, 1, 'non-auth failure should not retry');
+    });
+
     it('createBranch checks out a new branch and returns its sha', async () => {
         const exec = makeMockExec((args) => {
             if (args[0] === 'rev-parse' && args[1] === 'HEAD') {

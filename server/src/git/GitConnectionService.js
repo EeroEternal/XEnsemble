@@ -7,7 +7,7 @@ const auth = require('../auth/index');
 const { recordEvent } = require('../events/recordEvent');
 const PlatformSettings = require('../admin/PlatformSettings');
 const PlatformSecrets = require('../admin/PlatformSecrets');
-const { getProvider, hasProvider } = require('./providers/registry');
+const { getProvider, hasProvider, listProviders } = require('./providers/registry');
 
 const STATE_TTL_MS = 5 * 60 * 1000;
 
@@ -575,6 +575,91 @@ class GitConnectionService {
             github_username: row.provider === 'github' ? row.remoteUsername : undefined,
             github_avatar: row.provider === 'github' ? row.remoteAvatar : undefined,
         };
+    }
+
+    /**
+     * 根据仓库 URL 推断应使用哪个 provider 的凭据：
+     * 1) 公开托管域名（github.com / gitlab.com / gitea.com / codeberg.org）直接映射；
+     * 2) 自建实例与各 provider 配置的 apiBase 主机名比对（如 gitlab apiBase
+     *    配置为 http://git.schkzy.com 时，该域名的仓库即视为 gitlab）；
+     * 3) 均未命中返回 null —— 调用方可按"默认 gitlab / 遍历全部已连接 provider"兜底。
+     */
+    async matchProviderByUrl(repoUrl) {
+        let hostname = null;
+        try {
+            hostname = new URL(String(repoUrl || '')).hostname.toLowerCase().replace(/^www\./, '');
+        } catch {
+            return null;
+        }
+        if (!hostname) return null;
+
+        const knownHosts = {
+            'github.com': 'github',
+            'gitlab.com': 'gitlab',
+            'gitea.com': 'gitea',
+            'codeberg.org': 'gitea',
+        };
+        if (knownHosts[hostname]) return knownHosts[hostname];
+
+        for (const name of listProviders()) {
+            const config = await getProviderConfig(name);
+            if (!config || !config.apiBase) continue;
+            try {
+                const apiHost = new URL(config.apiBase).hostname.toLowerCase().replace(/^www\./, '');
+                if (apiHost === hostname) return name;
+            } catch { /* apiBase 非法则跳过 */ }
+        }
+        return null;
+    }
+
+    /**
+     * 构建某用户针对该仓库的凭据候选链（按优先级；clone/fetch 在凭据失败时
+     * 依序换用下一项重试）：
+     *   1. 项目已确定的 provider（preferredProvider）
+     *   2. 按仓库 URL 主机名匹配到的 provider（matchProviderByUrl）
+     *   3. 默认 gitlab（识别不出时按用户约定兜底猜测）
+     *   4. 其余所有已连接的 provider
+     * 只收录"已连接"的 provider；未连接 / 无有效 token 自动跳过。
+     * 每项为 { provider, token, username } —— username 供 git HTTP Basic 使用
+     * （GitLab/Gitea OAuth 必须是 'oauth2'，PAT 用远端用户名，GitHub 任意）。
+     */
+    async resolveTokenCandidates(userId, repoUrl, preferredProvider) {
+        const candidates = [];
+        const seen = new Set();
+        const isRealProvider = (name) => name && !['url', 'none', 'local_git'].includes(name);
+        const push = async (name) => {
+            if (!name || seen.has(name)) return;
+            seen.add(name);
+            try {
+                const token = await this.getDecryptedToken(userId, name);
+                if (!token) return;
+                const connection = await this.getConnection(userId, name);
+                candidates.push({
+                    provider: name,
+                    token,
+                    username: this._credentialUsername(name, connection),
+                });
+            } catch { /* 未连接 / token 无效，跳过该候选 */ }
+        };
+
+        if (isRealProvider(preferredProvider)) await push(preferredProvider);
+        const matched = await this.matchProviderByUrl(repoUrl);
+        if (matched && matched !== preferredProvider) await push(matched);
+        await push('gitlab');
+        const connections = await this.listConnections(userId).catch(() => []);
+        for (const c of connections) await push(c.provider);
+        return candidates;
+    }
+
+    _credentialUsername(providerName, connection) {
+        if (!connection) return null;
+        // PAT：HTTP Basic 用户名用远端用户名（GitLab/Gitea 接受任意非空用户名 + PAT 作密码）
+        if (connection.connection_type === 'pat') {
+            return connection.remote_username || null;
+        }
+        // OAuth token 作密码时，GitLab/Gitea 的 HTTP Basic 用户名必须是 'oauth2'
+        if (providerName === 'gitlab' || providerName === 'gitea') return 'oauth2';
+        return null; // GitHub：用户名任意，askpass 会回退用 token
     }
 
     async _pruneExpiredStates() {

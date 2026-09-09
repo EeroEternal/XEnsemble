@@ -427,10 +427,17 @@ function registerGitRoutes(fastify) {
         let connection;
         let repoInfo;
         if (parsedUrl) {
-            // URL import: no account connection needed. If a connection for the
-            // inferred provider happens to exist, use its token for the clone
-            // (helps with private repos); otherwise clone publicly.
-            const resolvedProvider = hasProvider(parsedUrl.provider) ? parsedUrl.provider : 'url';
+            // URL import: no account connection needed. If a provider can be
+            // identified for this URL (known host, or apiBase hostname match)
+            // and the user has a connection for it, use its token for the
+            // clone (helps with private repos); otherwise clone publicly.
+            // 识别不出时默认按 gitlab 处理（用户约定：域名未知 → gitlab 兜底）。
+            const matchedProvider = await connectionService.matchProviderByUrl(parsedUrl.cloneUrl);
+            let resolvedProvider = hasProvider(parsedUrl.provider) ? parsedUrl.provider : (matchedProvider || 'url');
+            if (resolvedProvider === 'url') {
+                const glConn = await connectionService.getConnection(request.user.id, 'gitlab').catch(() => null);
+                if (glConn) resolvedProvider = 'gitlab';
+            }
             try {
                 connection = await connectionService.getConnection(request.user.id, resolvedProvider).catch(() => null);
                 token = connection ? await connectionService.getDecryptedToken(request.user.id, resolvedProvider).catch(() => null) : null;
@@ -500,7 +507,13 @@ function registerGitRoutes(fastify) {
                     if (r.repo_url) {
                         const parsed = resolveRepoUrl(r.repo_url);
                         if (!parsed) throw new Error('invalid repo_url');
-                        const resolvedProvider = hasProvider(parsed.provider) ? parsed.provider : 'url';
+                        // 与单仓库 URL 导入一致：域名识别 → 默认 gitlab 兜底
+                        const matched = await connectionService.matchProviderByUrl(parsed.cloneUrl);
+                        let resolvedProvider = hasProvider(parsed.provider) ? parsed.provider : (matched || 'url');
+                        if (resolvedProvider === 'url') {
+                            const glConn = await connectionService.getConnection(request.user.id, 'gitlab').catch(() => null);
+                            if (glConn) resolvedProvider = 'gitlab';
+                        }
                         itemInfo = {
                             cloneUrl: parsed.cloneUrl,
                             fullName: parsed.fullName,
