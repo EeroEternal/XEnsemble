@@ -83,11 +83,15 @@ function serveStatic(req, res) {
                 return fs.createReadStream(p).pipe(res);
             }
             if (!err && st.isDirectory()) return send(path.join(p, 'index.html'));
-            // SPA history fallback
+            // SPA history fallback：深链（/login 等）回源 index.html。必须与主页一样走
+            // rewriteHtml（注入 <base> + 路由引导 shim + 资源相对化），否则深链首屏拿到
+            // 绝对路径资源与带前缀 pathname，Router 匹配不到根路由 → 白屏。
             const idx = path.join(distDir, 'index.html');
             if (spaFallback && fs.existsSync(idx)) {
+                let html = fs.readFileSync(idx, 'utf8');
+                html = rewriteHtml(html);
                 res.writeHead(200, { 'Content-Type': MIME['.html'] });
-                return fs.createReadStream(idx).pipe(res);
+                return res.end(html);
             }
             res.writeHead(404); res.end('Not found');
         });
@@ -117,7 +121,11 @@ const PREVIEW_RUNTIME_SCRIPT = `<script>
   var localRe = /^https?:\\/\\/(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\])(:\\d+)?/i;
   // 当前页面若挂在 /preview/<id>/ 子路径下，改写时保留该前缀（如 /preview/<id>/api/...），
   // 否则浏览器把 http://127.0.0.1:3888/api/... 直接打向宿主根 → 401。
+  // 优先用路由引导 shim 在剥前缀前捕获的精确 base（__xePreviewBase）：剥前缀后
+  // location.pathname 已不含 /preview/<id>/，动态读取会拿空，导致请求退化为无前缀路径
+  // （落"最新部署"路由，多预览时有歧义）。shim 未注入时回退动态读取。
   function previewBase() {
+    if (window.__xePreviewBase) return window.__xePreviewBase;
     var m = /^\\/preview\\/[^/?#]+\\//.exec(location.pathname);
     return m ? m[0] : '';
   }
@@ -152,6 +160,39 @@ const PREVIEW_RUNTIME_SCRIPT = `<script>
 
 const zlib = require('zlib');
 
+// 路由引导 shim：解决"路径前缀挂载"下客户端 Router 白屏的通用修复。
+//
+// 根因：平台把应用挂在 /preview/<id>/ 子路径下（一个端口隔离多个预览），但应用自身的
+// 客户端 Router（Next 无 basePath、react-router 无 basename）只认根路由。相对导航
+// （href="./login"、router.push('login')）解析出带前缀的"幽灵路径" /preview/<id>/login，
+// Router 拿 location.pathname 去匹配根路由表 → 匹配不到 → 渲染空白页（无 JS 异常，
+// 控制台无报错）。服务端反代只能转换"请求路径"（已完备：剥前缀转发、资源相对化、
+// API/WS 改写），无法改变浏览器里 Router 看到的 pathname —— 前缀只存在于应用自己的
+// 构建产物里。因此必须在浏览器侧引导：首屏用 history.replaceState 把前缀从地址栏剥掉，
+// Router 启动时看到的就是根路径，任意框架（Next/react-router/vue-router/…）通用。
+//
+// 安全性：
+//  - 使用服务端注入的精确 base（含随机 deploymentId），不可能误伤应用自身的 /preview/... 路由；
+//  - __xePreviewBase 在剥前缀"前"捕获，供运行时改写脚本保持 API/WS 的精确部署前缀；
+//  - 仅在独立窗口（self===top）写 sessionStorage 标记 xe_preview_dep：嵌套 xensemble 的
+//    pop-out 剥前缀后 URL 不再命中预览正则，控制台 auth.js 靠该标记维持 sessionStorage
+//    隔离（防止跨部署 token 串扰）；iframe 内跳过写标记，避免共享 sessionStorage 污染
+//    父控制台的上下文判定；
+//  - 注入在 <head> 开标签后：inline 同步脚本在解析期执行，必然先于应用全部外链脚本
+//    （Next 水合、react-router 初始化），Router 首屏即看到剥前缀后的根路径。
+const ROUTE_SHIM_SCRIPT = `<script>
+(function () {
+  if (window.__xeRouteShim) return; window.__xeRouteShim = true;
+  var BASE = __XE_PREVIEW_BASE__;
+  window.__xePreviewBase = BASE;
+  try { if (window.top === window.self) sessionStorage.setItem('xe_preview_dep', BASE); } catch (e) {}
+  if (location.pathname.indexOf(BASE) === 0) {
+    var rest = location.pathname.slice(BASE.length - 1) || '/';
+    try { history.replaceState(history.state, '', rest + location.search + location.hash); } catch (e) {}
+  }
+})();
+</script>`;
+
 // 解压响应体：代理到 dev server / 后端时常见 gzip/br/deflate 压缩。
 // 必须解压后再做 HTML 改写，否则改写后的内容与 content-encoding 头不匹配，
 // 浏览器按压缩解包会失败（ERR_CONTENT_DECODING_FAILED）→ 白屏。
@@ -171,6 +212,13 @@ function rewriteHtml(html) {
     if (liveBase && !/<base\s/i.test(html)) {
         const base = liveBase.replace(/\/$/, '') + '/';
         html = html.replace(/(<head[^>]*>)/i, `$1\n    <base href="${base}">`);
+    }
+    // 路由引导 shim：注入在 <head> 最早处（先于应用全部脚本），剥掉 /preview/<id>/ 前缀，
+    // 让客户端 Router 首屏看到根路径（详见 ROUTE_SHIM_SCRIPT 注释）。
+    if (liveBase && !html.includes('__xeRouteShim')) {
+        const base = liveBase.replace(/\/$/, '') + '/';
+        const shim = ROUTE_SHIM_SCRIPT.replace('__XE_PREVIEW_BASE__', JSON.stringify(base));
+        html = html.replace(/(<head[^>]*>)/i, `$1\n${shim}`);
     }
     html = html.replace(/(src|href)="\/(?!api\/|preview\/|@vite\/)/g, '$1="./');
     if (!html.includes('__xensemblePreviewPatched')) {
