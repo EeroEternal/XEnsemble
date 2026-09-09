@@ -807,11 +807,6 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                             className={`flex items-center gap-1.5 min-w-0 text-left ${consoleButtonFocusClass}`}
                           >
                             <span className="truncate text-[11px] font-semibold text-zinc-800">{repo.subPath}</span>
-                            {repo.isPrimary && (
-                              <span className="shrink-0 px-1 py-px rounded bg-blue-50 border border-blue-200 text-[9px] font-medium text-blue-600">
-                                {t('workspace:label.primary_repo_badge', { defaultValue: 'primary' })}
-                              </span>
-                            )}
                             {repo.branch && (
                               <span className="truncate font-mono text-[10px] text-zinc-400">{repo.branch}</span>
                             )}

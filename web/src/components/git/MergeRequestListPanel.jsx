@@ -316,11 +316,6 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
               <div key={g.id} className="border-b border-zinc-200">
                 <div className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100/80 sticky top-0 z-10 border-b border-zinc-200">
                   <span className="truncate text-[11px] font-semibold text-zinc-800">{g.subPath}</span>
-                  {g.isPrimary && (
-                    <span className="shrink-0 px-1 py-px rounded bg-blue-50 border border-blue-200 text-[9px] font-medium text-blue-600">
-                      {t('workspace:label.primary_repo_badge', { defaultValue: 'primary' })}
-                    </span>
-                  )}
                   <span className="ml-auto shrink-0 text-[10px] text-zinc-400">{g.mrs.length}</span>
                 </div>
                 {g.mrs.length > 0 ? (

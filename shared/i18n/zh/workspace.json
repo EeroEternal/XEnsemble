@@ -71,8 +71,7 @@
     "untracked_dir_files_other": "{{count}} 个文件",
     "changes_truncated": "变更过多，仅显示部分变更；其余目录已折叠",
     "changed_count": "{{count}} 项更改",
-    "no_changes_repo": "无更改",
-    "primary_repo_badge": "主仓库"
+    "no_changes_repo": "无更改"
   },
   "dialog": {
     "stage_commit_title": "暂存并提交更改",
