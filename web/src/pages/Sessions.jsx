@@ -620,13 +620,18 @@ export default React.forwardRef(function Sessions({
         const importPayload = {
           provider: repos[0].provider,
           name: importedProject.name || repos[0].name,
-          repos: repos.map((r, i) => ({
-            repo_full_name: r.full_name,
-            repo_provider: r.provider,
-            sub_path: r.name,
-            branch: r.default_branch,
-            is_primary: i === 0,
-          })),
+          repos: repos.map((r, i) => {
+            const base = {
+              sub_path: r.sub_path || r.name,
+              branch: r.default_branch,
+              is_primary: i === 0,
+            };
+            // URL 导入项走 repo_url 分支（无需账户连接）；勾选导入项走 repo_full_name
+            if (r.repo_url) {
+              return { ...base, repo_url: r.repo_url, role: 'custom' };
+            }
+            return { ...base, repo_full_name: r.full_name, repo_provider: r.provider };
+          }),
         };
         const result = await gitApi.importRepo(importPayload);
         switchWorkspace(result.id);

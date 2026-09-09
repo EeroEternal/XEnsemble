@@ -237,7 +237,7 @@
   "connect_account_hint": "连接你的 {{label}} 账户以导入仓库。",
   "oauth_admin_required": "管理员必须先配置 {{label}} OAuth，然后你才能连接。",
   "import_by_url": "通过 URL 导入",
-  "import_by_url_hint": "粘贴任意 git 仓库 URL，无需连接账户。",
+  "import_by_url_hint": "粘贴 git 仓库 URL，多个 URL 用分号 \";\" 分隔可一次导入多个仓库，无需连接账户。",
   "url_required": "仓库 URL 不能为空",
   "invalid_repo_url": "无效的仓库 URL",
   "back_to_connect": "连接账户",

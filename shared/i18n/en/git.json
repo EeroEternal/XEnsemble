@@ -238,7 +238,7 @@
   "connect_account_hint": "Connect your {{label}} account to import repositories.",
   "oauth_admin_required": "An administrator must configure {{label}} OAuth before you can connect.",
   "import_by_url": "Import by URL",
-  "import_by_url_hint": "Paste any git repository URL. No account connection needed.",
+  "import_by_url_hint": "Paste git repository URL(s). Separate multiple URLs with \";\" to import multiple repositories at once. No account connection needed.",
   "url_required": "Repository URL is required",
   "invalid_repo_url": "Invalid repository URL",
   "back_to_connect": "Connect account",

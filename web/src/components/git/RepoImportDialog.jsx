@@ -352,23 +352,54 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
   };
 
   const handleImportByUrl = async () => {
-    const url = urlOnlyInput.trim();
-    if (!url) {
-      setUrlOnlyError('Repository URL is required');
+    const raw = urlOnlyInput.trim();
+    if (!raw) {
+      setUrlOnlyError(t('git:url_required', { defaultValue: 'Repository URL is required' }));
+      return;
+    }
+    // 支持分号 ";" 分隔多个仓库 URL，一次导入多个仓库
+    const urls = raw.split(';').map((s) => s.trim()).filter(Boolean);
+    if (urls.length === 0) {
+      setUrlOnlyError(t('git:url_required', { defaultValue: 'Repository URL is required' }));
       return;
     }
     setUrlOnlyImporting(true);
     setUrlOnlyError(null);
     try {
-      const result = await gitApi.importRepo({
-        repo_url: url,
-        name: urlOnlyName.trim() || undefined,
-        branch: urlOnlyBranch.trim() || undefined,
-        auto_create_branch: false,
-      });
+      let result;
+      if (urls.length > 1) {
+        // 多仓库：构造 repos[]（后端多仓库分支已支持每项 repo_url），
+        // 项目名留空时后端自动以 "仓库a+仓库b" 命名
+        const baseBranch = urlOnlyBranch.trim() || undefined;
+        const usedSubPaths = new Set();
+        const repos = urls.map((u, idx) => {
+          let subPath = (parseRepoUrl(u) || u).split('/').filter(Boolean).pop().replace(/\.git$/, '') || `repo-${idx + 1}`;
+          if (usedSubPaths.has(subPath)) subPath = `${subPath}-${idx + 1}`;
+          usedSubPaths.add(subPath);
+          return {
+            repo_url: u,
+            role: 'custom',
+            sub_path: subPath,
+            branch: baseBranch,
+            is_primary: idx === 0,
+          };
+        });
+        result = await gitApi.importRepo({
+          name: urlOnlyName.trim() || undefined,
+          repos,
+        });
+      } else {
+        // 单仓库：原逻辑（顶层 repo_url，向后兼容）
+        result = await gitApi.importRepo({
+          repo_url: urls[0],
+          name: urlOnlyName.trim() || undefined,
+          branch: urlOnlyBranch.trim() || undefined,
+          auto_create_branch: false,
+        });
+      }
       setImportedProjectId(result.id);
       setCloneStatus(result.status || 'cloning');
-      showToast('success', 'Import started. Cloning repository…');
+      showToast('success', t('git:import_started', { defaultValue: 'Import started. Cloning repositories…' }));
     } catch (err) {
       setUrlOnlyError(err.message || 'Import failed. Please check the repository URL.');
       setUrlOnlyImporting(false);
@@ -429,7 +460,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
           value={urlOnlyInput}
           onChange={(e) => setUrlOnlyInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !urlOnlyImporting) handleImportByUrl(); }}
-          placeholder="https://github.com/owner/repo"
+          placeholder="https://github.com/owner/repo;https://gitlab.com/owner/repo"
           className="mt-1.5 font-mono"
           disabled={urlOnlyImporting}
         />

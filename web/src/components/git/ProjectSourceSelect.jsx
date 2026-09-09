@@ -171,27 +171,51 @@ export default function ProjectSourceSelect({
   };
 
   const submitUrlImport = () => {
-    const url = urlInput.trim();
-    if (!url) {
+    const raw = urlInput.trim();
+    if (!raw) {
       setUrlError(t('git:url_required', { defaultValue: 'Repository URL is required' }));
       return;
     }
-    const name = repoNameFromUrl(url);
-    if (!name) {
+    // 支持分号 ";" 分隔多个仓库 URL，一次导入多个仓库
+    const urls = raw.split(';').map((s) => s.trim()).filter(Boolean);
+    const parsed = urls.map((u) => ({ url: u, name: repoNameFromUrl(u) }));
+    if (parsed.length === 0 || parsed.some((p) => !p.name)) {
       setUrlError(t('git:invalid_repo_url', { defaultValue: 'Invalid repository URL' }));
       return;
     }
     setUrlError(null);
-    // Record the URL selection with the same flat repo shape as
-    // handleSelectRepo. handleRepoImported wraps it as { name, repo }, and
-    // handleLaunchFromModal reads repo.repo_url to build the import payload.
-    onImported?.({
-      provider: 'url',
-      repo_url: url,
-      name,
-      full_name: name,
-      default_branch: 'main',
-    });
+    if (parsed.length > 1) {
+      // 多仓库：与多选勾选一致的多仓库形态 { name, repos[] }（上游 handleRepoImported 兼容）；
+      // 不填 default_branch，后端对每个 URL 探测真实默认分支
+      const usedSubPaths = new Set();
+      const repos = parsed.map((p, idx) => {
+        let subPath = p.name;
+        if (usedSubPaths.has(subPath)) subPath = `${subPath}-${idx + 1}`;
+        usedSubPaths.add(subPath);
+        return {
+          provider: 'url',
+          repo_url: p.url,
+          name: p.name,
+          full_name: p.name,
+          sub_path: subPath,
+          default_branch: undefined,
+        };
+      });
+      onImported?.({
+        name: parsed.map((p) => p.name).filter(Boolean).join('+'),
+        repos,
+      });
+    } else {
+      // 单仓库：保持原扁平形态（handleRepoImported 读取 repo.repo_url 构建导入 payload）
+      const { url, name } = parsed[0];
+      onImported?.({
+        provider: 'url',
+        repo_url: url,
+        name,
+        full_name: name,
+        default_branch: 'main',
+      });
+    }
     setOpen(false);
     setUrlMode(false);
     setUrlInput('');
@@ -370,7 +394,7 @@ export default function ProjectSourceSelect({
                       if (e.key === 'Enter') { e.preventDefault(); submitUrlImport(); }
                       if (e.key === 'Escape') { setUrlMode(false); setUrlInput(''); setUrlError(null); }
                     }}
-                    placeholder="https://github.com/owner/repo"
+                    placeholder="https://github.com/owner/repo;https://gitlab.com/owner/repo"
                     autoFocus
                     className="min-w-0 flex-1 text-sm px-2.5 py-1.5 rounded-md border border-zinc-300 outline-none focus:border-zinc-500 text-zinc-700 placeholder:text-zinc-400"
                   />
