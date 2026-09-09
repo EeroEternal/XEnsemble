@@ -609,6 +609,14 @@ async function startLiveDevServer({ runtimeRef, workspacePath, devKind, devDir, 
     // next/nuxt 用各自 dev 命令；CRA/webpack 等通用 npm 项目用 PORT 环境变量。
     const baseArg = base ? ` --base ${base}` : '';
     const apiBaseArg = base ? `VITE_API_BASE=${base}` : '';
+    // node_modules 可写兜底（所有 dev server 通用）：workspace 是 virtiofs idmapped 挂载，
+    // 当 node_modules 属主与运行用户分裂（如 node_modules 宿主属主 root ↔ guest 视角 1000，
+    // 而 dev server 以 guest root 跑）时，root 对宿主 root 拥有的 755 node_modules 无写权限，
+    // vite 依赖预构建（node_modules/.vite）、webpack 缓存（node_modules/.cache）等会 EACCES
+    // → dev 资源 504/白屏。启动前给 node_modules 目录加写位：幂等、只改目录权限位、不遍历
+    // 子目录；即使 prepareVitePrivilegedRun 降权未生效（setpriv 缺失/检测回退），也能保证可写。
+    const nmAbs = workspaceAbsPath(targetDir) + '/node_modules';
+    const ensureNmWritable = `chmod u+w,g+w,o+w ${nmAbs} 2>/dev/null; `;
     let startCmd;
     if (devKind === 'vite') {
         // 沙箱身份/写权限适配：源码树与 node_modules 属主不同时以 node_modules 属主跑
@@ -620,13 +628,13 @@ async function startLiveDevServer({ runtimeRef, workspacePath, devKind, devDir, 
             vitePrefix = priv.prefix;
             viteConfigArg = priv.configArg;
         } catch { /* fallback below */ }
-        startCmd = `cd ${targetDir} && ${vitePrefix}env HOME=/tmp ${apiBaseArg} npx vite${viteConfigArg} --host 0.0.0.0 --port ${livePort} --strictPort${baseArg}`;
+        startCmd = `cd ${targetDir} && ${ensureNmWritable}${vitePrefix}env HOME=/tmp ${apiBaseArg} npx vite${viteConfigArg} --host 0.0.0.0 --port ${livePort} --strictPort${baseArg}`;
     } else if (devKind === 'next') {
-        startCmd = `cd ${targetDir} && PORT=${livePort} npx next dev -H 0.0.0.0 -p ${livePort}`;
+        startCmd = `cd ${targetDir} && ${ensureNmWritable}PORT=${livePort} npx next dev -H 0.0.0.0 -p ${livePort}`;
     } else if (devKind === 'nuxt') {
-        startCmd = `cd ${targetDir} && PORT=${livePort} HOST=0.0.0.0 npx nuxt dev --port ${livePort}`;
+        startCmd = `cd ${targetDir} && ${ensureNmWritable}PORT=${livePort} HOST=0.0.0.0 npx nuxt dev --port ${livePort}`;
     } else {
-        startCmd = `cd ${targetDir} && PORT=${livePort} BROWSER=none npm run dev`;
+        startCmd = `cd ${targetDir} && ${ensureNmWritable}PORT=${livePort} BROWSER=none npm run dev`;
     }
     try {
         await runtime.exec.exec('sh', ['-c', `(setsid nohup sh -c '${startCmd}' > ${startLog} 2>&1 &) && echo started`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
