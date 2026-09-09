@@ -479,15 +479,15 @@ async function injectForSession({ userId, projectId, agentId, fsAdapter, bumpUsa
             try {
                 const result = await runtimeExec.exec('sh', ['-c',
                     `rm -rf ${JSON.stringify(vmDir)} && mkdir -p ${JSON.stringify(vmDir)} `
-                    + `&& cp -a ${JSON.stringify(carrierDirGuest)}/. ${JSON.stringify(vmDir)}/`],
+                    + `&& ln -sfn ${JSON.stringify(carrierDirGuest)}/* ${JSON.stringify(vmDir)}/`],
                 {}, { runtimeRef, cwd: '/' });
                 if (result.exitCode !== 0) {
-                    console.error('[skills] VM copy non-zero exit:', result.exitCode,
+                    console.error('[skills] VM symlink non-zero exit:', result.exitCode,
                         JSON.stringify({ vmDir, carrierDirGuest, runtimeRef }),
                         'stderr:', (result.stderr || '').slice(0, 500));
                 }
             } catch (e) {
-                console.error('[skills] VM copy exec failed:', e.message || e,
+                console.error('[skills] VM symlink exec failed:', e.message || e,
                     JSON.stringify({ vmDir, carrierDirGuest, runtimeRef }));
             }
         }

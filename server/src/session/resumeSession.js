@@ -472,7 +472,7 @@ async function resumeSession({
                     try {
                         const result = await runtime.exec.exec('sh', ['-c',
                             `test -d ${JSON.stringify(carrierDirGuest)} && rm -rf ${JSON.stringify(vmDir)} && mkdir -p ${JSON.stringify(vmDir)} `
-                            + `&& cp -a ${JSON.stringify(carrierDirGuest)}/. ${JSON.stringify(vmDir)}/`],
+                            + `&& ln -sfn ${JSON.stringify(carrierDirGuest)}/* ${JSON.stringify(vmDir)}/`],
                         {}, { runtimeRef, cwd: '/' });
                         if (result.exitCode === 0) break;
                     } catch (_) { /* 继续尝试下一个路径 */ }
