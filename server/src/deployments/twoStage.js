@@ -39,9 +39,11 @@ const CACHE_VERSION = 2;
 // apt/dpkg 防卡死统一参数（实测 verify agent 现场 apt-get 装 postgres 卡住 → 60 轮耗尽）：
 //  - DPkg::Lock::Timeout：dpkg 锁等待有界（默认无限等），避免与残留 apt 进程互卡
 //  - Acquire::Retries / Acquire::http::Timeout：网络重试/下载超时有界
-// 安装前先清理残留锁与半死 apt/dpkg 进程，避免上一轮中断残留导致新安装立刻卡死。
+// 清理残留锁：仅当"无活跃 apt/dpkg 进程"时才删锁文件（清理上次被中断留下的僵尸锁）。
+// 绝不 pkill 活跃的 apt-get/dpkg——工具链预装与 DB 预配是并行的，两个 aptSafeInstall
+// 同时跑时 pkill 会杀掉对端的 apt-get/dpkg，造成 dpkg 中断 + 反复重试/互杀（真卡死）。
 const APT_SAFE_FLAGS = '-o DPkg::Lock::Timeout=300 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::ftp::Timeout=30';
-const APT_CLEAR_LOCKS = 'pkill -9 apt-get 2>/dev/null; pkill -9 dpkg 2>/dev/null; sleep 1; rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null; true';
+const APT_CLEAR_LOCKS = 'if ! pgrep -x apt-get >/dev/null 2>&1 && ! pgrep -x dpkg >/dev/null 2>&1; then rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null; fi; true';
 
 /**
  * 防卡死的 apt 安装（通用系统依赖安装入口，postgres/mysql/build-essential 等共用）。
@@ -1250,13 +1252,31 @@ async function ensureGuestToolchains({ runtimeRef, workspacePath, toolchains, on
     // 统一走"探活 → 缺则 aptSafeInstall"逻辑，幂等且 non-fatal。
     // 数据库/缓存服务（mysql/redis 等）由 provisionDbServices 统一处理（装+启动+就绪），
     // 不在本函数重复安装，避免并行 apt 锁竞争。
+    // packages 兜底表：即使调用方漏传 packages（历史 bug），也按 tool 取默认 apt 包，
+    // 避免再次静默空转。只列沙箱（Debian bookworm）有官方包的；dart/.NET 无官方包 → 不预装。
+    const PKG_BY_TOOL = {
+        'jdk-maven': ['default-jdk', 'maven'],
+        'jdk-gradle': ['default-jdk', 'gradle'],
+        'ruby': ['ruby', 'ruby-bundler'],
+        'elixir': ['elixir'],
+        'dart': [],
+        'dotnet': [],
+    };
     const items = [];
     for (const tc of Array.isArray(toolchains) ? toolchains : []) {
         if (!tc || !tc.tool || !PROBE_CMDS[tc.tool]) continue;
-        const pkgs = Array.isArray(tc.packages) ? tc.packages : [];
-        if (pkgs.length) items.push({ id: tc.tool, evidence: tc.evidence || '', probe: PROBE_CMDS[tc.tool], packages: pkgs });
+        const fromDetector = Array.isArray(tc.packages) ? tc.packages : [];
+        const pkgs = fromDetector.length ? fromDetector : (PKG_BY_TOOL[tc.tool] || []);
+        if (pkgs.length) {
+            items.push({ id: tc.tool, evidence: tc.evidence || '', probe: PROBE_CMDS[tc.tool], packages: pkgs });
+        } else {
+            log(`toolchain ${tc.tool} detected but no installable apt package on bookworm; leaving to agent`);
+        }
     }
-    if (items.length === 0) return { ran: false, results: [] };
+    if (items.length === 0) {
+        log(`no toolchain to pre-install (detected: ${(Array.isArray(toolchains) ? toolchains : []).map((t) => t && t.tool).filter(Boolean).join(',') || 'none'})`);
+        return { ran: false, results: [] };
+    }
     const results = [];
     for (const item of items) {
         try {

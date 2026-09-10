@@ -973,19 +973,25 @@ function detectSystemDeps(hostWorkspacePath) {
     const LANG_DEP_FILES = ['package.json', 'go.mod', 'requirements.txt', 'pyproject.toml', 'Cargo.toml',
         'composer.json', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'Gemfile', 'mix.exs', 'pubspec.yaml'];
     // 构建/依赖清单 → 需预装的工具链（provision 阶段 apt 装好，verify 不再现场试错）。
-    // packages 是沙箱 apt 包名（Debian bookworm）；elixir/dart 等在沙箱镜像可能缺，预装失败时
-    // non-fatal（agent 兜底），但至少 Java/Maven 这类高频依赖能前置解决。
+    // packages 是沙箱 apt 包名（Debian bookworm）。只在有官方包时才带（jdk-maven/jdk-gradle/
+    // ruby/elixir）；dart/.NET 无官方包 → 留空数组，交给 agent / 厂商源兜底，避免每次白跑
+    // 一次必然失败的 apt（且 non-fatal 会掩盖失败）。
     const TOOLCHAIN_FILES = {
         'pom.xml': { tool: 'jdk-maven', packages: ['default-jdk', 'maven'] },
         'build.gradle': { tool: 'jdk-gradle', packages: ['default-jdk', 'gradle'] },
         'build.gradle.kts': { tool: 'jdk-gradle', packages: ['default-jdk', 'gradle'] },
         'Gemfile': { tool: 'ruby', packages: ['ruby', 'ruby-bundler'] },
         'mix.exs': { tool: 'elixir', packages: ['elixir'] },
-        'pubspec.yaml': { tool: 'dart', packages: ['dart'] },
+        'pubspec.yaml': { tool: 'dart', packages: [] },
     };
     const toolchains = [];
-    const recordToolchain = (tool, evidence) => {
-        if (tool && !toolchains.some((s) => s.tool === tool)) toolchains.push({ tool, evidence });
+    // 注意：packages 必须随 toolchain 一起透传——ensureGuestToolchains 据此 apt 预装。
+    // 早期实现 recordToolchain(tool, evidence) 只 push {tool, evidence}，把 TOOLCHAIN_FILES
+    // 里的 packages 丢了，前置预装静默空转（Java/Maven 卡死根因）。
+    const recordToolchain = (tool, packages, evidence) => {
+        if (tool && !toolchains.some((s) => s.tool === tool)) {
+            toolchains.push({ tool, packages: Array.isArray(packages) ? packages : [], evidence });
+        }
     };
     const depFiles = [];
     try {
@@ -1002,7 +1008,7 @@ function detectSystemDeps(hostWorkspacePath) {
                 if (hasFile(base, name)) {
                     depFiles.push({ sub, name });
                     const tc = TOOLCHAIN_FILES[name];
-                    if (tc) recordToolchain(tc.tool, `${name} in ${sub === '.' ? 'root' : sub}/`);
+                    if (tc) recordToolchain(tc.tool, tc.packages, `${name} in ${sub === '.' ? 'root' : sub}/`);
                 }
             }
             // .NET：*.csproj 文件名不固定（项目名），目录 glob 扫描。
@@ -1010,7 +1016,8 @@ function detectSystemDeps(hostWorkspacePath) {
                 for (const ent of fs.readdirSync(base, { withFileTypes: true })) {
                     if (ent.isFile() && /\.csproj$/.test(ent.name)) {
                         depFiles.push({ sub, name: ent.name });
-                        recordToolchain('dotnet', `${ent.name} in ${sub === '.' ? 'root' : sub}/`);
+                        // .NET SDK 在 bookworm 无官方 apt 包（需微软 repo）→ packages 留空，agent 兜底
+                        recordToolchain('dotnet', [], `${ent.name} in ${sub === '.' ? 'root' : sub}/`);
                     }
                 }
             } catch { /* ignore */ }
