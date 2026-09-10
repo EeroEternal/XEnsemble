@@ -1090,7 +1090,12 @@ function buildSystemPrompt(plan, toolchain) {
             const lines = [];
             for (const ds of plan.context.dbServices) {
                 if (!ds || ds.service === 'postgres') continue;
-                if (ds.ready) {
+                if (ds.ready && ds.adapted && ds.dsn) {
+                    // 平台已按 app 自身配置预配好库/用户：只把 host 本地化，其余（db/user/password）沿用 app。
+                    lines.push(`- ${ds.service.toUpperCase()} is ALREADY installed, started, and the database/user have been PROVISIONED BY THE PLATFORM using the app's OWN config (db=\`${ds.database}\`, user=\`${ds.user}\`)${ds.localized ? ` — the app config pointed at a non-local host, which is NOT reachable/appropriate inside the preview sandbox` : ''}. Point the app at the sandbox-local DB: local DSN \`${ds.dsn}\` (host 127.0.0.1). KEEP the app's own database/user/password — do NOT change them, ONLY the host must be 127.0.0.1${ds.localized ? ` (was \`${ds.host || 'remote'}\`)` : ''}. Prefer an env/startup override; if the stack bakes config into a build artifact (e.g. \`java -jar\` reads the jar's application.yml), override via \`--spring.datasource.url=\`/env or rebuild after editing the source. ${ds.schemaImported ? `The platform imported ${ds.schemaImported} schema file(s).` : 'If the app needs tables, look for init.sql/schema.sql and import it.'} Do NOT run CREATE USER / ALTER USER / CREATE DATABASE — it is already done.`);
+                } else if (ds.ready && ds.remote) {
+                    lines.push(`- ${ds.service.toUpperCase()}: REMOTE DB MODE is enabled (explicit opt-in) — the app keeps its configured host \`${ds.dsn || ds.host || 'remote'}\`. Ensure the sandbox can reach it; be aware of credential/data exposure.`);
+                } else if (ds.ready) {
                     lines.push(`- ${ds.service.toUpperCase()} is ALREADY installed and started by the platform inside this sandbox. Do NOT apt install / start it yourself. ${ds.connect ? `Connection: ${ds.connect}. ` : ''}Create the database/user per the app config (server/.env / application.yml / config) and run migrations directly.`);
                 } else if (ds.skipped) {
                     lines.push(`- ${ds.service.toUpperCase()}: the platform detected it but could not pre-install it (${ds.skipped}). If the app needs it, you may install/start it yourself — try the standard service command (e.g. service ${ds.service} start) and clear apt locks first if needed.`);

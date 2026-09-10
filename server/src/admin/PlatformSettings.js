@@ -21,6 +21,10 @@ const DEFAULTS = {
     session_ttl_hours: 24,
     default_terminal_theme_id: 'nord',
     disabled_terminal_theme_ids: [],
+    // preview 部署时数据库模式：
+    //   local （默认）— 在沙箱内起 DB 并本地化 host（隔离、可复现、不碰生产库）；
+    //   remote        — 保留 app 配置的远端 host（显式 opt-in，需注意可达性/凭据/数据风险）。
+    preview_db_mode: 'local',
 };
 
 async function get(key) {
@@ -70,9 +74,13 @@ async function updateAll(updates) {
         'session_ttl_hours',
         'default_terminal_theme_id',
         'disabled_terminal_theme_ids',
+        'preview_db_mode',
     ];
     if (updates.llm_auth_mode !== undefined && !['gateway', 'byok'].includes(updates.llm_auth_mode)) {
         throw Object.assign(new Error('Invalid llm_auth_mode'), { statusCode: 400 });
+    }
+    if (updates.preview_db_mode !== undefined && !['local', 'remote'].includes(updates.preview_db_mode)) {
+        throw Object.assign(new Error('Invalid preview_db_mode'), { statusCode: 400 });
     }
     if (updates.disabled_terminal_theme_ids !== undefined) {
         if (!Array.isArray(updates.disabled_terminal_theme_ids)) {
@@ -108,6 +116,7 @@ async function seedDefaults(dbConn = db) {
         ['session_ttl_hours', DEFAULTS.session_ttl_hours],
         ['default_terminal_theme_id', DEFAULTS.default_terminal_theme_id],
         ['disabled_terminal_theme_ids', DEFAULTS.disabled_terminal_theme_ids],
+        ['preview_db_mode', DEFAULTS.preview_db_mode],
     ];
     for (const [key, value] of entries) {
         await dbConn.insert(schema.platformSettings).values({

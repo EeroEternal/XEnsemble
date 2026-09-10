@@ -23,6 +23,7 @@ const deploymentService = require('./DeploymentService');
 const workspace = require('../workspace');
 const { registerDeploy, peekDeploy, unregisterDeploy, isAborted, countByUser, listProjectIdsByUser, listByUser, deployKey } = require('./activeDeploys');
 const { ensureUserQuota, getUsage } = require('../auth/PolicyService');
+const dbAdapt = require('./dbAdapt');
 const { broadcastSse } = require('../session/sseManager');
 const { db } = require('../db');
 const schema = require('../db/schema');
@@ -2251,6 +2252,115 @@ async function parseDbInfoFromGuest(runtimeRef, workspacePath) {
     return null;
 }
 
+// ── 通用：宿主侧 DB 配置发现（与 DB 类型无关）──
+// 读 spring/.env/docker-compose → dbAdapt 解析出 app 自身的 {host,port,db,user,password}。
+// 目的：把"平台预配"从 postgres 单点泛化为"按 app 配置适配任意 DB 类型"。
+const DB_CONFIG_FILE_RE = /(^|\/)(application[\w.-]*\.(ya?ml|properties)|bootstrap[\w.-]*\.(ya?ml|properties)|\.env(\..+)?|[\w.-]+\.env|docker-compose[\w.-]*\.ya?ml)$/i;
+const DB_SCAN_SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'target', 'vendor', '.next', 'out', 'coverage', '.cache', '.venv', 'venv']);
+
+function _walkFiles(root, { depth = 5, maxFiles = 60, match, collect }) {
+    const out = [];
+    if (!root || !fs.existsSync(root)) return out;
+    const walk = (dir, d) => {
+        if (d > depth || out.length >= maxFiles) return;
+        let entries = [];
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const ent of entries) {
+            if (out.length >= maxFiles) return;
+            const full = path.join(dir, ent.name);
+            if (ent.isDirectory()) {
+                if (DB_SCAN_SKIP_DIRS.has(ent.name) || ent.name.startsWith('.')) continue;
+                walk(full, d + 1);
+            } else if (match(ent.name)) {
+                collect(full, ent.name, out);
+            }
+        }
+    };
+    walk(root, 0);
+    return out;
+}
+
+function collectHostDbConfigFiles(hostWorkspacePath) {
+    return _walkFiles(hostWorkspacePath, {
+        match: (n) => DB_CONFIG_FILE_RE.test(n),
+        collect: (full, name, out) => {
+            try {
+                if (fs.statSync(full).size > 512 * 1024) return; // 跳过超大文件
+                out.push({ path: path.relative(hostWorkspacePath, full), text: fs.readFileSync(full, 'utf8') });
+            } catch { /* ignore */ }
+        },
+    });
+}
+
+function collectHostSqlFiles(hostWorkspacePath) {
+    return _walkFiles(hostWorkspacePath, {
+        maxFiles: 40,
+        match: (n) => /\.sql$/i.test(n),
+        collect: (full, name, out) => out.push(path.relative(hostWorkspacePath, full)),
+    });
+}
+
+// preview DB 模式：默认 local（沙箱内起库并本地化 host）；remote 需显式开启
+// （项目级 .xensemble/preview.json 的 dbMode > 平台级 env/setting）。不硬编码。
+async function resolvePreviewDbMode(hostWorkspacePath) {
+    try {
+        const p = path.join(hostWorkspacePath || '', '.xensemble', 'preview.json');
+        if (fs.existsSync(p)) {
+            const v = JSON.parse(fs.readFileSync(p, 'utf8'))?.dbMode;
+            if (v === 'local' || v === 'remote') return v;
+        }
+    } catch { /* ignore */ }
+    const env = String(process.env.XENSEMBLE_PREVIEW_DB_MODE || '').trim().toLowerCase();
+    if (env === 'local' || env === 'remote') return env;
+    try {
+        const v = await require('../admin/PlatformSettings').get('preview_db_mode');
+        if (v === 'local' || v === 'remote') return v;
+    } catch { /* ignore */ }
+    return 'local';
+}
+
+// schema 导入命令（按方言；best-effort）。文件里可能已带 db 限定的表名，不指定 USE。
+function buildSchemaImportCommand(dialect, conn, relPath) {
+    const d = dbAdapt.DIALECTS[dialect];
+    if (!d) return null;
+    if (dialect === 'postgres') return `su postgres -c "psql -d ${dbAdapt._internal.sqlIdent(conn.database)} -f ${dbAdapt._internal.shq(relPath)}" 2>&1 | tail -3`;
+    if (dialect === 'mysql') return `mysql -uroot -proot ${dbAdapt._internal.sqlIdent(conn.database)} < ${dbAdapt._internal.shq(relPath)} 2>&1 | tail -3`;
+    return null;
+}
+
+// 通用"应用数据库预配"：按 dialect 用 app 自身凭据建库/建用户 + 导 schema，返回本地 DSN。
+// 与具体 DB 类型无关（新增类型只需在 dbAdapt.DIALECTS 补一档）。
+async function provisionAppDatabase({ runtime, runtimeRef, workspacePath, dialect, conn, schemaFiles, onLog }) {
+    const log = (m) => { if (onLog) onLog(m); };
+    const d = dbAdapt.DIALECTS[dialect];
+    if (!d) return { adapted: false };
+    const c = dbAdapt.fillDefaults(dialect, conn || {});
+    const localized = dbAdapt.isRemoteHost(c.host);
+    const dsn = d.dsn({ host: '127.0.0.1', port: c.port, db: c.database, user: c.user, password: c.password });
+    let provisioned = false;
+    const cmd = dbAdapt.buildProvisionCommand(dialect, c);
+    if (cmd) {
+        try {
+            const r = await runtime.exec.exec('sh', ['-c', cmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 90000 });
+            provisioned = r.exitCode === 0;
+            log(`db ${dialect} provision(app-adapted): ${provisioned ? 'ok' : 'FAILED'} db=${c.database} user=${c.user}${localized ? ` (app host ${c.host} → 127.0.0.1)` : ''}`);
+        } catch (e) {
+            log(`db ${dialect} provision error: ${String(e.message || e).slice(0, 160)}`);
+        }
+    }
+    let schemaImported = 0;
+    for (const rel of (schemaFiles || [])) {
+        const importCmd = buildSchemaImportCommand(dialect, c, rel);
+        if (!importCmd) continue;
+        try {
+            const r = await runtime.exec.exec('sh', ['-c', importCmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 120000 });
+            if (r.exitCode === 0) schemaImported++;
+        } catch { /* ignore */ }
+    }
+    if (schemaImported) log(`db ${dialect}: imported ${schemaImported} schema file(s)`);
+    return { adapted: true, database: c.database, user: c.user, password: c.password, host: '127.0.0.1', port: c.port, dsn, localized, schemaImported };
+}
+
 // 沙箱内镜像源系统级配置（幂等）：apt / npm+pnpm / pip / go / cargo / maven 全部指向国内镜像。
 // 目的：guest 出国带宽受限，官方源安装动辄数分钟（go tarball 4min+、apt 大包慢、npm 全量
 // workspace install 更慢），国内镜像通常 1 分钟内完成，是首次部署超时的主要性能杠杆。
@@ -2370,7 +2480,7 @@ async function ensureDependencyExcludeInGuest(runtimeRef, workspacePath, onLog) 
 
 // 系统侧自动 provision PostgreSQL：检测项目是否需要 PG，需要则启动沙箱内 PG，
 // 并尝试从配置解析出连接信息后直接建库建用户（幂等），使 verify agent 只需跑 migration。
-async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
+async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan, appConn = null) {
     const runtime = getRuntime();
     // 单次 apt 安装 postgres 的预算（首次冷装 40 包约需 3~5 分钟；太短会在超时边界被杀，
     // 留下半装/锁残留——xensemble 实测 240s 恰好撞上边界）
@@ -2439,23 +2549,24 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
         return { ready: false, code: 'provision_error', reason: String(e.message || '').slice(0, 200), detail: null };
     }
 
-    // PG 已运行后，若能从配置解析出连接信息则直接建库建用户（幂等），免去 agent 试错。
-    // plan.configFiles 解析不到时（Go 后端等把连接串写死在脚本里），兜底扫 guest 文件。
-    const info = parseDbInfoFromPlan(plan) || await parseDbInfoFromGuest(runtimeRef, workspacePath);
-    if (info) {
-        const pqPass = String(info.pass || '').replace(/'/g, "''"); // SQL 单引号转义
-        const create = `
-            su postgres -c "psql -tAc \\"SELECT 1 FROM pg_roles WHERE rolname='${info.user}'\\"" 2>/dev/null | grep -q 1 \\
-              || su postgres -c "psql -c \\"CREATE USER ${info.user} WITH PASSWORD '${pqPass}'\\""
-            su postgres -c "psql -tAc \\"SELECT 1 FROM pg_database WHERE datname='${info.db}'\\"" 2>/dev/null | grep -q 1 \\
-              || su postgres -c "createdb -O ${info.user} ${info.db}"
-        `;
+    // PG 已运行后，用**通用适配器**解析 app 自身 {db,user,password} 建库建用户（幂等）。
+    // 优先用宿主侧 dbAdapt 解析结果（appConn），退回 plan/guest 的 postgres 解析。
+    // 建库/建用户 SQL 走 dbAdapt.buildProvisionCommand（与 mysql 等同一接口，通用）。
+    const raw = appConn
+        ? { user: appConn.user, db: appConn.database, pass: appConn.password, port: appConn.port }
+        : (parseDbInfoFromPlan(plan) || await parseDbInfoFromGuest(runtimeRef, workspacePath));
+    if (raw) {
+        const c = dbAdapt.fillDefaults('postgres', { user: raw.user, database: raw.db, password: raw.pass, port: raw.port });
         try {
-            await runtime.exec.exec('sh', ['-c', create], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
-            console.error(`[twoStage] postgres db provisioned user=${info.user} db=${info.db}`);
-            // 密码一并返回（注入 verify prompt 的 dbPassword），让 agent 直接用预配凭据配置
-            // 应用，而不是自己 su postgres 改库（xensemble 案例：LLM 反复 ALTER USER 死循环）。
-            return { ready: true, dbUser: info.user, dbName: info.db, dbPassword: info.pass || null };
+            const cmd = dbAdapt.buildProvisionCommand('postgres', c);
+            await runtime.exec.exec('sh', ['-c', cmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
+            console.error(`[twoStage] postgres db provisioned user=${c.user} db=${c.database}`);
+            // 密码一并返回（注入 verify prompt 的 dbPassword），让 agent 直接用预配凭据配置应用。
+            return {
+                ready: true, dbUser: c.user, dbName: c.database, dbPassword: c.password || null,
+                dsn: dbAdapt.DIALECTS.postgres.dsn({ host: '127.0.0.1', port: c.port, db: c.database, user: c.user, password: c.password }),
+                localized: dbAdapt.isRemoteHost(c.host),
+            };
         } catch (e) {
             console.error('[twoStage] postgres db create failed (fallback to agent):', e.message);
             return { ready: true }; // PG 已运行，建库失败则让 agent 兜底
@@ -2506,54 +2617,84 @@ const DB_SERVICE_SPECS = {
 // 对每个服务执行"探活已装 → 缺则 apt 装 → 启动 → 等就绪（最多 30s）"闭环（幂等、non-fatal）。
 // postgres 额外走 provisionPostgresIfNeeded 的建库建用户增强（返回凭据供 prompt 注入）。
 // 返回 { results: [{ service, ready, ... }] }，prompt 按服务注入状态。
-async function provisionDbServices({ runtimeRef, workspacePath, services, plan, onLog }) {
+async function provisionDbServices({ runtimeRef, workspacePath, hostWorkspacePath, services, plan, onLog }) {
     const runtime = getRuntime();
     const log = (m) => { if (onLog) onLog(m); };
     const svcList = Array.isArray(services) ? services.filter((s) => DB_SERVICE_SPECS[s]) : [];
     if (svcList.length === 0) return { results: [] };
     log(`provision db services START: ${svcList.join(',')}`);
+    // 通用（与 DB 类型无关）：从 app 自身配置解析连接信息 + 发现 schema + 解析 preview DB 模式
+    const appConns = hostWorkspacePath ? dbAdapt.detectDbConnections(collectHostDbConfigFiles(hostWorkspacePath)) : {};
+    const schemaAll = hostWorkspacePath ? collectHostSqlFiles(hostWorkspacePath) : [];
+    const dbMode = await resolvePreviewDbMode(hostWorkspacePath);
+    if (Object.keys(appConns).length) log(`app db config detected: ${Object.entries(appConns).map(([k, v]) => `${k}(${v.database}@${v.host}:${v.port}/${v.user})`).join(', ')}`);
     const results = [];
     for (const svc of svcList) {
         const spec = DB_SERVICE_SPECS[svc];
         try {
-            // postgres 增强路径：装 + 启动 + 建库建用户（provisionPostgresIfNeeded 内部权威判定，
-            // 不需要时毫秒返回；返回 ready/凭据注入 prompt）
+            let base = null;
             if (svc === 'postgres') {
-                const pg = await provisionPostgresIfNeeded(runtimeRef, workspacePath, plan);
-                results.push({ service: 'postgres', ...pg });
-                continue;
-            }
-            if (!Array.isArray(spec.pkgs) || spec.pkgs.length === 0) {
+                // 装 + 启 + 就绪 + 建库建用户（内部走通用 dbAdapt 命令，返回 ready/凭据/DSN）
+                base = await provisionPostgresIfNeeded(runtimeRef, workspacePath, plan, appConns.postgres || null);
+            } else if (!Array.isArray(spec.pkgs) || spec.pkgs.length === 0) {
                 log(`db service ${svc}: ${spec.note || 'no apt package, leaving to agent'}`);
                 results.push({ service: svc, ready: false, skipped: spec.note || 'no apt package' });
                 continue;
+            } else {
+                // 1) 探活已装
+                const ins = await runtime.exec.exec('sh', ['-c', spec.probeInstalled], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => ({ stdout: 'NO' }));
+                if (!String(ins.stdout || '').includes('YES')) {
+                    const res = await aptSafeInstall({ runtime, runtimeRef, workspacePath, packages: spec.pkgs.join(' '), onLog, timeoutMs: 420000 });
+                    if (!res.ok) {
+                        log(`db service ${svc} apt install FAILED (non-fatal): ${(res.logTail || '').slice(0, 200)}`);
+                        results.push({ service: svc, ready: false, reason: 'apt install failed' });
+                        continue;
+                    }
+                }
+                // 2) 启动 + 服务初始化（如 mariadb root 认证）
+                await runtime.exec.exec('sh', ['-c', spec.start], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 30000 }).catch(() => {});
+                if (spec.initRoot) {
+                    await runtime.exec.exec('sh', ['-c', spec.initRoot], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 }).catch(() => {});
+                }
+                // 3) 等就绪（最多 30s）
+                let up = false;
+                for (let i = 0; i < 30; i++) {
+                    await new Promise((r) => setTimeout(r, 1000));
+                    const chk = await runtime.exec.exec('sh', ['-c', spec.ready], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 8000 }).catch(() => ({ stdout: '' }));
+                    if (String(chk.stdout || '').includes('UP')) { up = true; break; }
+                }
+                base = { ready: up };
+                log(`db service ${svc}: ${up ? 'ready' : 'started but not UP in 30s (agent will handle)'}`);
             }
-            // 1) 探活已装
-            const ins = await runtime.exec.exec('sh', ['-c', spec.probeInstalled], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => ({ stdout: 'NO' }));
-            if (!String(ins.stdout || '').includes('YES')) {
-                const res = await aptSafeInstall({ runtime, runtimeRef, workspacePath, packages: spec.pkgs.join(' '), onLog, timeoutMs: 420000 });
-                if (!res.ok) {
-                    log(`db service ${svc} apt install FAILED (non-fatal): ${(res.logTail || '').slice(0, 200)}`);
-                    results.push({ service: svc, ready: false, reason: 'apt install failed' });
-                    continue;
+
+            // 通用"应用数据库适配"：SQL 类型建 app 库/用户（沿用 app 凭据，host 本地化）+ 导 schema
+            let enhanced = {};
+            const dialect = (svc === 'postgres' || svc === 'mysql') ? svc : null;
+            if (dialect && base?.ready) {
+                const conn = appConns[dialect] || {};
+                if (dbMode === 'remote') {
+                    const c = dbAdapt.fillDefaults(dialect, conn);
+                    enhanced = { adapted: false, remote: true, localized: false, database: c.database, user: c.user, dsn: conn.host ? dbAdapt.DIALECTS[dialect].dsn(c) : null };
+                    log(`db ${dialect}: remote mode — keep app host ${c.host || '(unset)'}（不本地化）`);
+                } else if (svc === 'postgres') {
+                    // postgres 建库建用户已在 provisionPostgresIfNeeded 内完成，这里补 schema 导入 + DSN
+                    const c = dbAdapt.fillDefaults(dialect, conn);
+                    let schemaImported = 0;
+                    for (const rel of dbAdapt.pickSchemaFiles(dialect, schemaAll)) {
+                        const importCmd = buildSchemaImportCommand(dialect, c, rel);
+                        if (!importCmd) continue;
+                        try { const r = await runtime.exec.exec('sh', ['-c', importCmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 120000 }); if (r.exitCode === 0) schemaImported++; } catch { /* ignore */ }
+                    }
+                    enhanced = {
+                        adapted: true, database: c.database, user: c.user, host: '127.0.0.1', port: c.port,
+                        dsn: dbAdapt.DIALECTS.postgres.dsn({ host: '127.0.0.1', port: c.port, db: c.database, user: c.user, password: c.password }),
+                        localized: dbAdapt.isRemoteHost(c.host), schemaImported,
+                    };
+                } else {
+                    enhanced = await provisionAppDatabase({ runtime, runtimeRef, workspacePath, dialect, conn, schemaFiles: dbAdapt.pickSchemaFiles(dialect, schemaAll), onLog: log });
                 }
             }
-            // 2) 启动
-            await runtime.exec.exec('sh', ['-c', spec.start], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 30000 }).catch(() => {});
-            // 2.5) 服务初始化（如有）：如 mariadb 把 root 从 unix_socket 改为 mysql_native_password，
-            //     否则 Spring Boot/远程 TCP 连不上，agent 只能现场改认证试错。幂等（失败忽略）。
-            if (spec.initRoot) {
-                await runtime.exec.exec('sh', ['-c', spec.initRoot], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 }).catch(() => {});
-            }
-            // 3) 等就绪（最多 30s，apt 后首次启动可能偏慢）
-            let up = false;
-            for (let i = 0; i < 30; i++) {
-                await new Promise((r) => setTimeout(r, 1000));
-                const chk = await runtime.exec.exec('sh', ['-c', spec.ready], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 8000 }).catch(() => ({ stdout: '' }));
-                if (String(chk.stdout || '').includes('UP')) { up = true; break; }
-            }
-            log(`db service ${svc}: ${up ? 'ready' : 'started but not UP in 30s (agent will handle)'}`);
-            results.push({ service: svc, ready: up, connect: spec.connect || null });
+            results.push({ service: svc, ready: !!base?.ready, connect: spec.connect || null, ...base, ...enhanced });
         } catch (e) {
             log(`db service ${svc} provision error (non-fatal): ${e.message?.slice(0, 200)}`);
             results.push({ service: svc, ready: false, reason: String(e.message || '').slice(0, 200) });
@@ -3574,7 +3715,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         const results = await Promise.allSettled([
             repairHostWorkspaceOwnership(hostPath), // host 侧 chown，同步快
             detectDepsCached(ref, wsPath, detected), // guest 侧 deps 探测（改动 2：传入 stack 选对应语言脚本）
-            provisionDbServices({ runtimeRef: ref, workspacePath: wsPath, services: systemDeps.services, plan, onLog: (m) => { console.error(`[twoStage] ${m}`); report({ stage: 'B', substage: 'prepare', message: m }); } }),
+            provisionDbServices({ runtimeRef: ref, workspacePath: wsPath, hostWorkspacePath: hostPath, services: systemDeps.services, plan, onLog: (m) => { console.error(`[twoStage] ${m}`); report({ stage: 'B', substage: 'prepare', message: m }); } }),
             ensureGuestToolchains({
                 runtimeRef: ref, workspacePath: wsPath, toolchains: systemDeps.toolchains || [],
                 onLog: (m) => { console.error(`[twoStage] ${m}`); report({ stage: 'B', substage: 'prepare', message: m }); },
