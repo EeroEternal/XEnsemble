@@ -163,6 +163,15 @@ const ROUTE_SHIM_SCRIPT = `<script>
   window.addEventListener('unhandledrejection', function (e) {
     xeReport('error', 'unhandledrejection: ' + String((e && e.reason && e.reason.message) || (e && e.reason) || '').slice(0, 300));
   });
+  // React hydration 失败/渲染警告走 console.error（不抛异常，window.onerror 抓不到）。
+  // Next.js 白屏最常见的就是 "Hydration failed because the initial UI does not match"。
+  var oe = console.error;
+  if (oe) {
+    console.error = function () {
+      try { xeReport('error', 'console.error: ' + Array.prototype.slice.call(arguments).join(' ').slice(0, 350)); } catch (e) {}
+      return oe.apply(console, arguments);
+    };
+  }
   var BASE = __XE_PREVIEW_BASE__;
   window.__xePreviewBase = BASE;
   xeReport('log', 'boot pathname=' + location.pathname + ' base=' + BASE);
@@ -186,13 +195,12 @@ const ROUTE_SHIM_SCRIPT = `<script>
         bodyLen = b.innerHTML.length;
       }
       docLen = document.documentElement.outerHTML.length;
-      var app = document.getElementById('__next') || document.getElementById('app') || document.getElementById('root');
-      if (app) { appHtml = app.innerHTML.slice(0, 400); }
     } catch (e) {}
-    xeReport('log', tag + ' pathname=' + location.pathname + ' title=' + JSON.stringify(document.title || '') + ' bodyKids=' + kids + ' bodyLen=' + bodyLen + ' docLen=' + docLen + ' appHtml=' + JSON.stringify(appHtml) + ' bodyText=' + JSON.stringify(txt));
+    xeReport('log', tag + ' pathname=' + location.pathname + ' title=' + JSON.stringify(document.title || '') + ' bodyKids=' + kids + ' bodyLen=' + bodyLen + ' docLen=' + docLen + ' bodyText=' + JSON.stringify(txt));
   }
   window.addEventListener('load', function () { xeDump('loaded'); });
   window.setTimeout(function () { xeDump('t+2000'); }, 2000);
+  window.setTimeout(function () { xeDump('t+5000'); }, 5000);
 })();
 </script>`;
 
