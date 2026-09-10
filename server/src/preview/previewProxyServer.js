@@ -169,8 +169,25 @@ const ROUTE_SHIM_SCRIPT = `<script>
     xeReport('log', 'shim skipped (pathname not under base)');
   }
   window.addEventListener('load', function () {
-    xeReport('log', 'loaded pathname=' + location.pathname + ' readyState=' + document.readyState);
+    var txt = '', html = '', title = '';
+    try {
+      var b = document.body;
+      txt = (b && b.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 150);
+      html = (b && b.innerHTML || '').replace(/\s+/g, ' ').slice(0, 250);
+      title = document.title || '';
+    } catch (e) {}
+    xeReport('log', 'loaded pathname=' + location.pathname + ' title=' + JSON.stringify(title) + ' bodyText=' + JSON.stringify(txt) + ' bodyHtml=' + JSON.stringify(html));
   });
+  // hydration 完成后延迟再报一次（捕获路由/数据加载后的最终渲染状态）
+  window.setTimeout(function () {
+    var txt = '', html = '';
+    try {
+      var b = document.body;
+      txt = (b && b.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 150);
+      html = (b && b.innerHTML || '').replace(/\s+/g, ' ').slice(0, 250);
+    } catch (e) {}
+    xeReport('log', 't+2000 pathname=' + location.pathname + ' bodyText=' + JSON.stringify(txt) + ' bodyHtml=' + JSON.stringify(html));
+  }, 2000);
 })();
 </script>`;
 
