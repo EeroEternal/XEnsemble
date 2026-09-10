@@ -206,14 +206,16 @@ export default function ProjectSourceSelect({
         repos,
       });
     } else {
-      // 单仓库：保持原扁平形态（handleRepoImported 读取 repo.repo_url 构建导入 payload）
+      // 单仓库：保持原扁平形态（handleRepoImported 读取 repo.repo_url 构建导入 payload）。
+      // 不填 default_branch（undefined），后端用 git ls-remote 探测真实默认分支，
+      // 避免仓库默认分支非 main（如 master）时 fetch origin main 报错。
       const { url, name } = parsed[0];
       onImported?.({
         provider: 'url',
         repo_url: url,
         name,
         full_name: name,
-        default_branch: 'main',
+        default_branch: undefined,
       });
     }
     setOpen(false);
