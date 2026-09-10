@@ -185,18 +185,28 @@ const ROUTE_SHIM_SCRIPT = `<script>
     xeReport('log', 'shim skipped (pathname not under base)');
   }
   function xeDump(tag) {
-    var txt = '', html = '', kids = 0, bodyLen = 0, docLen = 0, appHtml = '';
+    var txt = '', kids = 0, bodyLen = 0, docLen = 0, scripts = '', resBad = '', resChunk = '';
     try {
       var b = document.body;
       if (b) {
-        txt = (b.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 200);
-        html = b.innerHTML.slice(0, 600);
+        txt = (b.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120);
         kids = b.children ? b.children.length : 0;
         bodyLen = b.innerHTML.length;
       }
       docLen = document.documentElement.outerHTML.length;
+      // 页面声明的 script 标签（src + async/defer）
+      var ss = document.querySelectorAll('script[src]');
+      scripts = Array.prototype.map.call(ss, function (s) { return (s.async ? 'A' : '') + (s.defer ? 'D' : '') + ':' + (s.getAttribute('src') || '').slice(0, 90); }).join(' | ').slice(0, 700);
+      // performance resource：chunk 请求状态 + 失败资源
+      if (window.performance && performance.getEntriesByType) {
+        var rs = performance.getEntriesByType('resource') || [];
+        var js = rs.filter(function (r) { return /\.js($|\?)/.test(r.name); });
+        var failed = rs.filter(function (r) { return r.responseStatus >= 400 || r.responseStatus === 0; });
+        resChunk = 'jsReq=' + js.length + ' bad=' + failed.length;
+        resBad = failed.slice(0, 6).map(function (r) { return r.responseStatus + ':' + r.name.slice(0, 100); }).join(' | ');
+      }
     } catch (e) {}
-    xeReport('log', tag + ' pathname=' + location.pathname + ' title=' + JSON.stringify(document.title || '') + ' bodyKids=' + kids + ' bodyLen=' + bodyLen + ' docLen=' + docLen + ' bodyText=' + JSON.stringify(txt));
+    xeReport('log', tag + ' pathname=' + location.pathname + ' bodyKids=' + kids + ' bodyLen=' + bodyLen + ' docLen=' + docLen + ' scripts=[' + scripts + '] ' + resChunk + (resBad ? ' failed=[' + resBad + ']' : ''));
   }
   window.addEventListener('load', function () { xeDump('loaded'); });
   window.setTimeout(function () { xeDump('t+2000'); }, 2000);
