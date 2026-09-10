@@ -620,23 +620,20 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
                 await new Promise((r) => setTimeout(r, 5000));
                 ({ probed, results } = await probeOnce(4));
             }
-            // 000 冷启动循环：000 = 连接失败/超时，不是端点 404。dev server（vite/next dev）
-            // 首次被请求时要现场做依赖预构建（esbuild）+ 按需转换，大应用单次请求 20s+ 且
-            // 持续数分钟（xensemble 实测 21:01-21:05 期间 agent curl 每次 21-23s，4 分钟后
-            // 恢复 5.6ms；预构建结果缓存进 node_modules/.vite 后不再慢）。固定窗口一次重试
-            // 不够（warm-up 窗口 > 窗口）——改为 deadline 循环：预算内（默认 150s，
-            // DEPLOY_PROBE_000_BUDGET_MS 可调）每 10s 用 40s 窗口重探，直到出现可判定状态码
-            // （含判活的非 000）或预算耗尽。判活命中立即通过；预算耗尽仍无判活 → 走下方
-            // backendEvidence 判定。
-            // 预算默认 300s：实测 dev warm-up 窗口 4-8 分钟（21:01:29→21:05:10 三次
-            // 探测全慢，21:09 已恢复），150s 不够覆盖。
-            const probe000BudgetMs = Number(process.env.DEPLOY_PROBE_000_BUDGET_MS) || 300000;
-            const probe000StartedAt = Date.now();
-            while (results.length && has000(results) && !results.some((x) => ALIVE_STATUS(x.method, x.code)) && Date.now() - probe000StartedAt < probe000BudgetMs) {
-                const left = Math.round((probe000BudgetMs - (Date.now() - probe000StartedAt)) / 1000);
-                console.error(`[analyzeVerify] api probe has 000 (dev server cold transform — vite/esbuild warm-up takes 20s+ per request for minutes), retrying (budget ${left}s left)`);
-                await new Promise((r) => setTimeout(r, 10000));
-                ({ probed, results } = await probeOnce(40));
+            // 000 冷启动重试：000 = 连接失败/超时，不是端点 404。dev server（vite/next dev）
+            // 首次被请求时要现场做依赖预构建（esbuild）+ 按需转换，大应用单次请求 20s+
+            // （xensemble 实测 agent curl 每次 21-23s 才拿到 200）。用 40s 窗口足够覆盖单次
+            // warm-up；若仍 000（多轮 re-optimization 期间），重试最多 3 次（每轮 40s 窗口
+            // + 5s 间隔 ≈ 135s 总预算），不走 deadline 循环——真死场景 3 次 000 即可判定，
+            // 不用等 5 分钟。
+            const PROBE_000_MAX_RETRIES = Number(process.env.DEPLOY_PROBE_000_MAX_RETRIES) || 3;
+            const PROBE_000_WINDOW_SEC = Number(process.env.DEPLOY_PROBE_000_WINDOW_SEC) || 40;
+            let probe000Attempts = 0;
+            while (results.length && has000(results) && !results.some((x) => ALIVE_STATUS(x.method, x.code)) && probe000Attempts < PROBE_000_MAX_RETRIES) {
+                probe000Attempts++;
+                console.error(`[analyzeVerify] api probe has 000 (dev server cold transform — vite/esbuild warm-up), retry ${probe000Attempts}/${PROBE_000_MAX_RETRIES} with ${PROBE_000_WINDOW_SEC}s window`);
+                await new Promise((r) => setTimeout(r, 5000));
+                ({ probed, results } = await probeOnce(PROBE_000_WINDOW_SEC));
             }
             if (!results.length) return { ok: true, verdict: 'no_result', probed, endpoints: targets };
             // 5xx 优先判死：5xx = 请求真实执行到了业务/DB 层并失败（哪怕其它端点判活），
@@ -1609,7 +1606,9 @@ async function runVerifyWithoutLlm({ workspacePath, runtimeRef, plan, projectTyp
             tested.push(`serve probe: http=${code}`);
             const ok2xx = code.startsWith('2') || code.startsWith('3');
             const boxDefaultPorts = [Number(process.env.BOXLITE_DEFAULT_PREVIEW_PORT || 3000), 5173];
-            const isBoxDefaultPort = port === 5173 || (boxDefaultPorts.includes(port) && isBoxDefaultPage(body));
+            // 与 probePort 保持一致：5173 不无条件排除（vite dev server 默认端口就是 5173，
+            // 真实应用监听 5173 会被误判为沙箱默认页），改为按内容判断 box 默认欢迎页。
+            const isBoxDefaultPort = boxDefaultPorts.includes(port) && isBoxDefaultPage(body);
             if (ok2xx && (isDirectoryListing(body) || isBoxDefaultPort || !body)) {
                 const log = await runtime.exec.exec('sh', ['-c', `cat /tmp/serve.log 2>&1 | tail -60`], {}, { runtimeRef, cwd: workspacePath });
                 return { ok: false, source: 'shell', tested, finalStderr: String(log.stdout || '').slice(0, 4000), warning: 'served directory listing / box default page / empty, not the app' };
