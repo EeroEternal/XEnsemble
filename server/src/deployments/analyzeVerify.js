@@ -264,7 +264,10 @@ async function runTool(tool, args, runtimeRef, workspacePath) {
             const BIN_MIRROR_ENV = 'export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/; '
                 + 'export ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/; '
                 + 'export PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright/; ';
-            const wrapped = `export NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}"; ${BIN_MIRROR_ENV}${cmd} > /tmp/_vt.log 2>&1; ec=$?; head -200 /tmp/_vt.log; echo "__EXIT_CODE__=\${ec}"`;
+            // CI=true 一并预置：pnpm 在无 TTY 下重建 node_modules 会 ERR_PNPM_ABORTED_REMOVE_
+            // MODULES_DIR_NO_TTY 中止（multica 实测 agent 试错到第 3 轮才自己 export CI=true），
+            // 平台统一预置省掉 agent 试错；对 yarn/npm 同样是无害的标准 CI 语义。
+            const wrapped = `export CI=true; export NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}"; ${BIN_MIRROR_ENV}${cmd} > /tmp/_vt.log 2>&1; ec=$?; head -200 /tmp/_vt.log; echo "__EXIT_CODE__=\${ec}"`;
             const r = await runtime.exec.exec('sh', ['-c', wrapped], {}, {
                 runtimeRef, cwd: workspacePath, maxBuffer: 4 * 1024 * 1024,
                 timeoutMs: LONG_CMD_RE.test(cmd) ? LONG_SHELL_TIMEOUT_MS : SHELL_TIMEOUT_MS,
@@ -939,6 +942,20 @@ function buildSystemPrompt(plan, toolchain) {
             if (rv.cpp?.installed) lines.push(`C/C++ READY: gcc + cmake toolchain installed and on PATH via apt. Do NOT install build tools, do NOT change CMakeLists.txt — run cmake/make directly.`);
             if (rv.swift?.installed) lines.push(`SWIFT READY: swift ${rv.swift.current || rv.swift.required} (${rv.swift.required}) is installed and on PATH via swiftly. Do NOT install Swift, do NOT change Package.swift — run swift build directly.`);
             if (rv.zig?.installed) lines.push(`ZIG READY: zig ${rv.zig.current || rv.zig.required} (${rv.zig.required}) is installed and on PATH via ziglang.org mirror. Do NOT install Zig, do NOT change zig.mod — run zig build directly.`);
+            return lines;
+        })() : []),
+        ...(plan?.context?.toolchainResults?.results ? (() => {
+            // 平台工具链预装结果（detectSystemDeps 检测出 Java/Maven、Java/Gradle、Ruby、
+            // Elixir、Dart、.NET 等 → ensureGuestToolchains 前置 apt 装好）：
+            // 告诉 agent 已装/未装，避免它现场 apt 试错（多仓库 Spring Boot 实测卡 10+ 分钟）。
+            const lines = [];
+            for (const tc of plan.context.toolchainResults.results) {
+                if (tc.ok) {
+                    lines.push(`TOOLCHAIN READY: ${tc.tool} is pre-installed by the platform on PATH (${tc.installed ? 'platform just installed it via apt' : 'already present'}). Do NOT install it yourself (NO apt-get / apt / dpkg), do NOT change version/build files — run the ${tc.tool} command directly.`);
+                } else if (tc.tool && tc.tool.startsWith('jdk-')) {
+                    lines.push(`TOOLCHAIN ATTEMPTED (${tc.tool}): the platform tried to pre-install it but apt failed. Check whether java/mvn/gradle already exist (command -v java mvn gradle) before running build; if truly missing, installing via apt is the last resort.`);
+                }
+            }
             return lines;
         })() : []),
         'OUTPUT SIZE RULE (MANDATORY): a TOOL CALL must be ONE compact JSON under 800 characters. NEVER paste file contents, logs or commands into your JSON — use read_file / edit_file / run_shell tools for that. If you were about to write a long reply, STOP and output the short JSON tool call instead. The FINAL answer may be up to 4000 characters so you can include the key error output in finalStderr.',

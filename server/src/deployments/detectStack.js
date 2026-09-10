@@ -858,6 +858,18 @@ const SYSTEM_SERVICE_DEPS = {
         'psycopg2', 'psycopg2-binary', 'asyncpg', 'pg8000',
         // rust
         'tokio-postgres', 'postgres',
+        // java (maven/gradle，pom.xml 里的 artifact 名)
+        'postgresql', 'org.postgresql', 'spring-boot-starter-data-jpa',
+        // ruby
+        'pg',
+        // elixir
+        'postgrex',
+        // dotnet
+        'Npgsql',
+        // dart
+        'postgres',
+        // php
+        'pdo_pgsql',
     ]),
     mysql: new Set([
         // npm（mariadb 包同时服务 MariaDB）
@@ -868,17 +880,47 @@ const SYSTEM_SERVICE_DEPS = {
         'pymysql', 'mysqlclient', 'MySQLdb',
         // rust
         'mysql',
+        // java
+        'mysql-connector-java', 'mysql-connector-j', 'mariadb-java-client',
+        // ruby
+        'mysql2',
+        // elixir
+        'myxql',
+        // dotnet
+        'MySql.Data', 'MySqlConnector', 'Pomelo.EntityFrameworkCore.MySql',
+        // dart
+        'mysql1',
+        // php
+        'pdo_mysql',
     ]),
     redis: new Set([
         'redis', 'ioredis', 'connect-redis',          // npm
         'github.com/go-redis/redis', 'github.com/go-redis/redis/v8', 'github.com/redis/go-redis', // go
-        'redis',                                       // python / rust
+        'redis',                                       // python / rust / ruby / dart
+        // java
+        'jedis', 'lettuce-core', 'redisson', 'spring-boot-starter-data-redis',
+        // elixir
+        'redix',
+        // dotnet
+        'StackExchange.Redis',
+        // php
+        'predis',
     ]),
     mongodb: new Set([
         'mongodb', 'mongoose', 'mongodb-memory-server', // npm
         'go.mongodb.org/mongo-driver',                   // go
         'pymongo', 'motor',                              // python
-        'mongodb',                                       // rust
+        'mongodb',                                       // rust / elixir
+        // java
+        'spring-data-mongodb', 'mongodb-driver', 'mongo-java-driver',
+        // ruby
+        'mongoid',
+        // dotnet
+        'MongoDB.Driver',
+        // dart
+        'mongo_dart',
+        // php
+        'mongodb/mongodb',
     ]),
 };
 
@@ -924,17 +966,64 @@ function detectSystemDeps(hostWorkspacePath) {
     };
 
     // 1) 依赖名扫描：根 + 一层子目录（同 detectNativeDeps 范围）。
+    // 依赖清单文件多语言覆盖：除既有 package.json/go.mod/requirements/pyproject/Cargo/composer 外，
+    // 补 Maven/Gradle（pom.xml/build.gradle*）、Ruby（Gemfile）、Elixir（mix.exs）、Dart（pubspec.yaml）、
+    // .NET（*.csproj 目录 glob）——否则 Java/Ruby 等项目的系统服务依赖（mysql/redis/postgres）漏检，
+    // verify agent 只能现场 apt 装（实测多仓库 Spring Boot 项目 apt 装 default-jdk/mariadb 卡 10+ 分钟）。
+    const LANG_DEP_FILES = ['package.json', 'go.mod', 'requirements.txt', 'pyproject.toml', 'Cargo.toml',
+        'composer.json', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'Gemfile', 'mix.exs', 'pubspec.yaml'];
+    // 构建/依赖清单 → 需预装的工具链（provision 阶段 apt 装好，verify 不再现场试错）。
+    // packages 是沙箱 apt 包名（Debian bookworm）；elixir/dart 等在沙箱镜像可能缺，预装失败时
+    // non-fatal（agent 兜底），但至少 Java/Maven 这类高频依赖能前置解决。
+    const TOOLCHAIN_FILES = {
+        'pom.xml': { tool: 'jdk-maven', packages: ['default-jdk', 'maven'] },
+        'build.gradle': { tool: 'jdk-gradle', packages: ['default-jdk', 'gradle'] },
+        'build.gradle.kts': { tool: 'jdk-gradle', packages: ['default-jdk', 'gradle'] },
+        'Gemfile': { tool: 'ruby', packages: ['ruby', 'ruby-bundler'] },
+        'mix.exs': { tool: 'elixir', packages: ['elixir'] },
+        'pubspec.yaml': { tool: 'dart', packages: ['dart'] },
+    };
+    const toolchains = [];
+    const recordToolchain = (tool, evidence) => {
+        if (tool && !toolchains.some((s) => s.tool === tool)) toolchains.push({ tool, evidence });
+    };
     const depFiles = [];
     try {
-        for (const name of ['package.json', 'go.mod', 'requirements.txt', 'pyproject.toml', 'Cargo.toml', 'composer.json']) {
-            if (hasFile(dir, name)) depFiles.push({ sub: '.', name });
-        }
-        for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-            if (!ent.isDirectory() || ent.name === 'node_modules' || ent.name.startsWith('.')) continue;
-            for (const name of ['package.json', 'go.mod', 'requirements.txt', 'pyproject.toml', 'Cargo.toml', 'composer.json']) {
-                if (hasFile(path.join(dir, ent.name), name)) depFiles.push({ sub: ent.name, name });
+        // 递归扫描（maxDepth=3）：多仓库/嵌套子项目（如 server-manage-server/manage-service/pom.xml）
+        // 的依赖在深层子目录，只扫根 + 一层会漏检（实测 mysql 驱动在 manage-service 子模块里，
+        // 一层扫描 services=[] → platform 不预装 → agent 现场 apt 装 mariadb-server 卡死）。
+        // 跳过 node_modules/.git/dist 等噪音目录，控制文件数与深度，保持毫秒级。
+        const SKIP_DIRS = ['node_modules', '.git', 'dist', 'build', 'target', 'vendor', '.next', 'out', 'coverage', '.cache'];
+        let checked = 0;
+        const MAX_FILES = 120;
+        const scanDir = (base, sub, depth) => {
+            if (depth > 3 || checked >= MAX_FILES) return;
+            for (const name of LANG_DEP_FILES) {
+                if (hasFile(base, name)) {
+                    depFiles.push({ sub, name });
+                    const tc = TOOLCHAIN_FILES[name];
+                    if (tc) recordToolchain(tc.tool, `${name} in ${sub === '.' ? 'root' : sub}/`);
+                }
             }
-        }
+            // .NET：*.csproj 文件名不固定（项目名），目录 glob 扫描。
+            try {
+                for (const ent of fs.readdirSync(base, { withFileTypes: true })) {
+                    if (ent.isFile() && /\.csproj$/.test(ent.name)) {
+                        depFiles.push({ sub, name: ent.name });
+                        recordToolchain('dotnet', `${ent.name} in ${sub === '.' ? 'root' : sub}/`);
+                    }
+                }
+            } catch { /* ignore */ }
+            try {
+                for (const ent of fs.readdirSync(base, { withFileTypes: true })) {
+                    if (!ent.isDirectory() || SKIP_DIRS.includes(ent.name) || ent.name.startsWith('.')) continue;
+                    if (++checked > MAX_FILES) return;
+                    const subName = sub === '.' ? ent.name : `${sub}/${ent.name}`;
+                    scanDir(path.join(base, ent.name), subName, depth + 1);
+                }
+            } catch { /* ignore */ }
+        };
+        scanDir(dir, '.', 0);
     } catch { /* ignore */ }
 
     for (const { sub, name } of depFiles) {
@@ -990,7 +1079,7 @@ function detectSystemDeps(hostWorkspacePath) {
 
     // 3) 后端服务源码指纹（server/ 等目录的 main 入口里出现数据库驱动 import）——
     //    交给上面依赖名扫描已覆盖；这里仅对"找不到依赖清单但明显是后端"的项目兜底。
-    return { services: signals.map((s) => s.service), signals };
+    return { services: signals.map((s) => s.service), signals, toolchains };
 }
 
 function escapeRegExp(s) {

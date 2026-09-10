@@ -956,10 +956,17 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
     const GH_PROXY_ENV = `export ELECTRON_MIRROR=${GH_PROXY}/https://github.com/electron/electron/releases/download/; `;
     const GH_FALLBACK_INSTALL_TIMEOUT_MS = Number(process.env.DEPLOY_GH_FALLBACK_TIMEOUT_MS) || 300000;
     const PATH_PREFIX = `export PATH="/usr/local/bin:$PATH"; export NODE_OPTIONS="--max-old-space-size=${nodeMb}"; `;
+    // CI=true：包管理器无 TTY 环境的官方标准解法。pnpm 在需要重建 node_modules（锁文件/
+    // 依赖变化触发全量重装）时，无 TTY 下会 ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY
+    // 中止（安全保护），yarn/npm 也有类似交互保护。platform install 的每条命令都带 CI=true，
+    // 从根上消除该类秒失败（实测 multica：platform install pnpm 秒失败 → verify agent 试错
+    // 到第 3 轮才 export CI=true 成功，白耗 3+ 分钟）。对所有包管理器、所有项目通用。
+    const CI_ENV = 'export CI=true; ';
     // install 根命令单独超时：大 monorepo 冷装（multica 245 子包全量下载 + store 首写）
     // 实测 9-10 分钟，600s 默认会截断——且失败连锁严重（agent 再装 ~5min / npm fallback
     // 覆盖不齐导致子包缺失）。
     const INSTALL_TIMEOUT_MS = Number(process.env.DEPLOY_INSTALL_TIMEOUT_MS) || 1200000;
+
     // electron 桌面应用子包：无法在浏览器 preview，对部署目标无用；其依赖（electron 二进制
     // 下载 + electron-builder install-app-deps）正是 github 卡死的源头。识别后根 install 用
     // --ignore-scripts 跳过其 postinstall，补装循环直接排除该子包。
@@ -969,7 +976,7 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
         log(`platform install: ${cmd}${cwd ? ` (cwd=${cwd})` : ''}${useGhProxy ? ' [ghproxy fallback]' : ''}`);
         try {
             const r = await runtime.exec.exec('sh', ['-c',
-                `${PATH_PREFIX}${useGhProxy ? GH_PROXY_ENV : MIRROR_ENV}${cmd} > /tmp/_pi.log 2>&1; ec=$?; tail -15 /tmp/_pi.log; echo "__PI_EXIT__=\${ec}"`],
+                `${CI_ENV}${PATH_PREFIX}${useGhProxy ? GH_PROXY_ENV : MIRROR_ENV}${cmd} > /tmp/_pi.log 2>&1; ec=$?; tail -15 /tmp/_pi.log; echo "__PI_EXIT__=\${ec}"`],
                 {}, { runtimeRef, cwd: cwd ? `${workspacePath}/${cwd}` : workspacePath, timeoutMs });
             const out = String(r.stdout || '');
             const m = out.match(/__PI_EXIT__=(-?\d+)/);
@@ -1069,9 +1076,36 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
     if (!ok && pm !== 'npm') {
         // pnpm/yarn/bun 二进制缺失或安装失败：回退 npm（覆盖 package.json workspaces；
         // pnpm-only workspace 覆盖不到子包，由下方重探测补漏循环兜底）。
-        log(`platform install: ${pm} install failed, falling back to npm install`);
-        const npmOk = await run('npm install --no-audit --no-fund', '');
-        if (npmOk) { ok = true; effectiveCmd = 'npm install --no-audit --no-fund'; }
+        // ⚠️ catalog: 协议守卫：pnpm workspace 的 catalog 特性（pnpm 9.5+/10）是 pnpm 专属，
+        // package.json 依赖值形如 "catalog:"。npm 不认识该协议，必然
+        // EUNSUPPORTEDPROTOCOL 秒失败（multica 实测）——命中则跳过 npm fallback，避免
+        // 3 秒白费 + 错误归因，直接交给 verify agent（平台已预置 CI=true，agent 的 pnpm
+        // 可正常重建 node_modules）。
+        const hasCatalogProtocol = (() => {
+            try {
+                const scan = (dir) => {
+                    const pkgPath = path.join(dir, 'package.json');
+                    if (!fs.existsSync(pkgPath)) return false;
+                    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+                    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+                    return Object.values(deps).some((v) => String(v).startsWith('catalog:'));
+                };
+                if (scan(hostWorkspacePath)) return true;
+                for (const sub of ['apps', 'packages', 'web', 'client', 'server']) {
+                    const dir = path.join(hostWorkspacePath, sub);
+                    if (!fs.existsSync(dir)) continue;
+                    if (fs.readdirSync(dir, { withFileTypes: true }).some((e) => e.isDirectory() && scan(path.join(dir, e.name)))) return true;
+                }
+                return false;
+            } catch { return false; }
+        })();
+        if (hasCatalogProtocol) {
+            log(`platform install: package.json uses pnpm catalog: protocol (npm incompatible) — skipping npm fallback, leaving to verify agent (CI=true preset)`);
+        } else {
+            log(`platform install: ${pm} install failed, falling back to npm install`);
+            const npmOk = await run('npm install --no-audit --no-fund', '');
+            if (npmOk) { ok = true; effectiveCmd = 'npm install --no-audit --no-fund'; }
+        }
     }
     // 重探测补漏：根 install 不覆盖"独立子项目"（无 workspace 配置的 monorepo）。
     // 仍非 CACHED 的子包逐个补装；超过 20 个放弃逐包（极端项目交给 agent，避免拖死总预算）。
@@ -1200,10 +1234,9 @@ async function ensureGuestGoToolchain({ runtimeRef, workspacePath, hostWorkspace
 // 幂等：已装则跳过；apt 失败 non-fatal（agent 兜底）。与 Go/Node/Python/Rust 运行时
 // 版本预装（ensureGuestGoToolchain / ensureGuestRuntimeVersions）互补，都是"平台前置、
 // 不阻塞 verify"的同一模式。
-async function ensureGuestToolchains({ runtimeRef, workspacePath, toolchains, onLog }) {
+async function ensureGuestToolchains({ runtimeRef, workspacePath, toolchains, services, onLog }) {
     const runtime = getRuntime();
     const log = (m) => { if (onLog) onLog(m); };
-    if (!Array.isArray(toolchains) || toolchains.length === 0) return { ran: false, results: [] };
     // tool → 沙箱探活命令（任一命中即视为已装，避免重复 apt）
     const PROBE_CMDS = {
         'jdk-maven': 'command -v java >/dev/null 2>&1 && command -v mvn >/dev/null 2>&1',
@@ -1213,31 +1246,48 @@ async function ensureGuestToolchains({ runtimeRef, workspacePath, toolchains, on
         'dart': 'command -v dart >/dev/null 2>&1',
         'dotnet': 'command -v dotnet >/dev/null 2>&1',
     };
-    const results = [];
-    for (const tc of toolchains) {
-        const tool = tc && tc.tool;
-        if (!tool || !PROBE_CMDS[tool]) continue;
+    // 系统服务预装映射（detectSystemDeps 检测出的 services 里除 postgres 外的部分）：
+    // mysql → mariadb-server、redis → redis-server；postgres 由 provisionPostgresIfNeeded 专门
+    // 处理（含启动/建库），mongodb 沙箱 apt 无官方包跳过（由 agent/配置兜底）。
+    const SERVICE_APT = {
+        mysql: { probe: 'command -v mariadbd >/dev/null 2>&1 || command -v mysqld >/dev/null 2>&1', packages: ['mariadb-server'] },
+        redis: { probe: 'command -v redis-server >/dev/null 2>&1', packages: ['redis-server'] },
+    };
+    // 预装项：toolchains（Java/Maven、Ruby、Elixir、Dart、.NET 等）+ services（mysql/redis）。
+    // 统一走"探活 → 缺则 aptSafeInstall"逻辑，幂等且 non-fatal。
+    const items = [];
+    for (const tc of Array.isArray(toolchains) ? toolchains : []) {
+        if (!tc || !tc.tool || !PROBE_CMDS[tc.tool]) continue;
         const pkgs = Array.isArray(tc.packages) ? tc.packages : [];
-        if (pkgs.length === 0) continue;
+        if (pkgs.length) items.push({ id: tc.tool, evidence: tc.evidence || '', probe: PROBE_CMDS[tc.tool], packages: pkgs });
+    }
+    for (const svc of Array.isArray(services) ? services : []) {
+        const sa = SERVICE_APT[svc];
+        if (!sa) continue;
+        if (!items.some((i) => i.id === svc)) items.push({ id: svc, evidence: `service:${svc}`, probe: sa.probe, packages: sa.packages });
+    }
+    if (items.length === 0) return { ran: false, results: [] };
+    const results = [];
+    for (const item of items) {
         try {
-            const r = await runtime.exec.exec('sh', ['-c', `if ${PROBE_CMDS[tool]}; then echo INSTALLED; else echo MISSING; fi`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => ({ stdout: 'MISSING' }));
+            const r = await runtime.exec.exec('sh', ['-c', `if ${item.probe}; then echo INSTALLED; else echo MISSING; fi`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => ({ stdout: 'MISSING' }));
             if (String(r.stdout || '').includes('INSTALLED')) {
-                log(`toolchain ${tool} ok (already installed)`);
-                results.push({ tool, ok: true, installed: false });
+                log(`toolchain ${item.id} ok (already installed)`);
+                results.push({ tool: item.id, ok: true, installed: false });
                 continue;
             }
-            log(`toolchain ${tool} missing (${tc.evidence || ''}): installing ${pkgs.join(' ')}`);
-            const res = await aptSafeInstall({ runtime, runtimeRef, workspacePath, packages: pkgs.join(' '), onLog, timeoutMs: 420000 });
+            log(`toolchain ${item.id} missing (${item.evidence || ''}): installing ${item.packages.join(' ')}`);
+            const res = await aptSafeInstall({ runtime, runtimeRef, workspacePath, packages: item.packages.join(' '), onLog, timeoutMs: 420000 });
             if (res.ok) {
-                log(`toolchain ${tool} installed: ${pkgs.join(' ')}`);
-                results.push({ tool, ok: true, installed: true });
+                log(`toolchain ${item.id} installed: ${item.packages.join(' ')}`);
+                results.push({ tool: item.id, ok: true, installed: true });
             } else {
-                log(`toolchain ${tool} install FAILED (non-fatal, agent will handle): ${(res.logTail || '').slice(0, 300)}`);
-                results.push({ tool, ok: false, installed: false });
+                log(`toolchain ${item.id} install FAILED (non-fatal, agent will handle): ${(res.logTail || '').slice(0, 300)}`);
+                results.push({ tool: item.id, ok: false, installed: false });
             }
         } catch (e) {
-            log(`toolchain ${tool} ensure failed (non-fatal): ${e.message?.slice(0, 200)}`);
-            results.push({ tool, ok: false, installed: false });
+            log(`toolchain ${item.id} ensure failed (non-fatal): ${e.message?.slice(0, 200)}`);
+            results.push({ tool: item.id, ok: false, installed: false });
         }
     }
     return { ran: results.length > 0, results };
@@ -3338,7 +3388,8 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             detectDepsCached(ref, wsPath, detected), // guest 侧 deps 探测（改动 2：传入 stack 选对应语言脚本）
             provisionPostgresIfNeeded(ref, wsPath, plan), // 内部权威判定，不需要时毫秒级返回
             ensureGuestToolchains({
-                runtimeRef: ref, workspacePath: wsPath, toolchains: systemDeps.toolchains || [],
+                runtimeRef: ref, workspacePath: wsPath,
+                toolchains: systemDeps.toolchains || [], services: systemDeps.services,
                 onLog: (m) => { console.error(`[twoStage] ${m}`); report({ stage: 'B', substage: 'prepare', message: m }); },
             }),
         ]);
