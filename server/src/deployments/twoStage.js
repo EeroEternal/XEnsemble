@@ -660,6 +660,33 @@ async function startLiveDevServer({ runtimeRef, workspacePath, devKind, devDir, 
         if (onLog) onLog(`live dev server not ready on :${livePort} (http ${code || '000'}) log=${String(log.stdout || '').slice(0, 400)}`);
         return { ok: false, reason: `live dev server not ready (http ${code || '000'})` };
     }
+    // —— 主动预热（辅助措施，失败绝不阻塞主流程）——
+    // vite dev server 的 warm-up（esbuild 依赖预构建 + 按需转换）只在"首次完整请求"
+    // 时才触发：根路径 / 会 302 到 --base 路径，上方就绪轮询拿到 302 即退，反而绕过
+    // 了 warm-up（首个真正请求要现场预构建，大应用单次 20s+、多轮 re-optimization
+    // 达数分钟，xensemble 实测 21:01-21:05 期间每次 21-23s）。这里用 -L 跟随到 base
+    // 路径 + 长超时，把预构建成本在部署期消化——结果缓存进 node_modules/.vite，
+    // 此后用户打开预览、探测访问都直接命中 warm 缓存。
+    // 失败容忍：curl 可能失败（连接瞬断/超时/非 2xx），预热只是辅助——失败只打日志
+    // 继续（vite 仍会在后台完成预构建，probeApiHealth 的 000 重试与用户访问自动兜底），
+    // 绝不让预热失败拖垮部署主流程。
+    if (devKind === 'vite') {
+        try {
+            const warmTarget = base ? `${base}` : '/';
+            const warm = await runtime.exec.exec(
+                'sh', ['-c', `curl -sL -m 180 -o /dev/null -w "%{http_code}" "http://127.0.0.1:${livePort}${warmTarget}"`],
+                {}, { runtimeRef, cwd: workspacePath, timeoutMs: 190000 },
+            );
+            const warmCode = String(warm.stdout || '').trim();
+            if (/^2\d\d$/.test(warmCode)) {
+                if (onLog) onLog(`dev server pre-warmed on :${livePort} (http ${warmCode}, dep pre-bundle cached)`);
+            } else {
+                if (onLog) onLog(`dev server warm-up got http ${warmCode || '000'} (non-fatal, background pre-bundle continues)`);
+            }
+        } catch (e) {
+            if (onLog) onLog(`dev server warm-up failed (non-fatal): ${String(e.message || e).slice(0, 120)}`);
+        }
+    }
     if (onLog) onLog(`live dev server ready on :${livePort} (${devKind})`);
     return { ok: true, port: livePort };
 }
