@@ -2319,15 +2319,6 @@ async function resolvePreviewDbMode(hostWorkspacePath) {
     return 'local';
 }
 
-// schema 导入命令（按方言；best-effort）。文件里可能已带 db 限定的表名，不指定 USE。
-function buildSchemaImportCommand(dialect, conn, relPath) {
-    const d = dbAdapt.DIALECTS[dialect];
-    if (!d) return null;
-    if (dialect === 'postgres') return `su postgres -c "psql -d ${dbAdapt._internal.sqlIdent(conn.database)} -f ${dbAdapt._internal.shq(relPath)}" 2>&1 | tail -3`;
-    if (dialect === 'mysql') return `mysql -uroot -proot ${dbAdapt._internal.sqlIdent(conn.database)} < ${dbAdapt._internal.shq(relPath)} 2>&1 | tail -3`;
-    return null;
-}
-
 // 通用"应用数据库预配"：按 dialect 用 app 自身凭据建库/建用户 + 导 schema，返回本地 DSN。
 // 与具体 DB 类型无关（新增类型只需在 dbAdapt.DIALECTS 补一档）。
 async function provisionAppDatabase({ runtime, runtimeRef, workspacePath, dialect, conn, schemaFiles, onLog }) {
@@ -2342,22 +2333,28 @@ async function provisionAppDatabase({ runtime, runtimeRef, workspacePath, dialec
     if (cmd) {
         try {
             const r = await runtime.exec.exec('sh', ['-c', cmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 90000 });
-            provisioned = r.exitCode === 0;
-            log(`db ${dialect} provision(app-adapted): ${provisioned ? 'ok' : 'FAILED'} db=${c.database} user=${c.user}${localized ? ` (app host ${c.host} → 127.0.0.1)` : ''}`);
+            // 解析命令内的真实退出码（不能用 r.exitCode —— 命令末尾有 echo，恒 0）
+            const m = String(r.stdout || '').match(/__DBPROV_EXIT__=(-?\d+)/);
+            provisioned = (m ? Number(m[1]) : r.exitCode) === 0;
+            log(`db ${dialect} provision(app-adapted): ${provisioned ? 'ok' : 'FAILED'} db=${c.database} user=${c.user}${localized ? ` (app host ${c.host} → 127.0.0.1)` : ''}${provisioned ? '' : ` out=${String(r.stdout || '').replace(/__DBPROV_EXIT__=-?\d+/, '').trim().slice(-200)}`}`);
         } catch (e) {
             log(`db ${dialect} provision error: ${String(e.message || e).slice(0, 160)}`);
         }
     }
     let schemaImported = 0;
-    for (const rel of (schemaFiles || [])) {
-        const importCmd = buildSchemaImportCommand(dialect, c, rel);
-        if (!importCmd) continue;
-        try {
-            const r = await runtime.exec.exec('sh', ['-c', importCmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 120000 });
-            if (r.exitCode === 0) schemaImported++;
-        } catch { /* ignore */ }
+    if (provisioned) {
+        for (const rel of (schemaFiles || [])) {
+            const importCmd = dbAdapt.buildSchemaImportCommand(dialect, c, rel);
+            if (!importCmd) continue;
+            try {
+                const r = await runtime.exec.exec('sh', ['-c', importCmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 120000 });
+                const m = String(r.stdout || '').match(/__DBIMP_EXIT__=(-?\d+)/);
+                if ((m ? Number(m[1]) : r.exitCode) === 0) schemaImported++;
+            } catch { /* ignore */ }
+        }
+        if (schemaImported) log(`db ${dialect}: imported ${schemaImported} schema file(s)`);
+        else if ((schemaFiles || []).length) log(`db ${dialect}: schema import produced no success (${(schemaFiles || []).length} file(s))`);
     }
-    if (schemaImported) log(`db ${dialect}: imported ${schemaImported} schema file(s)`);
     return { adapted: true, database: c.database, user: c.user, password: c.password, host: '127.0.0.1', port: c.port, dsn, localized, schemaImported };
 }
 
@@ -2681,9 +2678,13 @@ async function provisionDbServices({ runtimeRef, workspacePath, hostWorkspacePat
                     const c = dbAdapt.fillDefaults(dialect, conn);
                     let schemaImported = 0;
                     for (const rel of dbAdapt.pickSchemaFiles(dialect, schemaAll)) {
-                        const importCmd = buildSchemaImportCommand(dialect, c, rel);
+                        const importCmd = dbAdapt.buildSchemaImportCommand(dialect, c, rel);
                         if (!importCmd) continue;
-                        try { const r = await runtime.exec.exec('sh', ['-c', importCmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 120000 }); if (r.exitCode === 0) schemaImported++; } catch { /* ignore */ }
+                        try {
+                            const r = await runtime.exec.exec('sh', ['-c', importCmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 120000 });
+                            const m = String(r.stdout || '').match(/__DBIMP_EXIT__=(-?\d+)/);
+                            if ((m ? Number(m[1]) : r.exitCode) === 0) schemaImported++;
+                        } catch { /* ignore */ }
                     }
                     enhanced = {
                         adapted: true, database: c.database, user: c.user, host: '127.0.0.1', port: c.port,

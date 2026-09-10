@@ -179,7 +179,8 @@ function buildProvisionCommand(dialect, conn) {
         const p = sqlStr(c.password);
         const stmts = [`CREATE DATABASE IF NOT EXISTS \`${d}\``];
         if (u === 'root') {
-            // app 用 root：把 root 密码适配为 app 的密码（TCP/localhost/127.0.0.1 三面）
+            // app 用 root：把 root 密码适配为 app 的密码（localhost + 127.0.0.1 两面）。
+            // 注意：这之后平台/调用方的后续 mysql 命令必须使用 app 密码（见 buildSchemaImportCommand 阶梯）。
             stmts.push(`ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('${p}')`);
             stmts.push(`CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('${p}')`);
             stmts.push(`ALTER USER 'root'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('${p}')`);
@@ -190,8 +191,32 @@ function buildProvisionCommand(dialect, conn) {
             stmts.push(`GRANT ALL ON \`${d}\`.* TO '${u}'@'%'`);
         }
         stmts.push('FLUSH PRIVILEGES');
-        // root 先用平台预配的 root/root（socket/native 均可），失败再退回 socket 免密
-        return `mysql -uroot -proot -e "${stmts.join('; ')}" 2>&1 | tail -5 || mysql -uroot -e "${stmts.join('; ')}" 2>&1 | tail -5`;
+        const sql = stmts.join('; ');
+        // 凭据阶梯（密码用 MYSQL_PWD 传，避免 -p 对 * # 等特殊字符的解析问题）：
+        //   平台预配 root/root → app 自身密码（root 密码可能已被改成这个）→ socket 免密。
+        // 末尾打印**真实退出码**；绝不用 `| tail`（那会把 mysql 的失败掩盖成 tail 的 0）。
+        return `set +e; `
+            + `MYSQL_PWD=root mysql -uroot -e ${shq(sql)} 2>&1 `
+            + `|| MYSQL_PWD=${shq(c.password)} mysql -uroot -e ${shq(sql)} 2>&1 `
+            + `|| mysql -uroot -e ${shq(sql)} 2>&1; `
+            + `echo "__DBPROV_EXIT__=$?"`;
+    }
+    return null;
+}
+
+// 导入 schema：用 app 自身凭据（provision 可能已把 root 密码改成 app 密码），退回 root/root；
+// 末尾打印真实退出码（不掩盖失败）。
+function buildSchemaImportCommand(dialect, conn, relPath) {
+    const c = fillDefaults(dialect, conn || {});
+    if (dialect === 'postgres') {
+        return `set +e; su postgres -c "psql -d ${sqlIdent(c.database)} -f ${shq(relPath)}" 2>&1; echo "__DBIMP_EXIT__=$?"`;
+    }
+    if (dialect === 'mysql') {
+        const u = sqlIdent(c.user) || 'root';
+        const d = sqlIdent(c.database) || 'app';
+        return `set +e; MYSQL_PWD=${shq(c.password)} mysql -u${u} ${d} < ${shq(relPath)} 2>&1 `
+            + `|| MYSQL_PWD=root mysql -uroot ${d} < ${shq(relPath)} 2>&1; `
+            + `echo "__DBIMP_EXIT__=$?"`;
     }
     return null;
 }
@@ -219,6 +244,7 @@ module.exports = {
     fillDefaults,
     detectDbConnections,
     buildProvisionCommand,
+    buildSchemaImportCommand,
     pickSchemaFiles,
     _internal: { parseUrlInto, parseSpringDatasource, parseKeyVals, sqlStr, sqlIdent, shq },
 };

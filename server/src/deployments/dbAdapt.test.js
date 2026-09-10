@@ -5,7 +5,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
-    isRemoteHost, schemeToDialect, detectDbConnections, buildProvisionCommand, pickSchemaFiles,
+    isRemoteHost, schemeToDialect, detectDbConnections, buildProvisionCommand, buildSchemaImportCommand, pickSchemaFiles,
 } = require('./dbAdapt');
 
 test('isRemoteHost: 本地地址不算远端，LAN/公网/主机名算远端', () => {
@@ -62,17 +62,33 @@ test('detectDbConnections: POSTGRES_*/MYSQL_* env 分组', () => {
     );
 });
 
-test('buildProvisionCommand: mysql app 用 root 时，把 root 密码适配为 app 密码 + 建库', () => {
+test('buildProvisionCommand: mysql app 用 root 时适配密码 + 建库 + 真实退出码', () => {
     const cmd = buildProvisionCommand('mysql', { database: 'server_manage', user: 'root', password: '2UG8gE*Mta#z' });
     assert.match(cmd, /CREATE DATABASE IF NOT EXISTS `server_manage`/);
-    assert.match(cmd, /PASSWORD\('2UG8gE\*Mta#z'\)/);
-    assert.match(cmd, /GRANT ALL ON \*\.\* TO 'root'@'127\.0\.0\.1'/);
+    assert.match(cmd, /2UG8gE\*Mta#z/);
+    assert.match(cmd, /GRANT ALL ON \*\.\*/);
+    // 凭据阶梯（平台 root/root → app 密码）与真实退出码（不再被 | tail 掩盖）
+    assert.match(cmd, /MYSQL_PWD=root/);
+    assert.match(cmd, /MYSQL_PWD='2UG8gE\*Mta#z'/);
+    assert.ok(cmd.includes('__DBPROV_EXIT__='), 'must echo real exit code');
+    assert.ok(!/\|\s*tail/.test(cmd), 'must not mask exit code with | tail');
 });
 
 test('buildProvisionCommand: mysql 独立用户时建用户并授权到该库', () => {
     const cmd = buildProvisionCommand('mysql', { database: 'shop', user: 'shop_u', password: 'pw' });
-    assert.match(cmd, /CREATE USER IF NOT EXISTS 'shop_u'@'%' IDENTIFIED BY 'pw'/);
-    assert.match(cmd, /GRANT ALL ON `shop`\.\* TO 'shop_u'@'%'/);
+    assert.match(cmd, /shop_u/);
+    assert.match(cmd, /GRANT ALL ON `shop`\.\*/);
+    assert.ok(cmd.includes('__DBPROV_EXIT__='));
+});
+
+test('buildSchemaImportCommand: 用 app 凭据 + 真实退出码（不再硬编码 -proot 被 tail 掩盖）', () => {
+    const cmd = buildSchemaImportCommand('mysql', { database: 'server_manage', user: 'root', password: 'pw' }, 'sql/init.sql');
+    assert.match(cmd, /MYSQL_PWD='pw' mysql -uroot server_manage </);
+    assert.ok(cmd.includes('__DBIMP_EXIT__='));
+    assert.ok(!/\|\s*tail/.test(cmd), 'must not mask exit code with | tail');
+    const pg = buildSchemaImportCommand('postgres', { database: 'appdb' }, 'db/schema.sql');
+    assert.match(pg, /psql -d appdb -f/);
+    assert.ok(pg.includes('__DBIMP_EXIT__='));
 });
 
 test('buildProvisionCommand: postgres 建用户 + 授权到库（保留 app 凭据）', () => {
