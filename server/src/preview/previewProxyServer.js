@@ -153,6 +153,13 @@ const ROUTE_SHIM_SCRIPT = `<script>
   window.addEventListener('error', function (e) {
     xeReport('error', 'uncaught: ' + (e && e.message || '') + ' @ ' + (e && e.filename || '') + ':' + (e && e.lineno || ''));
   });
+  // 资源加载失败（JS/CSS chunk 加载错误是白屏常见原因：整页导航后资源请求被缓存/路由错）
+  document.addEventListener('error', function (e) {
+    var t = e && e.target;
+    if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK' || t.tagName === 'IMG')) {
+      xeReport('error', 'resource-load-failed: ' + t.tagName + ' ' + (t.src || t.href || ''));
+    }
+  }, true);
   window.addEventListener('unhandledrejection', function (e) {
     xeReport('error', 'unhandledrejection: ' + String((e && e.reason && e.reason.message) || (e && e.reason) || '').slice(0, 300));
   });
@@ -168,26 +175,24 @@ const ROUTE_SHIM_SCRIPT = `<script>
   } else {
     xeReport('log', 'shim skipped (pathname not under base)');
   }
-  window.addEventListener('load', function () {
-    var txt = '', html = '', title = '';
+  function xeDump(tag) {
+    var txt = '', html = '', kids = 0, bodyLen = 0, docLen = 0, appHtml = '';
     try {
       var b = document.body;
-      txt = (b && b.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 150);
-      html = (b && b.innerHTML || '').replace(/\s+/g, ' ').slice(0, 250);
-      title = document.title || '';
+      if (b) {
+        txt = (b.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+        html = b.innerHTML.slice(0, 600);
+        kids = b.children ? b.children.length : 0;
+        bodyLen = b.innerHTML.length;
+      }
+      docLen = document.documentElement.outerHTML.length;
+      var app = document.getElementById('__next') || document.getElementById('app') || document.getElementById('root');
+      if (app) { appHtml = app.innerHTML.slice(0, 400); }
     } catch (e) {}
-    xeReport('log', 'loaded pathname=' + location.pathname + ' title=' + JSON.stringify(title) + ' bodyText=' + JSON.stringify(txt) + ' bodyHtml=' + JSON.stringify(html));
-  });
-  // hydration 完成后延迟再报一次（捕获路由/数据加载后的最终渲染状态）
-  window.setTimeout(function () {
-    var txt = '', html = '';
-    try {
-      var b = document.body;
-      txt = (b && b.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 150);
-      html = (b && b.innerHTML || '').replace(/\s+/g, ' ').slice(0, 250);
-    } catch (e) {}
-    xeReport('log', 't+2000 pathname=' + location.pathname + ' bodyText=' + JSON.stringify(txt) + ' bodyHtml=' + JSON.stringify(html));
-  }, 2000);
+    xeReport('log', tag + ' pathname=' + location.pathname + ' title=' + JSON.stringify(document.title || '') + ' bodyKids=' + kids + ' bodyLen=' + bodyLen + ' docLen=' + docLen + ' appHtml=' + JSON.stringify(appHtml) + ' bodyText=' + JSON.stringify(txt));
+  }
+  window.addEventListener('load', function () { xeDump('loaded'); });
+  window.setTimeout(function () { xeDump('t+2000'); }, 2000);
 })();
 </script>`;
 
