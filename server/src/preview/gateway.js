@@ -94,7 +94,11 @@ proxy.on('error', (err, req, res) => {
 proxy.on('proxyRes', (pRes, req) => {
     const deploymentId = req && req.__previewDeploymentId;
     if (!deploymentId) return;
+    // 导航观测日志：非 2xx 或 HTML/RSC 响应（排查白屏时响应形态是否符合预期）
     const type = String(pRes.headers['content-type'] || '');
+    if (String(req.__previewNavLog) === '1' || pRes.statusCode !== 200) {
+        console.error(`[gateway] preview-res ${deploymentId} status=${pRes.statusCode} type=${type.slice(0, 60)} url=${req.url}`);
+    }
     if (!/\btext\/html\b/i.test(type)) return;
     const existing = pRes.headers['set-cookie'] || [];
     pRes.headers['set-cookie'] = [...existing, previewCookieValue(deploymentId)];
@@ -482,9 +486,11 @@ async function registerPreviewGateway(fastify) {
         }
 
         let deploymentId = null;
+        let depSource = 'none';
         const previewMatch = pathname.match(/^\/preview\/([^/]+)(?:\/(.*))?$/);
         if (previewMatch) {
             deploymentId = previewMatch[1];
+            depSource = 'path';
         } else {
             const referer = request.headers.referer || request.headers.origin || '';
             const m = referer.match(/\/preview\/([^/?#]+)/);
@@ -498,9 +504,11 @@ async function registerPreviewGateway(fastify) {
                 || (!!previewHost && request.headers.host === previewHost);
             if (m) {
                 deploymentId = m[1];
+                depSource = 'referer';
             } else if (isPreviewPort) {
                 // 预览专用端口：SPA 绝对路由产生的无前缀请求（/login、/api/...）默认路由到最新部署。
                 deploymentId = await findLatestRunningPreview();
+                depSource = deploymentId ? 'latest' : 'none';
             }
             if (!deploymentId) {
                 // 预览专用端口上的无前缀请求若无法路由，返回 404/503，绝不落入宿主控制台（8088）。
@@ -526,6 +534,17 @@ async function registerPreviewGateway(fastify) {
                 || /^\/@/.test(realPath)
                 || /^\/api(\/|$)/.test(realPath)
                 || /^\/ws(\/|$)/.test(realPath);
+            // 预览导航观测日志（诊断白屏/路由错配用，不影响行为）：
+            // 记录非资源请求的解析路径与来源（path/referer/latest），重点看 Next.js <Link>
+            // 客户端导航（RSC 头）与绝对路径跳转的实际请求序列与 Referer 形态。
+            if (!isAsset && !pathname.includes('/__dev/console')) {
+                const rsc = request.headers['rsc'] || request.headers['next-router-prefetch'] || request.headers['next-router-state-tree'] || '';
+                const logLine = {
+                    path: request.url, depSource, depId: deploymentId, referer: String(request.headers.referer || '').slice(0, 160),
+                    host: request.headers.host, xPrev: request.headers['x-preview-origin'] || '', rsc: String(rsc).slice(0, 40), accept: String(request.headers.accept || '').slice(0, 80),
+                };
+                console.error(`[gateway] preview-nav ${request.method} ${JSON.stringify(logLine)}`);
+            }
             if (isAsset) {
                 entry = previewRegistry.get(deploymentId);
                 if (!entry) return reply.code(503).send({ error: t('errors:preview_not_found', { defaultValue: 'Preview process not found' }, request.locale || 'en'), code: 'preview_not_found' });
@@ -556,6 +575,8 @@ async function registerPreviewGateway(fastify) {
             delete request.raw.headers['x-preview-origin'];
             // 标记部署，供 proxyRes 钩子在 HTML 响应上种会话 cookie
             request.raw.__previewDeploymentId = deploymentId;
+            // 标记本次请求为导航类（proxyRes 记录其响应 status/content-type，用于诊断）
+            request.raw.__previewNavLog = request.raw.__previewNavLog || '0';
             proxy.web(
                 request.raw,
                 reply.raw,
