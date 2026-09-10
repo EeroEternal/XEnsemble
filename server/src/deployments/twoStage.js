@@ -1192,6 +1192,57 @@ async function ensureGuestGoToolchain({ runtimeRef, workspacePath, hostWorkspace
     }
 }
 
+// 通用工具链预装（Java/Maven、Java/Gradle、Ruby、Elixir、Dart、.NET 等）：
+// 基于宿主侧 detectSystemDeps 检测出的 toolchains（多语言构建文件 → 工具链映射），
+// 沙箱缺对应命令时用 apt 前置装好，避免 verify agent 现场 apt 装卡死
+// （实测多仓库 Spring Boot 项目：agent 现场 apt 装 default-jdk/mariadb 单条 600s 超时
+// 被截断 + dpkg 锁残留反复重试，阶段 2 prepare 卡 10+ 分钟）。
+// 幂等：已装则跳过；apt 失败 non-fatal（agent 兜底）。与 Go/Node/Python/Rust 运行时
+// 版本预装（ensureGuestGoToolchain / ensureGuestRuntimeVersions）互补，都是"平台前置、
+// 不阻塞 verify"的同一模式。
+async function ensureGuestToolchains({ runtimeRef, workspacePath, toolchains, onLog }) {
+    const runtime = getRuntime();
+    const log = (m) => { if (onLog) onLog(m); };
+    if (!Array.isArray(toolchains) || toolchains.length === 0) return { ran: false, results: [] };
+    // tool → 沙箱探活命令（任一命中即视为已装，避免重复 apt）
+    const PROBE_CMDS = {
+        'jdk-maven': 'command -v java >/dev/null 2>&1 && command -v mvn >/dev/null 2>&1',
+        'jdk-gradle': 'command -v java >/dev/null 2>&1 && command -v gradle >/dev/null 2>&1',
+        'ruby': 'command -v ruby >/dev/null 2>&1 && command -v bundle >/dev/null 2>&1',
+        'elixir': 'command -v elixir >/dev/null 2>&1',
+        'dart': 'command -v dart >/dev/null 2>&1',
+        'dotnet': 'command -v dotnet >/dev/null 2>&1',
+    };
+    const results = [];
+    for (const tc of toolchains) {
+        const tool = tc && tc.tool;
+        if (!tool || !PROBE_CMDS[tool]) continue;
+        const pkgs = Array.isArray(tc.packages) ? tc.packages : [];
+        if (pkgs.length === 0) continue;
+        try {
+            const r = await runtime.exec.exec('sh', ['-c', `if ${PROBE_CMDS[tool]}; then echo INSTALLED; else echo MISSING; fi`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => ({ stdout: 'MISSING' }));
+            if (String(r.stdout || '').includes('INSTALLED')) {
+                log(`toolchain ${tool} ok (already installed)`);
+                results.push({ tool, ok: true, installed: false });
+                continue;
+            }
+            log(`toolchain ${tool} missing (${tc.evidence || ''}): installing ${pkgs.join(' ')}`);
+            const res = await aptSafeInstall({ runtime, runtimeRef, workspacePath, packages: pkgs.join(' '), onLog, timeoutMs: 420000 });
+            if (res.ok) {
+                log(`toolchain ${tool} installed: ${pkgs.join(' ')}`);
+                results.push({ tool, ok: true, installed: true });
+            } else {
+                log(`toolchain ${tool} install FAILED (non-fatal, agent will handle): ${(res.logTail || '').slice(0, 300)}`);
+                results.push({ tool, ok: false, installed: false });
+            }
+        } catch (e) {
+            log(`toolchain ${tool} ensure failed (non-fatal): ${e.message?.slice(0, 200)}`);
+            results.push({ tool, ok: false, installed: false });
+        }
+    }
+    return { ran: results.length > 0, results };
+}
+
 /**
  * 版本比较：major.minor.patch 数值比较
  */
@@ -2875,8 +2926,8 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
         }
         // 注册表有条目但项目内无任何 building 记录（陈旧注册）→ 走新部署并接管该键
     }
-    // per-user 并发闸门：进行中的部署 + 运行中的预览 ≤ 该用户个人配额（admin 同普通用户，
-    // 均在用户管理/个人配额里配置，避免无限制并发部署同时跑多个 VM 耗尽沙箱资源）。
+    // per-user 并发闸门：进行中的部署 + 运行中的预览 ≤ 该用户个人配额（admin 无限制，
+    // 跳过并发检查；普通用户在用户管理/个人配额里配置，避免无限制并发部署同时跑多个 VM 耗尽沙箱资源）。
     // 先注册（内存计数原子）再校验，避免多个并发请求同时通过；超限则注销并拒绝。
     const registerCreated = registerDeploy(project.id, userId, sessionId);
     if (!registerCreated) {
@@ -2930,22 +2981,26 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
     const deployState = { cancelled: false };
     const aborted = () => deployState.cancelled || isAborted(project.id, sessionId);
     try {
-        const limit = Number((await ensureUserQuota(userId)).maxPreviews ?? 0);
-        const usage = await getUsage(userId);
-        const current = countByUser(userId) + usage.previews;
-        if (current > limit) {
-            unregisterDeploy(project.id, sessionId);
-            const occupants = await buildConcurrencyOccupants(userId, getProjectForUser);
-            console.error(`[twoStage] quota_exceeded user=${userId} current=${current} limit=${limit} countByUser=${countByUser(userId)} previews=${usage.previews} listByUser=${JSON.stringify(listByUser(userId))} occupants=${JSON.stringify(occupants)}`);
-            return {
-                ok: false,
-                error: `已达并发部署上限（${current}/${limit}），请到对应会话停止预览或等待部署完成后再试`,
-                code: 'quota_exceeded',
-                dimension: 'max_previews',
-                limit,
-                current,
-                occupants,
-            };
+        if (role === 'admin') {
+            // admin 无预览并发限制，直接跳过并发检查
+        } else {
+            const limit = Number((await ensureUserQuota(userId)).maxPreviews ?? 0);
+            const usage = await getUsage(userId);
+            const current = countByUser(userId) + usage.previews;
+            if (current > limit) {
+                unregisterDeploy(project.id, sessionId);
+                const occupants = await buildConcurrencyOccupants(userId, getProjectForUser);
+                console.error(`[twoStage] quota_exceeded user=${userId} current=${current} limit=${limit} countByUser=${countByUser(userId)} previews=${usage.previews} listByUser=${JSON.stringify(listByUser(userId))} occupants=${JSON.stringify(occupants)}`);
+                return {
+                    ok: false,
+                    error: `已达并发部署上限（${current}/${limit}），请到对应会话停止预览或等待部署完成后再试`,
+                    code: 'quota_exceeded',
+                    dimension: 'max_previews',
+                    limit,
+                    current,
+                    occupants,
+                };
+            }
         }
     } catch (e) {
         console.error('[twoStage] concurrency gate error:', e?.message || e);
@@ -3275,11 +3330,17 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             startCandidates = detectStarts(hostPath) || startCandidates;
         } catch { /* 探测失败不阻塞 */ }
         const needsPg = Boolean(plan?.needsPostgres) || systemDeps.services.includes('postgres');
-        console.error(`[twoStage] project=${project.id} provision parallel START (needsPostgres=${needsPg}, systemDeps=${systemDeps.services.join(',') || 'none'}, startCandidates=${startCandidates.candidates.length})`);
+        console.error(`[twoStage] project=${project.id} provision parallel START (needsPostgres=${needsPg}, systemDeps=${systemDeps.services.join(',') || 'none'}, toolchains=${(systemDeps.toolchains || []).map((t) => t.tool).join(',') || 'none'}, startCandidates=${startCandidates.candidates.length})`);
+        // 并行前置：工具链预装（Java/Maven 等）与 postgres provision 并行跑，apt 时间不阻塞 verify。
+        // aptSafeInstall 内部有清锁 + DPkg::Lock::Timeout=300，多个 apt 并行最多互相等待，不会死锁。
         const results = await Promise.allSettled([
             repairHostWorkspaceOwnership(hostPath), // host 侧 chown，同步快
             detectDepsCached(ref, wsPath, detected), // guest 侧 deps 探测（改动 2：传入 stack 选对应语言脚本）
             provisionPostgresIfNeeded(ref, wsPath, plan), // 内部权威判定，不需要时毫秒级返回
+            ensureGuestToolchains({
+                runtimeRef: ref, workspacePath: wsPath, toolchains: systemDeps.toolchains || [],
+                onLog: (m) => { console.error(`[twoStage] ${m}`); report({ stage: 'B', substage: 'prepare', message: m }); },
+            }),
         ]);
         provisionMs = Date.now() - provisionStart;
         console.error(`[twoStage] project=${project.id} provision parallel done in ${provisionMs}ms`);
@@ -3288,6 +3349,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         const ownershipResult = results[0];
         const depsResult = results[1];
         const pgResult = results[2];
+        const toolchainsResult = results[3];
 
         if (ownershipResult.status === 'rejected') {
             console.error(`[twoStage] ownership fix failed: ${ownershipResult.reason}`);
@@ -3356,7 +3418,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             await injectGatewayBinary(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
         }
         // 改动 2：plan.context 同时存 depsCached (boolean, 向后兼容) + depsStatus (per-subpackage)
-        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, runtimeVersions: runtimeVersions.ran ? runtimeVersions : null, stack: { type: detected?.type, framework: detected?.framework }, systemDeps: systemDeps.services, startCandidates, dbReady: dbProvision.ready, dbProvision: dbProvision.ready ? { ready: true } : { ready: false, code: dbProvision.code || null, reason: dbProvision.reason || null }, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, dbPassword: dbProvision.dbPassword || null, successRun: plan._successRun || null } };
+        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, runtimeVersions: runtimeVersions.ran ? runtimeVersions : null, stack: { type: detected?.type, framework: detected?.framework }, systemDeps: systemDeps.services, toolchains: systemDeps.toolchains || [], toolchainResults: toolchainsResult.status === 'fulfilled' ? toolchainsResult.value : null, startCandidates, dbReady: dbProvision.ready, dbProvision: dbProvision.ready ? { ready: true } : { ready: false, code: dbProvision.code || null, reason: dbProvision.reason || null }, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, dbPassword: dbProvision.dbPassword || null, successRun: plan._successRun || null } };
         delete plan._successRun;
         // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）。
         // 缓存策略：只缓存真正从 LLM 出的 plan（source='opencode'/'ai'）。detectStack 兜底
