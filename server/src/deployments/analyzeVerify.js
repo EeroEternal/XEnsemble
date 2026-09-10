@@ -589,8 +589,8 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
                 const method = t.slice(0, sp);
                 const path = t.slice(sp + 1);
                 const curl = method === 'GET'
-                    ? `curl -s -o /dev/null -m ${timeoutSec} -w '%{http_code}' http://127.0.0.1:${p}${path} 2>/dev/null`
-                    : `curl -s -o /dev/null -m ${timeoutSec} -X ${method} -H 'Content-Type: application/json' -d '{}' -w '%{http_code}' http://127.0.0.1:${p}${path} 2>/dev/null`;
+                    ? `curl -s -o /dev/null -m ${timeoutSec} -w '%{http_code} %{content_type}' http://127.0.0.1:${p}${path} 2>/dev/null`
+                    : `curl -s -o /dev/null -m ${timeoutSec} -X ${method} -H 'Content-Type: application/json' -d '{}' -w '%{http_code} %{content_type}' http://127.0.0.1:${p}${path} 2>/dev/null`;
                 // tag 用 method:path（无空格）保证单行解析
                 return `echo "${method}:${path} $( ${curl} )"`;
             })
@@ -601,8 +601,15 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
             // 通用修复：probe 5xx → sleep 5s → retry 1 次。retry 还 5xx 才判 backend_down。
             // 风险：纯 retry，5xx 不变则行为不变；冷启动 5xx 自动恢复。
             const runtime = getRuntime();
-            const ALIVE_STATUS = (method, code) => {
-                if (code.startsWith('2') || code.startsWith('3')) return true;
+            // 2xx/3xx 但响应是 text/html = 前端静态服务的 SPA fallback（serve/nginx 对不存在的
+            // /api 路径返回 index.html），不是真实后端 API——不计 alive。真实后端 API 返回
+            // JSON（application/json）或业务 HTML/错误页；前端端口上探到的 HTML 是假活
+            // （实测：后端未启动时 serve 对 POST /api/v1/user/login 返回 200 HTML，页面
+            // 登录无响应却被判部署成功）。非 2xx（401/403/405/400/409/422）本身已证明有
+            // 应用层在响应，不受 type 影响。
+            const isHtmlResp = (type) => /^text\/html/i.test(String(type || ''));
+            const ALIVE_STATUS = (method, code, type) => {
+                if (code.startsWith('2') || code.startsWith('3')) return !isHtmlResp(type);
                 const base = ['401', '403', '405'];
                 const withBody = method !== 'GET' ? [...base, '400', '409', '422'] : base;
                 return withBody.includes(code);
@@ -611,7 +618,7 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
                 const r = await runtime.exec.exec('sh', ['-c', buildProbeCmd(timeoutSec)], {}, { runtimeRef, cwd: workspacePath, timeoutMs: timeoutSec * 1000 * targets.length + 15000 });
                 const probed = String(r.stdout || '').split('\n').map((l) => l.trim()).filter(Boolean);
                 const results = probed
-                    .map((l) => { const m = l.match(/^(\S+) (\d{3})$/); return m ? { tag: m[1], method: m[1].split(':')[0], path: m[1], code: m[2] } : null; })
+                    .map((l) => { const m = l.match(/^(\S+) (\d{3})(?: (.+))?$/); return m ? { tag: m[1], method: m[1].split(':')[0], path: m[1], code: m[2], type: m[3] || '' } : null; })
                     .filter(Boolean);
                 return { probed, results };
             };
@@ -632,7 +639,7 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
             const PROBE_000_MAX_RETRIES = Number(process.env.DEPLOY_PROBE_000_MAX_RETRIES) || 3;
             const PROBE_000_WINDOW_SEC = Number(process.env.DEPLOY_PROBE_000_WINDOW_SEC) || 40;
             let probe000Attempts = 0;
-            while (results.length && has000(results) && !results.some((x) => ALIVE_STATUS(x.method, x.code)) && probe000Attempts < PROBE_000_MAX_RETRIES) {
+            while (results.length && has000(results) && !results.some((x) => ALIVE_STATUS(x.method, x.code, x.type)) && probe000Attempts < PROBE_000_MAX_RETRIES) {
                 probe000Attempts++;
                 console.error(`[analyzeVerify] api probe has 000 (dev server cold transform — vite/esbuild warm-up), retry ${probe000Attempts}/${PROBE_000_MAX_RETRIES} with ${PROBE_000_WINDOW_SEC}s window`);
                 await new Promise((r) => setTimeout(r, 5000));
@@ -651,13 +658,28 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
                     endpoints: targets,
                 };
             }
-            const alive = results.find((x) => ALIVE_STATUS(x.method, x.code));
+            const alive = results.find((x) => ALIVE_STATUS(x.method, x.code, x.type));
             if (alive) return { ok: true, verdict: 'alive', probed, endpoints: targets };
             // 全 404/000：没有可判定的 API 面（方法不符且框架回 404 / 代理前缀差异）。
             // 收紧：项目有确定性后端证据时不能无条件放行——先查 agent 已报 backendPort
             // 是否监听（未监听 = 后端没起）；没报端口则硬失败要求补报，否则"前端 200
             // 后端死"会作为成功固化进缓存被后续部署继承。
             const ev = backendEvidence && backendEvidence.hasBackend;
+            // 全 2xx/3xx 但响应全是 text/html：前端静态服务（serve/nginx）对不存在的 /api
+            // 路径 SPA fallback 返回 index.html——agent 上报了 API 端点却全落在前端 HTML
+            // 上 = 后端假活（实测：后端未启动时 serve 对 POST /api/v1/user/login 返回
+            // 200 HTML）。这是比"全 404"更强的"后端没起"信号，绝不允许 inconclusive 放行。
+            const htmlFallbackAll = results.length > 0
+                && results.every((x) => (x.code.startsWith('2') || x.code.startsWith('3')) && /^text\/html/i.test(String(x.type || '')));
+            if (htmlFallbackAll) {
+                return {
+                    ok: false,
+                    verdict: 'backend_unverified',
+                    reason: `上报的 API 端点全部返回前端 HTML（SPA fallback）：${results.map((x) => `${x.path}=${x.code} ${x.type || ''}`).join(', ')} —— 后端进程没有启动（前端静态服务对不存在的 /api 返回 index.html），启动后端并重报真实 API 端点`,
+                    probed,
+                    endpoints: targets,
+                };
+            }
             const reportedPorts = sanitizeBackendPorts(backendPorts);
             if (reportedPorts.length) {
                 const listening = await listGuestListenPorts(runtimeRef, workspacePath);
@@ -707,23 +729,41 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
     // 分支 2：agent 只报了后端端口 → 检查端口是否监听（不发 HTTP，零路径猜测）
     const ports = sanitizeBackendPorts(backendPorts);
     if (ports.length) {
+        // 排除前端页面端口：agent 把前端静态服务（serve dist，appPort）当后端上报时
+        // （serve 对 /api 的 SPA fallback 假活），该端口"在监听"无法区分前端/后端——
+        // 必须剔除，否则"后端没起、只有前端 serve"被误判 backend_listening 通过。
+        const frontendPort = Number(port) || 0;
+        const realPorts = frontendPort ? ports.filter((bp) => bp !== frontendPort) : ports;
+        if (realPorts.length === 0) {
+            // 上报的端口全等于前端端口 → 视为未上报，落入分支 3（有后端证据则 backend_unreported）
+            if (backendEvidence && backendEvidence.hasBackend) {
+                return {
+                    ok: false,
+                    verdict: 'backend_unreported',
+                    reason: `上报的 backendPort（${ports.join(', ')}）等于前端页面端口 —— 前端静态服务被当成后端，无法确认后端已启动；请启动真实后端并上报其端口`,
+                    probed: [],
+                    endpoints: [],
+                };
+            }
+            return { ok: true, verdict: 'skipped', probed: [], endpoints: [] };
+        }
         const listening = await listGuestListenPorts(runtimeRef, workspacePath);
         const listenSet = new Set(listening);
-        const down = ports.filter((bp) => !listenSet.has(bp));
+        const down = realPorts.filter((bp) => !listenSet.has(bp));
         if (down.length) {
             return {
                 ok: false,
                 verdict: 'backend_not_listening',
                 reason: `后端端口未监听：${down.join(', ')}（前端正常但后端进程没起来）`,
-                probed: ports.map((bp) => `port ${bp}: ${listenSet.has(bp) ? 'listening' : 'down'}`),
-                endpoints: ports.map((bp) => `port:${bp}`),
+                probed: realPorts.map((bp) => `port ${bp}: ${listenSet.has(bp) ? 'listening' : 'down'}`),
+                endpoints: realPorts.map((bp) => `port:${bp}`),
             };
         }
         return {
             ok: true,
             verdict: 'backend_listening',
-            probed: ports.map((bp) => `port ${bp}: listening`),
-            endpoints: ports.map((bp) => `port:${bp}`),
+            probed: realPorts.map((bp) => `port ${bp}: listening`),
+            endpoints: realPorts.map((bp) => `port:${bp}`),
         };
     }
 
