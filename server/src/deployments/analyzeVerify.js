@@ -298,11 +298,14 @@ function isBoxDefaultPage(body) {
 }
 
 // 单端口探测：curl 一个端口，判定是否为"真实应用内容"。
-// boxDefaultPorts: box 沙箱常驻默认预览端口的集合（[3000, 5173]）。其中：
-//   - 5173 是 box 的默认 preview 服务（preview.json 的 serve . --listen 5173），常驻且
-//     verify 的 pkill npx serve 杀不掉，应用几乎不可能监听它 → 无条件排除，避免误选
-//     box 默认页/workspace 根内容为 appPort；
-//   - 3000 是 box 欢迎页常驻端口，但 agent 也可能把应用 serve 到 3000，因此仅当内容
+// boxDefaultPorts: box 沙箱常驻默认预览端口的集合（[3000, 5173]）。统一按"内容"判定，
+//   仅当响应确为 box 默认欢迎页时才排除，**不再对 5173 无条件排除**：
+//   - 5173 虽是 box 的默认 preview 服务（preview.json 的 serve . --listen 5173）常驻端口，
+//     但 vite dev server 的默认端口恰好也是 5173（实测 server-manage-frontend 用
+//     `pnpm dev` 起 vite 就监听 5173，返回真实应用 HTML）——无条件排除会把这类
+//     vite 项目误判为"无应用端口"→ 部署失败。box 默认页/目录列表由下方
+//     isDirectoryListing / isBoxDefaultPage 内容判断拦截，不依赖端口号；
+//   - 3000 是 box 欢迎页常驻端口，agent 也可能把应用 serve 到 3000，同样仅当内容
 //     确为默认欢迎页时才排除。
 async function probePort({ runtimeRef, workspacePath, port, boxDefaultPorts }) {
     const runtime = getRuntime();
@@ -329,7 +332,7 @@ async function probePort({ runtimeRef, workspacePath, port, boxDefaultPorts }) {
         if (isDirectoryListing(body)) {
             return { ok: false, listen: true, reason: `端口 ${port} 是目录列表` };
         }
-        if (port === 5173 || (boxDefaultPorts.includes(port) && isBoxDefaultPage(body))) {
+        if (boxDefaultPorts.includes(port) && isBoxDefaultPage(body)) {
             return { ok: false, listen: true, reason: `端口 ${port} 是沙箱默认页` };
         }
         if (!body) {
@@ -577,14 +580,14 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
             const withBody = method !== 'GET' ? [...base, '400', '409', '422'] : base;
             return withBody.includes(code);
         };
-        const cmd = targets
+        const buildProbeCmd = (timeoutSec) => targets
             .map((t) => {
                 const sp = t.indexOf(' ');
                 const method = t.slice(0, sp);
                 const path = t.slice(sp + 1);
                 const curl = method === 'GET'
-                    ? `curl -s -o /dev/null -m 4 -w '%{http_code}' http://127.0.0.1:${p}${path} 2>/dev/null`
-                    : `curl -s -o /dev/null -m 4 -X ${method} -H 'Content-Type: application/json' -d '{}' -w '%{http_code}' http://127.0.0.1:${p}${path} 2>/dev/null`;
+                    ? `curl -s -o /dev/null -m ${timeoutSec} -w '%{http_code}' http://127.0.0.1:${p}${path} 2>/dev/null`
+                    : `curl -s -o /dev/null -m ${timeoutSec} -X ${method} -H 'Content-Type: application/json' -d '{}' -w '%{http_code}' http://127.0.0.1:${p}${path} 2>/dev/null`;
                 // tag 用 method:path（无空格）保证单行解析
                 return `echo "${method}:${path} $( ${curl} )"`;
             })
@@ -601,8 +604,8 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
                 const withBody = method !== 'GET' ? [...base, '400', '409', '422'] : base;
                 return withBody.includes(code);
             };
-            const probeOnce = async () => {
-                const r = await runtime.exec.exec('sh', ['-c', cmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 40000 });
+            const probeOnce = async (timeoutSec) => {
+                const r = await runtime.exec.exec('sh', ['-c', buildProbeCmd(timeoutSec)], {}, { runtimeRef, cwd: workspacePath, timeoutMs: timeoutSec * 1000 * targets.length + 15000 });
                 const probed = String(r.stdout || '').split('\n').map((l) => l.trim()).filter(Boolean);
                 const results = probed
                     .map((l) => { const m = l.match(/^(\S+) (\d{3})$/); return m ? { tag: m[1], method: m[1].split(':')[0], path: m[1], code: m[2] } : null; })
@@ -610,11 +613,30 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
                 return { probed, results };
             };
             const has5xx = (results) => results.some((x) => x.code.startsWith('5'));
-            let { probed, results } = await probeOnce();
+            const has000 = (results) => results.some((x) => x.code === '000');
+            let { probed, results } = await probeOnce(4);
             if (results.length && has5xx(results)) {
                 console.error(`[analyzeVerify] api probe 5xx on first try, sleep 5s and retry (cold start pool init)`);
                 await new Promise((r) => setTimeout(r, 5000));
-                ({ probed, results } = await probeOnce());
+                ({ probed, results } = await probeOnce(4));
+            }
+            // 000 冷启动循环：000 = 连接失败/超时，不是端点 404。dev server（vite/next dev）
+            // 首次被请求时要现场做依赖预构建（esbuild）+ 按需转换，大应用单次请求 20s+ 且
+            // 持续数分钟（xensemble 实测 21:01-21:05 期间 agent curl 每次 21-23s，4 分钟后
+            // 恢复 5.6ms；预构建结果缓存进 node_modules/.vite 后不再慢）。固定窗口一次重试
+            // 不够（warm-up 窗口 > 窗口）——改为 deadline 循环：预算内（默认 150s，
+            // DEPLOY_PROBE_000_BUDGET_MS 可调）每 10s 用 40s 窗口重探，直到出现可判定状态码
+            // （含判活的非 000）或预算耗尽。判活命中立即通过；预算耗尽仍无判活 → 走下方
+            // backendEvidence 判定。
+            // 预算默认 300s：实测 dev warm-up 窗口 4-8 分钟（21:01:29→21:05:10 三次
+            // 探测全慢，21:09 已恢复），150s 不够覆盖。
+            const probe000BudgetMs = Number(process.env.DEPLOY_PROBE_000_BUDGET_MS) || 300000;
+            const probe000StartedAt = Date.now();
+            while (results.length && has000(results) && !results.some((x) => ALIVE_STATUS(x.method, x.code)) && Date.now() - probe000StartedAt < probe000BudgetMs) {
+                const left = Math.round((probe000BudgetMs - (Date.now() - probe000StartedAt)) / 1000);
+                console.error(`[analyzeVerify] api probe has 000 (dev server cold transform — vite/esbuild warm-up takes 20s+ per request for minutes), retrying (budget ${left}s left)`);
+                await new Promise((r) => setTimeout(r, 10000));
+                ({ probed, results } = await probeOnce(40));
             }
             if (!results.length) return { ok: true, verdict: 'no_result', probed, endpoints: targets };
             // 5xx 优先判死：5xx = 请求真实执行到了业务/DB 层并失败（哪怕其它端点判活），

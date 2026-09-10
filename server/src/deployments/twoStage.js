@@ -1169,12 +1169,21 @@ async function ensureGuestGoToolchain({ runtimeRef, workspacePath, hostWorkspace
  * 版本比较：major.minor.patch 数值比较
  */
 function versionSatisfies(current, required) {
-    const parse = (v) => (String(v || '').match(/(\d+)\.(\d+)(?:\.(\d+))?/) || []).slice(1, 4).map(Number);
-    const [c1, c2, c3] = parse(current);
-    const [r1, r2, r3] = parse(required);
-    if (c1 !== r1) return c1 > r1;
-    if (c2 !== r2) return c2 > r2;
-    return c3 >= r3;
+    // 支持主版本号单独出现（.nvmrc/.tool-versions 常写 "22" 这种无点格式）：
+    // 旧正则要求必须带点，"22" 解析为空 → 22 > undefined = false → 22.17.0 被
+    // 误判为不满足要求，每次部署都白白重装 node（实测每次多花 1-3 分钟）。
+    const parse = (v) => {
+        const m = String(v || '').trim().replace(/^v/, '').match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+        if (!m) return null;
+        return [Number(m[1]), Number(m[2] || 0), Number(m[3] || 0)];
+    };
+    const c = parse(current);
+    const r = parse(required);
+    // 任一版本无法解析 → 放行不阻断（真实健康检查兜底），好过盲装一个垃圾版本
+    if (!c || !r) return true;
+    if (c[0] !== r[0]) return c[0] > r[0];
+    if (c[1] !== r[1]) return c[1] > r[1];
+    return c[2] >= r[2];
 }
 
 /**
