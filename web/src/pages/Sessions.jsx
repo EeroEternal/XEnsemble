@@ -211,11 +211,23 @@ export default React.forwardRef(function Sessions({
   }, [showToast]);
   const panelRef = useRef(null);
   const shellRef = useRef(null);
-  // 每次点小火箭自增，用于强制 DeployPanel remount（重新分析），而不是复用上次内容
-  const [deployVersion, setDeployVersion] = useState(0);
-  // 切换项目时重置部署版本：不把上次的"主动部署"信号带到新项目（避免跨 session 误触发部署）
+  // 每次点小火箭自增，用于强制 DeployPanel remount（重新分析），而不是复用上次内容。
+  // 从 sessionStorage 恢复上次 version（DeployPanel 防重放按 projectId 记录了已消费的
+  // autoStartVersion）：若刷新/重进后重置为 0，再点击 version=1 会被 consumed(>=1) 误判为
+  // 重放而跳过 auto-deploy（概率性"点了 Deploy 不部署"——控制台只见 GET /deployments
+  // 无 POST auto-deploy）。恢复后 version 与本项目已消费值单调一致，主动点击恒放行。
+  const [deployVersion, setDeployVersion] = useState(() => {
+    try { return Number(sessionStorage.getItem(`xe_deploy_autostart_${activeSession?.projectId || ''}`)) || 0; } catch { return 0; }
+  });
+  // 切换项目时重置部署版本：不把上次的"主动部署"信号带到新项目（避免跨 session 误触发部署）。
+  // 但 version 从新项目的 sessionStorage 恢复（保持与该项目 consumed 单调一致），
+  // 否则切回旧项目后 version=0→点击=1 仍会被该项目已消费的 consumed 拦截。
   useEffect(() => {
-    setDeployVersion(0);
+    try {
+      setDeployVersion(Number(sessionStorage.getItem(`xe_deploy_autostart_${activeSession?.projectId || ''}`)) || 0);
+    } catch {
+      setDeployVersion(0);
+    }
   }, [activeSession?.projectId]);
   // 切换 session 时重置部署状态：右上角状态/Stop 按钮属于当前 session 的部署
   useEffect(() => {
