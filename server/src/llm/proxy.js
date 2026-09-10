@@ -32,6 +32,23 @@ const recordedToolCallIds = new Map();
 // Recorded tool-result call ids per session (agent replays history every turn).
 const recordedToolResultIds = new Map();
 
+/**
+ * 按 Agent 清洗用户消息中的格式噪音（XML 标签、时间戳前缀等）。
+ * 只匹配包裹整个消息或行首的固定格式，避免误删正文中出现的相同文本。
+ */
+function cleanUserContent(agentId, content) {
+    if (!content || !agentId) return content;
+    if (agentId === 'codebuddy') {
+        if (/^<user_query>[\s\S]*<\/user_query>$/.test(content)) {
+            return content.slice(12, -13);
+        }
+    }
+    if (agentId === 'openclaw') {
+        return content.replace(/^\[[A-Z][a-z]{2} \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\]\s*/, '');
+    }
+    return content;
+}
+
 function isNewToolCall(sessionId, id) {
     if (!id) return false;
     let set = recordedToolCallIds.get(sessionId);
@@ -843,7 +860,7 @@ async function proxyLlmRequest(request, reply) {
     // whether the request is one we should transcribe.
     if (isChatPath && userPrompt && lastUserPromptBySession.get(claims.sid) !== userPrompt) {
         lastUserPromptBySession.set(claims.sid, userPrompt);
-        void chatTranscript.append(claims.sid, { role: 'user', content: userPrompt });
+        void chatTranscript.append(claims.sid, { role: 'user', content: cleanUserContent(claims.aid, userPrompt) });
     }
     // Record tool_result messages echoed in the request body (the agent sends
     // them back after executing a tool call). Dedup by call id — the agent
