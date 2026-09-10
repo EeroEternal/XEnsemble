@@ -1259,6 +1259,16 @@ const NODE_BACKEND_DEPS = [
 ];
 const PY_BACKEND_RE = /\b(django|flask|fastapi|uvicorn|gunicorn|tornado|starlette|litestar)\b/i;
 
+// Python 后端入口文件：判定 python 后端时必须与框架依赖同时存在——
+// 只有 requirements.txt 装 flask/fastapi（独立工具脚本，不在主程序）而无入口文件，
+// 不能算后端（避免误检强制拉起不存在的 python 服务）。
+const PY_BACKEND_ENTRY_FILES = ['manage.py', 'main.py', 'app.py', 'asgi.py', 'wsgi.py', 'server.py', 'run.py'];
+function hasPyEntryFile(base) {
+    try {
+        return PY_BACKEND_ENTRY_FILES.some((f) => fs.existsSync(path.join(base, f)));
+    } catch { return false; }
+}
+
 function readPkgBackendInfo(subDir, { rootMode = false } = {}) {
     const pkg = readJsonSafe(path.join(subDir, 'package.json'));
     if (!pkg) return null;
@@ -1308,11 +1318,13 @@ function detectBackendSignature(workspacePath) {
         for (const sub of BACKEND_DIR_CANDIDATES) {
             const subDir = path.join(dir, sub);
             if (!fs.existsSync(subDir)) continue;
-            // python 后端子目录
+            // python 后端子目录：框架依赖 + 常见后端入口文件都必须存在才算后端——
+            // 只有 requirements.txt 装 flask/fastapi（可能是独立工具脚本，不在主程序）
+            // 而无入口文件 = 不是后端，避免误检强制拉起不存在的 python 服务。
             if (hasFile(subDir, 'requirements.txt') || hasFile(subDir, 'pyproject.toml')) {
                 const reqs = String(readTextSafe(path.join(subDir, 'requirements.txt')) || '')
                     + String(readTextSafe(path.join(subDir, 'pyproject.toml')) || '');
-                if (PY_BACKEND_RE.test(reqs)) {
+                if (PY_BACKEND_RE.test(reqs) && hasPyEntryFile(subDir)) {
                     evidence.push(`python backend deps in ${sub}/`);
                     if (!suggestCmd) {
                         // 入口：优先 manage.py（django）→ main.py（fastapi）→ app.py
@@ -1357,10 +1369,11 @@ function detectBackendSignature(workspacePath) {
                 if (!suggestCmd) suggestCmd = info.suggestCmd;
             }
         }
-        // 3) Python 根目录
+        // 3) Python 根目录：框架依赖 + 常见后端入口文件都存在才算后端（纯工具脚本
+        //    只装 flask/fastapi 无入口 = 不是后端，避免误检强制拉起不存在的 python 服务）。
         const rootPy = String(readTextSafe(path.join(dir, 'requirements.txt')) || '')
             + String(readTextSafe(path.join(dir, 'pyproject.toml')) || '');
-        if (rootPy && PY_BACKEND_RE.test(rootPy)) {
+        if (rootPy && PY_BACKEND_RE.test(rootPy) && hasPyEntryFile(dir)) {
             const fw = (PY_BACKEND_RE.exec(rootPy) || [])[1] || 'python';
             evidence.push(`python backend framework: ${fw.toLowerCase()}`);
             if (!suggestCmd && hasFile(dir, 'manage.py')) {

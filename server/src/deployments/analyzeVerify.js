@@ -770,12 +770,13 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
     // 分支 3：agent 未上报任何 API 面。纯前端站放行；但项目有后端证据时
     // 硬失败——agent 必须补报 apiEndpoints 或 backendPort（推回自修复，超限真失败），
     // 杜绝"带后端项目被当纯静态站验证通过"污染成功轨迹与部署缓存。
-    // 后端证据 = 签名检测 hasBackend + 平台检测信号兜底（toolchains 的 jdk-*（Java 构建）、
-    // systemDeps（mysql/redis/postgres 等 DB）——即使 detectBackendSignature 漏检
-    // 多仓库 Java（如 server-manage-server/），平台 toolchain/DB 信号仍能认定"有后端"，
-    // 不放过"前端独活"。纯前端站（无任何信号）不受影响。
-    const platformBackendSignal = (Array.isArray(plan?.context?.toolchains) && plan.context.toolchains.some((t) => /^jdk-/.test(t?.tool || '')))
-        || (Array.isArray(plan?.context?.systemDeps) && plan.context.systemDeps.length > 0);
+    // 后端证据 = 签名检测 hasBackend + jdk-* toolchain 兜底（pom.xml/build.gradle 在任意
+    // 子目录 → Java 构建文件，后端概率极高，即使 detectBackendSignature 漏检也能认定）。
+    // 注意：systemDeps（mysql/redis 等 DB 依赖）**不**作为独立触发信号——DB 依赖 ≠ 有
+    // 后端进程（纯前端站也可能带 redis/mysql 依赖做限流/SSR 辅助），误检会强制 agent
+    // 拉起不存在的后端而白白失败；仅作为 reason 里的辅助证据展示。
+    const platformBackendSignal = Array.isArray(plan?.context?.toolchains)
+        && plan.context.toolchains.some((t) => /^jdk-/.test(t?.tool || ''));
     if ((backendEvidence && backendEvidence.hasBackend) || platformBackendSignal) {
         const evidenceList = [
             ...((backendEvidence?.evidence || []).slice(0, 3)),
