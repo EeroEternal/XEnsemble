@@ -695,25 +695,30 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
                     };
                 }
             }
-            if (ev) {
-                return {
-                    ok: false,
-                    verdict: 'backend_unverified',
-                    reason: `API 端点全部 404（${results.map((x) => `${x.path}=${x.code}`).join(', ')}），但项目扫描到后端证据（${(backendEvidence.evidence || []).slice(0, 3).join('; ')}）且未上报 backendPort —— 无法确认后端已启动`,
-                    probed,
-                    endpoints: targets,
-                };
-            }
             // 通用兜底（不依赖 backendEvidence——Python/Go 等非 Node 后端扫不到证据）：
-            // 全 404 的常见真因是「API 前缀不在探测面」（如 dify 的 /console/api）而后端
-            // 实际在跑。扫 guest 监听端口，发现非系统端口的应用服务即判活，并把端口
-            // 带回给 preview 代理按 apiPrefixes 分流。
+            // 全 404 的常见真因是「API 前缀不在探测面」（如 dify 的 /console/api）或
+            // agent 上报的端点路径/前缀有误（如 /health 不经前端代理、/api/auth/login
+            // 后端无此路径，实测 multica 后端 8080 活着但 probe 打前端 3000 全 404）。
+            // 先扫 guest 监听端口，发现非系统端口的应用服务即判活（后端真的在跑）。
+            // 顺序必须在前：不能因「有后端证据（go.mod）+ 未上报 backendPort」就抢先
+            // 硬失败——那会漏掉「后端活着只是探测面错配」的真实健康场景（16:42 事故）。
             const aliveFallback = await verifyBackendAlive(runtimeRef, workspacePath, reportedPorts, plan, defaultPort).catch(() => null);
             if (aliveFallback && aliveFallback.backendPort) {
                 return {
                     ok: true,
                     verdict: 'backend_listening',
                     backendPort: aliveFallback.backendPort,
+                    probed,
+                    endpoints: targets,
+                };
+            }
+            // 扫不到任何应用服务 + 项目有确定性后端证据 → 硬失败（后端确实没起来），
+            // 推回 agent 补报，杜绝"前端 200 后端死"被固化进成功轨迹。
+            if (ev) {
+                return {
+                    ok: false,
+                    verdict: 'backend_unverified',
+                    reason: `API 端点全部 404（${results.map((x) => `${x.path}=${x.code}`).join(', ')}），项目扫描到后端证据（${(backendEvidence.evidence || []).slice(0, 3).join('; ')}），且沙箱内未发现任何应用服务监听 —— 后端确实未启动；请启动真实后端（如 nohup）并上报 backendPort/apiEndpoints`,
                     probed,
                     endpoints: targets,
                 };
