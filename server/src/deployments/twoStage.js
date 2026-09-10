@@ -2303,6 +2303,18 @@ if [ ! -f /root/.m2/settings.xml ]; then
   mkdir -p /root/.m2 2>/dev/null || true
   printf '%s\\n' '<settings>' '  <mirrors>' '    <mirror>' '      <id>aliyunmaven</id>' '      <mirrorOf>*</mirrorOf>' '      <url>https://maven.aliyun.com/repository/public</url>' '    </mirror>' '  </mirrors>' '</settings>' > /root/.m2/settings.xml 2>/dev/null || true
 fi
+# 7) ruby gem 镜像（Gemfile 项目 bundle install 走国内源；.gemrc 持久化，装完 gem 即生效）
+if [ ! -f /root/.gemrc ]; then
+  printf '%s\\n' '---' ':update_sources: true' ':sources:' '- https://gems.ruby-china.com/' '- https://mirrors.aliyun.com/rubygems/' > /root/.gemrc 2>/dev/null || true
+fi
+if command -v gem >/dev/null 2>&1; then
+  gem sources --remove https://rubygems.org/ 2>/dev/null || true
+  gem sources --add https://gems.ruby-china.com/ 2>/dev/null || true
+fi
+# 8) composer (PHP) packagist 镜像（composer install 走阿里云镜像）
+if command -v composer >/dev/null 2>&1; then
+  composer config -g repo.packagist composer https://mirrors.aliyun.com/composer/ 2>/dev/null || true
+fi
 echo MIRRORS_DONE
 `;
     try {
