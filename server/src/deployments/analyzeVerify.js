@@ -508,8 +508,11 @@ const BACKEND_LISTEN_EXCLUDE_PORTS = new Set([5432, 3306, 6379, 27017, 11211, 51
  * 端口监听兜底：判断"后端端口是否真的在监听"（用户要求：检测不到具体接口时，用端口
  * 监听判断后端是否正常拉起）。候选 = agent 上报的 backendPort + 平台探测的 startCandidates
  * 端口，排除系统服务端口。返回命中的端口或 null。
+ * @param {number} [excludePort] 前端页面端口——必须排除：前端静态服务（serve dist）也
+ *   在监听，且对 /api 的 SPA fallback 是假活，扫端口兜底绝不能把前端端口当成后端
+ *   （否则"后端没起、只有前端 serve"会被误判 backend_listening 放行）。
  */
-async function findListeningBackendPort(runtimeRef, workspacePath, reportedPorts, plan) {
+async function findListeningBackendPort(runtimeRef, workspacePath, reportedPorts, plan, excludePort) {
     const listening = await listGuestListenPorts(runtimeRef, workspacePath);
     const listenSet = new Set(listening);
     const candidates = [
@@ -522,7 +525,7 @@ async function findListeningBackendPort(runtimeRef, workspacePath, reportedPorts
         ...COMMON_APP_PORTS.filter((p) => listenSet.has(p)),
     ];
     for (const p of candidates) {
-        if (Number.isInteger(p) && p >= 1000 && p < 65535 && !BACKEND_LISTEN_EXCLUDE_PORTS.has(p) && listenSet.has(p)) {
+        if (Number.isInteger(p) && p >= 1000 && p < 65535 && p !== excludePort && !BACKEND_LISTEN_EXCLUDE_PORTS.has(p) && listenSet.has(p)) {
             return p;
         }
     }
@@ -537,8 +540,8 @@ async function findListeningBackendPort(runtimeRef, workspacePath, reportedPorts
  *     至少 preview 可达后端响应。
  * 返回 { backendPort, appPort, frontendServed }；后端未监听时返回 null。
  */
-async function verifyBackendAlive(runtimeRef, workspacePath, reportedPorts, plan, defaultPort) {
-    const backendPort = await findListeningBackendPort(runtimeRef, workspacePath, reportedPorts, plan);
+async function verifyBackendAlive(runtimeRef, workspacePath, reportedPorts, plan, defaultPort, excludePort) {
+    const backendPort = await findListeningBackendPort(runtimeRef, workspacePath, reportedPorts, plan, excludePort);
     if (!backendPort) return null;
     const probe = await assertAppIsServed({ runtimeRef, workspacePath, preferredPort: defaultPort });
     return {
@@ -702,7 +705,7 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
             // 先扫 guest 监听端口，发现非系统端口的应用服务即判活（后端真的在跑）。
             // 顺序必须在前：不能因「有后端证据（go.mod）+ 未上报 backendPort」就抢先
             // 硬失败——那会漏掉「后端活着只是探测面错配」的真实健康场景（16:42 事故）。
-            const aliveFallback = await verifyBackendAlive(runtimeRef, workspacePath, reportedPorts, plan, defaultPort).catch(() => null);
+            const aliveFallback = await verifyBackendAlive(runtimeRef, workspacePath, reportedPorts, plan, defaultPort, p).catch(() => null);
             if (aliveFallback && aliveFallback.backendPort) {
                 return {
                     ok: true,
@@ -1589,7 +1592,7 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                 // curl 判"应用内容"，纯 API 后端根路径 404（multica 只有 /health /api/* 路由）
                 // 会被误判 down。因此这里用 verifyBackendAlive：后端端口监听（排除系统服务
                 // 端口）= 后端已拉起；appPort 用前端页面端口（assertAppIsServed 内容探测）。
-                const alive = await verifyBackendAlive(runtimeRef, workspacePath, sanitizeBackendPorts(r.backendPort), plan, defaultPort);
+                const alive = await verifyBackendAlive(runtimeRef, workspacePath, sanitizeBackendPorts(r.backendPort), plan, defaultPort, defaultPort);
                 if (alive) {
                     trail.push({ round, action: 'agent_failed_but_backend_listening', backendPort: alive.backendPort, appPort: alive.appPort });
                     console.error(`[analyzeVerify] round ${round}: agent reported ok:false but backend port ${alive.backendPort} listening — overriding to success (appPort=${alive.appPort})`);
@@ -1674,7 +1677,7 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
     // 后端端口在监听 → 判定后端已正常拉起（用户要求：检测不到接口时用端口监听判断）。
     // appPort 取前端页面端口，避免 preview 隧道打到后端 API 端口。
     if (!fallbackOk && backendEvidence && backendEvidence.hasBackend) {
-        const alive = await verifyBackendAlive(runtimeRef, workspacePath, [], plan, defaultPort);
+        const alive = await verifyBackendAlive(runtimeRef, workspacePath, [], plan, defaultPort, defaultPort);
         if (alive) {
             fallbackOk = true;
             appPort = alive.appPort;
