@@ -569,6 +569,11 @@ async function registerPreviewGateway(fastify) {
                 request.raw.__previewNavLog = '1';
             }
             if (isAsset) {
+                // 无前缀资源请求（RSC 动态 import 的 chunk / 绝对路径资源）：记录路由目标，
+                // 排查"chunk 被路由到错误部署导致 React 启动失败白屏"。
+                if (depSource !== 'path') {
+                    console.error(`[gateway] preview-asset ${request.method} ${JSON.stringify({ path: request.url.slice(0, 110), depSource, depId: deploymentId, referer: String(request.headers.referer || '').slice(0, 80) })}`);
+                }
                 entry = previewRegistry.get(deploymentId);
                 if (!entry) return reply.code(503).send({ error: t('errors:preview_not_found', { defaultValue: 'Preview process not found' }, request.locale || 'en'), code: 'preview_not_found' });
             } else {

@@ -174,12 +174,12 @@ const ROUTE_SHIM_SCRIPT = `<script>
   }
   var BASE = __XE_PREVIEW_BASE__;
   window.__xePreviewBase = BASE;
-  xeReport('log', 'boot pathname=' + location.pathname + ' base=' + BASE);
+  xeReport('log', 'boot pathname=' + location.pathname + ' base=' + BASE + ' baseURI=' + document.baseURI + ' origin=' + location.origin);
   if (location.pathname.indexOf(BASE) === 0) {
     var rest = location.pathname.slice(BASE.length - 1) || '/';
     try {
       history.replaceState(history.state, '', rest + location.search + location.hash);
-      xeReport('log', 'shim stripped -> ' + location.pathname);
+      xeReport('log', 'shim stripped -> ' + location.pathname + ' baseURI=' + document.baseURI);
     } catch (e) { xeReport('error', 'shim replaceState failed: ' + e.message); }
   } else {
     xeReport('log', 'shim skipped (pathname not under base)');
