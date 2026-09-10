@@ -100,6 +100,11 @@ proxy.on('proxyRes', (pRes, req) => {
         console.error(`[gateway] preview-res ${deploymentId} status=${pRes.statusCode} type=${type.slice(0, 60)} url=${req.url}`);
     }
     if (!/\btext\/html\b/i.test(type)) return;
+    // HTML 响应禁止缓存：预览页面 HTML 由网关实时改写（base/shim/资源相对化），且部署间
+    // chunk hash 变化——浏览器若缓存旧 HTML（无 shim/旧资源引用）会导致脚本不执行/白屏，
+    // 且极难排查（16:10 部署连 shim 上报都没有，疑似缓存命中旧响应）。显式 no-store 兜底
+    // nginx/网关/上游可能缺失的缓存头。
+    pRes.headers['cache-control'] = 'no-store, max-age=0';
     const existing = pRes.headers['set-cookie'] || [];
     pRes.headers['set-cookie'] = [...existing, previewCookieValue(deploymentId)];
 });
@@ -421,6 +426,8 @@ async function handleDevConsole(request, reply) {
     const deploymentId = request.params.deploymentId;
     const resolved = await resolveDeployment(request.raw, deploymentId);
     if (resolved.error) {
+        // 上报被拒也打日志（区分"浏览器上报未到达" vs "到达但鉴权失败"——16:10 部署无上报的疑点）
+        console.error(`[gateway] browser-console ${deploymentId} REJECTED status=${resolved.status} code=${resolved.code || ''}`);
         const payload = { error: resolved.error };
         if (resolved.code) payload.code = resolved.code;
         return reply.code(resolved.status).send(payload);

@@ -189,7 +189,8 @@ const ROUTE_SHIM_SCRIPT = `<script>
     try {
       var b = document.body;
       if (b) {
-        txt = (b.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+        // 模板字符串里正则反斜杠必须双写（\\s），单写会被 JS 吞掉反斜杠
+        txt = (b.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 120);
         kids = b.children ? b.children.length : 0;
         bodyLen = b.innerHTML.length;
       }
@@ -200,7 +201,7 @@ const ROUTE_SHIM_SCRIPT = `<script>
       // performance resource：chunk 请求状态 + 失败资源
       if (window.performance && performance.getEntriesByType) {
         var rs = performance.getEntriesByType('resource') || [];
-        var js = rs.filter(function (r) { return /\.js($|\?)/.test(r.name); });
+        var js = rs.filter(function (r) { return /\\\.js($|\\\?)/.test(r.name); });
         var failed = rs.filter(function (r) { return r.responseStatus >= 400 || r.responseStatus === 0; });
         resChunk = 'jsReq=' + js.length + ' bad=' + failed.length;
         resBad = failed.slice(0, 6).map(function (r) { return r.responseStatus + ':' + r.name.slice(0, 100); }).join(' | ');
