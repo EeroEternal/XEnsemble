@@ -138,12 +138,39 @@ function stripFrameBlockingHeaders(headers) {
 const ROUTE_SHIM_SCRIPT = `<script>
 (function () {
   if (window.__xeRouteShim) return; window.__xeRouteShim = true;
+  // 浏览器端诊断上报：经网关 __dev/console 写入 inbox，用于定位"整页导航后 Router 白屏"的真实原因。
+  function xeReport(level, msg) {
+    try {
+      var base = window.__xePreviewBase || '';
+      if (!base) return;
+      fetch(base + '__dev/console', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ level: level, message: String(msg).slice(0, 800) }), keepalive: true
+      }).catch(function () {});
+    } catch (e) {}
+  }
+  window.xeReport = xeReport;
+  window.addEventListener('error', function (e) {
+    xeReport('error', 'uncaught: ' + (e && e.message || '') + ' @ ' + (e && e.filename || '') + ':' + (e && e.lineno || ''));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    xeReport('error', 'unhandledrejection: ' + String((e && e.reason && e.reason.message) || (e && e.reason) || '').slice(0, 300));
+  });
   var BASE = __XE_PREVIEW_BASE__;
   window.__xePreviewBase = BASE;
+  xeReport('log', 'boot pathname=' + location.pathname + ' base=' + BASE);
   if (location.pathname.indexOf(BASE) === 0) {
     var rest = location.pathname.slice(BASE.length - 1) || '/';
-    try { history.replaceState(history.state, '', rest + location.search + location.hash); } catch (e) {}
+    try {
+      history.replaceState(history.state, '', rest + location.search + location.hash);
+      xeReport('log', 'shim stripped -> ' + location.pathname);
+    } catch (e) { xeReport('error', 'shim replaceState failed: ' + e.message); }
+  } else {
+    xeReport('log', 'shim skipped (pathname not under base)');
   }
+  window.addEventListener('load', function () {
+    xeReport('log', 'loaded pathname=' + location.pathname + ' readyState=' + document.readyState);
+  });
 })();
 </script>`;
 
