@@ -1012,6 +1012,36 @@ function buildSystemPrompt(plan, toolchain) {
         '- Health check must return the REAL application content (HTML with a <title> and app markup, or the backend API JSON). A 200 on a file listing or an empty page is NOT success.',
         '- If you cannot install deps / build / start the app for real, report ok:false with the real reason. Do NOT fake success to satisfy the check.',
         'MONOREPO / WEB APP DISCOVERY (MANDATORY): if the repo root is a monorepo (has apps/*, packages/*, or a workspace root with sub-projects), do NOT serve whatever static index.html happens to exist at the root, in docs/, website/, or anywhere else — that is usually a docs site / landing page, NOT the real application. The REAL web app is the subproject whose package.json has a frontend build/dev script (`vite build` / `dev: vite` / `npm run dev` / `next build` / `nuxt build` / `react-scripts build`), typically under apps/web, apps/frontend, apps/ui, packages/web, or a dedicated client/ dir. Find that subproject, install its deps, build it, and serve its dist output. If the app also has a backend (server/, api/, apps/api, apps/cli), start it too and verify a real API endpoint responds. Serving a docs site (vitepress/docusaurus/docsify etc.) or a project landing page instead of the actual app is a FAILURE even if it returns 200.',
+        'BACKEND DISCOVERY (MANDATORY — decide BEFORE finalizing whether the project has a backend, in ANY language):',
+        ...(plan?.context ? (() => {
+            const lines = [];
+            const tc = Array.isArray(plan.context.toolchains) ? plan.context.toolchains : [];
+            const tcLines = tc.filter((t) => t && /^jdk-/.test(t.tool)).map((t) => `${t.tool} (${t.evidence || '?'})`);
+            const sys = Array.isArray(plan.context.systemDeps) ? plan.context.systemDeps : [];
+            const be = Array.isArray(plan.context.backendEvidence) ? plan.context.backendEvidence.slice(0, 4) : [];
+            const evidence = [...tcLines, ...sys.map((s) => `db/cache service: ${s}`), ...be];
+            if (evidence.length) {
+                lines.push(`- PLATFORM SCAN found backend evidence: ${evidence.join('; ')} — a backend is EXPECTED in this project, it MUST be built and started (NOT just the frontend served).`);
+            }
+            return lines;
+        })() : []),
+        '- Does the project have a BACKEND (any language)? It is YES if ANY of these signals matches:',
+        '  - a backend sub-project dir: server/ api/ backend/ srv/ cmd/ apps/server/ apps/api/ (or any subdir containing the files below)',
+        '  - pom.xml / build.gradle(.kts) — Java/Maven/Gradle backend',
+        '  - package.json with express / fastify / koa / @nestjs/core / hono / socket.io — Node backend',
+        '  - go.mod with a main package or cmd/ — Go backend',
+        '  - requirements.txt / pyproject.toml with fastapi / flask / django / uvicorn / gunicorn, or manage.py — Python/Django backend',
+        '  - Cargo.toml — Rust backend',
+        '  - application.yml / application.properties / .env / docker-compose with DATABASE_URL / spring.datasource / POSTGRES_* / MYSQL_* / REDIS_URL — a DB/cache-backed backend exists',
+        '- If ANY signal matches, the backend MUST be running — serving ONLY the frontend (npx serve dist / vite preview / python3 -m http.server) is a FAILURE:',
+        '  - cd <backend dir>, build it with the project\'s standard command (read README / Makefile / pom.xml plugins / package.json scripts / Dockerfile), then start it in the background (nohup / setsid), e.g.:',
+        '    - Java: `mvn package -DskipTests` then `nohup java -jar target/*.jar > /tmp/backend.log 2>&1 &`',
+        '    - Node: `nohup node src/server.js > /tmp/backend.log 2>&1 &`',
+        '    - Python: `nohup uvicorn main:app --host 0.0.0.0 --port <port> > /tmp/backend.log 2>&1 &` or `python3 manage.py runserver 0.0.0.0:<port> &`',
+        '    - Go: `nohup go run ./cmd/server > /tmp/backend.log 2>&1 &` (or run the built binary)',
+        '  - The platform pre-installed the build toolchains (see TOOLCHAIN READY / JAVA READY above) and databases (see DATABASE SETUP below) — use them, do NOT reinstall.',
+        '  - Read the backend router code to find REAL routes and report them as apiEndpoints (and the listen port as backendPort). The platform verifies them: endpoints whose response is frontend HTML (SPA fallback) are REJECTED as not-a-backend.',
+        '  - If the frontend proxies /api (vite proxy / next rewrites / axios baseURL), the backend MUST be reachable through the frontend: start it locally on 127.0.0.1 and keep the proxy target pointing at it.',
         'DATABASE SETUP (MANDATORY when the backend needs a database):',
         ...(plan?.context?.dbProvision && plan.context.dbProvision.ready === false && plan.context.dbProvision.code
             ? [
@@ -1155,6 +1185,16 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
             `Project root: /workspace. Detected type: ${projectType?.type || 'unknown'}, default port: ${defaultPort}.`,
             'Start executing the plan now. Report what you run. Work until the health check passes.',
         ].join('\n');
+        // 平台后端签名检测结果挂到 plan.context，供 buildSystemPrompt 注入
+        // "PLATFORM SCAN evidence of a backend"——agent 明确知道项目有后端必须启动。
+        plan = {
+            ...plan,
+            context: {
+                ...(plan.context || {}),
+                backendEvidence: backendEvidence?.evidence || [],
+                backendEvidenceHas: !!backendEvidence?.hasBackend,
+            },
+        };
         messages = [
             { role: 'system', content: buildSystemPrompt(plan, toolchain) },
             { role: 'user', content: initialUser },
