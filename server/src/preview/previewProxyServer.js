@@ -124,6 +124,29 @@ function stripFrameBlockingHeaders(headers) {
     return h;
 }
 
+// 路由引导 shim：解决"路径前缀挂载"下客户端 Router 白屏的通用修复。
+// 背景（9/10 网关日志实锤）：Next/react-router 等应用挂在 /preview/<id>/ 子路径下，
+// 点击 <Link href="/login"> 等按钮会触发【整页导航】到 /preview/<id>/login（带前缀，
+// 网关日志 accept=text/html、无 RSC 头），网关剥前缀返回 200 登录页 HTML，但浏览器
+// 地址栏仍是带前缀路径 → 客户端 Router（无 basePath）用该 pathname 匹配根路由表 →
+// 匹配不到 → not-found/白屏。服务端反代只能改请求路径，改不了浏览器 Router 读到的
+// location.pathname——必须在浏览器侧引导：整页导航加载的新 HTML 在 <head> 最早处
+// 同步执行本 shim，history.replaceState 把 /preview/<id>/ 前缀从地址栏剥掉，Router
+// 首屏即看到根路径，路由匹配成功。
+// 同时：剥前缀前把精确 base 存入 window.__xePreviewBase，供运行时 fetch/XHR/WS 改写
+// 脚本使用（剥前缀后 location 已无前缀，若动态读会退化为"最新部署"）。
+const ROUTE_SHIM_SCRIPT = `<script>
+(function () {
+  if (window.__xeRouteShim) return; window.__xeRouteShim = true;
+  var BASE = __XE_PREVIEW_BASE__;
+  window.__xePreviewBase = BASE;
+  if (location.pathname.indexOf(BASE) === 0) {
+    var rest = location.pathname.slice(BASE.length - 1) || '/';
+    try { history.replaceState(history.state, '', rest + location.search + location.hash); } catch (e) {}
+  }
+})();
+</script>`;
+
 // 统一 HTML 改写：
 //  1) 注入 <base href="/preview/<id>/">（若提供了 base 且 HTML 里没有 <base>），让前端所有
 //     相对 URL（webpack 动态 chunk、fetch 相对路径等）自动落到预览子路径，不脱离前缀。
@@ -188,6 +211,13 @@ function decompressBody(buf, encoding) {
 }
 
 function rewriteHtml(html) {
+    // 路由引导 shim：注入在 <head> 最早处（先于应用全部脚本），剥掉 /preview/<id>/ 前缀，
+    // 让客户端 Router 首屏看到根路径（详见 ROUTE_SHIM_SCRIPT 注释）。liveBase 由部署时
+    // 注入（/preview/<id>/），非前缀挂载场景（liveBase 为空）不注入、无副作用。
+    if (liveBase && !html.includes('__xeRouteShim')) {
+        const shim = ROUTE_SHIM_SCRIPT.replace('__XE_PREVIEW_BASE__', JSON.stringify(liveBase));
+        html = html.replace(/(<head[^>]*>)/i, `$1\n${shim}`);
+    }
     if (liveBase && !/<base\s/i.test(html)) {
         const base = liveBase.replace(/\/$/, '') + '/';
         html = html.replace(/(<head[^>]*>)/i, `$1\n    <base href="${base}">`);

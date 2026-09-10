@@ -506,9 +506,19 @@ async function registerPreviewGateway(fastify) {
                 deploymentId = m[1];
                 depSource = 'referer';
             } else if (isPreviewPort) {
-                // 预览专用端口：SPA 绝对路由产生的无前缀请求（/login、/api/...）默认路由到最新部署。
-                deploymentId = await findLatestRunningPreview();
-                depSource = deploymentId ? 'latest' : 'none';
+                // 预览专用端口上的无前缀请求（SPA 绝对路由 /login、/api/...、Next Link 整页导航后
+                // 刷新等）：优先用会话 cookie 绑定的部署——iframe/pop-out 首次打开时网关已在 HTML
+                // 响应种下 xe_preview（绑定实际部署），即使 URL/Referer 已无前缀也能精确路由回
+                // 当前部署；比 findLatestRunningPreview（全局最新，多部署并存时可能选到别的部署）
+                // 更准确。cookie 无绑定或绑定部署已不在 previewRegistry（进程退出/已停）才回退 latest。
+                const cookieDep = previewSessionId(request);
+                if (cookieDep && previewRegistry.get(cookieDep)) {
+                    deploymentId = cookieDep;
+                    depSource = 'cookie';
+                } else {
+                    deploymentId = await findLatestRunningPreview();
+                    depSource = deploymentId ? 'latest' : 'none';
+                }
             }
             if (!deploymentId) {
                 // 预览专用端口上的无前缀请求若无法路由，返回 404/503，绝不落入宿主控制台（8088）。
