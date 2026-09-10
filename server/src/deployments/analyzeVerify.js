@@ -767,14 +767,25 @@ async function probeApiHealth({ runtimeRef, workspacePath, port, endpoints, back
         };
     }
 
-    // 分支 3：agent 未上报任何 API 面。纯前端站放行；但项目有确定性后端证据时
+    // 分支 3：agent 未上报任何 API 面。纯前端站放行；但项目有后端证据时
     // 硬失败——agent 必须补报 apiEndpoints 或 backendPort（推回自修复，超限真失败），
     // 杜绝"带后端项目被当纯静态站验证通过"污染成功轨迹与部署缓存。
-    if (backendEvidence && backendEvidence.hasBackend) {
+    // 后端证据 = 签名检测 hasBackend + 平台检测信号兜底（toolchains 的 jdk-*（Java 构建）、
+    // systemDeps（mysql/redis/postgres 等 DB）——即使 detectBackendSignature 漏检
+    // 多仓库 Java（如 server-manage-server/），平台 toolchain/DB 信号仍能认定"有后端"，
+    // 不放过"前端独活"。纯前端站（无任何信号）不受影响。
+    const platformBackendSignal = (Array.isArray(plan?.context?.toolchains) && plan.context.toolchains.some((t) => /^jdk-/.test(t?.tool || '')))
+        || (Array.isArray(plan?.context?.systemDeps) && plan.context.systemDeps.length > 0);
+    if ((backendEvidence && backendEvidence.hasBackend) || platformBackendSignal) {
+        const evidenceList = [
+            ...((backendEvidence?.evidence || []).slice(0, 3)),
+            ...(plan?.context?.toolchains || []).filter((t) => /^jdk-/.test(t?.tool || '')).map((t) => t.evidence || t.tool),
+            ...(Array.isArray(plan?.context?.systemDeps) ? plan.context.systemDeps.map((s) => `db/cache service: ${s}`) : []),
+        ];
         return {
             ok: false,
             verdict: 'backend_unreported',
-            reason: `项目扫描到后端证据（${(backendEvidence.evidence || []).slice(0, 3).join('; ')}），但 final 未上报任何 apiEndpoints 或 backendPort —— 无法验证后端已启动`,
+            reason: `项目存在后端（${evidenceList.join('; ')}），但 final 未上报任何 apiEndpoints 或 backendPort —— 无法验证后端已启动（只 serve 前端会持续被拒）`,
             probed: [],
             endpoints: [],
         };

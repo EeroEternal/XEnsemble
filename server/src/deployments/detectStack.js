@@ -1395,6 +1395,41 @@ function detectBackendSignature(workspacePath) {
             evidence.push('manage.py (django)');
             if (!suggestCmd) suggestCmd = 'python3 manage.py runserver 0.0.0.0:$PORT';
         }
+        // 6) 深度扫描补充（多仓库 Java/Gradle/Rust/Go 后端）：pom.xml / build.gradle(.kts) /
+        //    Cargo.toml / go.mod 在**任意子目录**（如 server-manage-server/，不在
+        //    BACKEND_DIR_CANDIDATES 里）时此前漏检 → hasBackend=false → verify 分支 3
+        //    skipped 放行"前端独活"（实测 server-manage 后端从未启动却部署成功）。
+        //    深度 3 递归扫描（跳过 node_modules/.git/dist 等噪音），找到构建文件即认定有后端。
+        try {
+            const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'target', 'vendor', '.next', 'out', 'coverage', '.cache']);
+            let found = null;
+            const walk = (base, depth) => {
+                if (found || depth > 3) return;
+                let entries;
+                try { entries = fs.readdirSync(base, { withFileTypes: true }); } catch { return; }
+                for (const ent of entries) {
+                    if (found) return;
+                    if (ent.isFile()) {
+                        if (/^(pom\.xml|build\.gradle|build\.gradle\.kts|Cargo\.toml|go\.mod)$/.test(ent.name)) {
+                            found = { file: ent.name, sub: path.relative(dir, base) || '.' };
+                            return;
+                        }
+                    } else if (ent.isDirectory() && !SKIP_DIRS.has(ent.name) && !ent.name.startsWith('.')) {
+                        walk(path.join(base, ent.name), depth + 1);
+                    }
+                }
+            };
+            walk(dir, 0);
+            if (found) {
+                evidence.push(`${found.file} in ${found.sub === '.' ? 'root' : `${found.sub}/`}`);
+                if (!suggestCmd) {
+                    if (found.file === 'pom.xml') suggestCmd = `cd ${found.sub === '.' ? '.' : found.sub} && mvn spring-boot:run`;
+                    else if (/^build\.gradle/.test(found.file)) suggestCmd = `cd ${found.sub === '.' ? '.' : found.sub} && gradle bootRun`;
+                    else if (found.file === 'Cargo.toml') suggestCmd = `cd ${found.sub === '.' ? '.' : found.sub} && cargo run`;
+                    else suggestCmd = `cd ${found.sub === '.' ? '.' : found.sub} && go run .`;
+                }
+            }
+        } catch { /* 深度扫描失败不阻塞 */ }
     } catch {
         // 扫描失败不阻塞：按无后端处理（保守，不产生 fatal）
     }
