@@ -428,6 +428,10 @@ async function handleDevConsole(request, reply) {
 
     const level = request.body?.level || 'log';
     const message = request.body?.message ?? '';
+    // 浏览器端诊断上报（previewProxyServer 注入的 shim/RUNTIME_SCRIPT）：直接打到宿主
+    // journalctl（browser 标签），不依赖 inbox workspacePath（resolveDeployment 的 entry
+    // 可能无 workspacePath，inbox 会静默丢弃）。用户复现白屏后据此定位浏览器端真实行为。
+    console.error(`[gateway] browser-console ${deploymentId} [${level}] ${String(message).slice(0, 500)}`);
     const workspacePath = resolved.entry.workspacePath;
     if (workspacePath) {
         appendInboxLog(workspacePath, 'browser', `${level}: ${message}`);
@@ -545,7 +549,7 @@ async function registerPreviewGateway(fastify) {
                 || /^\/api(\/|$)/.test(realPath)
                 || /^\/ws(\/|$)/.test(realPath);
             // 预览导航观测日志（诊断白屏/路由错配用，不影响行为）：
-            // 记录非资源请求的解析路径与来源（path/referer/latest），重点看 Next.js <Link>
+            // 记录非资源请求的解析路径与来源（path/referer/cookie/latest），重点看 Next.js <Link>
             // 客户端导航（RSC 头）与绝对路径跳转的实际请求序列与 Referer 形态。
             if (!isAsset && !pathname.includes('/__dev/console')) {
                 const rsc = request.headers['rsc'] || request.headers['next-router-prefetch'] || request.headers['next-router-state-tree'] || '';
@@ -554,6 +558,8 @@ async function registerPreviewGateway(fastify) {
                     host: request.headers.host, xPrev: request.headers['x-preview-origin'] || '', rsc: String(rsc).slice(0, 40), accept: String(request.headers.accept || '').slice(0, 80),
                 };
                 console.error(`[gateway] preview-nav ${request.method} ${JSON.stringify(logLine)}`);
+                // 标记为导航类，让 proxyRes 钩子记录响应 status/content-type
+                request.raw.__previewNavLog = '1';
             }
             if (isAsset) {
                 entry = previewRegistry.get(deploymentId);
