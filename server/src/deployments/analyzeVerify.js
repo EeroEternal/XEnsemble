@@ -821,6 +821,7 @@ function buildSystemPrompt(plan, toolchain) {
         '- NEVER run install for the same sub-package twice. The DEPENDENCY CACHE block below is the authoritative per-sub-package install decision (platform-checked by mtime vs package.json / lockfile). If a sub-package is CACHED, skip its install; if STALE/MISSING/STALE_LOCK/STALE_PKG, you MUST install THAT sub-package exactly once. In a monorepo each sub-package is independent — installing the root does NOT cover subdirs unless the root has a "workspaces" / pnpm-workspace.yaml / yarn workspaces config.',
         '- NEVER run `npm run build` / `vite build` / `make` more than once. If the build artifact (web/dist, build/, out/) already exists and the source has not changed, SKIP rebuild and serve the existing artifact.',
         '- Do NOT waste rounds on environment inspection (`free -m`, `nproc`, `which`, `node -v`, `cat package.json`) — those were already provided. Only run a check if it directly unblocks a failing step.',
+        '- Waiting for a background build/service: NEVER loop on `pgrep -f "<keyword>"` — the executing shell\'s own command line contains that keyword, so pgrep matches the shell itself and the loop spins forever until the timeout kills it (burns a whole round). Instead check the actual artifact/port: `ls target/*.jar / dist/`, `ss -ltn | grep :<port>`, `curl`, or use `pgrep -x <exact binary name>` (exact process name, no -f).',
         'Deploy plan to execute:',
         JSON.stringify(plan?.steps || [], null, 2),
         '',
@@ -992,6 +993,23 @@ function buildSystemPrompt(plan, toolchain) {
         ...(plan?.context?.dbReady ? [] : [
             '- Create a user + database matching the app config. Run psql as the postgres user via `su postgres -c "psql -c \\"...\\""` — in this sandbox `su postgres -c` is the CORRECT way; do NOT waste rounds trying `sudo -u postgres` / `runuser -u postgres` variants. Create the user, then `CREATE DATABASE mydb OWNER myuser;`, and run each CREATE only ONCE.',
         ]),
+        ...(plan?.context?.dbServices ? (() => {
+            // 通用数据库/缓存服务状态（postgres 之外：mysql/redis/mongo）：平台已前置处理，
+            // 告诉 agent 已装/已启动及连接方式，避免现场 apt/启动试错（实测 mysql 未启动时
+            // agent 建库命令 hang 满 600s）。postgres 的状态在上面 dbProvision 块已覆盖。
+            const lines = [];
+            for (const ds of plan.context.dbServices) {
+                if (!ds || ds.service === 'postgres') continue;
+                if (ds.ready) {
+                    lines.push(`- ${ds.service.toUpperCase()} is ALREADY installed and started by the platform inside this sandbox. Do NOT apt install / start it yourself. ${ds.connect ? `Connection: ${ds.connect}. ` : ''}Create the database/user per the app config (server/.env / application.yml / config) and run migrations directly.`);
+                } else if (ds.skipped) {
+                    lines.push(`- ${ds.service.toUpperCase()}: the platform detected it but could not pre-install it (${ds.skipped}). If the app needs it, you may install/start it yourself — try the standard service command (e.g. service ${ds.service} start) and clear apt locks first if needed.`);
+                } else {
+                    lines.push(`- ${ds.service.toUpperCase()}: the platform tried to install+start it but it is not ready. If the app needs it, check the service state (ss -ltn | grep :port / service ${ds.service} status), start it, and fix the app config.`);
+                }
+            }
+            return lines;
+        })() : []),
         '- MIGRATIONS / PRE-START SCRIPTS RUN EXACTLY ONCE: `alembic upgrade`, `npm run db:migrate`, `prestart.sh`, `prisma migrate` etc. are typically idempotent or only need ONE successful run. Before running one, check whether it has already succeeded (table exists / previous exit=0 with no error in output / `alembic current` already up to date); if yes, SKIP it. NEVER re-run the same migration/prestart command just because a later step failed for an unrelated reason.',
         '- Create the tables: look for schema.sql / init.sql / migrations / README "Database Schema" section / the SQL in code (db/*.db.js), and run the DDL so real queries work.',
         '- Point the app at the LOCAL database: edit server/.env (and client env if needed) so POSTGRES_HOST/DATABASE_URL use 127.0.0.1 (or localhost), with the user/password/database you created.',

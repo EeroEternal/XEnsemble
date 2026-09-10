@@ -1234,7 +1234,7 @@ async function ensureGuestGoToolchain({ runtimeRef, workspacePath, hostWorkspace
 // 幂等：已装则跳过；apt 失败 non-fatal（agent 兜底）。与 Go/Node/Python/Rust 运行时
 // 版本预装（ensureGuestGoToolchain / ensureGuestRuntimeVersions）互补，都是"平台前置、
 // 不阻塞 verify"的同一模式。
-async function ensureGuestToolchains({ runtimeRef, workspacePath, toolchains, services, onLog }) {
+async function ensureGuestToolchains({ runtimeRef, workspacePath, toolchains, onLog }) {
     const runtime = getRuntime();
     const log = (m) => { if (onLog) onLog(m); };
     // tool → 沙箱探活命令（任一命中即视为已装，避免重复 apt）
@@ -1246,25 +1246,15 @@ async function ensureGuestToolchains({ runtimeRef, workspacePath, toolchains, se
         'dart': 'command -v dart >/dev/null 2>&1',
         'dotnet': 'command -v dotnet >/dev/null 2>&1',
     };
-    // 系统服务预装映射（detectSystemDeps 检测出的 services 里除 postgres 外的部分）：
-    // mysql → mariadb-server、redis → redis-server；postgres 由 provisionPostgresIfNeeded 专门
-    // 处理（含启动/建库），mongodb 沙箱 apt 无官方包跳过（由 agent/配置兜底）。
-    const SERVICE_APT = {
-        mysql: { probe: 'command -v mariadbd >/dev/null 2>&1 || command -v mysqld >/dev/null 2>&1', packages: ['mariadb-server'] },
-        redis: { probe: 'command -v redis-server >/dev/null 2>&1', packages: ['redis-server'] },
-    };
-    // 预装项：toolchains（Java/Maven、Ruby、Elixir、Dart、.NET 等）+ services（mysql/redis）。
+    // 预装项：toolchains（Java/Maven、Java/Gradle、Ruby、Elixir、Dart、.NET 等）。
     // 统一走"探活 → 缺则 aptSafeInstall"逻辑，幂等且 non-fatal。
+    // 数据库/缓存服务（mysql/redis 等）由 provisionDbServices 统一处理（装+启动+就绪），
+    // 不在本函数重复安装，避免并行 apt 锁竞争。
     const items = [];
     for (const tc of Array.isArray(toolchains) ? toolchains : []) {
         if (!tc || !tc.tool || !PROBE_CMDS[tc.tool]) continue;
         const pkgs = Array.isArray(tc.packages) ? tc.packages : [];
         if (pkgs.length) items.push({ id: tc.tool, evidence: tc.evidence || '', probe: PROBE_CMDS[tc.tool], packages: pkgs });
-    }
-    for (const svc of Array.isArray(services) ? services : []) {
-        const sa = SERVICE_APT[svc];
-        if (!sa) continue;
-        if (!items.some((i) => i.id === svc)) items.push({ id: svc, evidence: `service:${svc}`, probe: sa.probe, packages: sa.packages });
     }
     if (items.length === 0) return { ran: false, results: [] };
     const results = [];
@@ -2440,6 +2430,104 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan) {
     return { ready: true };
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// 数据库/缓存服务通用生命周期（装 → 启动 → 就绪），描述表驱动。
+// detectSystemDeps 检测出的 services（postgres/mysql/redis/mongo，多语言驱动名）在此统一
+// 前置处理：verify 开始前服务已就绪，agent 不再现场 apt/启动/认证试错（实测 mysql 未启动
+// 时 agent 的建库命令 hang 满 600s）。加新服务只需在 DB_SERVICE_SPECS 补一项。
+// 注意：mariadb/mysql 的 root 认证与 postgres 的建库建用户是各服务增强逻辑，不在通用闭环内。
+// ──────────────────────────────────────────────────────────────────────────
+const DB_SERVICE_SPECS = {
+    postgres: {
+        pkgs: ['postgresql', 'postgresql-contrib'],
+        probeInstalled: 'command -v pg_isready >/dev/null 2>&1 && echo YES || echo NO',
+        start: 'service postgresql start 2>/dev/null || pg_ctlcluster $(ls /etc/postgresql 2>/dev/null | head -1) main start 2>/dev/null || true',
+        ready: 'pg_isready -q 2>/dev/null && echo UP || echo DOWN',
+        // postgres 增强（建库建用户）由 provisionDbServices 里特判调用 provisionPostgresIfNeeded。
+    },
+    mysql: {
+        pkgs: ['mariadb-server'],
+        probeInstalled: '(command -v mariadbd >/dev/null 2>&1 || command -v mysqld >/dev/null 2>&1) && echo YES || echo NO',
+        start: 'service mariadb start 2>/dev/null || service mysql start 2>/dev/null || (mysqld_safe >/dev/null 2>&1 &) || true',
+        // Debian mariadb 默认 root 走 unix_socket auth（`mysql -u root` socket 免密，但 TCP
+        // 连不上）——Spring Boot / 远程 JDBC（jdbc:mysql://127.0.0.1）用 root 密码会失败，
+        // agent 只能现场改认证试错（实测）。平台启动后主动把 root 设为 mysql_native_password
+        //（密码 root，应用配置不同时 agent 自行 ALTER 或改应用配置），verify 直接 TCP 连接。
+        initRoot: "timeout 10 mysql -u root -e \"ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('root'); FLUSH PRIVILEGES;\" 2>/dev/null || true",
+        ready: '(mysqladmin ping -h127.0.0.1 -uroot -proot 2>/dev/null | grep -qi alive) && echo UP || echo DOWN',
+        connect: 'TCP 127.0.0.1:3306 root/root（平台已设 mysql_native_password 认证）；若应用配置其它密码，先 ALTER USER 或改应用配置',
+    },
+    redis: {
+        pkgs: ['redis-server'],
+        probeInstalled: 'command -v redis-server >/dev/null 2>&1 && echo YES || echo NO',
+        start: 'redis-server --daemonize yes >/dev/null 2>&1 || service redis-server start 2>/dev/null || true',
+        ready: '(redis-cli ping 2>/dev/null | grep -qi PONG) && echo UP || echo DOWN',
+        connect: '默认 127.0.0.1:6379，无认证',
+    },
+    // mongodb：Debian bookworm apt 无官方包，不预装（由 agent/配置兜底）。
+    mongodb: { pkgs: [], note: 'no official apt package in Debian bookworm, skipped' },
+};
+
+// 通用数据库/缓存服务 provision：遍历 detectSystemDeps 检测出的 services，
+// 对每个服务执行"探活已装 → 缺则 apt 装 → 启动 → 等就绪（最多 30s）"闭环（幂等、non-fatal）。
+// postgres 额外走 provisionPostgresIfNeeded 的建库建用户增强（返回凭据供 prompt 注入）。
+// 返回 { results: [{ service, ready, ... }] }，prompt 按服务注入状态。
+async function provisionDbServices({ runtimeRef, workspacePath, services, plan, onLog }) {
+    const runtime = getRuntime();
+    const log = (m) => { if (onLog) onLog(m); };
+    const svcList = Array.isArray(services) ? services.filter((s) => DB_SERVICE_SPECS[s]) : [];
+    if (svcList.length === 0) return { results: [] };
+    log(`provision db services START: ${svcList.join(',')}`);
+    const results = [];
+    for (const svc of svcList) {
+        const spec = DB_SERVICE_SPECS[svc];
+        try {
+            // postgres 增强路径：装 + 启动 + 建库建用户（provisionPostgresIfNeeded 内部权威判定，
+            // 不需要时毫秒返回；返回 ready/凭据注入 prompt）
+            if (svc === 'postgres') {
+                const pg = await provisionPostgresIfNeeded(runtimeRef, workspacePath, plan);
+                results.push({ service: 'postgres', ...pg });
+                continue;
+            }
+            if (!Array.isArray(spec.pkgs) || spec.pkgs.length === 0) {
+                log(`db service ${svc}: ${spec.note || 'no apt package, leaving to agent'}`);
+                results.push({ service: svc, ready: false, skipped: spec.note || 'no apt package' });
+                continue;
+            }
+            // 1) 探活已装
+            const ins = await runtime.exec.exec('sh', ['-c', spec.probeInstalled], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => ({ stdout: 'NO' }));
+            if (!String(ins.stdout || '').includes('YES')) {
+                const res = await aptSafeInstall({ runtime, runtimeRef, workspacePath, packages: spec.pkgs.join(' '), onLog, timeoutMs: 420000 });
+                if (!res.ok) {
+                    log(`db service ${svc} apt install FAILED (non-fatal): ${(res.logTail || '').slice(0, 200)}`);
+                    results.push({ service: svc, ready: false, reason: 'apt install failed' });
+                    continue;
+                }
+            }
+            // 2) 启动
+            await runtime.exec.exec('sh', ['-c', spec.start], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 30000 }).catch(() => {});
+            // 2.5) 服务初始化（如有）：如 mariadb 把 root 从 unix_socket 改为 mysql_native_password，
+            //     否则 Spring Boot/远程 TCP 连不上，agent 只能现场改认证试错。幂等（失败忽略）。
+            if (spec.initRoot) {
+                await runtime.exec.exec('sh', ['-c', spec.initRoot], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 }).catch(() => {});
+            }
+            // 3) 等就绪（最多 30s，apt 后首次启动可能偏慢）
+            let up = false;
+            for (let i = 0; i < 30; i++) {
+                await new Promise((r) => setTimeout(r, 1000));
+                const chk = await runtime.exec.exec('sh', ['-c', spec.ready], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 8000 }).catch(() => ({ stdout: '' }));
+                if (String(chk.stdout || '').includes('UP')) { up = true; break; }
+            }
+            log(`db service ${svc}: ${up ? 'ready' : 'started but not UP in 30s (agent will handle)'}`);
+            results.push({ service: svc, ready: up, connect: spec.connect || null });
+        } catch (e) {
+            log(`db service ${svc} provision error (non-fatal): ${e.message?.slice(0, 200)}`);
+            results.push({ service: svc, ready: false, reason: String(e.message || '').slice(0, 200) });
+        }
+    }
+    return { results };
+}
+
 // 沙箱内确保 PostgreSQL 可用：base 镜像（Debian bookworm）默认无 PG，需 apt 安装后启动；
 // 幂等：已装/已启动/已建库则跳过。返回 { ok }，供 verify agent 与 xensemble 后端拉起共用。
 async function ensureSandboxPostgres(runtimeRef, workspacePath, { user, pass, db } = {}) {
@@ -3381,15 +3469,15 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         } catch { /* 探测失败不阻塞 */ }
         const needsPg = Boolean(plan?.needsPostgres) || systemDeps.services.includes('postgres');
         console.error(`[twoStage] project=${project.id} provision parallel START (needsPostgres=${needsPg}, systemDeps=${systemDeps.services.join(',') || 'none'}, toolchains=${(systemDeps.toolchains || []).map((t) => t.tool).join(',') || 'none'}, startCandidates=${startCandidates.candidates.length})`);
-        // 并行前置：工具链预装（Java/Maven 等）与 postgres provision 并行跑，apt 时间不阻塞 verify。
-        // aptSafeInstall 内部有清锁 + DPkg::Lock::Timeout=300，多个 apt 并行最多互相等待，不会死锁。
+        // 并行前置：工具链预装（Java/Maven 等）+ 数据库/缓存服务（postgres/mysql/redis）并行跑，
+        // apt/启动时间不阻塞 verify。aptSafeInstall 内部有清锁 + DPkg::Lock::Timeout=300，
+        // 多个 apt 并行最多互相等待，不会死锁。
         const results = await Promise.allSettled([
             repairHostWorkspaceOwnership(hostPath), // host 侧 chown，同步快
             detectDepsCached(ref, wsPath, detected), // guest 侧 deps 探测（改动 2：传入 stack 选对应语言脚本）
-            provisionPostgresIfNeeded(ref, wsPath, plan), // 内部权威判定，不需要时毫秒级返回
+            provisionDbServices({ runtimeRef: ref, workspacePath: wsPath, services: systemDeps.services, plan, onLog: (m) => { console.error(`[twoStage] ${m}`); report({ stage: 'B', substage: 'prepare', message: m }); } }),
             ensureGuestToolchains({
-                runtimeRef: ref, workspacePath: wsPath,
-                toolchains: systemDeps.toolchains || [], services: systemDeps.services,
+                runtimeRef: ref, workspacePath: wsPath, toolchains: systemDeps.toolchains || [],
                 onLog: (m) => { console.error(`[twoStage] ${m}`); report({ stage: 'B', substage: 'prepare', message: m }); },
             }),
         ]);
@@ -3418,14 +3506,24 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         }
         // dbProvision 从上方并行 provision 的结果解析（PG 预配由 provisionPostgresIfNeeded
         // 内部权威判定，这里只解析结果）。变量已在函数顶部声明（裸块外），这里仅赋值。
+        // 通用 db 服务结果（postgres/mysql/redis 各服务就绪状态）→ dbServices 注入 prompt；
+        // postgres 增强结果（建库建用户凭据）→ dbProvision（兼容旧结构）。
+        let dbServices = [];
         dbProvision = { ready: false, reason: 'not needed' };
-        if (pgResult.status === 'fulfilled') {
-            dbProvision = pgResult.value;
-        } else {
-            console.error(`[twoStage] postgres provision failed: ${pgResult.reason}`);
+        if (pgResult.status === 'fulfilled' && Array.isArray(pgResult.value.results)) {
+            dbServices = pgResult.value.results;
+            const pgEntry = dbServices.find((r) => r.service === 'postgres');
+            if (pgEntry) {
+                dbProvision = { ready: !!pgEntry.ready, code: pgEntry.code || null, reason: pgEntry.reason || null };
+                if (pgEntry.dbUser) dbProvision.dbUser = pgEntry.dbUser;
+                if (pgEntry.dbName) dbProvision.dbName = pgEntry.dbName;
+                if (pgEntry.dbPassword) dbProvision.dbPassword = pgEntry.dbPassword;
+            }
+        } else if (pgResult.status === 'rejected') {
+            console.error(`[twoStage] db provision failed: ${pgResult.reason}`);
             dbProvision = { ready: false, code: 'provision_error', reason: pgResult.reason?.message || String(pgResult.reason), detail: null };
         }
-        console.error(`[twoStage] postgres provision: ready=${dbProvision.ready} code=${dbProvision.code || '-'} reason=${dbProvision.reason || '-'}`);
+        console.error(`[twoStage] db provision: ${dbServices.map((r) => `${r.service}=${r.ready ? 'UP' : 'down'}`).join(' ') || 'none'} (postgres ready=${dbProvision.ready} code=${dbProvision.code || '-'})`);
         // 平台侧确定性 install（在 agent 启动前把依赖装齐）：结果注入 verify prompt，
         // agent 不再重复 install——这是部署时长最大的单项优化（实测 install 占 60%+）。
         let platformInstall = { ran: false };
@@ -3469,7 +3567,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             await injectGatewayBinary(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
         }
         // 改动 2：plan.context 同时存 depsCached (boolean, 向后兼容) + depsStatus (per-subpackage)
-        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, runtimeVersions: runtimeVersions.ran ? runtimeVersions : null, stack: { type: detected?.type, framework: detected?.framework }, systemDeps: systemDeps.services, toolchains: systemDeps.toolchains || [], toolchainResults: toolchainsResult.status === 'fulfilled' ? toolchainsResult.value : null, startCandidates, dbReady: dbProvision.ready, dbProvision: dbProvision.ready ? { ready: true } : { ready: false, code: dbProvision.code || null, reason: dbProvision.reason || null }, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, dbPassword: dbProvision.dbPassword || null, successRun: plan._successRun || null } };
+        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, runtimeVersions: runtimeVersions.ran ? runtimeVersions : null, stack: { type: detected?.type, framework: detected?.framework }, systemDeps: systemDeps.services, toolchains: systemDeps.toolchains || [], toolchainResults: toolchainsResult.status === 'fulfilled' ? toolchainsResult.value : null, startCandidates, dbServices, dbReady: dbProvision.ready, dbProvision: dbProvision.ready ? { ready: true } : { ready: false, code: dbProvision.code || null, reason: dbProvision.reason || null }, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, dbPassword: dbProvision.dbPassword || null, successRun: plan._successRun || null } };
         delete plan._successRun;
         // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）。
         // 缓存策略：只缓存真正从 LLM 出的 plan（source='opencode'/'ai'）。detectStack 兜底
