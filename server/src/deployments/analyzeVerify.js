@@ -1664,26 +1664,33 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
     // 应用其实已由前面的轮次拉起并监听（xensemble 案例：LLM 死循环 60 轮但
     // 8080/health 已 200）。先探测，命中即判成功；失败再回到原判定链。
     const probe = await assertAppIsServed({ runtimeRef, workspacePath, preferredPort: defaultPort });
-    if (probe.ok) {
+    // needsBackend = 签名检测 hasBackend OR jdk-* toolchain 平台信号（多仓库 Java 兜底）。
+    const platformBackendSignal = Array.isArray(plan?.context?.toolchains)
+        && plan.context.toolchains.some((t) => /^jdk-/.test(t?.tool || ''));
+    const needsBackend = !!(backendEvidence && backendEvidence.hasBackend) || platformBackendSignal;
+    // 有后端证据时**强制**复核后端端口（不能因"前端已 serve"放行）。excludePort 传**真实前端端口**
+    // （probe.port；无前端时退化 appPort）：COMMON_APP_PORTS 含 8000/8081，不排除前端端口会把
+    // 前端端口误判成后端（假后端存活）。前端 dev server 返回 HTML ≠ 后端可用。
+    let backendAlive = null;
+    if (needsBackend) {
+        const frontendPort = probe.ok ? probe.port : appPort;
+        backendAlive = await verifyBackendAlive(runtimeRef, workspacePath, [], plan, defaultPort, frontendPort);
+    }
+    const fallbackOutcome = resolveFallbackOutcome({ frontendOk: !!probe.ok, needsBackend, backendAlive: !!backendAlive });
+    if (fallbackOutcome === 'ok') {
         fallbackOk = true;
-        appPort = probe.port;
-        concreteStderr = `[platform re-probe] app served on ${probe.port} (http ${probe.httpCode || 'listen'}) — accepted despite agent/failover failure. ${concreteStderr || ''}`;
-    } else if (fallbackOk) {
+        appPort = needsBackend ? backendAlive.appPort : probe.port;
+        concreteStderr = needsBackend
+            ? `[platform re-probe] backend listening on ${backendAlive.backendPort}, app served on ${backendAlive.appPort} — accepted despite no agent final. ${concreteStderr || ''}`
+            : `[platform re-probe] app served on ${probe.port} (http ${probe.httpCode || 'listen'}) — accepted despite agent/failover failure. ${concreteStderr || ''}`;
+        console.error(`[analyzeVerify] fallback OK needsBackend=${needsBackend} appPort=${appPort}`);
+    } else {
         fallbackOk = false;
         fallbackFailed = true;
-        concreteStderr = probe.reason;
-    }
-    // 空转/超轮数兜底：agent 未给出 final（空转 break / 超轮），但项目有确定性后端证据、
-    // 后端端口在监听 → 判定后端已正常拉起（用户要求：检测不到接口时用端口监听判断）。
-    // appPort 取前端页面端口，避免 preview 隧道打到后端 API 端口。
-    if (!fallbackOk && backendEvidence && backendEvidence.hasBackend) {
-        const alive = await verifyBackendAlive(runtimeRef, workspacePath, [], plan, defaultPort, defaultPort);
-        if (alive) {
-            fallbackOk = true;
-            appPort = alive.appPort;
-            concreteStderr = `[platform re-probe] backend listening on ${alive.backendPort}, app served on ${alive.appPort} — accepted despite no agent final. ${concreteStderr || ''}`;
-            console.error(`[analyzeVerify] no agent final but backend port ${alive.backendPort} listening — overriding to success (appPort=${alive.appPort})`);
-        }
+        concreteStderr = fallbackOutcome === 'frontend_served_backend_down'
+            ? `前端页面在 ${probe.port} 可访问，但项目存在后端（${(backendEvidence?.evidence || []).slice(0, 2).join('; ') || 'jdk-* toolchain'}）且未发现任何后端端口监听 —— 后端进程未启动，预览交互会全部失败（/api 5xx）。`
+            : (probe.reason || concreteStderr);
+        console.error(`[analyzeVerify] fallback FAILURE outcome=${fallbackOutcome} appPort=${probe.port}`);
     }
     const ok = lastResult ? lastResult.ok : fallbackOk;
     const usedRounds = loopExit ? loopExit.round : MAX_AGENT_ROUNDS;
@@ -1762,6 +1769,20 @@ async function runVerifyWithoutLlm({ workspacePath, runtimeRef, plan, projectTyp
     }
 }
 
+// 纯决策：fallback（verify agent 未产出 final / 跑满轮数）时的最终成败判定。
+// 关键规则：项目有后端证据（needsBackend）时，**后端必须存活**——前端 dev server
+// 能返回 HTML 不代表应用可用（/api 交互会全部 500/白屏）。无后端证据（纯静态站/纯前端）
+// 时前端 serve 即成功。此前"前端 serve 即成功、后端复核被 !fallbackOk 跳过"是
+// "后端没起却报 preview ready" 的根因。
+// 返回：'ok' | 'frontend_served_backend_down' | 'backend_down' | 'no_app'。
+function resolveFallbackOutcome({ frontendOk, needsBackend, backendAlive }) {
+    if (needsBackend) {
+        if (backendAlive) return 'ok';
+        return frontendOk ? 'frontend_served_backend_down' : 'backend_down';
+    }
+    return frontendOk ? 'ok' : 'no_app';
+}
+
 async function analyzeProjectVerify({ workspacePath, hostWorkspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted }) {
     if (!API_KEY || !API_URL) {
         return runVerifyWithoutLlm({ workspacePath, runtimeRef, plan, projectType });
@@ -1769,4 +1790,4 @@ async function analyzeProjectVerify({ workspacePath, hostWorkspacePath, runtimeR
     return runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted });
 }
 
-module.exports = { analyzeProjectVerify, assertAppIsServed };
+module.exports = { analyzeProjectVerify, assertAppIsServed, resolveFallbackOutcome };
