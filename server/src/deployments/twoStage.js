@@ -2296,8 +2296,10 @@ if command -v cargo >/dev/null 2>&1 && [ ! -f /root/.cargo/config.toml ]; then
   mkdir -p /root/.cargo 2>/dev/null || true
   printf '[source.crates-io]\\nreplace-with = "rsproxy"\\n\\n[source.rsproxy]\\nregistry = "sparse+https://rsproxy.cn/index/"\\n\\n[registries.rsproxy]\\nindex = "sparse+https://rsproxy.cn/index/"\\n' > /root/.cargo/config.toml 2>/dev/null || true
 fi
-# 6) maven 阿里云镜像（仅 mvn 已存在时）
-if command -v mvn >/dev/null 2>&1 && [ ! -f /root/.m2/settings.xml ]; then
+# 6) maven 阿里云镜像（无条件写：mvn 可能 provision 后才装/由 agent 装，先写好 settings.xml
+#    装完即生效——否则 Maven 走中央仓库下载依赖极慢，mvn package 打满 600s 超时反复重试，
+#    Java 项目 verify 卡死在构建阶段）
+if [ ! -f /root/.m2/settings.xml ]; then
   mkdir -p /root/.m2 2>/dev/null || true
   printf '%s\\n' '<settings>' '  <mirrors>' '    <mirror>' '      <id>aliyunmaven</id>' '      <mirrorOf>*</mirrorOf>' '      <url>https://maven.aliyun.com/repository/public</url>' '    </mirror>' '  </mirrors>' '</settings>' > /root/.m2/settings.xml 2>/dev/null || true
 fi
@@ -3018,7 +3020,32 @@ async function findBuildingDeployRecord(projectId, sessionId, userId) {
     }
 }
 
-async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUser, onProgress, onStarted, resume, sessionId }) {
+// 查同项目 status='running' 的部署（预览服务存活）。用于：
+//  - "打开预览"(/preview, reuseRunning=true)：已有 running 预览直接复用，绝不重复部署——
+//    重复部署会在同一沙箱并发 verify，互相清 worktree/杀服务/占端口（16:55 实测两个
+//    running 部署并发，后起的清了前一个的 next → chunk 全 500）；
+//  - 主动部署(/auto-deploy, reuseRunning=false)：先停旧 running 再新部署，独占沙箱。
+async function findRunningDeployRecord(projectId, sessionId, userId) {
+    try {
+        const conds = [
+            eq(schema.deployments.projectId, projectId),
+            eq(schema.deployments.kind, 'deploy'),
+            eq(schema.deployments.status, 'running'),
+        ];
+        if (sessionId) conds.push(eq(schema.deployments.sessionId, sessionId));
+        if (userId) conds.push(eq(schema.deployments.userId, userId));
+        const rows = await db.select().from(schema.deployments)
+            .where(and(...conds))
+            .orderBy(desc(schema.deployments.createdAt))
+            .limit(1);
+        return rows[0] || null;
+    } catch (e) {
+        console.error('[twoStage] findRunningDeployRecord failed:', e?.message || e);
+        return null;
+    }
+}
+
+async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUser, onProgress, onStarted, resume, sessionId, reuseRunning = false }) {
     const project = await getProjectForUser(userId, projectId);
     if (!project) return { ok: false, error: 'Project not found' };
     if (!process.env.LLM_ANALYZE_API_KEY && !process.env.LLM_ANALYZE_API_URL) {
@@ -3063,6 +3090,46 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
             };
         }
         // 注册表有条目但项目内无任何 building 记录（陈旧注册）→ 走新部署并接管该键
+    }
+    // ── running 预览互斥（项目级全生命周期，不只 building）──
+    // 注册表键已注销（上一次部署已 preview 完成）时，该项目可能仍有 running 部署
+    // （预览服务存活）。此时：
+    //  - /preview（reuseRunning=true，打开预览面板）：直接复用现有 running 预览——
+    //    再起部署会在同一沙箱并发 verify，互相清 worktree/杀服务/占端口（16:55 实测
+    //    两个 running 并发 → chunk 全 500 白屏）。
+    //  - /auto-deploy（reuseRunning=false，主动重新部署）：先真正停掉旧 running 的
+    //    沙箱服务（stopPreview 杀进程 + 标记 stopped），再开始新部署，独占沙箱。
+    const runningExisting = await findRunningDeployRecord(project.id, sessionId, userId);
+    if (runningExisting) {
+        if (reuseRunning) {
+            console.error(`[twoStage] reuse_preview: project=${project.id} session=${sessionId || '-'} deploy=${runningExisting.id} (existing running preview reused, no re-deploy)`);
+            return {
+                ok: true,
+                reattached: true,
+                deploymentId: runningExisting.id,
+                stage: runningExisting.stage || 'preview',
+                publicUrl: runningExisting.publicUrl || undefined,
+                elapsedMs: 0,
+            };
+        }
+        // 主动部署：停掉旧预览服务，避免同一沙箱并发（后起的 verify 会清 worktree/杀服务）
+        console.error(`[twoStage] stop_old_running: project=${project.id} session=${sessionId || '-'} deploy=${runningExisting.id} (stopping before new deploy)`);
+        try {
+            await deploymentService.stopPreview(userId, runningExisting);
+        } catch (e) {
+            console.error(`[twoStage] stop_old_running failed (non-fatal): ${e?.message || e}`);
+        }
+    } else {
+        // 其他 session 有 running 预览 → 拒绝（避免跨会话在同一沙箱并发）
+        const otherRunning = await findRunningDeployRecord(project.id, null, userId);
+        if (otherRunning) {
+            console.error(`[twoStage] preview_in_use: project=${project.id} requested by session=${sessionId || '-'} but running deploy=${otherRunning.id} (other session)`);
+            return {
+                ok: false,
+                code: 'deploy_in_progress',
+                error: '该项目已有运行中的预览，请到对应会话查看或停止后再试',
+            };
+        }
     }
     // per-user 并发闸门：进行中的部署 + 运行中的预览 ≤ 该用户个人配额（admin 无限制，
     // 跳过并发检查；普通用户在用户管理/个人配额里配置，避免无限制并发部署同时跑多个 VM 耗尽沙箱资源）。

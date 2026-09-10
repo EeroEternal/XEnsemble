@@ -2581,6 +2581,8 @@ fastify.post('/api/v1/projects/:projectId/preview', { preValidation: [fastify.au
             role: request.user.role,
             getProjectForUser,
             resume: false,
+            // 打开预览：同项目已有 running 预览则直接复用（不重复部署，防同沙箱并发）
+            reuseRunning: true,
             sessionId: request.query?.session_id || request.body?.session_id,
         });
         if (!result?.ok) {
