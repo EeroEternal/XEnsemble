@@ -16,7 +16,7 @@ const DIMENSION_LIMIT = {
 const DEFAULT_QUOTA = {
     maxProjects: 5,
     maxSessions: 20,
-    maxPreviews: 1,
+    maxPreviews: 5,
     maxRuntimes: 1,
     resourceTier: 'basic',
 };

@@ -2958,7 +2958,7 @@ async function bootstrapInitialAdmin(db) {
         userId,
         maxProjects: defaults.max_projects ?? 5,
         maxSessions: defaults.max_sessions ?? 20,
-        maxPreviews: defaults.max_previews ?? 1,
+        maxPreviews: defaults.max_previews ?? 5,
         maxRuntimes: defaults.max_runtimes ?? 1,
         resourceTier: defaults.resource_tier ?? 'basic',
         updatedAt: now,

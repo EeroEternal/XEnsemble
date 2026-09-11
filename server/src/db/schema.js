@@ -30,7 +30,7 @@ const userQuotas = pgTable('user_quotas', {
   userId: text('user_id').primaryKey().references(() => users.id),
   maxProjects: integer('max_projects').notNull().default(5),
   maxSessions: integer('max_sessions').notNull().default(2),
-  maxPreviews: integer('max_previews').notNull().default(1),
+  maxPreviews: integer('max_previews').notNull().default(5),
   maxRuntimes: integer('max_runtimes').notNull().default(1),
   resourceTier: text('resource_tier').notNull().default('basic'),
   updatedBy: text('updated_by').references(() => users.id),

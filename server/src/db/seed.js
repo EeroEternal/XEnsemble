@@ -26,7 +26,7 @@ async function seedIfNeeded(db) {
             userId: u.id,
             maxProjects: defaultQuota.max_projects ?? 5,
             maxSessions: defaultQuota.max_sessions ?? 2,
-            maxPreviews: defaultQuota.max_previews ?? 1,
+            maxPreviews: defaultQuota.max_previews ?? 5,
             maxRuntimes: defaultQuota.max_runtimes ?? 1,
             resourceTier: defaultQuota.resource_tier ?? 'basic',
             updatedAt: now,
@@ -76,6 +76,24 @@ async function seedIfNeeded(db) {
     await migrateGithubConnectionsToGit(db);
     await backfillRemoteRepoFields(db);
     await backfillDefaultRuntimes(db);
+    await backfillPreviewQuotaDefault(db);
+}
+
+// 默认并发预览从 1 提升到 5：升级已固化的 default_user_quota（仅当其
+// max_previews 仍是旧默认 1 时，避免覆盖 admin 手动改过的更大值）。
+async function backfillPreviewQuotaDefault(db) {
+    const rows = await db.select().from(schema.platformSettings)
+        .where(eq(schema.platformSettings.key, 'default_user_quota'));
+    if (rows.length === 0) return;
+    let quota;
+    try { quota = JSON.parse(rows[0].value); } catch { return; }
+    if (!quota || typeof quota !== 'object') return;
+    if (Number(quota.max_previews) === 1) {
+        quota.max_previews = 5;
+        await db.update(schema.platformSettings)
+            .set({ value: JSON.stringify(quota) })
+            .where(eq(schema.platformSettings.key, 'default_user_quota'));
+    }
 }
 
 async function getDefaultQuota(db) {
@@ -85,7 +103,7 @@ async function getDefaultQuota(db) {
         return {
             max_projects: 5,
             max_sessions: 2,
-            max_previews: 1,
+            max_previews: 5,
             max_runtimes: 1,
             resource_tier: 'basic',
         };
@@ -96,7 +114,7 @@ async function getDefaultQuota(db) {
         return {
             max_projects: 5,
             max_sessions: 2,
-            max_previews: 1,
+            max_previews: 5,
             max_runtimes: 1,
             resource_tier: 'basic',
         };
