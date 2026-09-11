@@ -10,7 +10,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { resolveFallbackOutcome } = require('./analyzeVerify');
+const { resolveFallbackOutcome, isWaitPollCommand } = require('./analyzeVerify');
 
 test('fallback: 无后端证据（纯前端/静态站）前端 serve 即成功', () => {
     assert.equal(resolveFallbackOutcome({ frontendOk: true, needsBackend: false, backendAlive: false }), 'ok');
@@ -30,4 +30,20 @@ test('fallback: 有后端证据但后端未起 → 失败（核心回归：前�
     assert.equal(resolveFallbackOutcome({ frontendOk: true, needsBackend: true, backendAlive: false }), 'frontend_served_backend_down');
     // 前后端都没起：backend_down
     assert.equal(resolveFallbackOutcome({ frontendOk: false, needsBackend: true, backendAlive: false }), 'backend_down');
+});
+
+test('isWaitPollCommand: sleep/while/for 轮询命令被识别（用于给短预算）', () => {
+    // 纯等待/轮询 → true
+    assert.equal(isWaitPollCommand('sleep 150; pgrep -f "pnpm install" && echo running'), true);
+    assert.equal(isWaitPollCommand('for i in $(seq 1 55); do pgrep -x node || break; done; ls x'), true);
+    assert.equal(isWaitPollCommand('while pgrep -x java; do sleep 10; done; ss -ltn'), true);
+    assert.equal(isWaitPollCommand('mvn -DskipTests package & for i in $(seq 1 55); do pgrep -x node || break; done'), true);
+});
+
+test('isWaitPollCommand: 真正的 install/build 不算等待（保留长预算）', () => {
+    assert.equal(isWaitPollCommand('pnpm install --no-frozen-lockfile'), false);
+    assert.equal(isWaitPollCommand('mvn -DskipTests package'), false);
+    assert.equal(isWaitPollCommand('npm ci'), false);
+    // install/build + 结尾 sleep：含 LONG 命令 → 不算纯等待
+    assert.equal(isWaitPollCommand('mvn package && sleep 2 && curl -s http://127.0.0.1:8081/'), false);
 });

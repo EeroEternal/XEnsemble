@@ -948,10 +948,15 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
     const stale = Object.entries(depsStatus || {}).filter(([, v]) => v !== 'CACHED');
     if (!stale.length) return { ran: false };
     const type = stack?.type || 'unknown';
+    // 多仓库/目录式 monorepo：根目录没有 package.json，detectProjectType 常返回 unknown/static，
+    // 但子包（frontend/server）有 package.json 且 STALE —— 也必须做平台预装，否则全落到 agent
+    // 现场 pnpm/npm install（慢、易撞 40min 总超时）。
+    const hasRootPkg = !!(hostWorkspacePath && fs.existsSync(path.join(hostWorkspacePath, 'package.json')));
+    const hasStaleSub = stale.some(([sub]) => sub && sub !== '.');
     // node-express/node-vite/node-next 等 node-* 变体全部支持——之前白名单漏了
     // node-express（xensemble 的实际类型），platform install 整个被跳过，
     // server/web 子包依赖全靠 agent 手装（多花 4+ 分钟）。
-    if (!(type === 'monorepo' || type === 'python' || type.startsWith('node'))) {
+    if (!(type === 'monorepo' || type === 'python' || type.startsWith('node') || hasStaleSub)) {
         return { ran: false, skipped: type };
     }
 
@@ -1057,77 +1062,85 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
             return String(r.stdout || '').trim() === 'YES';
         } catch { return false; }
     };
-    const pm = await detectGuestPackageManager(runtimeRef, workspacePath);
-    let installCmd = pm === 'pnpm' ? 'pnpm install --no-frozen-lockfile'
-        : pm === 'yarn' ? 'yarn install'
-            : pm === 'bun' ? 'bun install'
-                : 'npm install --no-audit --no-fund';
-    if (pm === 'pnpm' && !(await cmdExists('pnpm'))) {
-        if (await cmdExists('corepack')) {
-            log('platform install: pnpm binary missing, using corepack pnpm');
-            installCmd = 'corepack pnpm install --no-frozen-lockfile';
-        } else {
-            log('platform install: pnpm missing, trying npm i -g pnpm');
-            const installed = await (async () => {
+    // 根目录有 package.json 时做"根 install"；没有（多仓库/目录式 monorepo）则跳过根 install，
+    // 直接由下方逐子包装（每个子包用自己的包管理器）。
+    let ok = true;
+    let effectiveCmd = null;
+    if (hasRootPkg) {
+        const pm = await detectGuestPackageManager(runtimeRef, workspacePath);
+        let installCmd = pm === 'pnpm' ? 'pnpm install --no-frozen-lockfile'
+            : pm === 'yarn' ? 'yarn install'
+                : pm === 'bun' ? 'bun install'
+                    : 'npm install --no-audit --no-fund';
+        if (pm === 'pnpm' && !(await cmdExists('pnpm'))) {
+            if (await cmdExists('corepack')) {
+                log('platform install: pnpm binary missing, using corepack pnpm');
+                installCmd = 'corepack pnpm install --no-frozen-lockfile';
+            } else {
+                log('platform install: pnpm missing, trying npm i -g pnpm');
+                const installed = await (async () => {
+                    try {
+                        const r = await runtime.exec.exec('sh', ['-c', 'export PATH="/usr/local/bin:$PATH"; npm install -g pnpm --no-audit --no-fund >/dev/null 2>&1 && echo YES || echo NO'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 120000 });
+                        return String(r.stdout || '').trim() === 'YES';
+                    } catch { return false; }
+                })();
+                if (installed) log('platform install: pnpm installed globally');
+                else log('platform install: npm i -g pnpm failed, will fall back to npm install');
+            }
+        }
+        // electron 桌面子包存在：根 install 加 --ignore-scripts 跳过 electron 二进制下载与
+        // electron-builder install-app-deps（github releases 国内卡死的源头）。web/server 的
+        // postinstall（如 sharp/esbuild）同样被跳过，由 verify agent 在需要时补跑。
+        if (electronSubs.length && /^corepack pnpm|^pnpm|^yarn/.test(installCmd)) {
+            log(`platform install: electron desktop sub-packages detected (${electronSubs.map((e) => e.name).join(', ')}), adding --ignore-scripts to avoid github binary download`);
+            installCmd += ' --ignore-scripts';
+        }
+        ok = await run(installCmd, '', INSTALL_TIMEOUT_MS);
+        if (!ok && pm === 'pnpm') {
+            // pnpm 断点续装：第一次超时/失败时 store 已写入大部分包，重试只需补剩余
+            // （远快于首装），同时消掉「冷装贴着超时上限」的不确定性——比失败后交给
+            // npm fallback（覆盖不齐 pnpm workspace）或 agent 再装（实测多花 ~5min）都好。
+            // 兜底重试切 ghproxy 镜像（第三方，短超时，失败快速进入 npm fallback 不拖流程）。
+            log('platform install: pnpm first attempt failed, retrying via ghproxy mirror fallback (short timeout)');
+            ok = await run(installCmd, '', GH_FALLBACK_INSTALL_TIMEOUT_MS, true);
+        }
+        effectiveCmd = ok ? installCmd : null;
+        if (!ok && pm !== 'npm') {
+            // pnpm/yarn/bun 二进制缺失或安装失败：回退 npm（覆盖 package.json workspaces；
+            // pnpm-only workspace 覆盖不到子包，由下方重探测补漏循环兜底）。
+            // ⚠️ catalog: 协议守卫：pnpm workspace 的 catalog 特性（pnpm 9.5+/10）是 pnpm 专属，
+            // package.json 依赖值形如 "catalog:"。npm 不认识该协议，必然
+            // EUNSUPPORTEDPROTOCOL 秒失败（multica 实测）——命中则跳过 npm fallback，避免
+            // 3 秒白费 + 错误归因，直接交给 verify agent（平台已预置 CI=true，agent 的 pnpm
+            // 可正常重建 node_modules）。
+            const hasCatalogProtocol = (() => {
                 try {
-                    const r = await runtime.exec.exec('sh', ['-c', 'export PATH="/usr/local/bin:$PATH"; npm install -g pnpm --no-audit --no-fund >/dev/null 2>&1 && echo YES || echo NO'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 120000 });
-                    return String(r.stdout || '').trim() === 'YES';
+                    const scan = (dir) => {
+                        const pkgPath = path.join(dir, 'package.json');
+                        if (!fs.existsSync(pkgPath)) return false;
+                        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+                        const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+                        return Object.values(deps).some((v) => String(v).startsWith('catalog:'));
+                    };
+                    if (scan(hostWorkspacePath)) return true;
+                    for (const sub of ['apps', 'packages', 'web', 'client', 'server']) {
+                        const dir = path.join(hostWorkspacePath, sub);
+                        if (!fs.existsSync(dir)) continue;
+                        if (fs.readdirSync(dir, { withFileTypes: true }).some((e) => e.isDirectory() && scan(path.join(dir, e.name)))) return true;
+                    }
+                    return false;
                 } catch { return false; }
             })();
-            if (installed) log('platform install: pnpm installed globally');
-            else log('platform install: npm i -g pnpm failed, will fall back to npm install');
+            if (hasCatalogProtocol) {
+                log(`platform install: package.json uses pnpm catalog: protocol (npm incompatible) — skipping npm fallback, leaving to verify agent (CI=true preset)`);
+            } else {
+                log(`platform install: ${pm} install failed, falling back to npm install`);
+                const npmOk = await run('npm install --no-audit --no-fund', '');
+                if (npmOk) { ok = true; effectiveCmd = 'npm install --no-audit --no-fund'; }
+            }
         }
-    }
-    // electron 桌面子包存在：根 install 加 --ignore-scripts 跳过 electron 二进制下载与
-    // electron-builder install-app-deps（github releases 国内卡死的源头）。web/server 的
-    // postinstall（如 sharp/esbuild）同样被跳过，由 verify agent 在需要时补跑。
-    if (electronSubs.length && /^corepack pnpm|^pnpm|^yarn/.test(installCmd)) {
-        log(`platform install: electron desktop sub-packages detected (${electronSubs.map((e) => e.name).join(', ')}), adding --ignore-scripts to avoid github binary download`);
-        installCmd += ' --ignore-scripts';
-    }
-    let ok = await run(installCmd, '', INSTALL_TIMEOUT_MS);
-    if (!ok && pm === 'pnpm') {
-        // pnpm 断点续装：第一次超时/失败时 store 已写入大部分包，重试只需补剩余
-        // （远快于首装），同时消掉「冷装贴着超时上限」的不确定性——比失败后交给
-        // npm fallback（覆盖不齐 pnpm workspace）或 agent 再装（实测多花 ~5min）都好。
-        // 兜底重试切 ghproxy 镜像（第三方，短超时，失败快速进入 npm fallback 不拖流程）。
-        log('platform install: pnpm first attempt failed, retrying via ghproxy mirror fallback (short timeout)');
-        ok = await run(installCmd, '', GH_FALLBACK_INSTALL_TIMEOUT_MS, true);
-    }
-    let effectiveCmd = ok ? installCmd : null;
-    if (!ok && pm !== 'npm') {
-        // pnpm/yarn/bun 二进制缺失或安装失败：回退 npm（覆盖 package.json workspaces；
-        // pnpm-only workspace 覆盖不到子包，由下方重探测补漏循环兜底）。
-        // ⚠️ catalog: 协议守卫：pnpm workspace 的 catalog 特性（pnpm 9.5+/10）是 pnpm 专属，
-        // package.json 依赖值形如 "catalog:"。npm 不认识该协议，必然
-        // EUNSUPPORTEDPROTOCOL 秒失败（multica 实测）——命中则跳过 npm fallback，避免
-        // 3 秒白费 + 错误归因，直接交给 verify agent（平台已预置 CI=true，agent 的 pnpm
-        // 可正常重建 node_modules）。
-        const hasCatalogProtocol = (() => {
-            try {
-                const scan = (dir) => {
-                    const pkgPath = path.join(dir, 'package.json');
-                    if (!fs.existsSync(pkgPath)) return false;
-                    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-                    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-                    return Object.values(deps).some((v) => String(v).startsWith('catalog:'));
-                };
-                if (scan(hostWorkspacePath)) return true;
-                for (const sub of ['apps', 'packages', 'web', 'client', 'server']) {
-                    const dir = path.join(hostWorkspacePath, sub);
-                    if (!fs.existsSync(dir)) continue;
-                    if (fs.readdirSync(dir, { withFileTypes: true }).some((e) => e.isDirectory() && scan(path.join(dir, e.name)))) return true;
-                }
-                return false;
-            } catch { return false; }
-        })();
-        if (hasCatalogProtocol) {
-            log(`platform install: package.json uses pnpm catalog: protocol (npm incompatible) — skipping npm fallback, leaving to verify agent (CI=true preset)`);
-        } else {
-            log(`platform install: ${pm} install failed, falling back to npm install`);
-            const npmOk = await run('npm install --no-audit --no-fund', '');
-            if (npmOk) { ok = true; effectiveCmd = 'npm install --no-audit --no-fund'; }
-        }
+    } else {
+        log('platform install: no root package.json (multi-repo / dir-based monorepo) — installing per sub-package');
     }
     // 重探测补漏：根 install 不覆盖"独立子项目"（无 workspace 配置的 monorepo）。
     // 仍非 CACHED 的子包逐个补装；超过 20 个放弃逐包（极端项目交给 agent，避免拖死总预算）。
@@ -1141,7 +1154,21 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
         finalStatus = parseDepsStatus(r.stdout);
         const stillStale = Object.entries(finalStatus.perPackage || {}).filter(([, v]) => v !== 'CACHED');
         remainingStale = stillStale.length;
-        if (effectiveCmd) {
+        // 逐子包补装（与根 install 是否成功无关）：根 install 成功时复用 effectiveCmd；
+        // 无根 package.json（多仓库）时按**每个子包自己的包管理器**选命令（前端 pnpm 后端 npm 各自为政）。
+        {
+            const { detectPackageManager: detectHostPm } = require('./detectStack');
+            const pmCmd = (pm) => pm === 'pnpm' ? 'pnpm install --no-frozen-lockfile'
+                : pm === 'yarn' ? 'yarn install'
+                    : pm === 'bun' ? 'bun install'
+                        : 'npm install --no-audit --no-fund';
+            const subInstallCmd = (sub) => {
+                try {
+                    const dir = path.join(hostWorkspacePath, sub);
+                    if (fs.existsSync(path.join(dir, 'package.json'))) return pmCmd(detectHostPm(dir));
+                } catch { /* ignore */ }
+                return null;
+            };
             // 补装并行化：各子包 install 互相独立（无 workspace 依赖），串行实测
             // web 13s + server 25s + desktop 78s = ~2min，并行后 = max(~78s)。
             // 并发限流：沙箱内存有限（2GB），同时跑太多 npm install 会互相 OOM，
@@ -1156,7 +1183,9 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
                 const workers = Array.from({ length: concurrency }, async () => {
                     while (queue.length) {
                         const sub = queue.shift();
-                        const subOk = await run(effectiveCmd, sub);
+                        const subCmd = effectiveCmd || subInstallCmd(sub);
+                        if (!subCmd) continue;
+                        const subOk = await run(subCmd, sub);
                         if (!subOk) ok = false;
                     }
                 });

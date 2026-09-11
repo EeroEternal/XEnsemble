@@ -29,6 +29,20 @@ const SHELL_TIMEOUT_MS = 240000;
 // 只能重试（实测一条 npm install 打满 240s 超时后重跑，时间双倍）。这类命令"截断重来"
 // 的代价比"多等一会"高得多，故单独放宽到 600s；可经 DEPLOY_LONG_SHELL_TIMEOUT_MS 覆盖。
 const LONG_SHELL_TIMEOUT_MS = Number(process.env.DEPLOY_LONG_SHELL_TIMEOUT_MS) || 600000;
+// 纯等待/轮询命令（`sleep N`；`while/for …` 里含 sleep/pgrep/kill -0/ps 的轮询）：给很短预算，
+// 防止 agent 用 sleep 轮询等后台进程吃掉整体部署预算（实测 server-manage：round10 `node -e` 600s
+// + 3×240s + 150s + 550s ≈ 36min 全耗在等待，撞 40min 总超时被中止）。真正 install/build 应前台
+// 直接跑（LONG_SHELL_TIMEOUT_MS 已放宽），不需要 sleep 轮询。
+const WAIT_SHELL_TIMEOUT_MS = Number(process.env.DEPLOY_WAIT_SHELL_TIMEOUT_MS) || 60000;
+const LOOP_WAIT_RE = /\b(while|for)\b[^\n]*\b(sleep|pgrep|kill\s+-0|\bps\b)/i;
+// 以 sleep 开头（允许前置的 export/FOO=bar 前缀）→ 纯等待。
+const SLEEP_LEAD_RE = /^(?:export\b[^;]*;\s*|(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+))*sleep\s+\d+/i;
+function isWaitPollCommand(cmd) {
+    const s = String(cmd || '').trim();
+    if (LOOP_WAIT_RE.test(s)) return true;
+    if (SLEEP_LEAD_RE.test(s)) return true;
+    return false;
+}
 // agent 所有 shell 命令统一预置 node 堆上限：大前端项目 vite build（katex/monaco 等）
 // 用 node 默认堆 ~1.7GB 会 OOM，agent 要试错 2-3 轮 NODE_OPTIONS 才成功（xensemble
 // 实测 build ×3 ≈ 10 分钟）。对非 node 命令无影响（curl/ps 等不读该变量）。
@@ -268,9 +282,12 @@ async function runTool(tool, args, runtimeRef, workspacePath) {
             // MODULES_DIR_NO_TTY 中止（multica 实测 agent 试错到第 3 轮才自己 export CI=true），
             // 平台统一预置省掉 agent 试错；对 yarn/npm 同样是无害的标准 CI 语义。
             const wrapped = `export CI=true; export NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}"; ${BIN_MIRROR_ENV}${cmd} > /tmp/_vt.log 2>&1; ec=$?; head -200 /tmp/_vt.log; echo "__EXIT_CODE__=\${ec}"`;
+            const isWait = isWaitPollCommand(cmd);
+            if (isWait) console.error(`[analyzeVerify] run_shell wait/poll command capped at ${WAIT_SHELL_TIMEOUT_MS}ms: ${cmd.slice(0, 120)}`);
             const r = await runtime.exec.exec('sh', ['-c', wrapped], {}, {
                 runtimeRef, cwd: workspacePath, maxBuffer: 4 * 1024 * 1024,
-                timeoutMs: LONG_CMD_RE.test(cmd) ? LONG_SHELL_TIMEOUT_MS : SHELL_TIMEOUT_MS,
+                timeoutMs: isWait ? WAIT_SHELL_TIMEOUT_MS
+                    : LONG_CMD_RE.test(cmd) ? LONG_SHELL_TIMEOUT_MS : SHELL_TIMEOUT_MS,
             });
             let out = String(r.stdout || '');
             let ec = r.exitCode;
@@ -1020,6 +1037,7 @@ function buildSystemPrompt(plan, toolchain) {
             return lines;
         })() : []),
         'OUTPUT SIZE RULE (MANDATORY): a TOOL CALL must be ONE compact JSON under 800 characters. NEVER paste file contents, logs or commands into your JSON — use read_file / edit_file / run_shell tools for that. If you were about to write a long reply, STOP and output the short JSON tool call instead. The FINAL answer may be up to 4000 characters so you can include the key error output in finalStderr.',
+        'NO SLEEP-POLLING (MANDATORY): run install/build/start commands in the FOREGROUND and let the shell return — the platform allows long timeouts for install/build (do NOT background them and then poll). NEVER wait with `sleep`/`while`/`for` loops (`sleep 150`, `while pgrep …; do sleep …; done`, `for i in $(seq …); do pgrep …; done`) — the platform caps such wait/poll commands to ~60s, and they waste the whole deployment budget. If you must check a background process, check its log ONCE (`tail -20 /tmp/xxx.log`) and proceed; do not loop.',
         'HEALTH CHECK (MANDATORY):',
         '- Confirm the app is up with ONE successful curl (2xx/3xx). Then IMMEDIATELY output your final answer.',
         '- Never curl / pgrep / ps the same port repeatedly. Repeating curls wastes rounds — once a single 2xx/3xx curl succeeds, the platform performs the final port discovery and health verification itself.',
@@ -1795,4 +1813,4 @@ async function analyzeProjectVerify({ workspacePath, hostWorkspacePath, runtimeR
     return runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted });
 }
 
-module.exports = { analyzeProjectVerify, assertAppIsServed, resolveFallbackOutcome };
+module.exports = { analyzeProjectVerify, assertAppIsServed, resolveFallbackOutcome, isWaitPollCommand };
