@@ -7,6 +7,8 @@ import { useToast } from '../Toast';
 import { useTheme } from '../../hooks/useTheme';
 import { useEditMode } from '../../hooks/useEditMode';
 import { loadViewPref, saveViewPref } from '../../lib/viewPrefs';
+import { TIMEZONES } from '../../lib/timezones';
+import { loadTimezonePref, saveTimezonePref } from '../../lib/timezonePref';
 import { consoleSectionLabelClass, consoleCardClass } from '../../lib/consoleTokens';
 
 const THEME_LABEL_KEYS = {
@@ -37,12 +39,14 @@ export default function PreferencesPanel() {
     theme: pref,
     viewMode: loadViewPref(),
     language: i18n.language,
+    timezone: loadTimezonePref(),
   }));
 
   const editMode = useEditMode({
     onSave: (draft) => {
       setPref(draft.theme);
       saveViewPref(draft.viewMode);
+      saveTimezonePref(draft.timezone);
       if (draft.language && draft.language !== i18n.language) {
         i18n.changeLanguage(draft.language);
         try { localStorage.setItem('xe_locale', draft.language); } catch { /* ignore */ }
@@ -72,6 +76,8 @@ export default function PreferencesPanel() {
     { value: 'zh', label: t('settings:language.zh') },
   ];
 
+  const timezoneOptions = TIMEZONES.map((tz) => ({ value: tz, label: tz }));
+
   const setField = (key, value) => {
     editMode.setDraft({ ...source, [key]: value });
   };
@@ -90,12 +96,12 @@ export default function PreferencesPanel() {
     <div className="h-full flex flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto console-scroll-hidden">
         <div className={`${consoleCardClass} p-6`}>
-          {/* Language — full row */}
+          {/* Language & region — full-width rows */}
           <div className="mb-3">
-            <h3 className={consoleSectionLabelClass}>{t('settings:language.label')}</h3>
+            <h3 className={consoleSectionLabelClass}>{t('settings:preferences.locale')}</h3>
           </div>
 
-          <div className="mb-6">
+          <div className="mb-3">
             {isEdit ? (
               <div className="flex items-center justify-between gap-4 min-h-[38px]">
                 <span className="text-xs text-zinc-500 shrink-0">{t('settings:language.label')}</span>
@@ -109,6 +115,23 @@ export default function PreferencesPanel() {
               </div>
             ) : (
               <ReadOnlyField label={t('settings:language.label')} value={langLabel} />
+            )}
+          </div>
+
+          <div className="mb-6">
+            {isEdit ? (
+              <div className="flex items-center justify-between gap-4 min-h-[38px]">
+                <span className="text-xs text-zinc-500 shrink-0">{t('settings:preferences.timezone')}</span>
+                <div className="w-48">
+                  <SelectMenu
+                    value={source.timezone}
+                    onChange={(v) => setField('timezone', v)}
+                    options={timezoneOptions}
+                  />
+                </div>
+              </div>
+            ) : (
+              <ReadOnlyField label={t('settings:preferences.timezone')} value={source.timezone} />
             )}
           </div>
 

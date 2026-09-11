@@ -15,6 +15,7 @@
   "preferences": {
     "title": "Preferences",
     "display": "Display",
+    "locale": "Language & Region",
     "theme_mode": "Theme mode",
     "appearance": "Appearance",
     "theme_light": "Light",
@@ -22,7 +23,8 @@
     "theme_system": "Follow system",
     "session_view": "Agent interface",
     "view_agent": "Agent view",
-    "view_chat": "Chat view"
+    "view_chat": "Chat view",
+    "timezone": "Default timezone"
   },
   "language": {
     "label": "Language",

@@ -15,6 +15,7 @@
   "preferences": {
     "title": "偏好",
     "display": "显示",
+    "locale": "语言与地区",
     "theme_mode": "主题模式",
     "appearance": "外观",
     "theme_light": "浅色",
@@ -22,7 +23,8 @@
     "theme_system": "跟随系统",
     "session_view": "Agent 界面风格",
     "view_agent": "Agent 视图",
-    "view_chat": "对话视图"
+    "view_chat": "对话视图",
+    "timezone": "默认时区"
   },
   "language": {
     "label": "语言",

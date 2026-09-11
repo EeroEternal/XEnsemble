@@ -26,16 +26,12 @@ import {
 import { formatRelativeTime } from '../lib/formatRelativeTime';
 import { apiFetch } from '../lib/api';
 import { parseAtLocal, formatAtLocal } from '../lib/dateTimeFormat';
+import { TIMEZONES } from '../lib/timezones';
+import { loadTimezonePref } from '../lib/timezonePref';
 import DateTimeField from '../components/DateTimeField';
 import {
   listLoopTasks, createLoopTask, updateLoopTask, deleteLoopTask, runLoopTaskNow, listLoopTaskRuns, previewSchedule,
 } from '../lib/loopTasksApi';
-
-// 与后端 routes/loopTasks.js 保持一致
-const TIMEZONES = [
-  'UTC', 'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Singapore', 'Asia/Tokyo', 'Asia/Seoul',
-  'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Chicago', 'America/Los_Angeles',
-];
 
 const UNIT_MS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
 
@@ -118,7 +114,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
   const projectName = useCallback((id) => projects.find((p) => p.id === id)?.name || id, [projects]);
 
   const openCreate = () => {
-    setForm(emptyForm);
+    setForm({ ...emptyForm, timezone: loadTimezonePref() });
     setEditing(null);
     setDialogMode('create');
   };
@@ -253,7 +249,6 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
     return () => clearInterval(timer);
   }, [runsOpenFor, fetchRuns]);
 
-  const timezoneOptions = useMemo(() => TIMEZONES.map((tz) => ({ value: tz, label: tz })), []);
   const workspaceOptions = useMemo(() => projects.map((p) => ({ value: p.id, label: p.name })), [projects]);
   const kindOptions = useMemo(() => [
     { value: 'cron', label: t('loopTasks:kind.cron') },
@@ -485,14 +480,6 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                   <p className={`min-h-4 text-xs ${cronHint?.error ? 'text-red-700' : 'text-zinc-500'}`}>
                     {cronHint?.error || cronHint?.description || ''}
                   </p>
-                </div>
-                <div className="space-y-1.5">
-                  <FormLabel htmlFor="loop-task-timezone">{t('loopTasks:field.timezone')}</FormLabel>
-                  <SelectMenu
-                    value={form.timezone}
-                    onChange={(v) => setForm((f) => ({ ...f, timezone: v }))}
-                    options={timezoneOptions}
-                  />
                 </div>
               </div>
             </ConsoleStructuredDialogBody>
