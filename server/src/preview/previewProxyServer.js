@@ -186,6 +186,7 @@ const ROUTE_SHIM_SCRIPT = `<script>
   }
   function xeDump(tag) {
     var txt = '', kids = 0, bodyLen = 0, docLen = 0, scripts = '', resBad = '', resChunk = '';
+    var formCount = 0, inputCount = 0, nextKids = 0, nextHtmlLen = 0;
     try {
       var b = document.body;
       if (b) {
@@ -193,7 +194,14 @@ const ROUTE_SHIM_SCRIPT = `<script>
         txt = (b.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 120);
         kids = b.children ? b.children.length : 0;
         bodyLen = b.innerHTML.length;
+        // 关键：CSR 页面（BAILOUT_TO_CLIENT_SIDE_RENDERING 骨架）SSR 无表单，
+        // 表单完全靠客户端 JS 渲染。form/input 计数直接证明"JS 是否渲染出表单"：
+        // 白屏=0，正常渲染≥1。nextKids 看 #__next 容器内 React 挂载的子树。
+        formCount = b.querySelectorAll('form').length;
+        inputCount = b.querySelectorAll('input').length;
       }
+      var n = document.getElementById('__next');
+      if (n) { nextKids = n.children ? n.children.length : 0; nextHtmlLen = n.innerHTML.length; }
       docLen = document.documentElement.outerHTML.length;
       // 页面声明的 script 标签（src + async/defer）
       var ss = document.querySelectorAll('script[src]');
@@ -207,7 +215,7 @@ const ROUTE_SHIM_SCRIPT = `<script>
         resBad = failed.slice(0, 6).map(function (r) { return r.responseStatus + ':' + r.name.slice(0, 100); }).join(' | ');
       }
     } catch (e) {}
-    xeReport('log', tag + ' pathname=' + location.pathname + ' bodyKids=' + kids + ' bodyLen=' + bodyLen + ' docLen=' + docLen + ' scripts=[' + scripts + '] ' + resChunk + (resBad ? ' failed=[' + resBad + ']' : ''));
+    xeReport('log', tag + ' pathname=' + location.pathname + ' bodyKids=' + kids + ' bodyLen=' + bodyLen + ' docLen=' + docLen + ' form=' + formCount + ' input=' + inputCount + ' nextKids=' + nextKids + ' nextLen=' + nextHtmlLen + ' scripts=[' + scripts + '] ' + resChunk + (resBad ? ' failed=[' + resBad + ']' : '') + ' bodyText=[' + txt + ']');
   }
   window.addEventListener('load', function () { xeDump('loaded'); });
   window.setTimeout(function () { xeDump('t+2000'); }, 2000);
@@ -534,12 +542,18 @@ const server = http.createServer((req, res) => {
     }
 });
 
-// WebSocket upgrade 转发：live 模式支持终端/SSE 的 /ws 反代到后端。
+// WebSocket upgrade 转发：live 模式支持终端/SSE 的 /ws 反代到后端；
+// upstream 模式（--upstream）也必须转发——被部署应用（如 Next.js dev / HMR、
+// 前端直连的实时 WS）依赖 WebSocket 才能完成客户端渲染，此前 upstream 分支
+// 缺失会落到 socket.destroy()，HMR WS 被静默销毁 → 客户端 hydration/渲染挂起
+// → 纯客户端渲染页（BAILOUT_TO_CLIENT_SIDE_RENDERING）白屏。
 server.on('upgrade', (req, socket, head) => {
     if (devPort) {
         handleLiveUpgrade(req, socket, head);
     } else if (backendPort) {
         forwardUpgrade(req, socket, head, Number(backendPort), req.url);
+    } else if (upstreamPort) {
+        forwardUpgrade(req, socket, head, upstreamPort, req.url);
     } else {
         socket.destroy();
     }

@@ -1263,6 +1263,12 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
         // 先推回给 agent 自修复；超过上限才硬失败，避免纯静态站被误伤或无限循环。
         let apiNudges = 0;
         const MAX_API_NUDGES = 2;
+        // app-serve content probe (assertAppIsServed) nudge counter: after agent final ok
+        // the system re-checks a REAL frontend page port (non-404 / non-default page).
+        // Agents often treat a healthy API backend as "whole app ready" (backend only,
+        // frontend not started) -> nudge back to start the frontend; hard-fail only after the cap.
+        let appCheckNudges = 0;
+        const MAX_APP_CHECK_NUDGES = 2;
         // 健康检查失败重试计数：防止 check -> build -> check 无限循环。
         // 统计健康检查类命令（curl/wget/health check/nc -z/pgrep/ps aux/ss -t）失败次数，
         // 超过限制后强制要求 agent 诊断日志或输出 final 失败，避免盲目重新构建循环。
@@ -1556,6 +1562,16 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                 const probe = await assertAppIsServed({ runtimeRef, workspacePath, preferredPort: defaultPort });
                 if (!probe.ok) {
                     trail.push({ round, action: 'app_check_failed', reason: probe.reason });
+                    console.error(`[analyzeVerify] round ${round}: app serve probe FAILED (nudge ${appCheckNudges + 1}/${MAX_APP_CHECK_NUDGES}): ${probe.reason}`);
+                    if (appCheckNudges < MAX_APP_CHECK_NUDGES) {
+                        appCheckNudges++;
+                        messages.push({
+                            role: 'user',
+                            content: `Code-side check REJECTED your final answer: ${probe.reason}. No port is serving real application page content - this usually means the FRONTEND (the page users open in a browser) is NOT running; the API backend alone is not enough for a preview. Start the frontend (find it from package.json "dev"/"start" scripts, next.config / vite.config / app package.json / Dockerfile.web; e.g. \`npm run dev\` / \`pnpm dev\` / \`npx serve dist\`), confirm it returns an HTML page on its port, then output final again with ok:true. Do NOT output ok:true while only the backend/API is listening.`,
+                        });
+                        messages = trimContext(messages);
+                        continue;
+                    }
                     const failedResult = {
                         ...lastResult,
                         ok: false,
