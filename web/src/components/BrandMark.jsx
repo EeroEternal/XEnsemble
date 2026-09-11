@@ -5,7 +5,9 @@ export default function BrandMark({ className, iconClassName }) {
   return (
     <div
       className={cn(
-        'flex shrink-0 items-center justify-center rounded-lg bg-zinc-900',
+        // neutral 未被主题变量化（见 tailwind.config）——保证深浅模式下都是深底白图形，
+        // zinc-* 会随 .dark 翻转导致深色模式下 logo 变白块
+        'flex shrink-0 items-center justify-center rounded-lg bg-neutral-900',
         className,
       )}
       aria-hidden

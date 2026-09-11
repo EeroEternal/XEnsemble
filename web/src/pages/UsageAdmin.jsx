@@ -207,7 +207,7 @@ export default function UsageAdmin() {
                     <col className="w-1/7" />
                     <col className="w-1/6" />
                     <col className="w-1/6" />
-                    <col className="w-8" />
+                    <col className="w-12" />
                   </colgroup>
                   <thead className="sticky top-0 z-10">
                     <tr className={consoleTableHeadRowClass}>
@@ -327,13 +327,13 @@ function Row({ user, idx, share, expanded, expandable, onToggle, onOpenDialog, t
             <span className="text-[11px] tabular-nums text-zinc-300">0%</span>
           )}
         </td>
-        <td className={consoleTableBodyCellClass}>
-          {expandable
-            ? (expanded
-                ? <ChevronUp className="h-3.5 w-3.5 text-zinc-400" />
-                : <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />)
-            : null}
-        </td>
+        <td className={`${consoleTableBodyCellClass} pr-3 text-right`}>
+            {expandable
+              ? (expanded
+                  ? <ChevronUp className="ml-auto h-3.5 w-3.5 text-zinc-400" />
+                  : <ChevronDown className="ml-auto h-3.5 w-3.5 text-zinc-400" />)
+              : null}
+          </td>
       </tr>
       {expanded && (
         <tr>
