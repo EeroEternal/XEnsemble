@@ -129,6 +129,7 @@
   },
   "history": {
     "view_all": "Session history",
+    "title": "Session history",
     "load_failed": "Failed to load history",
     "empty": "No sessions found",
     "untitled": "Untitled session",

@@ -10,8 +10,10 @@ import { formatRelativeTime } from '../lib/formatRelativeTime';
 import { useToast } from '../components/Toast';
 import SelectMenu from '../components/SelectMenu';
 import MarkdownView from '../components/Markdown';
+import PageHeader from '../components/PageHeader';
 import { extractSkillFromSession } from '../lib/skillsApi';
 import {
+  consoleAdminPageClass,
   consoleButtonFocusClass,
   consoleEmptyStateClass,
   consoleToolbarInputClass,
@@ -627,9 +629,10 @@ export default function History({ agents, projects, active = true, className = '
   const selectedSession = data.items.find((s) => s.id === selectedId) || null;
 
   return (
-    <div className={`flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-surface ${className}`} aria-hidden={ariaHidden}>
+    <div className={`${consoleAdminPageClass} px-4 sm:px-6 lg:px-8 py-6 ${className}`} aria-hidden={ariaHidden}>
+      <PageHeader title={t('sessions:history.title', { defaultValue: 'Session history' })} />
       {/* Filter bar */}
-      <div className="shrink-0 border-b border-zinc-200 bg-surface px-4 py-3">
+      <div className="shrink-0 border-b border-zinc-200 pb-3">
         <div className="flex flex-wrap items-center gap-2">
           <div className="w-44">
             <SelectMenu
@@ -677,7 +680,7 @@ export default function History({ agents, projects, active = true, className = '
       </div>
 
       {/* List */}
-      <div className="min-h-0 flex-1 overflow-y-auto console-scroll-hidden px-4 py-3">
+      <div className="min-h-0 flex-1 overflow-y-auto console-scroll-hidden">
         {loading ? (
           <div className="flex h-full items-center justify-center text-zinc-400">
             <Loader2 className="h-5 w-5 animate-spin" />

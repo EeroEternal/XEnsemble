@@ -129,6 +129,7 @@
   },
   "history": {
     "view_all": "会话历史",
+    "title": "会话历史",
     "load_failed": "加载历史失败",
     "empty": "未找到会话",
     "untitled": "未命名会话",
