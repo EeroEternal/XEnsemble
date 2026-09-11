@@ -99,6 +99,7 @@
     "view_detail": "查看趋势明细",
     "no_data": "暂无用量数据",
     "deleted_project": "已删除项目",
-    "unknown": "（未知）"
+    "unknown": "（未知）",
+    "hidden_empty_users": "其余 {{count}} 名用户在该周期内无用量（可搜索查找）"
   }
 }

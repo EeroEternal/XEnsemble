@@ -99,6 +99,7 @@
     "view_detail": "View trend detail",
     "no_data": "No usage data yet",
     "deleted_project": "Deleted workspace",
-    "unknown": "(unknown)"
+    "unknown": "(unknown)",
+    "hidden_empty_users": "{{count}} more users with no usage in this period (search to find them)"
   }
 }

@@ -130,7 +130,7 @@ export default function QuotaSettingsPanel() {
 
           <div>
             <div className={`${consoleSectionLabelClass} mb-2`}>{t('settings:usage.by_project')}</div>
-            <div className={`${consoleCardClass} overflow-hidden`}>
+            <div className={`${consoleCardClass} max-h-64 overflow-y-auto overflow-x-hidden console-scroll-hidden`}>
               <table className="w-full border-collapse text-left text-xs">
                 <thead>
                   <tr className="border-b border-zinc-200 text-[11px] uppercase tracking-wide text-zinc-400">

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, ChevronUp, Loader2, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2, RefreshCw, Search } from 'lucide-react';
 
 import PageHeader from '../components/PageHeader';
 import SelectMenu from '../components/SelectMenu';
@@ -78,8 +78,23 @@ export default function UsageAdmin() {
     }
   }, [searchParams, setSearchParams]);
 
-  const rows = summary?.items || [];
+  const items = summary?.items || [];
   const platformTotal = summary?.totalTokens ?? 0;
+
+  // 搜索（本地过滤）；无搜索词时默认隐藏 0 用量用户，避免淹没排行榜
+  const [search, setSearch] = useState('');
+  const q = search.trim().toLowerCase();
+  const matched = useMemo(() => {
+    if (!q) return items;
+    return items.filter((u) =>
+      (u.username || '').toLowerCase().includes(q)
+      || (u.displayName || '').toLowerCase().includes(q));
+  }, [items, q]);
+  const visibleRows = useMemo(
+    () => (q ? matched : matched.filter((u) => u.requests > 0 || u.totalTokens > 0)),
+    [matched, q],
+  );
+  const hiddenEmptyCount = matched.length - visibleRows.length;
 
   const trendData = useMemo(
     () => (overview?.trend || []).map((d) => ({
@@ -163,8 +178,19 @@ export default function UsageAdmin() {
           </section>
 
           {/* 用户排行 */}
-          <section>
-            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.ranking')}</h2>
+          <section className="flex min-h-0 flex-1 flex-col">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.ranking')}</h2>
+              <div className="relative w-56">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={t('users:search_placeholder')}
+                  className="h-8 w-full rounded-md border border-zinc-200 bg-white pl-8 pr-2 text-xs text-zinc-700 placeholder:text-zinc-400 outline-none focus:border-zinc-400"
+                />
+              </div>
+            </div>
             <div className={consoleAdminTableShellClass}>
               <div className={consoleAdminTableScrollClass}>
                 <table className="w-full table-fixed border-collapse text-left text-sm">
@@ -178,7 +204,7 @@ export default function UsageAdmin() {
                     <col className="w-1/6" />
                     <col className="w-8" />
                   </colgroup>
-                  <thead>
+                  <thead className="sticky top-0 z-10">
                     <tr className={consoleTableHeadRowClass}>
                       <th className={consoleTableHeadCellClass}>#</th>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.user')}</th>
@@ -191,28 +217,36 @@ export default function UsageAdmin() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100">
-                    {rows.length === 0 ? (
+                    {visibleRows.length === 0 ? (
                       <tr>
                         <td colSpan={8} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>
-                          {t('users:usage.no_data')}
+                          {q ? t('users:empty.no_match', { defaultValue: 'No users match your search.' }) : t('users:usage.no_data')}
                         </td>
                       </tr>
-                    ) : rows.map((u, idx) => {
+                    ) : visibleRows.map((u, idx) => {
                       const share = platformTotal > 0 ? Math.round((u.totalTokens / platformTotal) * 100) : 0;
                       const expanded = expandedUserId === u.userId;
                       return (
                         <Row
                           key={u.userId}
                           user={u}
-                          idx={idx}
+                          idx={items.indexOf(u)}
                           share={share}
                           expanded={expanded}
+                          expandable={u.requests > 0 || u.totalTokens > 0}
                           onToggle={() => toggleExpand(u.userId)}
                           onOpenDialog={() => setDialogUserId(u.userId)}
                           t={t}
                         />
                       );
                     })}
+                    {hiddenEmptyCount > 0 && (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-2.5 text-center text-[11px] text-zinc-400">
+                          {t('users:usage.hidden_empty_users', { count: hiddenEmptyCount })}
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -228,12 +262,12 @@ export default function UsageAdmin() {
   );
 }
 
-function Row({ user, idx, share, expanded, onToggle, onOpenDialog, t }) {
+function Row({ user, idx, share, expanded, expandable, onToggle, onOpenDialog, t }) {
   return (
     <>
       <tr
-        className={`cursor-pointer transition-colors hover:bg-zinc-50/70 ${expanded ? 'bg-zinc-50' : ''}`}
-        onClick={onToggle}
+        className={`transition-colors ${expandable ? 'cursor-pointer hover:bg-zinc-50/70' : ''} ${expanded ? 'bg-zinc-50' : ''}`}
+        onClick={expandable ? onToggle : undefined}
       >
         <td className={consoleTableBodyCellClass}>
           <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-zinc-100 text-[11px] font-semibold text-zinc-500">
@@ -258,17 +292,23 @@ function Row({ user, idx, share, expanded, onToggle, onOpenDialog, t }) {
           {formatTokens(user.totalTokens)}
         </td>
         <td className={consoleTableBodyCellClass}>
-          <div className="flex items-center gap-2">
-            <div className="h-1.5 w-20 overflow-hidden rounded-full bg-zinc-100">
-              <div className="h-full rounded-full bg-zinc-800" style={{ width: `${Math.min(100, share)}%` }} />
+          {share > 0 ? (
+            <div className="flex items-center gap-2">
+              <div className="h-1.5 w-20 overflow-hidden rounded-full bg-zinc-100">
+                <div className="h-full rounded-full bg-zinc-800" style={{ width: `${Math.min(100, share)}%` }} />
+              </div>
+              <span className="text-[11px] tabular-nums text-zinc-400">{share}%</span>
             </div>
-            <span className="text-[11px] tabular-nums text-zinc-400">{share}%</span>
-          </div>
+          ) : (
+            <span className="text-[11px] tabular-nums text-zinc-300">0%</span>
+          )}
         </td>
         <td className={consoleTableBodyCellClass}>
-          {expanded
-            ? <ChevronUp className="h-3.5 w-3.5 text-zinc-400" />
-            : <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />}
+          {expandable
+            ? (expanded
+                ? <ChevronUp className="h-3.5 w-3.5 text-zinc-400" />
+                : <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />)
+            : null}
         </td>
       </tr>
       {expanded && (

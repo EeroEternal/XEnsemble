@@ -273,7 +273,7 @@ function AuthenticatedLayout({
               )}
             >
               <SettingsTabSidebar activeTab="usage" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
-              <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
+              <div className={cn('flex min-h-0 flex-1 flex-col overflow-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
                 <UsageAdmin />
               </div>
             </div>
