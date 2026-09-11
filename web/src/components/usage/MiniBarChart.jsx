@@ -1,4 +1,4 @@
-import { formatTokens } from '../../lib/formatTokens';
+﻿import { formatTokens } from '../../lib/formatTokens';
 
 /**
  * 迷你堆叠柱状图（纯 CSS，无图表库依赖）。
@@ -41,7 +41,7 @@ export default function MiniBarChart({
               )}
             </div>
             {total > 0 && (
-              <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] leading-relaxed shadow-lg group-hover:block">
+              <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-zinc-200 bg-surface px-2 py-1 text-[11px] leading-relaxed shadow-lg group-hover:block">
                 <div className="text-zinc-400">{d.tip ?? d.label}</div>
                 {s > 0 && (
                   <div className="text-zinc-600">

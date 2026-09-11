@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+﻿import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp, Loader2, RefreshCw, Search } from 'lucide-react';
@@ -177,7 +177,7 @@ export default function UsageAdmin() {
                 <span className="inline-block h-1.5 w-1.5 rounded-sm bg-emerald-400" /> {t('users:usage.completion')}
               </span>
             </div>
-            <div className="rounded-lg border border-zinc-200 bg-white px-3 py-4">
+            <div className="rounded-lg border border-zinc-200 bg-surface px-3 py-4">
               <MiniBarChart data={trendData} height={104} />
             </div>
           </section>
@@ -192,7 +192,7 @@ export default function UsageAdmin() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder={t('users:search_placeholder')}
-                  className="h-8 w-full rounded-md border border-zinc-200 bg-white pl-8 pr-2 text-xs text-zinc-700 placeholder:text-zinc-400 outline-none focus:border-zinc-400"
+                  className="h-8 w-full rounded-md border border-zinc-200 bg-surface pl-8 pr-2 text-xs text-zinc-700 placeholder:text-zinc-400 outline-none focus:border-zinc-400"
                 />
               </div>
             </div>
@@ -367,11 +367,11 @@ function ExpandedDetail({ userId, days, onOpenDialog, t }) {
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <div className="rounded-lg border border-zinc-200 bg-white p-3.5">
+      <div className="rounded-lg border border-zinc-200 bg-surface p-3.5">
         <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{t('users:usage.by_model')}</p>
         <MiniList items={detail?.byModel} t={t} />
       </div>
-      <div className="rounded-lg border border-zinc-200 bg-white p-3.5">
+      <div className="rounded-lg border border-zinc-200 bg-surface p-3.5">
         <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{t('users:usage.by_project')}</p>
         <MiniList items={byProject} t={t} />
       </div>
@@ -413,7 +413,7 @@ function MiniList({ items, t }) {
 
 function StatCard({ label, value, full }) {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-4" title={full}>
+    <div className="rounded-lg border border-zinc-200 bg-surface p-4" title={full}>
       <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{label}</div>
       <div className="mt-1 text-2xl font-bold tabular-nums text-zinc-900">{value}</div>
     </div>
