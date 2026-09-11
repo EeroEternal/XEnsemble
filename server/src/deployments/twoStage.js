@@ -4159,23 +4159,29 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             }
             served = { ok: true };
         } else if (mode !== 'live' && verify?.appPort) {
-            const proxyPort = (await getGuestFreePort(ref)) || 0;
-            if (proxyPort) {
-                const proxyOk = await startRewriteProxy({
+            // rewrite proxy 起不来就"直接隧道 verify 端口"是白屏来源之一（实测 10:13：
+            // rewrite proxy failed → 直连 → HTML 无 shim/base → Next Router 用带前缀
+            // pathname 匹配失败 → 白屏且网络层无任何 4xx/5xx）。此处失败换端口重试，
+            // 重试耗尽才允许直连兜底。
+            let proxyPort = 0;
+            let proxyOk = false;
+            for (let attempt = 0; attempt < 3 && !proxyOk; attempt++) {
+                proxyPort = (await getGuestFreePort(ref)) || 0;
+                if (!proxyPort) break;
+                proxyOk = await startRewriteProxy({
                     runtimeRef: ref, workspacePath: wsPath,
                     upstreamPort: verify.appPort, listenPort: proxyPort,
                     base: staticBase,
                     backendPort: backendPortFromVerify, apiPrefixes,
                     onLog: (m) => console.error(`[twoStage] ${m}`),
                 });
-                if (proxyOk) {
-                    port = proxyPort;
-                    console.error(`[twoStage] preview: rewrite proxy :${proxyPort} -> verify app :${verify.appPort}`);
-                } else {
-                    console.error(`[twoStage] preview: rewrite proxy failed on :${proxyPort}, tunneling verify port ${verify.appPort} directly`);
-                }
+                if (!proxyOk) console.error(`[twoStage] preview: rewrite proxy attempt ${attempt + 1} failed on :${proxyPort}, retrying`);
+            }
+            if (proxyOk) {
+                port = proxyPort;
+                console.error(`[twoStage] preview: rewrite proxy -> verify app :${verify.appPort}`);
             } else {
-                console.error(`[twoStage] preview: no free guest port for rewrite proxy, tunneling verify port ${verify.appPort} directly`);
+                console.error(`[twoStage] preview: rewrite proxy failed after retries, tunneling verify port ${verify.appPort} directly`);
             }
         } else if (mode !== 'live') {
             served = await ensureFrontendServed({ runtimeRef: ref, workspacePath: wsPath, port, base: staticBase, onLog: (m) => console.error(`[twoStage] ${m}`) });
