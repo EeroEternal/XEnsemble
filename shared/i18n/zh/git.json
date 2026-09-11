@@ -124,7 +124,9 @@
     "generate_message_failed": "生成信息失败",
     "connection_failed": "{{label}} 连接失败。",
     "oauth_not_configured": "{{label}} OAuth 未配置。请联系管理员在 设置 → Git 中配置 OAuth 凭据。",
-    "load_branches_failed": "加载分支失败"
+    "load_branches_failed": "加载分支失败",
+    "discard_failed": "放弃更改失败",
+    "pull_failed": "拉取失败"
   },
   "toast": {
     "committed": "更改已提交。",
@@ -149,7 +151,16 @@
     "connected_as": "已连接到 {{provider}}，用户：{{username}}",
     "authorization_failed": "{{provider}} 授权失败，请重试。",
     "authorization_window_closed": "{{provider}} 授权窗口在完成前已关闭，请重试。",
-    "authorization_timed_out": "{{provider}} 授权超时，请重试。"
+    "authorization_timed_out": "{{provider}} 授权超时，请重试。",
+    "changes_discarded": "已放弃更改。",
+    "all_changes_discarded": "已放弃全部更改。",
+    "repo_imported": "仓库已导入，可以使用了。",
+    "no_conflicts": "无冲突——分支可以干净合并。",
+    "comment_added": "评论已添加。",
+    "reply_added": "回复已添加。",
+    "comment_updated": "评论已更新。",
+    "comment_deleted": "评论已删除。",
+    "no_more_comments": "没有更多评论了。"
   },
   "count_one": "{{count}} 个会话",
   "count_other": "{{count}} 个会话",

@@ -86,5 +86,19 @@
     "disk_gb": "磁盘 (GB)",
     "cpus": "CPU",
     "memory_mb": "内存 (MB)"
+  },
+  "toast": {
+    "executable_updated": "可执行文件已更新。",
+    "config_saved": "配置已保存。"
+  },
+  "error": {
+    "register_json_invalid": "请先修正 Arguments 或 Required env 中的 JSON 错误再保存。",
+    "register_failed": "注册 Agent 失败。",
+    "command_required": "请填写启动命令。",
+    "executable_update_failed": "更新可执行文件失败。",
+    "provider_required": "请选择 Provider。",
+    "models_required": "请至少选择一个模型。",
+    "config_save_failed": "保存配置失败。",
+    "vm_saved_warnings": "VM 资源已保存，但有警告：{{message}}"
   }
 }

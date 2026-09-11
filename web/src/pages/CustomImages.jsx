@@ -137,7 +137,7 @@ export function CustomImagesContent() {
       }
       setPollIds(polling);
     } catch (err) {
-      showToast('error', err.message || 'Failed to load data');
+      showToast('error', err.message || t('images:error.load_failed'));
     } finally {
       setLoading(false);
     }
@@ -197,16 +197,16 @@ export function CustomImagesContent() {
   async function handleCreate(event) {
     event.preventDefault();
     if (!imageName.trim()) {
-      showToast('error', 'Image name is required');
+      showToast('error', t('images:error.name_required'));
       return;
     }
     if (selectedComponentIds.length === 0) {
-      showToast('error', 'Select at least one component');
+      showToast('error', t('images:error.components_required'));
       return;
     }
     const hasAgent = selectedComponentIds.some((id) => id.startsWith('agent:'));
     if (!hasAgent) {
-      showToast('error', 'Select an agent (required)');
+      showToast('error', t('images:error.agent_required'));
       return;
     }
 
@@ -234,7 +234,7 @@ export function CustomImagesContent() {
       setImageQuota((prev) => ({ ...prev, count: prev.count + 1 }));
       setPollIds((prev) => new Set([...prev, data.id]));
       resetForm();
-      showToast('success', 'Image build started');
+      showToast('success', t('images:toast.build_started'));
     } catch (err) {
       showToast('error', err.message || t('images:error.create_image', { defaultValue: 'Failed to create image' }));
     } finally {

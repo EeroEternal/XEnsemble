@@ -266,7 +266,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
         if (res?.clone_status === 'ready') {
           setCloneStatus('ready');
           clearInterval(id);
-          showToast('success', 'Repository imported and ready.');
+          showToast('success', t('git:toast.repo_imported'));
           onImported?.(importedProjectId);
           if (!inline) handleClose();
         } else if (res?.clone_status === 'failed') {

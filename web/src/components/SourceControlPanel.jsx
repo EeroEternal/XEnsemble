@@ -260,14 +260,14 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       if (target.kind === 'file') {
         setFileDiffs((prev) => { const next = { ...prev }; delete next[target.path]; return next; });
         await gitChanges?.discard([target.path]);
-        showToast('success', 'Changes discarded.');
+        showToast('success', t('git:toast.changes_discarded'));
       } else {
         setFileDiffs({});
         await gitChanges?.discard(target.paths);
-        showToast('success', 'All changes discarded.');
+        showToast('success', t('git:toast.all_changes_discarded'));
       }
     } catch (err) {
-      showToast('error', err.message || 'Discard failed');
+      showToast('error', err.message || t('git:error.discard_failed'));
     } finally {
       setDiscarding(false);
       setDiscardConfirm(null);
@@ -307,7 +307,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       setCommitMessage('');
       setShowCommitDialog(false);
       setCommitTarget(null);
-      showToast('success', 'Committed.');
+      showToast('success', t('git:toast.committed'));
       gitChanges?.fetchStatus?.({ silent: true });
     } catch (err) {
       if (err.code === 'AUTHOR_REQUIRED' || (err.message && err.message.includes('author'))) {
@@ -332,7 +332,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t('git:error.generate_message_failed'));
       if (data.message) setCommitMessage(data.message);
-      else showToast('error', data.error || 'No changes to describe');
+      else showToast('error', data.error || t('git:error.no_changes_to_describe'));
     } catch (err) {
       showToast('error', err.message || t('git:error.generate_message_failed'));
     } finally {
@@ -531,7 +531,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
       if (err.code === 'pull_conflict') {
         showToast('error', t('git:pull_conflict_message', { defaultValue: 'There are conflicts between your local changes and the remote.' }));
       } else {
-        showToast('error', err.message || 'Pull failed');
+        showToast('error', err.message || t('git:error.pull_failed'));
       }
     } finally {
       setPullingRepo(null);

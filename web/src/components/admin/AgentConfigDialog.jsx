@@ -97,11 +97,11 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
     e.preventDefault();
     if (!agent) return;
     if (!authDraft.provider?.trim()) {
-      showToast('error', 'Select a provider.');
+      showToast('error', t('agents:error.provider_required'));
       return;
     }
     if (authDraft.model.length === 0) {
-      showToast('error', 'Select at least one model.');
+      showToast('error', t('agents:error.models_required'));
       return;
     }
     setSavingKeys(true);
@@ -138,13 +138,13 @@ export default function AgentConfigDialog({ agent, gatewayProviders, onClose, on
           const vrData = await vrRes.json();
           if (!vrRes.ok) throw new Error(vrData.error);
         } catch (err) {
-          showToast('error', 'VM resources saved, but: ' + (err.message || 'failed'));
+          showToast('error', t('agents:error.vm_saved_warnings', { message: err.message || 'failed' }));
         }
       }
       onClose();
       onSaved?.();
     } catch (err) {
-      showToast('error', err.message || 'Failed to save configuration.');
+      showToast('error', err.message || t('agents:error.config_save_failed'));
     } finally {
       setSavingKeys(false);
     }

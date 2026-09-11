@@ -62,14 +62,23 @@
     "provider_status": "Provider returned {{status}}.",
     "empty_response": "Provider returned an empty response. Check API Key and model.",
     "no_models": "No models returned. Enter the list manually.",
-    "enter_models_manually": "You can enter models manually."
+    "enter_models_manually": "You can enter models manually.",
+    "load_failed": "Failed to load gateway settings.",
+    "base_url_required": "Base URL is required.",
+    "model_required_for_verify": "Default model is required to verify provider.",
+    "api_key_required_for_verify": "API Key is required to verify provider.",
+    "api_key_required_for_models": "API Key is required to fetch models. Enter it above or fill the list manually.",
+    "name_base_url_required": "Name and Base URL are required.",
+    "host_port_invalid": "Enter a valid host and port.",
+    "vm_saved_with_warnings": "VM resources saved, but: {{message}}"
   },
   "toast": {
     "models_fetched_one": "Fetched {{count}} model",
     "models_fetched_other": "Fetched {{count}} models",
     "provider_saved": "Provider saved.",
     "provider_deleted": "Provider deleted.",
-    "settings_saved": "Gateway settings saved."
+    "settings_saved": "Gateway settings saved.",
+    "provider_removed": "Provider removed."
   },
   "removing": "Removing…",
   "verifying_provider": "Verifying provider",

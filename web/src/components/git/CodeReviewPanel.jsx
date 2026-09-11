@@ -591,7 +591,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
     try {
       await gitApi.addMergeRequestComment(projectId, mergeRequestId, commentText.trim());
       setCommentText('');
-      showToast('success', 'Comment added.');
+      showToast('success', t('git:toast.comment_added'));
       refreshMR();
     } catch (err) {
       if (err.code === 'REAUTH_REQUIRED') {
@@ -627,7 +627,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
       await gitApi.replyToReviewComment(projectId, mergeRequestId, replyingTo, replyText.trim(), targetComment.discussionId);
       setReplyText('');
       setReplyingTo(null);
-      showToast('success', 'Reply added.');
+      showToast('success', t('git:toast.reply_added'));
       refreshMR();
     } catch (err) {
       if (err.code === 'REAUTH_REQUIRED') {
@@ -646,7 +646,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
     setCommentActionLoading({ type: 'edit', id: comment.id, pending: true });
     try {
       await gitApi.editMergeRequestComment(projectId, mergeRequestId, comment.id, newBody.trim(), comment._type || 'issue');
-      showToast('success', 'Comment updated.');
+      showToast('success', t('git:toast.comment_updated'));
       setCommentActionLoading(null);
       refreshMR();
     } catch (err) {
@@ -665,7 +665,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
     setCommentActionLoading({ type: 'delete', id: comment.id, pending: true });
     try {
       await gitApi.deleteMergeRequestComment(projectId, mergeRequestId, comment.id, comment._type || 'issue');
-      showToast('success', 'Comment deleted.');
+      showToast('success', t('git:toast.comment_deleted'));
       refreshMR();
     } catch (err) {
       if (err.code === 'REAUTH_REQUIRED') {
@@ -1017,7 +1017,7 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
                             if (moreComments.comments?.length) setComments((prev) => [...prev, ...moreComments.comments]);
                             if (moreIssues.comments?.length) setIssueComments((prev) => [...prev, ...moreIssues.comments]);
                             if (!moreComments.comments?.length && !moreIssues.comments?.length) {
-                              showToast('info', 'No more comments to load.');
+                              showToast('info', t('git:toast.no_more_comments'));
                             }
                           } catch (err) {
                             showToast('error', err.message);

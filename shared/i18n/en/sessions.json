@@ -72,6 +72,7 @@
   "toast": {
     "file_deleted": "File deleted.",
     "session_restarted": "Session restarted.",
+    "session_resumed": "Session resumed.",
     "path_copied": "Path copied.",
     "config_saved": "Configuration saved.",
     "session_deleted": "Session deleted.",

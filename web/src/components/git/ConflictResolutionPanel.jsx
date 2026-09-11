@@ -98,7 +98,7 @@ export default function ConflictResolutionPanel({ projectId, targetBranch }) {
       if (!result.canMerge) {
         showToast('warning', `${result.conflictFiles?.length || 0} conflict(s) detected.`);
       } else {
-        showToast('success', 'No conflicts — branches can be merged cleanly.');
+        showToast('success', t('git:toast.no_conflicts'));
       }
     } catch (err) {
       showToast('error', err.message);

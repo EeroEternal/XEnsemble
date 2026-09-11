@@ -126,7 +126,9 @@
     "generate_message_failed": "Failed to generate message",
     "connection_failed": "{{label}} connection failed.",
     "oauth_not_configured": "{{label}} OAuth is not configured. Ask an administrator to set up OAuth credentials in Settings → Git.",
-    "load_branches_failed": "Failed to load branches"
+    "load_branches_failed": "Failed to load branches",
+    "discard_failed": "Discard failed",
+    "pull_failed": "Pull failed"
   },
   "toast": {
     "committed": "Changes committed.",
@@ -151,7 +153,16 @@
     "connected_as": "Connected to {{provider}} as {{username}}",
     "authorization_failed": "{{provider}} authorization failed. Please try again.",
     "authorization_window_closed": "{{provider}} authorization window was closed before completing. Please try again.",
-    "authorization_timed_out": "{{provider}} authorization timed out. Please try again."
+    "authorization_timed_out": "{{provider}} authorization timed out. Please try again.",
+    "changes_discarded": "Changes discarded.",
+    "all_changes_discarded": "All changes discarded.",
+    "repo_imported": "Repository imported and ready.",
+    "no_conflicts": "No conflicts — branches can be merged cleanly.",
+    "comment_added": "Comment added.",
+    "reply_added": "Reply added.",
+    "comment_updated": "Comment updated.",
+    "comment_deleted": "Comment deleted.",
+    "no_more_comments": "No more comments to load."
   },
   "count_one": "{{count}} session",
   "count_other": "{{count}} sessions",

@@ -399,7 +399,7 @@ export default function GatewaySettingsPanel() {
       }
       setProviderHealth((prev) => ({ ...prev, ...initialHealth }));
     } catch {
-      showToast('error', 'Failed to load gateway settings.');
+      showToast('error', t('gateway:error.load_failed'));
     } finally {
       setLoading(false);
     }
@@ -581,12 +581,12 @@ export default function GatewaySettingsPanel() {
     if (!providerDialog) return;
     const { form, mode } = providerDialog;
     if (!form.base_url.trim()) {
-      showToast('error', 'Base URL is required.');
+      showToast('error', t('gateway:error.base_url_required'));
       return;
     }
     const testModel = resolveFormTestModel(form);
     if (!testModel) {
-      showToast('error', 'Default model is required to verify provider.');
+      showToast('error', t('gateway:error.model_required_for_verify'));
       return;
     }
     setTestingConnection(true);
@@ -595,7 +595,7 @@ export default function GatewaySettingsPanel() {
       const apiKey = await resolveApiKeyForAction();
       if (!apiKey) {
         setFormConnectionHealth({ status: 'unknown' });
-        showToast('error', 'API Key is required to verify provider.');
+        showToast('error', t('gateway:error.api_key_required_for_verify'));
         return;
       }
       const res = await apiFetch('/api/v1/admin/gateway/providers/test', {
@@ -648,18 +648,18 @@ export default function GatewaySettingsPanel() {
     if (!providerDialog) return;
     const { form } = providerDialog;
     if (!form.base_url.trim()) {
-      showToast('error', 'Base URL is required.');
+      showToast('error', t('gateway:error.base_url_required'));
       return;
     }
     if (!hasApiKeyForActions(providerDialog)) {
-      showToast('error', 'API Key is required to fetch models. Enter it above or fill the list manually.');
+      showToast('error', t('gateway:error.api_key_required_for_models'));
       return;
     }
     setFetchingModels(true);
     try {
       const apiKey = await resolveApiKeyForAction();
       if (!apiKey) {
-        showToast('error', 'API Key is required to fetch models. Enter it above or fill the list manually.');
+        showToast('error', t('gateway:error.api_key_required_for_models'));
         return;
       }
       const res = await apiFetch('/api/v1/admin/gateway/providers/fetch-models', {
@@ -742,7 +742,7 @@ export default function GatewaySettingsPanel() {
     const { form, mode } = providerDialog;
     const name = form.name.trim();
     if (!name || !form.base_url.trim()) {
-      showToast('error', 'Name and Base URL are required.');
+      showToast('error', t('gateway:error.name_base_url_required'));
       return;
     }
     setSaving(true);
@@ -768,7 +768,7 @@ export default function GatewaySettingsPanel() {
     const host = processDraft.host.trim();
     const port = Number.parseInt(processDraft.port, 10);
     if (!host || !Number.isFinite(port) || port < 1 || port > 65535) {
-      showToast('error', 'Enter a valid host and port.');
+      showToast('error', t('gateway:error.host_port_invalid'));
       return;
     }
     setProcessSaving(true);
@@ -860,7 +860,7 @@ export default function GatewaySettingsPanel() {
       }
       if (providerDialog?.form?.name === name) setProviderDialog(null);
       await loadData();
-      showToast('success', 'Provider removed.');
+      showToast('success', t('gateway:toast.provider_removed'));
     } catch (err) {
       showToast('error', err.message);
     } finally {

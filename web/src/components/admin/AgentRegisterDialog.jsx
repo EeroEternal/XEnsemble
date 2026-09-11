@@ -37,7 +37,7 @@ export default function AgentRegisterDialog({ open, onClose, onRegistered }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!argsValidation.ok || !envValidation.ok) {
-      showToast('error', 'Fix JSON errors in Arguments or Required env before saving.');
+      showToast('error', t('agents:error.register_json_invalid'));
       return;
     }
     setSaving(true);
@@ -58,7 +58,7 @@ export default function AgentRegisterDialog({ open, onClose, onRegistered }) {
       onClose();
       onRegistered?.();
     } catch (err) {
-      showToast('error', err.message || 'Failed to register agent.');
+      showToast('error', err.message || t('agents:error.register_failed'));
     } finally {
       setSaving(false);
     }

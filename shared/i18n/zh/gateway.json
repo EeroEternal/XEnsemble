@@ -37,14 +37,23 @@
     "provider_status": "提供商返回 {{status}}。",
     "empty_response": "提供商返回了空响应。请检查 API Key 和模型。",
     "no_models": "未返回任何模型。请手动填写模型列表。",
-    "enter_models_manually": "可手动填写模型列表。"
+    "enter_models_manually": "可手动填写模型列表。",
+    "load_failed": "网关设置加载失败。",
+    "base_url_required": "请填写 Base URL。",
+    "model_required_for_verify": "验证 Provider 前请先填写默认模型。",
+    "api_key_required_for_verify": "验证 Provider 前请先填写 API Key。",
+    "api_key_required_for_models": "获取模型列表前请先填写 API Key；或在上方填写后手动录入列表。",
+    "name_base_url_required": "请填写名称和 Base URL。",
+    "host_port_invalid": "请填写有效的主机与端口。",
+    "vm_saved_with_warnings": "VM 资源已保存，但有警告：{{message}}"
   },
   "toast": {
     "models_fetched_one": "已获取 {{count}} 个模型",
     "models_fetched_other": "已获取 {{count}} 个模型",
     "provider_saved": "提供商已保存。",
     "provider_deleted": "提供商已删除。",
-    "settings_saved": "网关设置已保存。"
+    "settings_saved": "网关设置已保存。",
+    "provider_removed": "Provider 已删除。"
   },
   "table": {
     "name": "名称",

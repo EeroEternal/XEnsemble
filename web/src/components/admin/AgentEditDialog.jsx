@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import Button from '../Button';
 import Input from '../Input';
 import { ConsoleDialogShell } from '../ConsoleDialog';
@@ -10,6 +11,7 @@ import {
 import { apiFetch } from '../../lib/api';
 
 export default function AgentEditDialog({ agent, onClose, onSaved }) {
+  const { t } = useTranslation();
   const { showToast } = useToast();
   const [editDraft, setEditDraft] = useState({ cmd: '', args: '' });
   const [saving, setSaving] = useState(false);
@@ -25,7 +27,7 @@ export default function AgentEditDialog({ agent, onClose, onSaved }) {
     if (!agent) return;
     const cmd = editDraft.cmd.trim();
     if (!cmd) {
-      showToast('error', 'Command is required.');
+      showToast('error', t('agents:error.command_required'));
       return;
     }
     const args = editDraft.args.trim() ? editDraft.args.trim().split(/\s+/) : [];
@@ -37,11 +39,11 @@ export default function AgentEditDialog({ agent, onClose, onSaved }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      showToast('success', 'Executable updated.');
+      showToast('success', t('agents:toast.executable_updated'));
       onClose();
       onSaved?.();
     } catch (err) {
-      showToast('error', err.message || 'Failed to update executable.');
+      showToast('error', err.message || t('agents:error.executable_update_failed'));
     } finally {
       setSaving(false);
     }

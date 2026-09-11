@@ -72,6 +72,7 @@
   "toast": {
     "file_deleted": "文件已删除。",
     "session_restarted": "会话已重启。",
+    "session_resumed": "会话已恢复。",
     "path_copied": "路径已复制。",
     "config_saved": "配置已保存。",
     "session_deleted": "会话已删除。",

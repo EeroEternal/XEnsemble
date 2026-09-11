@@ -83,7 +83,7 @@ export default function GitHubSettingsPanel() {
         ...data,
         GITHUB_CLIENT_SECRET: data.GITHUB_CLIENT_SECRET ? MASK : '',
       });
-      showToast('success', 'GitHub settings saved.');
+      showToast('success', t('settings:toast.github_saved'));
     } catch (err) {
       showToast('error', err.message);
     } finally {

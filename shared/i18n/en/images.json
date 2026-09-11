@@ -70,7 +70,11 @@
     "load_images": "Failed to load images",
     "create_image": "Failed to create image",
     "rebuild_image": "Failed to rebuild image",
-    "delete_image": "Failed to delete image"
+    "delete_image": "Failed to delete image",
+    "load_failed": "Failed to load data",
+    "name_required": "Image name is required",
+    "components_required": "Select at least one component",
+    "agent_required": "Select an agent (required)"
   },
   "actions_for": "Actions for",
   "rebuilding": "Rebuilding…",
@@ -90,5 +94,8 @@
   "start_build": "Start Build",
   "build_not_started": "Build has not started yet.",
   "no_components": "No components available.",
-  "no_images_match": "No images match your search."
+  "no_images_match": "No images match your search.",
+  "toast": {
+    "build_started": "Image build started"
+  }
 }

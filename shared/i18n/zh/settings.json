@@ -79,7 +79,8 @@
     "save_failed": "保存失败。",
     "config_saved": "配置已保存。",
     "save_keys_failed": "保存密钥失败",
-    "save_config_failed": "保存配置失败"
+    "save_config_failed": "保存配置失败",
+    "github_saved": "GitHub 设置已保存。"
   },
   "error": {
     "load_fields_failed": "加载配置字段失败。",

@@ -50,7 +50,11 @@
     "load_images": "加载镜像失败",
     "create_image": "创建镜像失败",
     "rebuild_image": "重新构建镜像失败",
-    "delete_image": "删除镜像失败"
+    "delete_image": "删除镜像失败",
+    "load_failed": "数据加载失败",
+    "name_required": "请输入镜像名称",
+    "components_required": "请至少选择一个组件",
+    "agent_required": "请选择 Agent（必填）"
   },
   "table": {
     "name": "名称",
@@ -89,5 +93,8 @@
   "start_build": "开始构建",
   "build_not_started": "构建尚未开始。",
   "no_components": "暂无可用组件。",
-  "no_images_match": "没有匹配的镜像。"
+  "no_images_match": "没有匹配的镜像。",
+  "toast": {
+    "build_started": "镜像构建已开始"
+  }
 }
