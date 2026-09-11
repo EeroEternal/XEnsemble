@@ -24,7 +24,10 @@
   },
   "action": {
     "stop_and_remove": "Stop and remove",
+    "exit": "Exit",
     "remove": "Remove",
+    "delete": "Delete",
+    "more_actions": "Session actions",
     "rename_session": "Rename",
     "restart_session": "Restart session",
     "start_session": "Start session",
@@ -67,7 +70,9 @@
     "load_files_failed": "Failed to load workspace files",
     "read_file_failed": "Failed to read file",
     "not_granted": "You do not have permission to use this agent.",
-    "load_history_failed": "Failed to load session history"
+    "load_history_failed": "Failed to load session history",
+    "delete_session_failed": "Failed to delete session",
+    "exit_session_failed": "Failed to exit session"
   },
   "toast": {
     "file_deleted": "File deleted.",
@@ -82,6 +87,8 @@
     "agent_configuration": "Agent Configuration",
     "workspace_files_deleted": "All workspace files on the server will be deleted. This frees your workspace quota.",
     "remove_session": "Remove this session?",
+    "exit_session": "Exit this session? It releases its sandbox and quota. You can resume later.",
+    "delete_session": "Delete this session permanently? This also removes its conversation history.",
     "clear_unassigned": "Clear unassigned sessions",
     "delete_workspace": "Delete workspace",
     "remove_all_sessions_in": "Remove all sessions in",

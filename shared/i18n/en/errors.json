@@ -3,6 +3,7 @@
   "forbidden": "Forbidden",
   "project_not_found": "Project not found",
   "session_not_found": "Session not found",
+  "session_already_exited": "Session has already ended",
   "agent_not_found": "Agent not found",
   "agent_not_granted": "You do not have permission to use this agent.",
   "agent_not_installed": "Agent is not installed",

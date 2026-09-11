@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Search, RotateCcw, Bot, Folder, Clock, FileText, ChevronLeft, ChevronRight,
-  ChevronDown, Lightbulb, User, RefreshCw, Loader2, X, ChevronsDown, Wrench, Sparkles,
+  ChevronDown, Lightbulb, User, RefreshCw, Loader2, X, ChevronsDown, Wrench, Sparkles, Trash2,
 } from 'lucide-react';
 import { apiFetch, getAccessToken } from '../lib/api';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
@@ -528,6 +528,7 @@ function ConversationDrawer({ session, onClose }) {
 
 export default function History({ agents, projects, active = true, className = '', 'aria-hidden': ariaHidden }) {
   const { t } = useTranslation();
+  const { showToast } = useToast();
 
   const [status, setStatus] = useState('');
   const [agentId, setAgentId] = useState('');
@@ -605,6 +606,21 @@ export default function History({ agents, projects, active = true, className = '
     setSearch('');
     setPage(1);
   }, []);
+
+  const handleDeleteSession = async (sessionId) => {
+    try {
+      const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || t('sessions:error.delete_session_failed', { defaultValue: 'Failed to delete session' }));
+      }
+      setData((prev) => ({ items: prev.items.filter((s) => s.id !== sessionId), total: Math.max(0, prev.total - 1) }));
+      if (selectedId === sessionId) setSelectedId(null);
+      showToast('success', t('sessions:toast.session_deleted', { defaultValue: 'Session deleted.' }));
+    } catch (err) {
+      showToast('error', err.message);
+    }
+  };
 
   const totalPages = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
 
@@ -703,12 +719,12 @@ export default function History({ agents, projects, active = true, className = '
               return (
                 <div
                   key={s.id}
-                  className={`rounded-lg border bg-surface transition-colors ${selectedId === s.id ? 'border-zinc-300' : 'border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50'} ${isExited ? 'opacity-60 hover:opacity-100' : ''}`}
+                  className={`flex items-center rounded-lg border bg-surface transition-colors ${selectedId === s.id ? 'border-zinc-300' : 'border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50'} ${isExited ? 'opacity-60 hover:opacity-100' : ''}`}
                 >
                   <button
                     type="button"
                     onClick={() => setSelectedId(s.id)}
-                    className={`flex w-full items-center gap-3 px-4 py-3 text-left ${consoleButtonFocusClass}`}
+                    className={`flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left ${consoleButtonFocusClass}`}
                     aria-label={t('sessions:history.open_detail', { defaultValue: 'Open conversation' })}
                   >
                     <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${statusDotClass(s.status)}`} />
@@ -757,6 +773,16 @@ export default function History({ agents, projects, active = true, className = '
                       <ChevronRight className="h-4 w-4 text-zinc-400" />
                     </div>
                   </button>
+                  {isExited && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id); }}
+                      title={t('sessions:action.delete', { defaultValue: 'Delete' })}
+                      className="mr-2 shrink-0 rounded-md p-2 text-zinc-400 hover:bg-red-50 hover:text-red-600"
+                    >
+                      <Trash2 className="h-4 w-4" strokeWidth={1.75} />
+                    </button>
+                  )}
                 </div>
               );
             })}

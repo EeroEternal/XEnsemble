@@ -15,6 +15,7 @@ import {
   List,
   ListTodo,
   Sparkles,
+  Square,
 } from 'lucide-react';
 import { apiFetch, getAccessToken } from '../lib/api';
 import { useToast } from './Toast';
@@ -27,13 +28,12 @@ import {
   selectActiveSession,
 } from '../lib/sidebarPrefs';
 import BrandMark from './BrandMark';
+import RowActionsMenu from './RowActionsMenu';
 import {
   textPrimary,
   textSecondary,
   textPlaceholder,
   accentGreen,
-  accentRed,
-  accentRedBg,
   transitionBase,
   hoverTextPrimary,
   hoverBgTertiary,
@@ -387,6 +387,9 @@ export default function AppSidebar({
     const isLive = s.alive === true;
     const isPending = s.status === 'pending';
     const isFailed = s.status === 'failed';
+    // 可退出（结束会话、释放配额、可 resume）：running/pending/idle。
+    // failed 会话仅提供物理删除。
+    const canExit = isLive || isPending || s.status === 'idle';
     const label = s.title?.trim() || getAgentLabel(s.agentId);
     const timestamp = s.createdAt ? formatRelativeTime(s.createdAt) : '';
     const imageName = s.customImageId ? customImageMap[s.customImageId] : null;
@@ -446,29 +449,15 @@ export default function AppSidebar({
         )}
         <div className="flex items-center shrink-0 opacity-0 group-hover/session:opacity-100 focus-within:opacity-100">
           {!isRenaming && (
-            <button
-              type="button"
-              title={t('sessions:action.rename_session', { defaultValue: 'Rename' })}
-              onClick={(e) => {
-                e.stopPropagation();
-                startRename(s);
-              }}
-              className={`p-1 rounded-md ${textPlaceholder} ${hoverTextPrimary}`}
-            >
-              <PenSquare className="w-3 h-3" />
-            </button>
+            <RowActionsMenu
+              label={t('sessions:action.more_actions', { defaultValue: 'Session actions' })}
+              items={[
+                { icon: PenSquare, label: t('sessions:action.rename_session', { defaultValue: 'Rename' }), onClick: () => startRename(s) },
+                ...(canExit ? [{ icon: Square, label: t('sessions:action.exit'), onClick: () => onRequestDeleteSession?.(s, { name: s.projectName || activeWorkspaceName }, 'exit') }] : []),
+                { icon: Trash2, label: t('sessions:action.delete'), danger: true, onClick: () => onRequestDeleteSession?.(s, { name: s.projectName || activeWorkspaceName }, 'delete') },
+              ]}
+            />
           )}
-          <button
-            type="button"
-            title={isLive ? t('sessions:action.stop_and_remove') : t('sessions:action.remove')}
-            onClick={(e) => {
-              e.stopPropagation();
-              onRequestDeleteSession?.(s, { name: s.projectName || activeWorkspaceName });
-            }}
-            className={`p-1 rounded-md ${textPlaceholder} ${accentRed} ${accentRedBg}`}
-          >
-            <Trash2 className="w-3 h-3" />
-          </button>
         </div>
       </div>
     );

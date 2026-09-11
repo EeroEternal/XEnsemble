@@ -1311,11 +1311,11 @@ export default React.forwardRef(function Sessions({
               : t('sessions:dialog.delete_session')}
           </div>
           <div className={consoleStructuredDialogFooterClass}>
-            <button onClick={() => setDeleteConfirmSession(null)} className="h-9 px-4 border rounded-md">{t('common:action.cancel')}</button>
+            <button onClick={() => setDeleteConfirmSession(null)} className="h-9 px-4 border border-zinc-300 text-zinc-900 rounded-md text-sm font-medium hover:bg-zinc-50">{t('common:action.cancel')}</button>
             {deleteConfirmSession.action === 'exit' ? (
-              <button onClick={() => handleExitSession(deleteConfirmSession.sessionId)} className="h-9 px-4 bg-zinc-800 text-white rounded-md">{t('sessions:action.exit')}</button>
+              <button onClick={() => handleExitSession(deleteConfirmSession.sessionId)} className="h-9 px-4 bg-zinc-900 text-zinc-50 rounded-md text-sm font-medium hover:bg-zinc-800">{t('sessions:action.exit')}</button>
             ) : (
-              <button onClick={() => handleDeleteSession(deleteConfirmSession.sessionId)} className="h-9 px-4 bg-red-600 text-white rounded-md">{t('sessions:action.delete')}</button>
+              <button onClick={() => handleDeleteSession(deleteConfirmSession.sessionId)} className="h-9 px-4 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700">{t('sessions:action.delete')}</button>
             )}
           </div>
         </ConsoleInlineDialog>

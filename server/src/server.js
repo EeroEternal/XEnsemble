@@ -1284,6 +1284,31 @@ fastify.get('/api/v1/sessions/:sessionId/chat', { preValidation: [fastify.authen
     };
 });
 
+// 退出会话：标记 exited、停进程、清理 preview/runtime。记录保留（软删除），
+// 释放配额，可 resume 重新拉起。对应业界 Stop/Exit 语义。
+fastify.post('/api/v1/sessions/:sessionId/exit', { preValidation: [fastify.authenticate] }, async (request, reply) => {
+    const { sessionId } = request.params;
+    const rows = await db.select().from(schema.sessions)
+        .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
+
+    const session = rows[0];
+    if (session.status === 'exited') {
+        return reply.code(409).send({ error: t('errors:session_already_exited', {}, request.locale || 'en'), code: 'session_already_exited' });
+    }
+
+    // Mark exited first so in-flight provisioning observes cancellation.
+    await db.update(schema.sessions)
+        .set({ status: 'exited', exitedAt: Date.now(), updatedAt: Date.now() })
+        .where(eq(schema.sessions.id, sessionId));
+
+    await teardownSession(session, sessionId, request.log);
+
+    return { ok: true };
+});
+
+// 删除会话：停进程 + 清理资源 + 物理删除记录（级联清理 streams/configs/
+// conversations/chat_messages 等子表）。对应业界 Delete 语义，不可恢复。
 fastify.delete('/api/v1/sessions/:sessionId', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const { sessionId } = request.params;
     const rows = await db.select().from(schema.sessions)
@@ -1292,15 +1317,23 @@ fastify.delete('/api/v1/sessions/:sessionId', { preValidation: [fastify.authenti
 
     const session = rows[0];
 
-    // Mark exited first so in-flight provisioning observes cancellation.
-    await db.update(schema.sessions)
-        .set({ status: 'exited', exitedAt: Date.now(), updatedAt: Date.now() })
-        .where(eq(schema.sessions.id, sessionId));
+    await teardownSession(session, sessionId, request.log);
 
+    await db.delete(schema.sessions).where(eq(schema.sessions.id, sessionId));
+
+    return { ok: true };
+});
+
+// 停止/删除共用的资源回收：杀进程、清理 preview/deploy、回收 runtime VM。
+// 对已 exited 的会话幂等（进程已停、deployment 已 stopped、runtime 已销毁）。
+async function teardownSession(session, sessionId, log) {
     const live = sessionManager.getSession(sessionId);
     if (live?.handle) {
+        // 标记 hibernating，避免 kill 触发的 onExit 回调（resumeSession 注册）
+        // 按"可恢复性"把 status 覆盖回 idle，破坏 /exit 显式标记的 exited 语义。
+        sessionManager.beginHibernate(sessionId);
         try { live.handle.kill(); } catch (err) {
-            request.log.warn({ err, sessionId }, '[sessions] failed to kill live handle on delete');
+            log.warn({ err, sessionId }, '[sessions] failed to kill live handle');
         }
         const runtimeRef = live.runtimeRef || live.runtimeId || null;
         if (runtimeRef) {
@@ -1319,13 +1352,13 @@ fastify.delete('/api/v1/sessions/:sessionId', { preValidation: [fastify.authenti
             session: { ...session, runtimeRef },
             runtime,
             waitForAgentExit,
-            fastifyLog: request.log,
+            fastifyLog: log,
         });
     }
 
     sessionManager.deleteSession(sessionId);
 
-    // session 强绑定：删除 session 时，中止并清理它名下所有 deploy/preview 进程。
+    // session 强绑定：中止并清理它名下所有 deploy/preview 进程。
     // DB 记录由 deployments.session_id 的 ON DELETE CASCADE 级联清理；这里显式停 tunnel/abort。
     try {
         const depRows = await db.select({
@@ -1345,12 +1378,12 @@ fastify.delete('/api/v1/sessions/:sessionId', { preValidation: [fastify.authenti
                 try { abortDeploy(d.projectId, d.sessionId); } catch (_) { /* ignore */ }
             }
             await db.update(schema.deployments)
-                .set({ status: 'stopped', updatedAt: Date.now(), stoppedBy: 'session_delete' })
+                .set({ status: 'stopped', updatedAt: Date.now(), stoppedBy: 'session_teardown' })
                 .where(eq(schema.deployments.id, d.id))
                 .catch(() => {});
         }
     } catch (err) {
-        request.log.warn({ err, sessionId }, '[sessions] failed to stop preview/deploy on session delete');
+        log.warn({ err, sessionId }, '[sessions] failed to stop preview/deploy on session teardown');
     }
 
     // Destroy the boxlite/blink VM if no other live session for this project still
@@ -1374,11 +1407,10 @@ fastify.delete('/api/v1/sessions/:sessionId', { preValidation: [fastify.authenti
                 }
             }
         } catch (err) {
-            request.log.warn({ err, sessionId }, '[sessions] failed to destroy runtime on session delete');
+            log.warn({ err, sessionId }, '[sessions] failed to destroy runtime on session teardown');
         }
     }
-    return { ok: true };
-});
+}
 
 // ── Session config (config files + custom env) ──
 fastify.get('/api/v1/sessions/:sessionId/config', { preValidation: [fastify.authenticate] }, async (request, reply) => {
@@ -1497,6 +1529,13 @@ fastify.post('/api/v1/sessions/:sessionId/resume', { preValidation: [fastify.aut
     }
     if (session.status !== 'exited' && session.status !== 'idle' && session.status !== 'running') {
         return reply.code(409).send({ error: 'session not resumable - please start a new session' });
+    }
+    // exited 会话恢复会新增一个 running（此前不占配额），需重新检查配额，
+    // 防止"退出释放配额 → 新增占满 → 恢复旧会话"绕过配额限制。
+    // idle 会话恢复是状态内转换（idle→running），配额数不变，无需检查。
+    if (session.status === 'exited') {
+        const sessionQuota = await policy.checkQuota(request.user.id, 'sessions', request.user.role);
+        if (!sessionQuota.ok) return policy.quotaErrorReply(reply, sessionQuota);
     }
     try {
         const resumeContext = await buildResumeSessionContext({

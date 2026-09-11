@@ -3,6 +3,7 @@
   "forbidden": "禁止访问",
   "project_not_found": "项目不存在",
   "session_not_found": "会话不存在",
+  "session_already_exited": "会话已结束",
   "agent_not_found": "Agent 不存在",
   "agent_not_granted": "你没有使用此 Agent 的权限。",
   "agent_not_installed": "Agent 未安装",

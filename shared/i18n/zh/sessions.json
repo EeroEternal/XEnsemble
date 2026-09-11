@@ -24,7 +24,10 @@
   },
   "action": {
     "stop_and_remove": "停止并移除",
+    "exit": "退出",
     "remove": "移除",
+    "delete": "删除",
+    "more_actions": "会话操作",
     "rename_session": "重命名",
     "restart_session": "重启会话",
     "start_session": "启动会话",
@@ -67,7 +70,9 @@
     "load_files_failed": "加载工作空间文件失败",
     "read_file_failed": "读取文件失败",
     "not_granted": "你没有使用此 Agent 的权限。",
-    "load_history_failed": "加载会话历史失败"
+    "load_history_failed": "加载会话历史失败",
+    "delete_session_failed": "删除会话失败",
+    "exit_session_failed": "退出会话失败"
   },
   "toast": {
     "file_deleted": "文件已删除。",
@@ -82,6 +87,8 @@
     "agent_configuration": "Agent 配置",
     "workspace_files_deleted": "服务器上的所有工作空间文件将被删除。这将释放你的工作空间配额。",
     "remove_session": "移除这个会话？",
+    "exit_session": "退出这个会话？将释放沙箱和配额，之后可恢复。",
+    "delete_session": "永久删除这个会话？其对话历史也将一并删除。",
     "clear_unassigned": "清除未分配的会话",
     "delete_workspace": "删除工作空间",
     "remove_all_sessions_in": "移除所有会话中的",
