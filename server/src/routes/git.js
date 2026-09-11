@@ -520,6 +520,7 @@ function registerGitRoutes(fastify) {
                             name: parsed.repoName,
                             provider: resolvedProvider,
                             defaultBranch: r.branch || await probeDefaultBranch(parsed.cloneUrl),
+                            explicitBranch: r.branch || null,
                         };
                     } else if (r.repo_full_name) {
                         const rProvider = r.repo_provider || providerName;
@@ -535,6 +536,7 @@ function registerGitRoutes(fastify) {
                             name: info.name || r.repo_full_name.split('/').pop(),
                             provider: rProvider,
                             defaultBranch: r.branch || info.defaultBranch || 'main',
+                            explicitBranch: r.branch || null,
                         };
                     } else {
                         return reply.code(400).send({ error: 'each repo requires repo_url or repo_full_name', code: 'repo_url_required' });
@@ -559,6 +561,7 @@ function registerGitRoutes(fastify) {
                     name: itemInfo.name,
                     provider: itemInfo.provider,
                     repoDefaultBranch: itemInfo.defaultBranch || 'main',
+                    explicitBranch: itemInfo.explicitBranch || null,
                     isPrimary: r.is_primary != null ? !!r.is_primary : i === 0,
                     remoteRepoId: r.remote_repo_id || null,
                 });
@@ -669,11 +672,16 @@ function registerGitRoutes(fastify) {
                     workBranchName,
                     autoCreateBranch,
                 });
-                // project 行状态跟随 primary repo
+                // project 行状态跟随 primary repo（含真实默认分支/当前分支回写）
                 if (primaryRepoRowId) {
                     const pr = await projectRepoService.getById(primaryRepoRowId);
                     await db.update(schema.projects)
-                        .set({ cloneStatus: pr?.cloneStatus || 'ready', cloneError: pr?.cloneError || null })
+                        .set({
+                            cloneStatus: pr?.cloneStatus || 'ready',
+                            cloneError: pr?.cloneError || null,
+                            repoDefaultBranch: pr?.repoDefaultBranch || effectiveRepoInfo.defaultBranch || 'main',
+                            currentBranch: pr?.currentBranch || currentBranch,
+                        })
                         .where(eq(schema.projects.id, projectId));
                 }
             })();
@@ -713,25 +721,40 @@ function registerGitRoutes(fastify) {
 
                     const cloneResult = await gitOperationService.cloneRepo(project, {
                         repoUrl: repoInfo.cloneUrl,
-                        branch: baseBranch,
+                        // 只有用户显式指定的分支才定向 fetch；未指定时由 cloneRepo 从
+                        // 远端解析真实默认分支（不再依赖 ls-remote 探测值，避免默认
+                        // 分支非 main 时探测兜底 'main' 导致 fetch origin main 失败）。
+                        branch: branch || undefined,
                     });
 
+                    // cloneResult.branch 是实际检出分支：显式分支 = 用户指定；
+                    // 未指定 = 远端真实默认分支（如 master）。
+                    const resolvedBaseBranch = cloneResult.branch || baseBranch || 'main';
                     let branchSha = cloneResult.sha;
                     if (autoCreateBranch) {
                         const createResult = await gitOperationService.createBranch(
-                            project, workBranchName, baseBranch);
+                            project, workBranchName, resolvedBaseBranch);
                         branchSha = createResult.sha;
                     }
 
                     await scaffoldXEnsembleWithFs(ready.hostWorkspacePath || ready.workspacePath, {
-                        baseBranch,
+                        baseBranch: resolvedBaseBranch,
                         autoCommitOnExit: true,
                     });
 
                     await db.update(schema.projects)
-                        .set({ cloneStatus: 'ready', cloneError: null })
+                        .set({
+                            cloneStatus: 'ready',
+                            cloneError: null,
+                            repoDefaultBranch: resolvedBaseBranch,
+                            currentBranch: autoCreateBranch ? workBranchName : resolvedBaseBranch,
+                        })
                         .where(eq(schema.projects.id, projectId));
                     if (singleRepoRowId) {
+                        await projectRepoService.updateBranchInfo(singleRepoRowId, {
+                            repoDefaultBranch: resolvedBaseBranch,
+                            currentBranch: autoCreateBranch ? workBranchName : resolvedBaseBranch,
+                        });
                         await projectRepoService.updateCloneStatus(singleRepoRowId, 'ready', null);
                     }
                 } catch (err) {

@@ -160,6 +160,38 @@ describe('GitOperationService (mock exec)', () => {
         assert.strictEqual(checkoutCall.args[4], 'origin/main');
     });
 
+    it('cloneRepo without branch fetches all refs and resolves the remote default branch', async () => {
+        const exec = makeMockExec((args) => {
+            if (args[0] === 'symbolic-ref' && args[1] === 'refs/remotes/origin/HEAD') {
+                return 'refs/remotes/origin/master\n';
+            }
+            if (args[0] === 'rev-parse' && args[1] === 'HEAD') {
+                return 'clone-sha\n';
+            }
+            return '';
+        });
+        const service = createService(exec);
+
+        const result = await service.cloneRepo(
+            { id: 'p1', userId: 'u1', repoProvider: 'url' },
+            { repoUrl: 'https://github.com/owner/repo.git' },
+        );
+
+        assert.deepStrictEqual(result, { sha: 'clone-sha', branch: 'master' });
+
+        const fetchCall = findCall(exec.calls, 'fetch', 'origin');
+        assert.ok(fetchCall);
+        // 未指定分支：fetch 全量 refs，而不是 fetch origin <猜的分支>
+        assert.deepStrictEqual(fetchCall.args.slice(2), []);
+
+        const setHeadCall = findCall(exec.calls, 'remote', 'set-head', 'origin', '-a');
+        assert.ok(setHeadCall, 'should query the remote HEAD symref');
+
+        const checkoutCall = findCall(exec.calls, 'checkout', '-f', '-b', 'master');
+        assert.ok(checkoutCall);
+        assert.strictEqual(checkoutCall.args[4], 'origin/master');
+    });
+
     it('cloneRepo updates existing remote origin', async () => {
         let remoteAddFailed = false;
         const exec = makeMockExec((args) => {
@@ -697,6 +729,42 @@ describe('GitOperationService (real git)', { skip: !hasGit() }, () => {
         if (tmpRoot) {
             fs.rmSync(tmpRoot, { recursive: true, force: true });
         }
+    });
+
+    it('cloneRepo resolves a non-main remote default branch when branch is omitted', async () => {
+        const originMaster = path.join(tmpRoot, 'origin-master.git');
+        git(['init', '--bare', 'origin-master.git'], tmpRoot);
+
+        const seed = path.join(tmpRoot, 'seed-master');
+        fs.mkdirSync(seed, { recursive: true });
+        git(['init', '-b', 'master'], seed);
+        git(['config', 'user.email', 'seed@example.com'], seed);
+        git(['config', 'user.name', 'Seed'], seed);
+        fs.writeFileSync(path.join(seed, 'README.md'), 'hello-master');
+        git(['add', '.'], seed);
+        git(['commit', '-m', 'initial'], seed);
+        git(['remote', 'add', 'origin', originMaster], seed);
+        git(['push', 'origin', 'master'], seed);
+
+        const ws = path.join(tmpRoot, 'workspace-master');
+        fs.mkdirSync(ws, { recursive: true });
+        const svc = new GitOperationService({
+            ensureProjectRuntime: async () => ({ workspacePath: ws }),
+            getToken: async () => undefined,
+            exec: makeLocalExec(),
+            fs: new LocalFsAdapter(),
+            usesHostWorkspace: () => false,
+        });
+
+        // 模拟用户 URL 导入时未指定分支：必须解析出 master 而非报 "couldn't find remote ref main"
+        const result = await svc.cloneRepo(
+            { id: 'p2', userId: 'u1', repoProvider: 'url' },
+            { repoUrl: originMaster },
+        );
+        assert.strictEqual(result.branch, 'master');
+
+        const status = await svc.getStatus({ id: 'p2', userId: 'u1' });
+        assert.strictEqual(status.branch, 'master');
     });
 
     it('clones a real repo into an existing workspace directory', async () => {

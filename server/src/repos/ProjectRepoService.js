@@ -144,6 +144,20 @@ class ProjectRepoService {
   }
 
   /**
+   * 回写真实默认分支与当前分支（clone 完成且默认分支从远端解析出来后调用，
+   * 覆盖导入时 ls-remote 探测失败兜底 'main' 造成的错误值）。
+   */
+  async updateBranchInfo(repoId, { repoDefaultBranch, currentBranch } = {}) {
+    await this.db.update(this.projectRepos)
+      .set({
+        repoDefaultBranch: repoDefaultBranch || 'main',
+        currentBranch: currentBranch || null,
+        updatedAt: Date.now(),
+      })
+      .where(eq(this.projectRepos.id, repoId));
+  }
+
+  /**
    * 删除一个 repo。如果删除的是 primary，自动把最早创建的剩余 repo 升级为 primary。
    * @param {string} id
    * @returns {Promise<void>}

@@ -57,14 +57,16 @@ async function clonePrimary(project, primary, opts) {
                 project.defaultRuntimeId = ready.runtime.id;
             }
             t = Date.now();
-            await primarySvc.cloneRepo(project, {
+            const cloneResult = await primarySvc.cloneRepo(project, {
                 repoUrl: primary.cloneUrl,
-                branch: baseBranch || primary.repoDefaultBranch || 'main',
+                // 用户显式指定分支才定向 fetch；否则 cloneRepo 从远端解析真实默认分支
+                branch: primary.explicitBranch || undefined,
             });
-            stage(`clone done in ${Date.now() - t}ms`);
+            const resolvedBase = cloneResult.branch || baseBranch || primary.repoDefaultBranch || 'main';
+            stage(`clone done in ${Date.now() - t}ms (default branch: ${resolvedBase})`);
             if (autoCreateBranch && workBranchName) {
                 t = Date.now();
-                await primarySvc.createBranch(project, workBranchName, baseBranch || primary.repoDefaultBranch || 'main');
+                await primarySvc.createBranch(project, workBranchName, resolvedBase);
                 stage(`work branch done in ${Date.now() - t}ms`);
             }
             // scaffold 写 primary 仓库根（多仓库布局下 projectDir 根不是 git 仓，
@@ -73,12 +75,17 @@ async function clonePrimary(project, primary, opts) {
             const scaffoldRoot = path.join(ready.hostWorkspacePath || ready.workspacePath, primary.subPath);
             t = Date.now();
             await scaffoldXEnsembleWithFs(scaffoldRoot, {
-                baseBranch: baseBranch || primary.repoDefaultBranch || 'main',
+                baseBranch: resolvedBase,
                 autoCommitOnExit: true,
             });
             stage(`scaffold done in ${Date.now() - t}ms`);
             // 平台目录写入 .git/info/exclude，避免 scaffold 落盘污染 Changes 面板
             ensureRepoGitExcludes(project, primary.subPath);
+            // 回写真实默认分支（探测值可能因 ls-remote 失败兜底 'main'）
+            await svc.updateBranchInfo(primary.id, {
+                repoDefaultBranch: resolvedBase,
+                currentBranch: autoCreateBranch && workBranchName ? workBranchName : resolvedBase,
+            });
         }, CLONE_TIMEOUT_MS, `primary repo "${primary.subPath}" clone`);
         await svc.updateCloneStatus(primary.id, 'ready', null);
     } catch (err) {
@@ -100,13 +107,18 @@ async function cloneSecondary(project, repo) {
         await withTimeout(async () => {
             const t = Date.now();
             stage(`clone start`);
-            await opSvc.cloneRepo(project, {
+            const cloneResult = await opSvc.cloneRepo(project, {
                 repoUrl: repo.cloneUrl,
-                branch: repo.repoDefaultBranch || 'main',
+                branch: repo.explicitBranch || undefined,
             });
-            stage(`clone done in ${Date.now() - t}ms`);
+            const resolvedBranch = cloneResult.branch || repo.repoDefaultBranch || 'main';
+            stage(`clone done in ${Date.now() - t}ms (default branch: ${resolvedBranch})`);
             // 平台目录写入 .git/info/exclude（secondary 无 scaffold，但会话运行会落盘 .xensemble/）
             ensureRepoGitExcludes(project, repo.subPath);
+            await svc.updateBranchInfo(repo.id, {
+                repoDefaultBranch: resolvedBranch,
+                currentBranch: resolvedBranch,
+            });
         }, CLONE_TIMEOUT_MS, `repo "${repo.subPath}" clone`);
         await svc.updateCloneStatus(repo.id, 'ready', null);
     } catch (err) {

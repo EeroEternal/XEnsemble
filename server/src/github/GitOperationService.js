@@ -343,8 +343,10 @@ class GitOperationService {
 
         let localBranch = branch;
         if (!localBranch) {
-            const { stdout } = await this._execGit(project, ['rev-parse', '--abbrev-ref', 'origin/HEAD']);
-            const remoteRef = stdout.trim();
+            // 未指定分支：fetch 已拉取全量 refs（不 fetch origin <猜的分支>，
+            // 避免仓库默认分支非 main 时 "couldn't find remote ref main"）。
+            // 再通过远端 HEAD symref 解析真实默认分支（带凭据候选链，私有仓库可用）。
+            const remoteRef = await this._resolveRemoteDefaultBranch(project, cleanUrl);
             localBranch = remoteRef.replace(/^origin\//, '');
             // -f：clone 前 ensureAgentBootstrap 可能预置了 untracked 的 .gitignore / AGENTS.md
             // （含 .agents/、.xensemble/ 平台元数据条目），checkout 会因"untracked 文件将被覆盖"失败。
@@ -366,6 +368,61 @@ class GitOperationService {
 
         const sha = await this._revParse(project, 'HEAD');
         return { sha, branch: localBranch };
+    }
+
+    /**
+     * 解析远端默认分支（返回 'origin/<branch>'）。仅当 cloneRepo 未显式指定
+     * branch 时调用；此时 fetch 已拉取全量 refs。解析链路全程走凭据候选链
+     * （_execGitWithCredentialFallback），私有仓库同样适用：
+     *   1) git remote set-head origin -a：询问远端 HEAD symref 并落盘 origin/HEAD；
+     *   2) ls-remote --symref 直接解析 "ref: refs/heads/<branch>  HEAD"；
+     *   3) 服务端不支持 --symref 时：HEAD sha 在 --heads 列表中反查分支名。
+     * 全部失败抛 GitError('default_branch_unknown')。
+     */
+    async _resolveRemoteDefaultBranch(project, repoUrl) {
+        // 1) git remote set-head origin -a（成功后 origin/HEAD 可直接读取）
+        try {
+            await this._execGitWithCredentialFallback(project, ['remote', 'set-head', 'origin', '-a'], repoUrl);
+            const { stdout } = await this._execGit(project, ['symbolic-ref', 'refs/remotes/origin/HEAD']);
+            const name = stdout.trim().replace(/^refs\/remotes\/origin\//, '');
+            if (name && name !== 'HEAD') {
+                return `origin/${name}`;
+            }
+        } catch { /* 服务端不支持 / 网络异常 → 走下一级 */ }
+
+        // 2) ls-remote --symref 直接解析
+        try {
+            const { stdout } = await this._execGitWithCredentialFallback(
+                project,
+                ['ls-remote', '--symref', repoUrl, 'HEAD'],
+                repoUrl,
+            );
+            const m = stdout.match(/ref: refs\/heads\/([^\s]+)\s+HEAD/);
+            if (m && m[1]) {
+                return `origin/${m[1]}`;
+            }
+        } catch { /* 继续 */ }
+
+        // 3) 兜底：HEAD sha 与 --heads 列表反查（兼容不支持 --symref 的 git 服务端）
+        try {
+            const { stdout } = await this._execGitWithCredentialFallback(project, ['ls-remote', repoUrl, 'HEAD'], repoUrl);
+            const headSha = stdout.split('\t')[0]?.trim();
+            if (headSha) {
+                const { stdout: headsOut } = await this._execGitWithCredentialFallback(project, ['ls-remote', '--heads', repoUrl], repoUrl);
+                for (const line of headsOut.split('\n')) {
+                    const [sha, ref] = line.trim().split(/\s+/);
+                    if (sha === headSha && ref) {
+                        const name = ref.replace(/^refs\/heads\//, '');
+                        if (name) return `origin/${name}`;
+                    }
+                }
+            }
+        } catch { /* 全部失败 */ }
+
+        throw new GitError(
+            `Unable to determine the remote default branch for ${stripCredentialFromUrl(repoUrl)}; specify a branch explicitly`,
+            'default_branch_unknown',
+        );
     }
 
     /**
