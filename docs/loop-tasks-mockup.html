@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loop Tasks — XEnsemble Console Mockup</title>
+<style>
+  :root {
+    --z50:#fafafa; --z100:#f4f4f5; --z200:#e4e4e7; --z300:#d4d4d8; --z400:#a1a1aa;
+    --z500:#71717a; --z600:#52525b; --z700:#3f3f46; --z900:#18181b;
+    --em-bg:#ecfdf5; --em-tx:#047857; --em-bd:#a7f3d0;
+    --bl-bg:#eff6ff; --bl-tx:#1d4ed8; --bl-bd:#bfdbfe;
+    --rd-bg:#fef2f2; --rd-tx:#b91c1c; --rd-bd:#fecaca;
+    --nt-bg:#f4f4f5; --nt-tx:#52525b; --nt-bd:#e4e4e7;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:var(--z50); color:var(--z900); font-size:14px; height:100vh; display:flex; overflow:hidden; }
+  button { font:inherit; cursor:pointer; border:none; background:none; color:inherit; }
+  button:focus, input:focus, textarea:focus, select:focus { outline:none; }
+  svg { display:block; }
+
+  /* ───────────── Sidebar ───────────── */
+  .sidebar { width:272px; flex-shrink:0; background:#fff; border-right:1px solid var(--z200); display:flex; flex-direction:column; }
+  .sb-top { padding:12px 12px 10px; border-bottom:1px solid var(--z200); }
+  .sb-head { display:flex; align-items:center; justify-content:space-between; padding:0 2px; margin-bottom:8px; }
+  .sb-title { font-size:12px; font-weight:500; color:var(--z400); }
+  .icon-btn { padding:6px; border-radius:6px; color:var(--z400); display:inline-flex; }
+  .icon-btn:hover { background:var(--z100); color:var(--z900); }
+  .sb-nav { display:flex; flex-direction:column; gap:2px; }
+  .nav-item { display:flex; align-items:center; gap:10px; width:100%; padding:8px 10px; border-radius:8px; font-size:13px; font-weight:500; color:var(--z700); }
+  .nav-item:hover { background:var(--z100); }
+  .nav-item.active { background:#18181b; color:#fff; }
+  .nav-item svg { width:16px; height:16px; flex-shrink:0; }
+  .nav-cta { background:#fff; border:1px solid var(--z200); }
+  .sb-search { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px; color:var(--z400); font-size:13px; border:1px dashed transparent; }
+  .sb-search input { border:none; background:transparent; flex:1; min-width:0; font-size:13px; color:var(--z700); }
+  .sb-rows { flex:1; overflow:auto; padding:12px 8px; display:flex; flex-direction:column; gap:2px; }
+  .sess-row { display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:6px; font-size:13px; color:var(--z700); }
+  .sess-row:hover { background:var(--z100); }
+  .sess-row .dot { width:6px; height:6px; border-radius:50%; background:var(--z300); flex-shrink:0; }
+  .sess-row .dot.live { background:#10b981; }
+  .sess-row .t { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sess-row .ts { font-size:11px; color:var(--z400); flex-shrink:0; }
+  .sb-bottom { border-top:1px solid var(--z200); padding:8px; }
+  .account { display:flex; align-items:center; gap:8px; width:100%; padding:8px; border-radius:8px; }
+  .account:hover { background:var(--z50); }
+  .avatar { width:28px; height:28px; border-radius:50%; background:#fef2f2; color:#dc2626; font-size:12px; font-weight:600; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .account .name { font-size:13px; font-weight:500; }
+  .account .role { font-size:10px; color:var(--z400); }
+
+  /* ───────────── Main ───────────── */
+  .main { flex:1; min-width:0; overflow:auto; }
+  .page { display:flex; flex-direction:column; gap:24px; padding:24px 32px; }
+  .page-header { display:flex; flex-direction:column; gap:12px; border-bottom:1px solid var(--z200); padding-bottom:16px; }
+  .page-header h1 { font-size:24px; font-weight:700; letter-spacing:-0.025em; }
+  .page-header .desc { margin-top:4px; font-size:14px; color:var(--z500); }
+
+  .toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .count { font-size:12px; color:var(--z500); flex-shrink:0; }
+  .toolbar-right { display:flex; align-items:center; gap:8px; }
+
+  .btn { display:inline-flex; align-items:center; gap:6px; border-radius:6px; font-size:14px; font-weight:500; padding:8px 16px; transition:all .15s; }
+  .btn svg { width:16px; height:16px; }
+  .btn-primary { background:#000; color:#fff; }
+  .btn-primary:hover { background:#27272a; }
+  .btn-secondary { background:#fff; color:var(--z700); border:1px solid var(--z300); }
+  .btn-secondary:hover { background:var(--z50); }
+  .btn-sm { font-size:13px; padding:6px 12px; }
+  .btn-sm svg { width:14px; height:14px; }
+  .btn[disabled] { opacity:.5; cursor:default; }
+
+  .row-icon-btn { padding:6px; border-radius:6px; color:var(--z500); display:inline-flex; }
+  .row-icon-btn:hover { background:var(--z100); color:var(--z900); }
+  .row-icon-btn.danger:hover { background:#fef2f2; color:#b91c1c; }
+  .row-icon-btn svg { width:14px; height:14px; }
+
+  /* ───────────── Table ───────────── */
+  .table-shell { background:#fff; border:1px solid var(--z200); border-radius:8px; box-shadow:0 1px 2px rgba(0,0,0,.05); overflow:hidden; }
+  table { width:100%; table-layout:fixed; border-collapse:collapse; text-align:left; font-size:14px; }
+  thead tr { background:var(--z50); border-bottom:1px solid var(--z200); }
+  th { padding:10px 16px; font-size:12px; font-weight:600; color:var(--z600); }
+  td { padding:12px 16px; font-size:14px; color:var(--z700); border-top:1px solid var(--z100); }
+  tbody tr:hover { background:rgba(250,250,250,.5); }
+  .cell-title { font-weight:500; color:var(--z900); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cell-sub { font-size:12px; color:var(--z400); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px; }
+  .cell-trunc { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; }
+  .cell-xs { font-size:12px; color:var(--z500); }
+  .actions { display:flex; align-items:center; gap:2px; }
+
+  /* ───────────── StatusBadge ───────────── */
+  .badge { display:inline-flex; align-items:center; gap:4px; border-radius:6px; border:1px solid; padding:2px 6px; font-size:12px; line-height:16px; white-space:nowrap; }
+  .badge .slot { width:12px; height:12px; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+  .badge .slot svg { width:12px; height:12px; }
+  .badge.success { background:var(--em-bg); color:var(--em-tx); border-color:var(--em-bd); }
+  .badge.neutral  { background:var(--nt-bg); color:var(--nt-tx); border-color:var(--nt-bd); }
+  .badge.info     { background:var(--bl-bg); color:var(--bl-tx); border-color:var(--bl-bd); }
+  .badge.danger   { background:var(--rd-bg); color:var(--rd-tx); border-color:var(--rd-bd); }
+  .spinner { animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  /* ───────────── Dialogs ───────────── */
+  .backdrop { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:100; }
+  .shell { position:fixed; inset:0; z-index:101; display:flex; align-items:center; justify-content:center; padding:16px; pointer-events:none; }
+  .panel { pointer-events:auto; background:#fff; border:1px solid var(--z200); border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,.1); overflow:hidden; display:flex; flex-direction:column; max-height:calc(100vh - 32px); max-width:calc(100vw - 32px); }
+  .panel.md { width:480px; }
+  .panel.lg { width:560px; }
+  .dlg-head { padding:16px 20px; border-bottom:1px solid var(--z200); }
+  .dlg-head h2 { font-size:15px; font-weight:600; }
+  .dlg-head .sub { font-size:12px; color:var(--z500); margin-top:2px; }
+  .dlg-body { padding:20px; overflow-y:auto; }
+  .field { margin-bottom:16px; }
+  .field:last-child { margin-bottom:0; }
+  .field label { display:block; font-size:12px; font-weight:500; color:var(--z700); margin-bottom:6px; }
+  .input, .textarea, .select {
+    width:100%; border:1px solid var(--z300); border-radius:6px; background:#fff;
+    padding:7px 10px; font-size:13px; color:var(--z900); font-family:inherit;
+  }
+  .input:focus, .textarea:focus, .select:focus { border-color:#000; box-shadow:0 0 0 1px #000; }
+  .input.mono { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .textarea { resize:vertical; min-height:110px; }
+  .select { appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 10px center; padding-right:28px; }
+  .select[disabled] { background-color:var(--z100); color:var(--z400); }
+  .dlg-foot { display:flex; justify-content:flex-end; gap:8px; padding:16px 24px; border-top:1px solid var(--z200); background:rgba(250,250,250,.8); }
+  .hidden { display:none !important; }
+
+  /* ───────────── Runs dialog ───────────── */
+  .run-row { display:flex; align-items:center; gap:12px; width:100%; padding:8px 12px; border-radius:6px; text-align:left; }
+  .run-row:hover { background:var(--z100); }
+  .run-row.selected { background:var(--z100); }
+  .run-row .time { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; color:var(--z600); }
+  .run-row .rounds { font-size:12px; color:var(--z400); flex-shrink:0; }
+  .run-detail { border:1px solid var(--z200); border-radius:8px; background:rgba(250,250,250,.7); padding:12px; margin-top:12px; }
+  .run-error { font-size:12px; color:#b91c1c; margin-bottom:8px; word-break:break-word; }
+  .run-error b { font-weight:600; }
+  .logs { max-height:260px; overflow:auto; display:flex; flex-direction:column; gap:4px; }
+  .log-line { display:flex; align-items:baseline; gap:8px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
+  .log-line .no { color:var(--z400); flex-shrink:0; }
+  .log-line .act { color:var(--z700); font-weight:600; flex-shrink:0; }
+  .log-line .sum { color:var(--z500); word-break:break-all; }
+
+  /* ───────────── Toast ───────────── */
+  .toast {
+    position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:200;
+    display:flex; align-items:center; gap:8px; background:#fff; border:1px solid var(--z200);
+    border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,.12); padding:10px 14px; font-size:13px;
+    animation:toast-in .15s ease-out;
+  }
+  @keyframes toast-in { from { opacity:0; transform:translate(-50%,-6px); } to { opacity:1; transform:translate(-50%,0); } }
+  .toast svg { width:16px; height:16px; }
+  .toast.ok svg { color:#059669; }
+  .toast.err svg { color:#dc2626; }
+
+  /* ───────────── Row actions menu (kebab) ───────────── */
+  .row-menu { position:fixed; z-index:150; width:208px; background:#fff; border:1px solid var(--z200); border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,.12); padding:4px 0; }
+  .row-menu button { display:flex; align-items:center; gap:8px; width:100%; padding:8px 12px; font-size:13px; color:var(--z600); text-align:left; }
+  .row-menu button:hover { background:var(--z50); color:var(--z900); }
+  .row-menu button.danger { color:#dc2626; }
+  .row-menu button.danger:hover { background:var(--rd-bg); color:#b91c1c; }
+  .row-menu button svg { width:16px; height:16px; flex-shrink:0; }
+  .row-menu .sep { margin:4px 0; border-top:1px solid var(--z100); }
+</style>
+</head>
+<body>
+
+<!-- ═════════ Sidebar ═════════ -->
+<aside class="sidebar">
+  <div class="sb-top">
+    <div class="sb-head"><span class="sb-title">Sessions</span></div>
+    <div class="sb-nav">
+      <button class="nav-item nav-cta">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        New Session
+      </button>
+      <label class="sb-search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input placeholder="Search">
+      </label>
+      <button class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        View all history
+      </button>
+      <button class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
+        Skills
+      </button>
+      <button class="nav-item active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><rect x="3" y="5" width="6" height="6" rx="1"/><path d="m5.5 7.5 1 1 2-2"/><line x1="13" y1="6" x2="21" y2="6"/><line x1="13" y1="10" x2="21" y2="10"/><line x1="13" y1="14" x2="21" y2="14"/><line x1="13" y1="18" x2="21" y2="18"/><rect x="3" y="15" width="6" height="6" rx="1" stroke-dasharray="2 2"/></svg>
+        Loop Tasks
+      </button>
+    </div>
+  </div>
+  <div class="sb-rows">
+    <div class="sess-row"><span class="dot live"></span><span class="t">Fix flaky checkout test</span><span class="ts">2m</span></div>
+    <div class="sess-row"><span class="dot live"></span><span class="t">Refactor auth middleware</span><span class="ts">1h</span></div>
+    <div class="sess-row"><span class="dot"></span><span class="t">Add telemetry endpoint</span><span class="ts">3h</span></div>
+    <div class="sess-row"><span class="dot"></span><span class="t">Upgrade to React 19</span><span class="ts">1d</span></div>
+  </div>
+  <div class="sb-bottom">
+    <button class="account">
+      <span class="avatar">A</span>
+      <span style="flex:1;min-width:0;text-align:left">
+        <span class="name" style="display:block">admin</span>
+        <span class="role" style="display:block">admin</span>
+      </span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+  </div>
+</aside>
+
+<!-- ═════════ Main ═════════ -->
+<main class="main">
+  <div class="page">
+    <div class="page-header">
+      <div>
+        <h1>Loop Tasks</h1>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <span class="count">4 tasks</span>
+      <div class="toolbar-right">
+        <button class="icon-btn" title="Refresh">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+        </button>
+        <button class="btn btn-primary" onclick="openCreate()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+          New Task
+        </button>
+      </div>
+    </div>
+
+    <div class="table-shell">
+      <table>
+        <colgroup>
+          <col style="width:22%"><col style="width:16%"><col style="width:14%">
+          <col style="width:12%"><col style="width:12%"><col style="width:12%">
+          <col style="width:112px"><col style="width:96px">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Title</th><th>Workspace</th><th>Schedule</th><th>Status</th>
+            <th>Last run</th><th>Next run</th><th>Run history</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div class="cell-title">Nightly dependency check</div><div class="cell-sub">Audit package.json deps, upgrade safe patches, run tests, report.</div></td>
+            <td><span class="cell-trunc">acme-web</span></td>
+            <td><span class="cell-trunc" title="0 9 * * *">At 09:00.</span></td>
+            <td><span class="badge success"><span class="slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 3 20 12 6 21 6 3"/></svg></span>Active</span></td>
+            <td><span class="cell-xs">2h ago</span></td>
+            <td><span class="cell-xs">Sep 11, 09:00</span></td>
+            <td>
+              <button class="row-icon-btn" title="Run history" onclick="openRuns()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              </button>
+            </td>
+            <td>
+              <button class="row-icon-btn kebab" data-title="Nightly dependency check" data-status="active" title="Actions" aria-label="Actions">
+                <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+              </button>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cell-title">Weekly lint &amp; autofix</div><div class="cell-sub">Run eslint --fix on src/, commit only if tests pass.</div></td>
+            <td><span class="cell-trunc">acme-web</span></td>
+            <td><span class="cell-trunc" title="0 10 * * 1">At 10:00, on Monday.</span></td>
+            <td><span class="badge success"><span class="slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 3 20 12 6 21 6 3"/></svg></span>Active</span></td>
+            <td><span class="cell-xs">3d ago</span></td>
+            <td><span class="cell-xs">Sep 14, 10:00</span></td>
+            <td>
+              <button class="row-icon-btn" title="Run history" onclick="openRuns()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              </button>
+            </td>
+            <td>
+              <button class="row-icon-btn kebab" data-title="Weekly lint &amp; autofix" data-status="active" title="Actions" aria-label="Actions">
+                <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+              </button>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cell-title">Hourly deploy health probe</div><div class="cell-sub">curl health endpoints, restart dev server if 5xx.</div></td>
+            <td><span class="cell-trunc">api-gateway</span></td>
+            <td><span class="cell-trunc" title="0 * * * *">At minute 0.</span></td>
+            <td><span class="badge neutral"><span class="slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></svg></span>Paused</span></td>
+            <td><span class="cell-xs">26m ago</span></td>
+            <td><span class="cell-xs">—</span></td>
+            <td>
+              <button class="row-icon-btn" title="Run history" onclick="openRuns()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              </button>
+            </td>
+            <td>
+              <button class="row-icon-btn kebab" data-title="Hourly deploy health probe" data-status="paused" title="Actions" aria-label="Actions">
+                <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+              </button>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cell-title">Sync API docs</div><div class="cell-sub">Regenerate OpenAPI docs from routes and open a doc PR.</div></td>
+            <td><span class="cell-trunc">api-gateway</span></td>
+            <td><span class="cell-trunc" title="*/30 * * * *">Every 30 minutes.</span></td>
+            <td><span class="badge success"><span class="slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 3 20 12 6 21 6 3"/></svg></span>Active</span></td>
+            <td><span class="cell-xs">12m ago</span></td>
+            <td><span class="cell-xs">Sep 10, 22:00</span></td>
+            <td>
+              <button class="row-icon-btn" title="Run history" onclick="openRuns()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              </button>
+            </td>
+            <td>
+              <button class="row-icon-btn kebab" data-title="Sync API docs" data-status="active" title="Actions" aria-label="Actions">
+                <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<!-- ═════════ Create / Edit dialog (md) ═════════ -->
+<div id="dlg-form">
+  <div class="backdrop" onclick="closeDialog('dlg-form')"></div>
+  <div class="shell">
+    <div class="panel md" role="dialog" aria-modal="true">
+      <div class="dlg-head"><h2 id="form-title">New Task</h2></div>
+      <div class="dlg-body">
+        <div class="field">
+          <label>Title</label>
+          <input class="input" id="f-title" placeholder="e.g. Nightly dependency check" maxlength="80">
+        </div>
+        <div class="field">
+          <label>Workspace</label>
+          <select class="select" id="f-ws">
+            <option>acme-web</option><option>api-gateway</option><option>docs-site</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Task prompt</label>
+          <textarea class="textarea" id="f-prompt" placeholder="Describe what the agent should do on every run...">Audit package.json dependencies. Upgrade safe patch versions, run the test suite, and report a summary. If tests fail, revert the change.</textarea>
+        </div>
+        <div class="field">
+          <label>Schedule</label>
+          <select class="select" id="f-kind" onchange="kindChanged(this)">
+            <option value="cron" selected>Cron expression</option>
+            <option value="every">Fixed interval</option>
+            <option value="at">Run once</option>
+          </select>
+          <div id="sched-cron" style="margin-top:8px">
+            <input class="input mono" id="f-cron" style="height:38px" value="0 9 * * *" placeholder="0 9 * * *">
+          </div>
+          <div id="sched-every" style="margin-top:8px;display:none">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <input class="input" id="f-interval" type="number" min="1" value="30" style="height:38px">
+              <select class="select" id="f-unit" style="height:38px"><option value="minutes">Minutes</option><option value="hours">Hours</option><option value="days">Days</option></select>
+            </div>
+          </div>
+          <div id="sched-at" style="margin-top:8px;display:none">
+            <input class="input mono" id="f-runat" placeholder="YYYY-MM-DD HH:mm" style="height:38px">
+          </div>
+          <p id="cron-hint" style="font-size:12px;line-height:16px;min-height:16px;color:#71717a;margin-top:6px">At 09:00.</p>
+        </div>
+        <div class="field">
+          <label>Timezone</label>
+          <select class="select"><option>Asia/Shanghai</option><option>UTC</option><option>Asia/Tokyo</option><option>Europe/London</option><option>America/New_York</option></select>
+        </div>
+      </div>
+      <div class="dlg-foot">
+        <button class="btn btn-secondary btn-sm" onclick="closeDialog('dlg-form')">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="save()">
+          <svg class="spinner hidden" id="save-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
+          <span id="save-label">Create</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ Runs dialog (lg) ═════════ -->
+<div id="dlg-runs" class="hidden">
+  <div class="backdrop" onclick="closeDialog('dlg-runs')"></div>
+  <div class="shell">
+    <div class="panel lg" role="dialog" aria-modal="true">
+      <div class="dlg-head">
+        <h2>Run history · Nightly dependency check</h2>
+        <div class="sub">acme-web</div>
+      </div>
+      <div class="dlg-body">
+        <div id="run-list"></div>
+        <div id="run-detail" class="run-detail"></div>
+      </div>
+      <div class="dlg-foot">
+        <button class="btn btn-secondary btn-sm" onclick="closeDialog('dlg-runs')">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ Toast ═════════ -->
+<div id="toast-root"></div>
+
+<script>
+  /* 默认展开 New Task 弹窗（演示用） */
+  window.addEventListener('load', () => setTimeout(() => document.getElementById('f-title').focus(), 50));
+
+  /* ---------- dialogs ---------- */
+  function showDialog(id) { document.getElementById(id).classList.remove('hidden'); }
+  function closeDialog(id) { document.getElementById(id).classList.add('hidden'); }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { closeDialog('dlg-form'); closeDialog('dlg-runs'); }
+  });
+
+  /* ---------- form dialog ---------- */
+  function openCreate() {
+    document.getElementById('form-title').textContent = 'New Task';
+    document.getElementById('f-title').value = '';
+    document.getElementById('save-label').textContent = 'Create';
+    document.getElementById('f-ws').disabled = false;
+    showDialog('dlg-form');
+    setTimeout(() => document.getElementById('f-title').focus(), 0);
+  }
+  function openEdit() {
+    document.getElementById('form-title').textContent = 'Edit';
+    document.getElementById('f-title').value = 'Nightly dependency check';
+    document.getElementById('save-label').textContent = 'Save';
+    document.getElementById('f-ws').disabled = true;
+    showDialog('dlg-form');
+  }
+  function save() {
+    const spin = document.getElementById('save-spin');
+    spin.classList.remove('hidden');
+    setTimeout(() => {
+      spin.classList.add('hidden');
+      closeDialog('dlg-form');
+      toast('ok', 'Loop task created.');
+    }, 700);
+  }
+
+  /* ---------- kebab row actions menu ---------- */
+  const rowMenu = document.createElement('div');
+  rowMenu.className = 'row-menu hidden';
+  document.body.appendChild(rowMenu);
+  let menuRow = null;
+  function openRowMenu(btn) {
+    const rect = btn.getBoundingClientRect();
+    menuRow = btn.closest('tr');
+    rowMenu.dataset.status = btn.dataset.status;
+    const pauseLabel = btn.dataset.status === 'active' ? 'Pause' : 'Resume';
+    const pauseIcon = btn.dataset.status === 'active'
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
+    rowMenu.innerHTML = `
+      <button data-act="run"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 3 20 12 6 21 6 3"/></svg>Run now</button>
+      <button data-act="toggle">${pauseIcon}${pauseLabel}</button>
+      <button data-act="edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>Edit</button>
+      <div class="sep"></div>
+      <button data-act="delete" class="danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Delete</button>`;
+    rowMenu.style.left = Math.max(8, rect.right - 208) + 'px';
+    rowMenu.style.top = (rect.bottom + 4) + 'px';
+    rowMenu.classList.remove('hidden');
+  }
+  document.addEventListener('click', (e) => {
+    const kebab = e.target.closest('.kebab');
+    if (kebab) {
+      const wasOpen = !rowMenu.classList.contains('hidden') && menuRow === kebab.closest('tr');
+      rowMenu.classList.add('hidden');
+      if (!wasOpen) openRowMenu(kebab);
+      return;
+    }
+    if (!rowMenu.contains(e.target)) rowMenu.classList.add('hidden');
+  });
+  rowMenu.addEventListener('click', (e) => {
+    const act = e.target.closest('button')?.dataset.act;
+    if (!act) return;
+    rowMenu.classList.add('hidden');
+    if (act === 'run') toast('ok', 'Run started.');
+    else if (act === 'edit') openEdit();
+    else if (act === 'delete') toast('err', 'This action cannot be undone. (demo)');
+    else if (act === 'toggle' && menuRow) toggleRow(menuRow);
+  });
+  function toggleRow(tr) {
+    const badge = tr.querySelector('td:nth-child(4) .badge');
+    const active = badge.classList.contains('success');
+    badge.className = 'badge ' + (active ? 'neutral' : 'success');
+    const slot = badge.querySelector('.slot');
+    slot.innerHTML = active
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
+    badge.lastChild.textContent = active ? 'Paused' : 'Active';
+    const kebab = tr.querySelector('.kebab');
+    if (kebab) kebab.dataset.status = active ? 'paused' : 'active';
+  }
+
+  /* ---------- cron live description (demo subset) ---------- */
+  function pad2(n) { return String(n).padStart(2, '0'); }
+  const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  function pf(x) {
+    if (x === '*') return { t: 'all' };
+    if (x.startsWith('*/')) return { t: 'step', n: +x.slice(2) };
+    if (x.includes(',')) return { t: 'list', v: x.split(',').map(Number).sort((a, b) => a - b) };
+    if (x.includes('-')) { const p = x.split('-').map(Number); return { t: 'range', a: p[0], b: p[1] }; }
+    const n = Number(x);
+    return Number.isInteger(n) ? { t: 'list', v: [n] } : null;
+  }
+  function describeMini(expr) {
+    const e = expr.trim().toLowerCase();
+    const sc = { '@daily': 'At 00:00.', '@hourly': 'At minute 0 of every hour.', '@weekly': 'At 00:00, on Sunday.', '@monthly': 'At 00:00, on day-of-month 1.' };
+    if (sc[e]) return sc[e];
+    const f = e.split(/\s+/);
+    if (f.length !== 5 || /[a-z]/.test(e)) return null;
+    const [m, h, dom, mon, dow] = f.map(pf);
+    if (!m || !h || !dom || !mon || !dow || [dom, mon, dow].some((x) => x.t === 'step')) return null;
+    let time;
+    if (m.t === 'all' && h.t === 'all') time = 'Every minute';
+    else if (m.t === 'step' && h.t === 'all') time = `Every ${m.n} minutes`;
+    else if (m.t === 'list' && m.v.length === 1 && h.t === 'list' && h.v.length === 1) time = `At ${pad2(h.v[0])}:${pad2(m.v[0])}`;
+    else if (h.t === 'all') time = m.v.length === 1 ? `At minute ${m.v[0]}` : `At minutes ${m.v.join(', ')}`;
+    else if (h.t === 'list' && m.t === 'list') {
+      const hh = h.v.map((x) => pad2(x) + ':00').join(', ');
+      time = m.v.length === 1 ? `At minute ${m.v[0]} past ${hh}` : `At minutes ${m.v.join(', ')} past ${hh}`;
+    } else if (h.t === 'range' && m.t === 'list') {
+      const hh = `${pad2(h.a)}:00 through ${pad2(h.b)}:00`;
+      time = m.v.length === 1 ? `At minute ${m.v[0]} past ${hh}` : `At minutes ${m.v.join(', ')} past ${hh}`;
+    } else if (m.t === 'step' && (h.t === 'list' || h.t === 'range')) {
+      time = `Every ${m.n} minutes past ${h.t === 'list' ? h.v.map((x) => pad2(x) + ':00').join(', ') : pad2(h.a) + ':00 through ' + pad2(h.b) + ':00'}`;
+    } else return null;
+    const parts = [time];
+    if (dow.t !== 'all') parts.push(dow.t === 'list' ? `on ${dow.v.map((x) => DAYS[x]).join(', ')}` : `${DAYS[dow.a]} through ${DAYS[dow.b]}`);
+    else if (dom.t !== 'all') parts.push(dom.t === 'list' ? (dom.v.length === 1 ? `on day-of-month ${dom.v[0]}` : `on days ${dom.v.join(', ')}`) : `on days ${dom.a} through ${dom.b}`);
+    if (mon.t !== 'all') return null;
+    return parts.join(', ') + '.';
+  }
+  let cronTimer = null;
+  function kindChanged(sel) {
+    document.getElementById('sched-cron').style.display = sel.value === 'cron' ? '' : 'none';
+    document.getElementById('sched-every').style.display = sel.value === 'every' ? '' : 'none';
+    document.getElementById('sched-at').style.display = sel.value === 'at' ? '' : 'none';
+    updateHint();
+  }
+  function schedulePayload() {
+    const kind = document.getElementById('f-kind').value;
+    if (kind === 'every') return { kind, intervalMs: Number(document.getElementById('f-interval').value) * ({ minutes: 60000, hours: 3600000, days: 86400000 }[document.getElementById('f-unit').value]) };
+    if (kind === 'at') return { kind, runAt: document.getElementById('f-runat').value };
+    return { kind, cronExpr: document.getElementById('f-cron').value };
+  }
+  function updateHint() {
+    const hint = document.getElementById('cron-hint');
+    const p = schedulePayload();
+    if (p.kind === 'every' && p.intervalMs > 0) {
+      const days = p.intervalMs / 86400000, hours = p.intervalMs / 3600000, minutes = Math.round(p.intervalMs / 60000);
+      hint.style.visibility = 'visible';
+      hint.style.color = '#71717a';
+      hint.textContent = Number.isInteger(days) && days >= 1 ? `Every ${days} days.` : Number.isInteger(hours) && hours >= 1 ? `Every ${hours} hours.` : `Every ${minutes} minutes.`;
+      return;
+    }
+    if (p.kind === 'at') {
+      const text = (p.runAt || '').trim();
+      if (!text) { hint.style.visibility = 'hidden'; hint.textContent = ''; return; }
+      const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(text);
+      const ms = m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime() : NaN;
+      hint.style.visibility = 'visible';
+      if (Number.isNaN(ms) || ms <= Date.now()) { hint.style.color = '#b91c1c'; hint.textContent = Number.isNaN(ms) ? 'Use the format YYYY-MM-DD HH:mm.' : 'Scheduled time must be in the future.'; return; }
+      hint.style.color = '#71717a';
+      hint.textContent = `Once, at ${new Date(ms).toLocaleString()}.`;
+      return;
+    }
+    const expr = (p.cronExpr || '').trim();
+    if (!expr) { hint.style.visibility = 'hidden'; hint.textContent = ''; return; }
+    hint.style.visibility = 'visible';
+    const d = describeMini(expr);
+    if (d) { hint.style.color = '#71717a'; hint.textContent = d; }
+    else { hint.style.color = '#b91c1c'; hint.textContent = 'Invalid cron expression (demo describes common numeric patterns).'; }
+  }
+  ['f-cron', 'f-interval', 'f-unit', 'f-runat'].forEach((id) => {
+    document.getElementById(id).addEventListener('input', () => { clearTimeout(cronTimer); cronTimer = setTimeout(updateHint, 250); });
+    document.getElementById(id).addEventListener('change', () => { clearTimeout(cronTimer); cronTimer = setTimeout(updateHint, 250); });
+  });
+
+  /* ---------- runs dialog ---------- */
+  const RUNS = [
+    { id: 'r1', status: 'succeeded', time: 'Today 09:00 · 2h ago', rounds: 11, error: null,
+      logs: [
+        { r: 1, a: 'run_shell',  s: 'npm outdated --json' },
+        { r: 2, a: 'run_shell',  s: 'npm audit --omit=dev' },
+        { r: 3, a: 'read_file',  s: 'package.json' },
+        { r: 4, a: 'run_shell',  s: 'npm install lodash@^4.17.22 --save-exact' },
+        { r: 5, a: 'edit_file',  s: 'package-lock.json' },
+        { r: 6, a: 'run_shell',  s: 'npm test -- --run' },
+        { r: 7, a: 'run_shell',  s: 'npm test -- --run (retry after fix)' },
+        { r: 8, a: 'run_shell',  s: 'git diff --stat' },
+        { r: 9, a: 'edit_file',  s: 'CHANGELOG.md' },
+        { r: 10, a: 'list_dir',  s: '.' },
+        { r: 11, a: 'final',     s: 'Upgraded 3 safe patches, 48 tests passing.' },
+      ] },
+    { id: 'r2', status: 'failed', time: 'Yesterday 09:00 · 1d ago', rounds: 30, error: 'max rounds (30) exhausted',
+      logs: [
+        { r: 1, a: 'run_shell', s: 'npm outdated --json' },
+        { r: 2, a: 'run_shell', s: 'npm install typescript@5.7 --save-dev' },
+        { r: 3, a: 'run_shell', s: 'npm run build' },
+        { r: 4, a: 'run_shell', s: 'npm run build (retry after fix)' },
+        { r: 5, a: 'repeat_blocked', s: 'npm run build' },
+        { r: 6, a: 'run_shell', s: 'npx tsc --noEmit 2>&1 | tail -40' },
+      ] },
+    { id: 'r3', status: 'running', time: 'Today 21:38 · now', rounds: 3, error: null,
+      logs: [
+        { r: 1, a: 'run_shell', s: 'npm outdated --json' },
+        { r: 2, a: 'read_file', s: 'package.json' },
+        { r: 3, a: 'run_shell', s: 'npm install zod@^3.24 --save-exact' },
+      ] },
+    { id: 'r4', status: 'timeout', time: 'Sep 8, 09:00 · 2d ago', rounds: 18, error: 'task timed out',
+      logs: [
+        { r: 1, a: 'run_shell', s: 'apt-get update && apt-get install -y postgresql' },
+        { r: 2, a: 'run_shell', s: 'service postgresql start && sleep 30' },
+        { r: 3, a: 'timeout',   s: 'task timed out' },
+      ] },
+  ];
+  const BADGE = {
+    succeeded: '<span class="badge success"><span class="slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg></span>Succeeded</span>',
+    failed:    '<span class="badge danger"><span class="slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg></span>Failed</span>',
+    running:   '<span class="badge info"><span class="slot"><svg class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg></span>Running</span>',
+    timeout:   '<span class="badge danger"><span class="slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span>Timed out</span>',
+  };
+  let selectedRun = 'r1';
+
+  function renderRuns() {
+    const list = document.getElementById('run-list');
+    list.innerHTML = RUNS.map((run) => `
+      <button class="run-row ${selectedRun === run.id ? 'selected' : ''}" onclick="selectRun('${run.id}')">
+        ${BADGE[run.status]}
+        <span class="time">${run.time}</span>
+        <span class="rounds">${run.rounds} rounds</span>
+      </button>
+    `).join('');
+    const run = RUNS.find((r) => r.id === selectedRun);
+    document.getElementById('run-detail').innerHTML = `
+      ${run.error ? `<div class="run-error"><b>Error:</b> ${run.error}</div>` : ''}
+      <div class="logs">${run.logs.map((l) => `
+        <div class="log-line"><span class="no">#${l.r}</span><span class="act">${l.a}</span><span class="sum">${l.s}</span></div>
+      `).join('')}</div>
+    `;
+  }
+  function selectRun(id) { selectedRun = id; renderRuns(); }
+  function openRuns() { renderRuns(); showDialog('dlg-runs'); }
+
+  /* ---------- toast ---------- */
+  function toast(kind, msg) {
+    const root = document.getElementById('toast-root');
+    const el = document.createElement('div');
+    el.className = 'toast ' + kind;
+    el.innerHTML = kind === 'ok'
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>';
+    el.appendChild(document.createTextNode(msg));
+    root.innerHTML = '';
+    root.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+  }
+</script>
+</body>
+</html>

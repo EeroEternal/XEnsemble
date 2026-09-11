@@ -73,5 +73,12 @@
   "username_password_required": "username and password are required",
   "skill_not_found": "Skill not found",
   "skill_validation_failed": "Skill validation failed: {{message}}",
-  "skill_invalid_transition": "Invalid skill status transition"
+  "skill_invalid_transition": "Invalid skill status transition",
+  "loop_task_not_found": "Loop task not found",
+  "loop_cron_invalid": "Invalid cron expression: {{message}}",
+  "loop_task_limit_exceeded": "Loop task limit reached ({{limit}}).",
+  "loop_run_in_progress": "Previous run is still in progress.",
+  "loop_field_required": "{{field}} is required",
+  "loop_interval_invalid": "Interval must be between {{min}} minutes and {{max}} days.",
+  "loop_schedule_past": "Scheduled time must be in the future."
 }

@@ -156,6 +156,7 @@ Desktop Client 或 Self-Hosted Server 使用 **Local Runtime Provider**，Agent/
 | `gateway/*` | UniGateway 作为本地进程或外部上游；admin token 强制配置。 |
 | `preview/gateway.js` | 代理预览流量；使用 deployment-scoped token 并校验 `Host`/用户状态。 |
 | `events/recordEvent.js` | 保留审计。 |
+| `loopTasks/*` + `routes/loopTasks.js` | Task Automation（LoopTask）：`loop-task-runner` Scheduler job 每 30s 幂等触发（`(task_id, scheduled_for)` 唯一锚点 + 防重入 + 僵尸回收）；执行走 `TaskAgent`（控制面 ReAct 循环，模式同 deploy verify agent，LLM 走 `LLM_TASK_*`/`LLM_ANALYZE_*`），工具经 `runtime.exec`/`runtime.fs` 落 Workspace runtime 沙箱；**不创建 Session、不依赖 CLI Agent、不占 Session 配额**。 |
 
 ### 5.4 执行面（Runtime Provider）
 
@@ -270,6 +271,8 @@ Desktop Client 或 Self-Hosted Server 使用 **Local Runtime Provider**，Agent/
 
 - `refresh_tokens(id, user_id, token_hash, device_name, created_at, expires_at, revoked_at)`
 - `runtime_providers` 配置表（可选，用于动态 provider 选择）
+- `loop_tasks(id, user_id, project_id, title, prompt, cron_expr, timezone, status, next_run_at, last_run_at, ...)` —— 定时任务定义
+- `loop_task_runs(id, task_id, scheduled_for, status, rounds, logs, error, started_at, finished_at)` —— 执行记录；`(task_id, scheduled_for)` 唯一索引为幂等触发锚点（0026_loop_tasks.sql）
 
 ### 7.2 保留
 

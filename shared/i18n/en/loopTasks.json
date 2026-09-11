@@ -1,0 +1,69 @@
+{
+  "title": "Loop Tasks",
+  "nav": "Loop Tasks",
+  "count": "{{count}} tasks",
+  "empty": "No loop tasks yet. Create one to let the agent work on a schedule.",
+  "new_task": "New Task",
+  "field": {
+    "title": "Title",
+    "title_placeholder": "e.g. Nightly dependency check",
+    "workspace": "Workspace",
+    "workspace_placeholder": "Select a workspace",
+    "prompt": "Task prompt",
+    "prompt_placeholder": "Describe what the agent should do on every run...",
+    "schedule": "Schedule (cron)",
+    "timezone": "Timezone",
+    "cron_placeholder": "0 9 * * *"
+  },
+  "status": {
+    "active": "Active",
+    "paused": "Paused",
+    "completed": "Completed"
+  },
+  "kind": {
+    "cron": "Cron expression",
+    "every": "Fixed interval",
+    "at": "Run once"
+  },
+  "unit": {
+    "minutes": "Minutes",
+    "hours": "Hours",
+    "days": "Days"
+  },
+  "run": {
+    "status_running": "Running",
+    "status_succeeded": "Succeeded",
+    "status_failed": "Failed",
+    "status_timeout": "Timed out",
+    "last_run": "Last run",
+    "next_run": "Next run",
+    "never": "Never",
+    "history": "Run history",
+    "no_runs": "No runs yet.",
+    "logs": "Execution log",
+    "rounds": "{{count}} rounds",
+    "error": "Error"
+  },
+  "action": {
+    "run_now": "Run now",
+    "pause": "Pause",
+    "resume": "Resume",
+    "edit": "Edit",
+    "delete": "Delete",
+    "create": "Create",
+    "actions_for": "Actions for {{title}}"
+  },
+  "toast": {
+    "created": "Loop task created.",
+    "updated": "Loop task updated.",
+    "deleted": "Loop task deleted.",
+    "run_started": "Run started.",
+    "run_in_progress": "Previous run is still in progress.",
+    "action_failed": "Action failed."
+  },
+  "error": {
+    "cron_invalid": "Invalid cron expression.",
+    "datetime_format": "Use the format YYYY-MM-DD HH:mm.",
+    "required": "Title, workspace, prompt and schedule are required."
+  }
+}

@@ -13,6 +13,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   List,
+  ListTodo,
   Sparkles,
 } from 'lucide-react';
 import { apiFetch, getAccessToken } from '../lib/api';
@@ -213,6 +214,7 @@ export default function AppSidebar({
   onLogout,
   onOpenHistory,
   onOpenSkills,
+  onOpenLoopTasks,
   minimal = false,
 }) {
   const { t } = useTranslation();
@@ -609,6 +611,16 @@ export default function AppSidebar({
                   {skillsUnread > 99 ? '99+' : skillsUnread}
                 </span>
               )}
+            </button>
+          )}
+          {onOpenLoopTasks && (
+            <button
+              type="button"
+              onClick={onOpenLoopTasks}
+              className={`${sidebarNavItemClass}`}
+            >
+              <ListTodo className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+              {t('loopTasks:nav', { defaultValue: 'Loop Tasks' })}
             </button>
           )}
         </div>

@@ -1,0 +1,69 @@
+{
+  "title": "定时任务",
+  "nav": "定时任务",
+  "count": "{{count}} 个任务",
+  "empty": "还没有定时任务。创建一个，让 Agent 按计划自动工作。",
+  "new_task": "新建任务",
+  "field": {
+    "title": "任务名称",
+    "title_placeholder": "例如：每夜依赖检查",
+    "workspace": "工作空间",
+    "workspace_placeholder": "选择工作空间",
+    "prompt": "任务描述",
+    "prompt_placeholder": "描述每次运行时 Agent 需要做什么……",
+    "schedule": "执行计划（cron）",
+    "timezone": "时区",
+    "cron_placeholder": "0 9 * * *"
+  },
+  "status": {
+    "active": "已启用",
+    "paused": "已暂停",
+    "completed": "已完成"
+  },
+  "kind": {
+    "cron": "Cron 表达式",
+    "every": "固定间隔",
+    "at": "单次执行"
+  },
+  "unit": {
+    "minutes": "分钟",
+    "hours": "小时",
+    "days": "天"
+  },
+  "run": {
+    "status_running": "执行中",
+    "status_succeeded": "成功",
+    "status_failed": "失败",
+    "status_timeout": "超时",
+    "last_run": "上次执行",
+    "next_run": "下次执行",
+    "never": "从未",
+    "history": "执行历史",
+    "no_runs": "还没有执行记录。",
+    "logs": "执行日志",
+    "rounds": "{{count}} 轮",
+    "error": "错误"
+  },
+  "action": {
+    "run_now": "立即执行",
+    "pause": "暂停",
+    "resume": "恢复",
+    "edit": "编辑",
+    "delete": "删除",
+    "create": "创建",
+    "actions_for": "「{{title}}」的操作"
+  },
+  "toast": {
+    "created": "定时任务已创建。",
+    "updated": "定时任务已更新。",
+    "deleted": "定时任务已删除。",
+    "run_started": "执行已启动。",
+    "run_in_progress": "上一次执行仍在进行中。",
+    "action_failed": "操作失败。"
+  },
+  "error": {
+    "cron_invalid": "cron 表达式无效。",
+    "datetime_format": "请使用 YYYY-MM-DD HH:mm 格式。",
+    "required": "任务名称、工作空间、任务描述和执行计划为必填项。"
+  }
+}

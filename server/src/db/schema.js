@@ -532,6 +532,42 @@ const agentImageBuilds = pgTable('agent_image_builds', {
   agentBuildStateIdx: index('idx_agent_image_builds_agent_state').on(table.agentId, table.state),
 }));
 
+// LoopTask：用户自定义定时任务（执行 = TaskAgent 在 Workspace runtime 沙箱内 ReAct 循环）
+const loopTasks = pgTable('loop_tasks', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  projectId: text('project_id').notNull().references(() => projects.id),
+  title: text('title').notNull(),
+  prompt: text('prompt').notNull(),
+  scheduleKind: text('schedule_kind').notNull().default('cron'), // cron / every / at
+  cronExpr: text('cron_expr').notNull().default('* * * * *'),
+  timezone: text('timezone').notNull().default('Asia/Shanghai'),
+  intervalMs: bigint('interval_ms', { mode: 'number' }), // kind=every
+  status: text('status').notNull().default('active'), // active / paused / completed
+  nextRunAt: bigint('next_run_at', { mode: 'number' }).notNull().default(0),
+  lastRunAt: bigint('last_run_at', { mode: 'number' }),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }),
+}, (table) => ({
+  dueIdx: index('idx_loop_tasks_due').on(table.status, table.nextRunAt),
+}));
+
+// LoopTask 执行记录；(task_id, scheduled_for) 唯一约束 = 幂等触发锚点
+const loopTaskRuns = pgTable('loop_task_runs', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id').notNull().references(() => loopTasks.id),
+  scheduledFor: bigint('scheduled_for', { mode: 'number' }).notNull(),
+  status: text('status').notNull().default('running'), // running / succeeded / failed / timeout
+  rounds: integer('rounds'),
+  logs: jsonb('logs'),
+  error: text('error'),
+  startedAt: bigint('started_at', { mode: 'number' }),
+  finishedAt: bigint('finished_at', { mode: 'number' }),
+}, (table) => ({
+  unqSlot: unique('uq_loop_task_runs_slot').on(table.taskId, table.scheduledFor),
+  taskIdx: index('idx_loop_task_runs_task').on(table.taskId, table.startedAt),
+}));
+
 module.exports = {
   users,
   userQuotas,
@@ -569,4 +605,6 @@ module.exports = {
   agentImageBuilds,
   customImages,
   customImageBuilds,
+  loopTasks,
+  loopTaskRuns,
 };

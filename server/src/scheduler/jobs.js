@@ -151,6 +151,11 @@ function createJobs() {
             intervalMs: Number(process.env.REPO_CLONE_REAP_INTERVAL_MS) || 60_000,
             run: (ctx) => runRepoCloneReap(ctx),
         },
+        {
+            name: 'loop-task-runner',
+            intervalMs: Number(process.env.LOOP_TASK_TICK_MS) || 30_000,
+            run: (ctx) => require('../loopTasks/runner').tick({ log: ctx?.log || console }),
+        },
     ];
 }
 

@@ -7,6 +7,7 @@ import Sessions from './pages/Sessions';
 import History from './pages/History';
 import SkillsMarket from './pages/SkillsMarket';
 import MySkills from './pages/MySkills';
+import LoopTasks from './pages/LoopTasks';
 import AgentsAdmin from './pages/AgentsAdmin';
 import ImagesManager from './pages/ImagesManager';
 import UsersAdmin from './pages/UsersAdmin';
@@ -71,6 +72,7 @@ function AuthenticatedLayout({
   const isHistory = location.pathname === '/history';
   const isMySkills = location.pathname === '/skills';
   const isSkillsMarket = location.pathname === '/skills/market';
+  const isLoopTasks = location.pathname === '/loop-tasks';
   const isAgentsAdmin = location.pathname === '/admin/agents';
   const isUsersAdmin = location.pathname === '/admin/users';
   const isGatewayAdmin = location.pathname === '/admin/gateway';
@@ -157,6 +159,7 @@ function AuthenticatedLayout({
         onLogout={logout}
         onOpenHistory={() => navigate('/history')}
         onOpenSkills={() => navigate('/skills')}
+        onOpenLoopTasks={() => navigate('/loop-tasks')}
       />
       )}
       <main
@@ -206,6 +209,13 @@ function AuthenticatedLayout({
             isMySkills ? 'relative z-20' : offRouteClass,
           )}
           aria-hidden={!isMySkills}
+        />
+        <LoopTasks
+          className={cn(
+            'flex h-full min-h-0 flex-1 flex-col',
+            isLoopTasks ? 'relative z-20' : offRouteClass,
+          )}
+          aria-hidden={!isLoopTasks}
         />
         <SkillsMarket
           className={cn(
@@ -429,6 +439,7 @@ function App() {
               <Route path="/history" element={null} />
               <Route path="/skills" element={null} />
               <Route path="/skills/market" element={null} />
+              <Route path="/loop-tasks" element={null} />
               <Route path="/settings" element={null} />
               <Route
                 path="/custom-images"
