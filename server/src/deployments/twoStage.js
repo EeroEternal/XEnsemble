@@ -2447,6 +2447,10 @@ printf 'registry=https://registry.npmmirror.com\\n' > /root/.npmrc 2>/dev/null |
 # 的 apps/desktop 使 pnpm install 卡满 20 分钟超时）；.npmrc 的 electron_mirror 会被
 # electron/@electron/get 读取，走 npmmirror 镜像
 printf 'electron_mirror=https://npmmirror.com/mirrors/electron/\\n' >> /root/.npmrc 2>/dev/null || true
+# 平台级 npm 私有 scope registry（XENSEMBLE_NPM_SCOPE_REGISTRIES，格式 scope=url;scope2=url2）：
+# 向 /root/.npmrc 追加 <scope>:registry=<url>，pnpm/npm 安装私有 scope 包时走私有源，
+# 否则私有包（如 @schkzy/*）会去 npmmirror 取 → 404。此前 scopeShell 只计算未写入脚本（死代码）。
+${scopeShell}
 # pnpm 预装：base 镜像无 pnpm 二进制，corepack 按需下载走官方源常中断（缓存残缺），
 # 且 corepack prepare --activate 在此镜像上激活行为异常（实测只写缓存不铺 shim，
 # pnpm 仍 not found）。确定性方案：npm 全局装 pnpm 并显式 --prefix /usr/local——
