@@ -83,6 +83,7 @@ export default function UsageAdmin() {
 
   // 搜索（本地过滤）；无搜索词时默认隐藏 0 用量用户，避免淹没排行榜
   const [search, setSearch] = useState('');
+  const [showEmpty, setShowEmpty] = useState(false);
   const q = search.trim().toLowerCase();
   const matched = useMemo(() => {
     if (!q) return items;
@@ -91,10 +92,14 @@ export default function UsageAdmin() {
       || (u.displayName || '').toLowerCase().includes(q));
   }, [items, q]);
   const visibleRows = useMemo(
-    () => (q ? matched : matched.filter((u) => u.requests > 0 || u.totalTokens > 0)),
-    [matched, q],
+    () => (q || showEmpty ? matched : matched.filter((u) => u.requests > 0 || u.totalTokens > 0)),
+    [matched, q, showEmpty],
   );
   const hiddenEmptyCount = matched.length - visibleRows.length;
+  const emptyCount = useMemo(
+    () => items.filter((u) => u.requests === 0 && u.totalTokens === 0).length,
+    [items],
+  );
 
   const trendData = useMemo(
     () => (overview?.trend || []).map((d) => ({
@@ -240,10 +245,29 @@ export default function UsageAdmin() {
                         />
                       );
                     })}
-                    {hiddenEmptyCount > 0 && (
-                      <tr>
+                    {!q && !showEmpty && emptyCount > 0 && hiddenEmptyCount > 0 && (
+                      <tr
+                        className="cursor-pointer transition-colors hover:bg-zinc-50"
+                        onClick={() => setShowEmpty(true)}
+                      >
                         <td colSpan={8} className="px-4 py-2.5 text-center text-[11px] text-zinc-400">
-                          {t('users:usage.hidden_empty_users', { count: hiddenEmptyCount })}
+                          <span className="mr-1 inline-flex items-center justify-center align-[-2px]">
+                            <ChevronDown className="h-3 w-3" />
+                          </span>
+                          {t('users:usage.show_empty_users', { count: hiddenEmptyCount })}
+                        </td>
+                      </tr>
+                    )}
+                    {!q && showEmpty && emptyCount > 0 && (
+                      <tr
+                        className="cursor-pointer transition-colors hover:bg-zinc-50"
+                        onClick={() => setShowEmpty(false)}
+                      >
+                        <td colSpan={8} className="px-4 py-2.5 text-center text-[11px] text-zinc-400">
+                          <span className="mr-1 inline-flex items-center justify-center align-[-2px]">
+                            <ChevronUp className="h-3 w-3" />
+                          </span>
+                          {t('users:usage.hide_empty_users')}
                         </td>
                       </tr>
                     )}

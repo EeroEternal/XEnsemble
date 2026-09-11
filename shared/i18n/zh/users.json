@@ -100,6 +100,8 @@
     "no_data": "暂无用量数据",
     "deleted_project": "已删除项目",
     "unknown": "（未知）",
-    "hidden_empty_users": "其余 {{count}} 名用户在该周期内无用量（可搜索查找）"
+    "hidden_empty_users": "其余 {{count}} 名用户在该周期内无用量",
+    "show_empty_users": "展开其余 {{count}} 名无用量用户",
+    "hide_empty_users": "收起无用量用户"
   }
 }
