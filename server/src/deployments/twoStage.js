@@ -46,11 +46,30 @@ const CACHE_VERSION = 2;
 const APT_SAFE_FLAGS = '-o DPkg::Lock::Timeout=300 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::ftp::Timeout=30';
 const APT_CLEAR_LOCKS = 'if ! pgrep -x apt-get >/dev/null 2>&1 && ! pgrep -x dpkg >/dev/null 2>&1; then rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null; fi; true';
 
+// 进程内 apt 串行闸门：apt/dpkg 是**全局单例**（/var/lib/apt/lists 与 dpkg 锁）。
+// 并行调用（工具链预装 ensureGuestToolchains + DB 预配 provisionDbServices/Postgres，都跑在
+// Promise.allSettled 里）会互相抢 lists 锁：抢输的一方 `apt-get update` 失败被 `|| true` 吞掉，
+// 随后 `apt-get install` 用未更新的空索引 → `E: Unable to locate package`（实测
+// mariadb-server exit=100 → mysql=down → 后端起不来）。串行化所有 aptSafeInstall，
+// 保证每次 update+install 原子完成。通用（与具体包/DB 无关）。
+let _aptChain = Promise.resolve();
+function _withAptLock(fn) {
+    const prev = _aptChain;
+    let release;
+    _aptChain = new Promise((r) => { release = r; });
+    return prev.then(fn, fn).finally(release);
+}
+
 /**
  * 防卡死的 apt 安装（通用系统依赖安装入口，postgres/mysql/build-essential 等共用）。
  * 先清锁，再带超时/重试参数安装；返回是否成功与日志尾部，供调用方判断/记录。
+ * 通过 _withAptLock 串行化，避免并行 apt 抢 lists 锁导致 "Unable to locate package"。
  */
-async function aptSafeInstall({ runtime, runtimeRef, workspacePath, packages, onLog, timeoutMs = 420000 }) {
+function aptSafeInstall(args) {
+    return _withAptLock(() => _aptSafeInstallInner(args));
+}
+
+async function _aptSafeInstallInner({ runtime, runtimeRef, workspacePath, packages, onLog, timeoutMs = 420000 }) {
     const log = (m) => { if (onLog) onLog(m); };
     try {
         await runtime.exec.exec('sh', ['-c', `${APT_CLEAR_LOCKS}`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => {});
