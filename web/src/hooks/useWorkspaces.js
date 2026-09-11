@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiFetch, getAccessToken, refreshAccessToken } from '../lib/api';
 import {
   readBootstrapConsoleState,
+  readInitialConsoleState,
   saveConsoleCache,
   getCacheUserId,
 } from '../lib/consoleCache.js';
@@ -42,6 +43,23 @@ export function useWorkspaces(user) {
   // True after the first workspaces fetch resolves, so consumers can tell an
   // genuinely-empty workspace list apart from the initial pre-fetch state.
   const [projectsLoaded, setProjectsLoaded] = useState(false);
+
+  // SPA 登录/登出不会整页刷新，bootstrap 单例在上一账号会话期就已生成。
+  // 账号切换时必须用当前用户自己的缓存桶重新播种，否则会带着上一账号的
+  // 会话/项目 id 发请求 → 404「项目不存在」（getProjectForUser 归属校验失败）。
+  const seededForUserRef = useRef(null);
+  useEffect(() => {
+    const uid = user?.id ? String(user.id) : null;
+    if (!uid || seededForUserRef.current === uid) return;
+    seededForUserRef.current = uid;
+    const fresh = readInitialConsoleState(user);
+    setAgents(fresh.agents);
+    setSessions(fresh.sessions);
+    setProjects(fresh.projects);
+    setActiveSession(null);
+    setActiveWorkspaceId(null);
+    setProjectsLoaded(false);
+  }, [user]);
 
   const hasPendingRef = useRef(false);
   const [hasPending, setHasPending] = useState(false);
@@ -232,6 +250,10 @@ export function useWorkspaces(user) {
       : sessions;
     const candidate = pickSessionToRestore(scoped, prefs);
     if (!candidate || candidate.alive !== true) return;
+    // 会话所属工作区必须仍存在：项目在 API 之外被删/环境重置后，sessions 列表
+    // 可能残留指向已删项目的会话，恢复它会让顶部面板带着死 projectId 发请求
+    // → 404「项目不存在」toast。
+    if (candidate.projectId && projectsLoaded && !projects.some((p) => p.id === candidate.projectId)) return;
     const projectName = candidate.projectName || projects.find((p) => p.id === candidate.projectId)?.name;
     setActiveSession({
       sessionId: candidate.id,
@@ -240,7 +262,17 @@ export function useWorkspaces(user) {
       projectId: candidate.projectId ?? null,
       projectName: projectName ?? null,
     });
-  }, [sessions, activeWorkspaceId]);
+  }, [sessions, activeWorkspaceId, projects, projectsLoaded]);
+
+  // 已恢复的会话若所属工作区消失（项目被删/环境重置），同样清掉，避免顶部面板
+  // 持续用死 projectId 轮询（BranchSwitcher/DeployPanel/文件树都吃 activeSession.projectId）。
+  useEffect(() => {
+    if (!activeSession?.projectId || !projectsLoaded) return;
+    if (projects.some((p) => p.id === activeSession.projectId)) return;
+    setActiveSession(null);
+    const userId = getCacheUserId(user);
+    if (userId) saveConsoleCache(userId, { agents, sessions, projects, activeSession: null });
+  }, [activeSession?.projectId, projects, projectsLoaded, user, agents, sessions]);
 
   // activeWorkspaceId follows the active session's project so the sidebar
   // and header stay in sync when a session is selected/restored.
