@@ -59,12 +59,16 @@ function getTunnelHostIp() {
 async function waitForVmPort(runtimeRef, workspacePath, vmPort, timeoutMs = 60000) {
     const runtime = getRuntime();
     const deadline = Date.now() + timeoutMs;
+    // 端口"可达"判定：**不能**用 `curl -sf`（HTTP>=400 会被 -f 当失败）。被预览的可能是带
+    // context-path 的 API 后端（如 Spring Boot `server.servlet.context-path=/api`，根路径 404）
+    // 或 API-only 服务——端口在监听、`/` 返回 404，用 -f 会误判"未启动"导致隧道创建超时
+    // （实测 server-manage：8081 已监听但 / 404 → "Preview service did not start on port 8081"）。
+    // 这里只要求"能建立连接/端口在监听"：curl -s（不带 -f，收到任意 HTTP 响应即成功，含 404/5xx），
+    // 失败（连接被拒）再退化到 ss 监听检查。
+    const probe = `curl -s -o /dev/null -m 3 http://127.0.0.1:${vmPort}/ 2>/dev/null || ss -ltn 2>/dev/null | grep -qE ":${vmPort}([[:space:]]|$)"`;
     while (Date.now() < deadline) {
         try {
-            const r = await runtime.exec.exec(
-                'sh', ['-c', `curl -sf -o /dev/null http://127.0.0.1:${vmPort}/ || exit 1`], {},
-                { runtimeRef, cwd: workspacePath },
-            );
+            const r = await runtime.exec.exec('sh', ['-c', probe], {}, { runtimeRef, cwd: workspacePath });
             if (r.exitCode === 0) return true;
         } catch { /* not ready */ }
         await new Promise((r) => setTimeout(r, 1000));
