@@ -9,8 +9,9 @@
     "title_placeholder": "e.g. Nightly dependency check",
     "workspace": "Workspace",
     "workspace_placeholder": "Select a workspace",
-    "prompt": "Task prompt",
-    "prompt_placeholder": "Describe what the agent should do on every run...",
+    "prompt": "Prompt",
+    "prompt_placeholder": "e.g. Run `npm audit` and upgrade safe patches in this workspace, then run the tests. If tests fail, revert. Reply with the audit summary.",
+    "prompt_help": "Describe what to do, what it may change, and how to verify it's done.",
     "schedule": "Schedule (cron)",
     "timezone": "Timezone",
     "cron_placeholder": "0 9 * * *"

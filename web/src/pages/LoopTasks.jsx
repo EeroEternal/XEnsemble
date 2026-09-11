@@ -435,6 +435,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                     onChange={(e) => setForm((f) => ({ ...f, prompt: e.target.value }))}
                     placeholder={t('loopTasks:field.prompt_placeholder')}
                   />
+                  <p className="text-xs text-zinc-500">{t('loopTasks:field.prompt_help')}</p>
                 </div>
                 <div className="space-y-1.5">
                   <FormLabel htmlFor="loop-task-schedule">{t('loopTasks:field.schedule')}</FormLabel>

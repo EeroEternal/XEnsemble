@@ -9,8 +9,9 @@
     "title_placeholder": "例如：每夜依赖检查",
     "workspace": "工作空间",
     "workspace_placeholder": "选择工作空间",
-    "prompt": "任务描述",
-    "prompt_placeholder": "描述每次运行时 Agent 需要做什么……",
+    "prompt": "任务指令",
+    "prompt_placeholder": "例如：在本工作空间运行 npm audit 并升级安全补丁，然后跑测试；若测试失败则回滚。最后回复审计摘要。",
+    "prompt_help": "描述要做什么、允许改动什么、以及如何判断已完成。",
     "schedule": "执行计划（cron）",
     "timezone": "时区",
     "cron_placeholder": "0 9 * * *"
