@@ -9,6 +9,7 @@ import { apiFetch } from '../lib/api';
 import { withSessionId } from '../lib/sessionContext';
 import { useToast } from './Toast';
 import { useTranslation } from 'react-i18next';
+import { formatQuotaExceeded } from '../lib/quotaLabels';
 
 function pickActiveDeployment(list) {
   if (!Array.isArray(list) || list.length === 0) return null;
@@ -120,7 +121,12 @@ export function usePreview(projectId, token, sessionId) {
         method: 'POST',
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || t('deploy:error.preview_deploy_failed'));
+      if (!res.ok) {
+        if (data.code === 'quota_exceeded' || data.error === 'quota_exceeded') {
+          throw new Error(formatQuotaExceeded(data.dimension || 'max_previews', data.current, data.limit));
+        }
+        throw new Error(data.error || t('deploy:error.preview_deploy_failed'));
+      }
       if (data.public_url) {
         const url = data.preview_token
           ? `${data.public_url}${data.public_url.includes('?') ? '&' : '?'}preview_token=${encodeURIComponent(data.preview_token)}`

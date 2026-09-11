@@ -157,6 +157,9 @@ async function checkAgentAccess(userId, agentId, role) {
 
 function quotaErrorReply(reply, result) {
     return reply.code(429).send({
+        // code 供前端结构化拦截（sessions 创建等 UI 据此本地化文案）；
+        // error 保持错误码原样，兼容仅透传 error 的旧调用方。
+        code: 'quota_exceeded',
         error: result.error,
         dimension: result.dimension,
         limit: result.limit,

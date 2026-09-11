@@ -438,7 +438,7 @@ export default React.forwardRef(function Sessions({
         if (res.status === 401 || data.code === 'unauthorized') {
           throw new Error(t('auth:error.session_expired'));
         }
-        if (data.code === 'quota_exceeded') {
+        if (data.code === 'quota_exceeded' || data.error === 'quota_exceeded') {
           throw new Error(formatQuotaExceeded(data.dimension || 'max_projects', data.current, data.limit));
         }
         throw new Error(data.error || t('sessions:error.create_workspace_failed'));
@@ -502,7 +502,7 @@ export default React.forwardRef(function Sessions({
           setLaunchModalError(t('sessions:error.not_granted'));
           return false;
         }
-        if (data.code === 'quota_exceeded') {
+        if (data.code === 'quota_exceeded' || data.error === 'quota_exceeded') {
           setLaunchModalError(formatQuotaExceeded(data.dimension, data.current, data.limit));
           fetchWorkspaces();
           return false;
@@ -1096,7 +1096,12 @@ export default React.forwardRef(function Sessions({
           body: JSON.stringify({ terminal_theme_id: themeId }),
         });
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || data.detail || t('sessions:error.resume_failed'));
+        if (!response.ok) {
+          if (data.code === 'quota_exceeded' || data.error === 'quota_exceeded') {
+            throw new Error(formatQuotaExceeded(data.dimension || 'max_sessions', data.current, data.limit));
+          }
+          throw new Error(data.error || data.detail || t('sessions:error.resume_failed'));
+        }
         setSessions((prev) => prev.map((s) => (
           s.id === oldSessionId ? { ...s, alive: true, status: 'running', memoryStatus: 'running' } : s
         )));
@@ -1120,7 +1125,12 @@ export default React.forwardRef(function Sessions({
         }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || t('sessions:error.start_failed'));
+      if (!response.ok) {
+        if (data.code === 'quota_exceeded' || data.error === 'quota_exceeded') {
+          throw new Error(formatQuotaExceeded(data.dimension || 'max_sessions', data.current, data.limit));
+        }
+        throw new Error(data.error || t('sessions:error.start_failed'));
+      }
 
       replaceRecentSessionId(oldSessionId, data.session_id, {
         agentId, projectId, projectName, createdAt: Date.now(),
@@ -1149,12 +1159,26 @@ export default React.forwardRef(function Sessions({
     }
   };
 
+  const handleExitSession = async (sessionId) => {
+    setDeletingSessionId(sessionId);
+    try {
+      const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/exit`, { method: 'POST' });
+      if (!res.ok) throw new Error(t('sessions:error.exit_session_failed', { defaultValue: 'Failed to exit session' }));
+      handleSessionEnd(sessionId);
+      if (activeSession?.sessionId === sessionId) setActiveSession(null);
+      setDeleteConfirmSession(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDeletingSessionId(null);
+    }
+  };
+
   const handleDeleteSession = async (sessionId) => {
     setDeletingSessionId(sessionId);
     try {
       const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(t('sessions:error.delete_session_failed', { defaultValue: 'Failed to delete session' }));
-      archiveSession(sessionId);
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       if (activeSession?.sessionId === sessionId) setActiveSession(null);
       setDeleteConfirmSession(null);
@@ -1166,10 +1190,13 @@ export default React.forwardRef(function Sessions({
     }
   };
 
-  const requestDeleteSession = (session, ws) => {
+  const requestDeleteSession = (session, ws, action) => {
+    const isExit = action === 'exit'
+      || (action == null && (session.status === 'running' || session.status === 'pending'
+        || session.status === 'idle' || session.alive === true));
     setDeleteConfirmSession({
       sessionId: session.id,
-      isLive: session.alive === true,
+      action: isExit ? 'exit' : 'delete',
       agentLabel: getAgentLabel(session.agentId),
       workspaceName: ws?.name || t('sessions:label.unassigned'),
     });
@@ -1274,14 +1301,22 @@ export default React.forwardRef(function Sessions({
 
   return (
     <div className={className || 'h-full w-full'}>
-      {/* Simple delete confirm */}
+      {/* Stop / delete confirm */}
       {deleteConfirmSession && (
         <ConsoleInlineDialog onClose={() => setDeleteConfirmSession(null)} panelClassName={`${consoleDialogPanelClass} w-full max-w-md`}>
           <div className={`${consoleStructuredDialogHeaderClass}`}>{t('common:dialog.confirm_title')}</div>
-          <div className="p-5 text-sm">{t('sessions:dialog.remove_session')}</div>
+          <div className="p-5 text-sm">
+            {deleteConfirmSession.action === 'exit'
+              ? t('sessions:dialog.exit_session')
+              : t('sessions:dialog.delete_session')}
+          </div>
           <div className={consoleStructuredDialogFooterClass}>
             <button onClick={() => setDeleteConfirmSession(null)} className="h-9 px-4 border rounded-md">{t('common:action.cancel')}</button>
-            <button onClick={() => handleDeleteSession(deleteConfirmSession.sessionId)} className="h-9 px-4 bg-red-600 text-white rounded-md">{t('sessions:action.remove')}</button>
+            {deleteConfirmSession.action === 'exit' ? (
+              <button onClick={() => handleExitSession(deleteConfirmSession.sessionId)} className="h-9 px-4 bg-zinc-800 text-white rounded-md">{t('sessions:action.exit')}</button>
+            ) : (
+              <button onClick={() => handleDeleteSession(deleteConfirmSession.sessionId)} className="h-9 px-4 bg-red-600 text-white rounded-md">{t('sessions:action.delete')}</button>
+            )}
           </div>
         </ConsoleInlineDialog>
       )}
