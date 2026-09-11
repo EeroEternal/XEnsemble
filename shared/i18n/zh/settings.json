@@ -67,12 +67,10 @@
     "mode_invite": "仅邀请",
     "default_quota": "默认用户配额",
     "tier": "等级",
-    "session_ttl": "会话有效期（小时）",
     "saving": "保存中…",
     "save": "保存",
     "default_value": "（默认）",
-    "not_configured": "未配置",
-    "hours_unit": "小时"
+    "not_configured": "未配置"
   },
   "toast": {
     "saved": "已保存。",

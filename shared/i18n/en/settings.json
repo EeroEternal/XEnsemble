@@ -67,12 +67,10 @@
     "mode_invite": "Invite only",
     "default_quota": "Default user quota",
     "tier": "Tier",
-    "session_ttl": "Session TTL (hours)",
     "saving": "Saving…",
     "save": "Save",
     "default_value": "(default)",
-    "not_configured": "Not configured",
-    "hours_unit": "hours"
+    "not_configured": "Not configured"
   },
   "toast": {
     "saved": "Saved.",
