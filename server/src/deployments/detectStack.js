@@ -48,6 +48,8 @@ const NODE_FRAMEWORK_DEPS = {
     express: 'node-express',
     fastify: 'node-express',
     '@nestjs/core': 'node-express',
+    '@umijs/max': 'node-umi',
+    umi: 'node-umi',
 };
 
 const FRAMEWORK_DEFAULT_PORTS = {
@@ -62,6 +64,7 @@ const FRAMEWORK_DEFAULT_PORTS = {
 };
 
 const FRAMEWORK_DEV_SCRIPTS = {
+    umi: 'dev',
     vite: 'dev',
     next: 'dev',
     nuxt: 'dev',
@@ -108,8 +111,10 @@ function detectNodeFramework(pkg) {
     for (const dep of Object.keys(allDeps)) {
         if (NODE_FRAMEWORK_DEPS[dep]) {
             // Normalize framework id for downstream port/script lookups:
-            // `@sveltejs/kit` and `svelte` both resolve to "sveltekit".
-            const framework = (dep === 'svelte' || dep === '@sveltejs/kit') ? 'sveltekit' : dep;
+            // `@sveltejs/kit` and `svelte` both resolve to "sveltekit";
+            // `@umijs/max` and `umi` both resolve to "umi".
+            const framework = (dep === 'svelte' || dep === '@sveltejs/kit') ? 'sveltekit'
+                : (dep === '@umijs/max' || dep === 'umi') ? 'umi' : dep;
             return { framework, type: NODE_FRAMEWORK_DEPS[dep] };
         }
     }
@@ -922,6 +927,22 @@ const SYSTEM_SERVICE_DEPS = {
         // php
         'mongodb/mongodb',
     ]),
+    // k8s 依赖（gpustack/higress 类应用）：客户端库 + 编排特征。
+    // 平台预装 k3s 单节点（CN 镜像），应用以 external gateway 模式连接。
+    k3s: new Set([
+        'kubernetes',                       // python client（gpustack）
+        '@kubernetes/client-node',          // npm
+        'k8s.io/client-go',                 // go
+        'k8s.io/apimachinery',
+    ]),
+    // k8s 依赖（gpustack/higress 类应用）：客户端库 + 编排特征。
+    // 平台预装 k3s 单节点（CN 镜像），应用以 external gateway 模式连接。
+    k3s: new Set([
+        'kubernetes',                       // python client（gpustack）
+        '@kubernetes/client-node',          // npm
+        'k8s.io/client-go',                 // go
+        'k8s.io/apimachinery',
+    ]),
 };
 
 // 单值也可能命中多个服务（如 'redis' 同时是 npm/py/rust 包名）——只记一次，交由证据判断。
@@ -930,6 +951,7 @@ const SERVICE_NAME_RE = {
     mysql: /\bmysql\b|\bmariadb\b/i,
     redis: /\bredis\b/i,
     mongodb: /\bmongo(?:db)?\b/i,
+    k3s: /\bk(?:ubernetes|3s)\b|\bhigress\b|\bkubeconfig\b/i,
 };
 
 // 从一段文本（依赖清单/连接串/配置）提取命中的服务集合。
@@ -1463,6 +1485,47 @@ function detectBackendSignature(workspacePath) {
  * @param {string} workspacePath
  * @returns {StackInfo}
  */
+// 一层子目录的项目枚举（泛用，无目录名白名单）：对每个含项目标记文件的子目录
+// 跑现有探测器（node/go/python/rust），聚合出 {dir, type, installCmd, buildCmd, startCmd}。
+// 消费方：无根 package.json 的多仓库布局（frontend/ + backend/ 各自独立仓库）的
+// startCmd/buildCmd/fallback plan 生成——root 探测无果时这是唯一可靠的结构信息来源。
+const SUBPROJECT_MARKERS = ['package.json', 'go.mod', 'Cargo.toml', 'requirements.txt', 'pyproject.toml', 'manage.py'];
+
+function detectSubProjectStacks(dir) {
+    const out = [];
+    let entries = [];
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true })
+            .filter((e) => e.isDirectory() && e.name !== 'node_modules' && e.name !== 'dist' && e.name !== 'build' && !e.name.startsWith('.'))
+            .map((e) => e.name);
+    } catch { return out; }
+    for (const name of entries) {
+        const sub = path.join(dir, name);
+        if (!SUBPROJECT_MARKERS.some((m) => hasFile(sub, m))) continue;
+        const subDetectors = [detectNodeStack, detectGoStack, detectPythonStack, detectRustStack];
+        let stack = null;
+        for (const fn of subDetectors) {
+            try {
+                stack = fn(sub);
+                if (stack) break;
+            } catch { /* individual detector failure must not block the rest */ }
+        }
+        if (stack && (stack.startCmd || stack.buildCmd)) {
+            const pm = stack.packageManager || 'npm';
+            const port = stack.defaultPort || 3000;
+            out.push({
+                dir: name,
+                type: stack.type,
+                installCmd: stack.installCmd ? `cd ${name} && ${stack.installCmd}` : null,
+                buildCmd: stack.buildCmd ? `cd ${name} && ${stack.buildCmd}` : null,
+                startCmd: stack.startCmd ? `cd ${name} && ${stack.startCmd.replace(/\$PORT/g, String(port))}` : null,
+                defaultPort: port,
+            });
+        }
+    }
+    return out.slice(0, 8);
+}
+
 function detectStack(workspacePath) {
     if (!workspacePath) {
         return emptyStack('unknown', ['no_workspace_path']);
@@ -1487,12 +1550,48 @@ function detectStack(workspacePath) {
     for (const fn of detectors) {
         try {
             const result = fn(dir);
-            if (result) return result;
+            if (result) {
+                // 多子目录项目枚举聚合（泛用）：多仓库导入的布局是 root 下并列多个独立
+                // 仓库目录（frontend/ backend/），root 探测出的 startCmd/buildCmd 为 null，
+                // 决策树/ fallback plan 全都无从下手——用子目录枚举补齐。仅在缺项时补，
+                // 不覆盖现有探测结果（root 有 package.json 的单仓库不受影响）。
+                return augmentWithSubProjects(result, dir);
+            }
         } catch {
             // individual detector failure must not block the rest
         }
     }
+    // 兜底：所有探测器都无结果（unknown）——多仓库导入的典型布局（root 下并列多个
+    // 独立仓库目录，root 无 package.json/go.mod），用一层子目录枚举聚合出可用 plan。
+    const subs = detectSubProjectStacks(dir);
+    if (subs.length) {
+        const result = emptyStack('monorepo', ['subprojects']);
+        result.startCmd = subs.find((x) => x.startCmd)?.startCmd || null;
+        result.buildCmd = subs.find((x) => x.buildCmd)?.buildCmd || null;
+        const installs = subs.map((x) => x.installCmd).filter(Boolean);
+        result.installCmd = installs.length ? installs.join(' && ') : null;
+        result.subProjects = subs;
+        return result;
+    }
     return emptyStack('unknown', ['fallback']);
+}
+
+// 聚合：现有探测结果缺 startCmd/buildCmd 时，用一层子目录枚举补齐（不覆盖已有值）。
+function augmentWithSubProjects(result, dir) {
+    if ((result.type === 'unknown' || result.type === 'monorepo') && (!result.startCmd || !result.buildCmd)) {
+        const subs = detectSubProjectStacks(dir);
+        if (subs.length) {
+            if (!result.startCmd) result.startCmd = subs.find((x) => x.startCmd)?.startCmd || null;
+            if (!result.buildCmd) result.buildCmd = subs.find((x) => x.buildCmd)?.buildCmd || null;
+            if (!result.installCmd) {
+                const installs = subs.map((x) => x.installCmd).filter(Boolean);
+                if (installs.length) result.installCmd = installs.join(' && ');
+            }
+            result.subProjects = subs;
+            result.confidence = [...(result.confidence || []), 'subprojects'];
+        }
+    }
+    return result;
 }
 
 function emptyStack(type, confidence) {

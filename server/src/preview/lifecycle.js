@@ -12,7 +12,7 @@ const { cleanupStale } = require('../deployments/activeDeploys');
 const SCAN_MS = 60_000;
 // activeDeploys 残留清理阈值：大于部署总超时（45 分钟）的合理缓冲，
 // 部署进程异常退出（卡死/被杀）时 finally 可能未执行，超时残留应被清掉
-const ACTIVE_DEPLOY_STALE_MS = 60 * 60 * 1000;
+const ACTIVE_DEPLOY_STALE_MS = 50 * 60 * 1000;
 // deploy 记录卡在 building/pending 的清理阈值：超过该时长仍非终态视为异常退出
 // （finally 未执行），定期标 failed 回收，避免残留干扰前端状态/占用额度
 const STALE_DEPLOY_BUILDING_MS = 30 * 60 * 1000;
@@ -96,6 +96,16 @@ async function expirePreviews() {
 const RECONCILE_MS = 15 * 1000;
 
 function startPreviewLifecycle() {
+    // 启动时立即跑一轮全量清理（不等第一个周期）：控制面重启后，旧进程的部署/预览
+    // 全部消亡，但 DB/内存里的 running 记录还在——不立即回收，重启后第一次部署的
+    // 并发闸门会把这些僵尸计入额度（"已达并发上限"误报，实测 frontend+backend）。
+    const initialSweep = () => {
+        reconcileStaleRunningPreviews().catch((err) => console.error('[lifecycle] initial reconcile failed', err));
+        expirePreviews().catch((err) => console.error('[lifecycle] initial expire failed', err));
+        try { cleanupStale(ACTIVE_DEPLOY_STALE_MS); } catch (err) { console.error('[lifecycle] initial cleanupStale failed', err); }
+        reclaimStaleBuildingDeploys().catch((err) => console.error('[lifecycle] initial reclaim failed', err));
+    };
+    initialSweep();
     reconcileStaleRunningPreviews().catch((err) => {
         console.error('[lifecycle] reconcile failed', err);
     });
@@ -117,18 +127,23 @@ function startPreviewLifecycle() {
 // 回收长时间卡在 building/pending 的 deploy 记录：部署进程异常退出时 finally 可能未执行，
 // 记录卡 building，会干扰 usePreview 选择（假转圈）与并发计数。超过阈值标 failed。
 async function reclaimStaleBuildingDeploys() {
-    const staleBefore = Date.now() - STALE_DEPLOY_BUILDING_MS;
+    // 回收面含 running：deploy 的 running 记录超过 2 小时无更新必为僵尸（部署总超时
+    // 40min，running 不可能超 2h）——PERN-Store 一条 running 挂了 5.7 天，占着并发
+    // 额度导致后续部署误报"已达上限"。
+    const staleBuilding = Date.now() - STALE_DEPLOY_BUILDING_MS;
+    const staleRunning = Date.now() - 2 * 60 * 60 * 1000;
     const rows = await db.select({ id: schema.deployments.id }).from(schema.deployments)
         .where(and(
             eq(schema.deployments.kind, 'deploy'),
-            inArray(schema.deployments.status, ['building', 'pending']),
-            lt(schema.deployments.updatedAt, staleBefore),
+            inArray(schema.deployments.status, ['building', 'pending', 'running']),
+            lt(schema.deployments.updatedAt, staleRunning),
         ));
     for (const r of rows) {
         await db.update(schema.deployments)
             .set({ status: 'failed', lastErrorMessage: '部署进程异常退出，已回收', updatedAt: Date.now() })
             .where(eq(schema.deployments.id, r.id));
     }
+    void staleBuilding;
 }
 
 module.exports = { startPreviewLifecycle, reconcileStaleRunningPreviews, expirePreviews };

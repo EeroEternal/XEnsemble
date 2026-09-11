@@ -21,6 +21,11 @@ function chatCompletionsUrl(url) {
 const API_URL = chatCompletionsUrl(process.env.LLM_ANALYZE_API_URL || 'https://api.deepseek.com/chat/completions');
 const MODEL = process.env.LLM_ANALYZE_MODEL || 'deepseek-chat';
 const LLM_TIMEOUT_MS = 180000;
+// 不支持 thinking 字段的模型（与 analyzeVerify.js 同一份名单；400 自愈降级）。
+const noThinkingModels = new Set([
+    'deepseek-chat', 'deepseek-reasoner',
+    ...(String(process.env.LLM_NO_THINKING_MODELS || '').split(',').map((s) => s.trim()).filter(Boolean)),
+]);
 
 const KEY_FILES = [
     'package.json',
@@ -485,7 +490,28 @@ async function runSelfCheck({ steps, configFiles, runtimeRef, workspacePath, hos
     return { passed: issues.length === 0, issues, fatal };
 }
 
-function fallbackSteps(fileContentsText) {
+function fallbackSteps(fileContentsText, detected = null) {
+    // 多子项目布局（多仓库导入：root 下并列 frontend/ backend/ 各自独立仓库）：
+    // 按 detectStack 的子项目枚举生成步骤——每个子项目各一段 install/build，
+    // serve 用第一个有 start 的子项目。比 heuristic 的"根目录当应用"可靠得多
+    // （多仓库的 root 没有任何可执行内容，老逻辑在 fallback 直跑时必然失败）。
+    if (detected && Array.isArray(detected.subProjects) && detected.subProjects.length) {
+        const steps = [];
+        let n = 1;
+        for (const sp of detected.subProjects) {
+            if (sp.installCmd) {
+                steps.push({ id: `step_${n++}`, name: `Install dependencies (${sp.dir})`, command: sp.installCmd, description: `Install packages for ${sp.dir}`, kind: 'prepare' });
+            }
+            if (sp.buildCmd) {
+                steps.push({ id: `step_${n++}`, name: `Build ${sp.dir}`, command: sp.buildCmd, description: `Build ${sp.dir}`, kind: 'build' });
+            }
+        }
+        const startSub = detected.subProjects.find((x) => x.startCmd);
+        if (startSub && startSub.startCmd) {
+            steps.push({ id: `step_${n++}`, name: `Start ${startSub.dir}`, command: startSub.startCmd, description: `Start ${startSub.dir} on its port`, kind: 'serve' });
+        }
+        if (steps.length) return steps;
+    }
     const pm = fileContentsText.includes('pnpm-lock.yaml') ? 'pnpm'
         : fileContentsText.includes('yarn.lock') ? 'yarn' : 'npm';
     const hasPkg = fileContentsText.includes('### package.json\n');
@@ -503,9 +529,7 @@ function fallbackSteps(fileContentsText) {
 }
 
 // 对 LLM API 的瞬时故障（5xx / 429 / 网络错误）自动重试，避免一次网关抖动直接让部署失败。
-// 不支持 thinking 参数的模型（如 glm-flash 连 { type: "disabled" } 都不收，直接 400）：
-// 首次 400 且错误指向 thinking 时记录，本进程后续请求自动不带该参数（自愈降级）。
-const noThinkingModels = new Set();
+// 不主动传 thinking 参数：由供应商默认行为决定（reasoning 模型默认思考——慢但质量高）。
 async function callLlm(messages) {
     const retries = 2;
     let lastWarning = '';
@@ -528,12 +552,6 @@ async function callLlm(messages) {
             if (!res.ok) {
                 const text = await res.text().catch(() => '');
                 lastWarning = `LLM error ${res.status}: ${text.slice(0, 120)}`;
-                if (res.status === 400 && /thinking/i.test(text) && !noThinkingModels.has(MODEL)) {
-                    noThinkingModels.add(MODEL);
-                    console.error(`[analyzeDeploy] model ${MODEL} rejected thinking param — retrying without it`);
-                    clearTimeout(timer);
-                    continue;
-                }
                 if ((res.status >= 500 || res.status === 429) && attempt < retries) {
                     console.error(`[analyzeDeploy] LLM error ${res.status}, retry ${attempt + 1}/${retries}`);
                     await new Promise((r) => setTimeout(r, attempt === 0 ? 1500 : 4000));
@@ -804,7 +822,8 @@ async function analyzeWithReact({ workspacePath, hostWorkspacePath, runtimeRef, 
     const { treeText, fileContentsText } = await collectProjectContext(fsAdapter, workspacePath, runtimeRef);
 
     if (!API_KEY) {
-        return { steps: normalizeSteps(fallbackSteps(fileContentsText)), configFiles: [], source: 'fallback', contextTree: treeText };
+        const detected = detectStack(workspacePath);
+        return { steps: normalizeSteps(fallbackSteps(fileContentsText, detected)), configFiles: [], source: 'fallback', contextTree: treeText };
     }
 
     // 后端签名证据：喂给 agent，让它第一遍就把后端启动写进计划（self-check 会强制校验）
@@ -832,7 +851,8 @@ async function analyzeWithReact({ workspacePath, hostWorkspacePath, runtimeRef, 
         const llmResult = await callLlm(messages);
         if (!llmResult.ok) {
             if (round === 0) {
-                return { steps: normalizeSteps(fallbackSteps(fileContentsText)), configFiles: [], source: 'fallback', warning: llmResult.warning };
+                const detected = detectStack(workspacePath);
+                return { steps: normalizeSteps(fallbackSteps(fileContentsText, detected)), configFiles: [], source: 'fallback', warning: llmResult.warning };
             }
             break;
         }
@@ -877,7 +897,7 @@ async function analyzeWithReact({ workspacePath, hostWorkspacePath, runtimeRef, 
     }
 
     return {
-        ...(lastResult || { steps: normalizeSteps(fallbackSteps(fileContentsText)), configFiles: [] }),
+        ...(lastResult || (() => { const detected = detectStack(workspacePath); return { steps: normalizeSteps(fallbackSteps(fileContentsText, detected)), configFiles: [] }; })()),
         source: 'ai',
         checked: false,
         contextTree: treeText,

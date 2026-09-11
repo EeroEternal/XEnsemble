@@ -13,6 +13,12 @@ const API_KEY = process.env.LLM_ANALYZE_API_KEY;
 const API_URL = process.env.LLM_ANALYZE_API_URL || 'https://api.deepseek.com/chat/completions';
 const MODEL = process.env.LLM_VERIFY_MODEL || process.env.LLM_ANALYZE_MODEL || 'deepseek-chat';
 const LLM_TIMEOUT_MS = 240000;
+// 不支持 thinking 字段的模型（400 自愈后自动降级为不带 thinking）：
+// deepseek 系不认识 anthropic 风格的 thinking 参数；glm-4 系（-9b/-32b）会 400。
+const noThinkingModels = new Set([
+    'deepseek-chat', 'deepseek-reasoner',
+    ...(String(process.env.LLM_NO_THINKING_MODELS || '').split(',').map((s) => s.trim()).filter(Boolean)),
+]);
 const MAX_AGENT_ROUNDS = Number(process.env.OPENCODE_VERIFY_MAX_ROUNDS) || 60;
 // 同一条命令（install/build/start/su 等）被"去重拦截"累计达到该次数 → 直接 break 进兜底，
 // 不再让 LLM 反复重跑同一命令空转（xensemble 实测 LLM 连续 55 轮决定重跑 su 死循环，
@@ -53,9 +59,8 @@ const MAX_TOOL_OUTPUT = 6000;
 
 const LLM_RETRIES = 2;
 
-// 不支持 thinking 参数的模型（如 glm-5-3-flash 连 { type: "disabled" } 都不收，直接 400）。
-// 首次 400 且错误指向 thinking 时记录，本进程后续请求自动不带该参数（自愈降级）。
-const noThinkingModels = new Set();
+// 不主动传 thinking 参数：由供应商默认行为决定（reasoning 模型默认思考——慢但质量高）。
+// 之前显式 { type: "disabled" } 关思考导致弱模型输出 35-88 tokens/轮 的退化空转（实测）。
 
 // 对 LLM API 的瞬时故障（5xx / 429 / 网络错误）自动重试，避免一次网关抖动直接让部署失败。
 async function callLlm(messages, abortSignal) {
@@ -88,13 +93,6 @@ async function callLlm(messages, abortSignal) {
             if (!res.ok) {
                 const text = await res.text().catch(() => '');
                 lastWarning = `LLM error ${res.status}: ${text.slice(0, 160)}`;
-                // 模型不支持 thinking 参数 → 记住并立即降级重试（不带 thinking）
-                if (res.status === 400 && /thinking/i.test(text) && !noThinkingModels.has(MODEL)) {
-                    noThinkingModels.add(MODEL);
-                    console.error(`[analyzeVerify] model ${MODEL} rejected thinking param — retrying without it`);
-                    clearTimeout(timer);
-                    continue;
-                }
                 if ((res.status >= 500 || res.status === 429) && attempt < LLM_RETRIES) {
                     console.error(`[analyzeVerify] LLM error ${res.status}, retry ${attempt + 1}/${LLM_RETRIES}`);
                     await new Promise((r) => setTimeout(r, attempt === 0 ? 1500 : 4000));
@@ -304,12 +302,16 @@ async function runTool(tool, args, runtimeRef, workspacePath) {
     }
 }
 
-// 目录列表/源码树页面特征（python http.server 的 "Directory listing for"，及 serve 等的 "Index of"）。
+// 目录列表/源码树页面特征：python http.server 的 "Directory listing for"、serve 的
+// "Index of"、以及 serve 新版模板的 "Files within <dir>"（多仓库导入 frontend+backend
+// 实测：serve 在仓库根起 → 列出各仓库目录 → 预览整页只有目录列表）。
 function isDirectoryListing(body) {
     return /<title>\s*Index of\b/i.test(body)
         || /<title>\s*Directory listing for\b/i.test(body)
+        || /<title>\s*Files within\b/i.test(body)
         || /\bIndex of \//.test(body)
-        || /\bDirectory listing for \//.test(body);
+        || /\bDirectory listing for \//.test(body)
+        || /\bFiles within \//.test(body);
 }
 
 // box 沙箱默认预览页特征（guest 常驻的 "Workspace ready" 页，不是用户应用）。
@@ -363,6 +365,34 @@ async function probePort({ runtimeRef, workspacePath, port, boxDefaultPorts }) {
         // 页面至少是 HTML 或有实质内容；纯文本小响应判定为非应用，继续探测其它端口。
         if (body.length < 50 && !/<[a-z!]/i.test(body)) {
             return { ok: false, listen: true, reason: `端口 ${port} 响应过短（${body.length}B 纯文本 "${body.slice(0, 30)}"），不像应用页面` };
+        }
+        // JSON 响应不是应用页面（多仓库前后端分离实测推演：backend 根路径 200 + JSON
+        // 会被误判为前端 → preview 指向 API 服务 → 预览整页是裸 JSON）。应用页面必须是
+        // HTML；纯 JSON（{ / [ 开头）是 API 服务的特征，继续探测其它端口。
+        const trimmed = body.trim();
+        if ((trimmed.startsWith('{') || trimmed.startsWith('[')) && !/<[a-z!]/i.test(trimmed)) {
+            return { ok: false, listen: true, reason: `端口 ${port} 返回 JSON（API 服务特征），不是应用页面` };
+        }
+        // dev server 页面不是可交付的预览：umi MFSU 的 remoteEntry / webpack MF / react
+        // 错误覆盖层都用绝对路径加载模块，在 /preview/<id>/ 子路径代理下必然 404 → 白屏
+        // （frontend+backend 实测）。这类页面要求 agent 用 production build + 静态 serve
+        // 替代，继续探测其它端口。
+        if (/mf-va_remoteEntry|react-error-overlay|webpack-dev-server|\/__umi_dev|hot-update\.js/i.test(trimmed)) {
+            return { ok: false, listen: true, reason: `端口 ${port} 是 dev server 页面（MFSU/HMR 模块加载在预览代理下不可用），需要 production build + 静态 serve` };
+        }
+        // 第二层（关键）：抽查页面引用的主 JS 内容——umi MFSU dev 的 chunk 内含
+        // /workspace/<dir>/node_modules 绝对路径与 mf-va_remoteEntry（生产构建无）。
+        // 这些特征在 JS 运行时才可见，index.html 里看不到——单看 HTML 判定会漏。
+        // 抽查前 2 个绝对路径 JS，各取 120KB。
+        const jsRefs = [...trimmed.matchAll(/src="(\/[^"]+\.js)"/g)].map((m) => m[1]).slice(0, 2);
+        for (const jp of jsRefs) {
+            try {
+                const jr = await runtime.exec.exec('sh', ['-c', `curl -s -m 6 http://127.0.0.1:${port}${jp} | head -c 120000`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+                const jsBody = String(jr.stdout || '');
+                if (/\/workspace\/[a-zA-Z0-9_.-]+\/node_modules|mf-va_remoteEntry|react-error-overlay/.test(jsBody)) {
+                    return { ok: false, listen: true, reason: `端口 ${port} 是 dev server（${jp} 内含开发环境模块路径/MFSU 特征）——需要 production build + 静态 serve dist` };
+                }
+            } catch { /* 抽查失败不阻断该端口判定 */ }
         }
         return { ok: true, httpCode, snippet: body.slice(0, 120) };
     } catch (e) {
@@ -558,8 +588,22 @@ async function findListeningBackendPort(runtimeRef, workspacePath, reportedPorts
  * 返回 { backendPort, appPort, frontendServed }；后端未监听时返回 null。
  */
 async function verifyBackendAlive(runtimeRef, workspacePath, reportedPorts, plan, defaultPort, excludePort) {
+    const runtime = getRuntime();
     const backendPort = await findListeningBackendPort(runtimeRef, workspacePath, reportedPorts, plan, excludePort);
     if (!backendPort) return null;
+    // JSON 探活：长寿会话 VM 会积累旧部署的静态 serve 进程（COMMON_APP_PORTS 命中
+    // 陈旧监听 → 被误判为"后端已拉起"→ UI-only 半成品放行）。真 API 后端对常见
+    // 探针路径返回 JSON（404 也常是 JSON，如 Flask）；纯静态 serve 对所有路径都是
+    // text/html → 判非后端。
+    const jsonProbe = await runtime.exec.exec('sh', ['-c',
+        `for p in /version /health /healthz /api/health /openapi.json /; do `
+        + `ct=$(curl -s -m 4 -o /dev/null -w '%{content_type}' http://127.0.0.1:${backendPort}${p} 2>/dev/null); `
+        + `case "$ct" in *json*) echo JSON; break;; esac; done; echo DONE`],
+        {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 });
+    if (!/JSON/.test(String(jsonProbe.stdout || ''))) {
+        console.error(`[analyzeVerify] verifyBackendAlive: port ${backendPort} listening but serves no JSON on probe paths — stale/static listener, not an API backend`);
+        return null;
+    }
     const probe = await assertAppIsServed({ runtimeRef, workspacePath, preferredPort: defaultPort });
     return {
         backendPort,
@@ -871,6 +915,14 @@ async function findMissingPlanTools(plan, runtimeRef, workspacePath) {
 function buildSystemPrompt(plan, toolchain) {
     const stepsJson = JSON.stringify(plan?.steps || [], null, 2);
     const toolchainBlock = renderToolchainBlock(toolchain || []);
+    // 条件注入（数据驱动，不写死项目名）：仅当平台预构建了 wheel-integrity 包时，
+    // 告知 agent 部署的最终状态要求——后端进程必须运行且 API 返回 JSON。
+    // entry/pkg/端口全部来自 plan.context（detectStack 从 pyproject hook 确定性检出），
+    // 没有 wheel 的项目完全看不到这条——避免针对性 prompt 污染其他项目。
+    const wheel = plan?.context?.backendWheel;
+    const wheelEntryBlock = wheel?.built && wheel?.entry ? [
+        `WHEEL ENTRY REQUIREMENT (platform-provisioned backend): the platform pre-built and installed Python wheel "${wheel.pkg}" (entry point: \`${wheel.entry}\`). Installing it is ONLY a preparation step — the deployment is NOT done until the backend process is RUNNING. Start it (pick a free port, default ${wheel.defaultPort || 8000}): \`nohup ${wheel.entry} start --port ${wheel.defaultPort || 8000} > /tmp/backend-wheel.log 2>&1 &\`, then curl a real API route and confirm non-HTML JSON (e.g. /version or /health). Serving ONLY the frontend with \`npx serve dist\` / http.server is NOT a valid final state for this project — the backend must be up and reported via apiEndpoints/backendPort in your final answer.`,
+    ] : [];
     return [
         'You are a deployment verification agent running inside a sandbox Linux VM. Your job: execute a deploy plan for a project at /workspace, make the app actually pass a health check, and fix problems yourself until it works.',
         toolchainBlock,
@@ -886,7 +938,7 @@ function buildSystemPrompt(plan, toolchain) {
         '- PORT IN USE HANDLING (MANDATORY): before (re)starting the backend, check who owns the port: `ss -ltnp | grep :<port>` and `pgrep -af <project-binary>`. If the port is ALREADY owned by YOUR OWN backend process (same project binary/name), DO NOT restart — it is already up (a second start only fails with "address already in use"). Just curl the health route and proceed. If a DIFFERENT process owns it, start your backend on a NEW free port (export PORT=<new>) AND make the frontend reach it (update next.config rewrites / vite proxy target / .env NEXT_PUBLIC_API_URL to the new port, or proxy /api to it) — any arrangement that makes the backend reachable through the frontend is fine. Never report failure solely because the default port was busy.',
         '- Verify with an actual HTTP request, not just "process started": `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:<port>/`. A 2xx/3xx/expected response means success.',
         '- FULL-STACK requirement: a root page 200 is NOT enough. If the project is frontend+backend (the frontend proxies /api to a local backend), the backend MUST be running and reachable, or every browser page will be blank.',
-        '- BACKEND ALIVE CHECK — NEVER guess a health/API path. Guessing e.g. /api/health and treating a 404 as "backend dead" is YOUR error, not the app\'s (multica-style backends expose /health, not /api/health). Follow this order:',
+        '- BACKEND ALIVE CHECK — NEVER guess a health/API path. Guessing e.g. /api/health and treating a 404 as "backend dead" is YOUR error, not the app\'s (many backends expose /health at root, not /api/health). Follow this order:',
         '  1) READ the backend router code to find REAL routes: `grep -rnE \'"/(health|api/[a-z]+|ping|ready)"|app\\.(get|use)\\(|r\\.Get\\(|@Get|router\\.(get|post)\\(|HandleFunc\\(\' server/ cmd/ internal/ apps/server/ 2>/dev/null | head -30`. Probe a REAL simple GET route (e.g. /health) from the code — not a guessed one.',
         '  2) If the backend port is LISTENING but your probed path 404s, the backend is still ALIVE: 404 = no such route (your path guess), NOT a dead process. Confirm with `ss -ltn | grep <port>` and report that backendPort as alive.',
         '  3) A 5xx means the backend PROCESS is up but the request failed in the business/DB layer (missing migration, DB down, bad env). FIX that (run migrations / provision DB / fix .env), do NOT report ok:false just because a guessed endpoint 5xxs — a 5xx proves the server answered.',
@@ -1038,6 +1090,10 @@ function buildSystemPrompt(plan, toolchain) {
         })() : []),
         'OUTPUT SIZE RULE (MANDATORY): a TOOL CALL must be ONE compact JSON under 800 characters. NEVER paste file contents, logs or commands into your JSON — use read_file / edit_file / run_shell tools for that. If you were about to write a long reply, STOP and output the short JSON tool call instead. The FINAL answer may be up to 4000 characters so you can include the key error output in finalStderr.',
         'NO SLEEP-POLLING (MANDATORY): run install/build/start commands in the FOREGROUND and let the shell return — the platform allows long timeouts for install/build (do NOT background them and then poll). NEVER wait with `sleep`/`while`/`for` loops (`sleep 150`, `while pgrep …; do sleep …; done`, `for i in $(seq …); do pgrep …; done`) — the platform caps such wait/poll commands to ~60s, and they waste the whole deployment budget. If you must check a background process, check its log ONCE (`tail -20 /tmp/xxx.log`) and proceed; do not loop.',
+        'K8S-DEPENDENT SERVICES: if a backend fails to start because it needs Kubernetes (logs mention kubeconfig, higress, istio, "gateway init", "connecting to k8s", or it hangs waiting for a cluster): (1) If plan.context.k3sReady is TRUE, the platform already provisioned a k3s CONTROL-PLANE (agent-less: apiserver ready, CRD writes verified, kubeconfig at /etc/rancher/k3s/k3s.yaml) and PRE-REGISTERED any gateway CRDs the plan asked for (plan.context.k3sHigressCrds = true means Higress McpBridge/WasmPlugin CRDs are ready) — apps that only write gateway CR resources via the k8s API work out of the box. The gateway DATA plane (envoy/controller pods) is NOT installed: do NOT deploy pods/Deployments and do not expect real traffic routing — CR resources only. (2) If plan.context.k3sReady is FALSE, DO NOT fake a kubeconfig or try to install k8s yourself — use the app CLI flag that disables its k8s/gateway dependency (check the app\'s --help for gateway/k8s/mesh related flags; common names: --gateway-mode, embedded mode, DISABLE_K8S=1). A backend running with its gateway skipped is a WORKING deployment; one that dies retrying k8s is not.',
+        'FAST UI MOUNTING FOR PYTHON BACKENDS SERVING BUILT FRONTENDS: when a Python backend serves a built frontend via a static route (a routes/ui.py or similar with fastapi StaticFiles mounting an app-relative directory), DO NOT spend many rounds reading route code. The fast path: grep the static_dir/mount path ONCE, then create the directory the mount expects and copy the built frontend in: mkdir -p <target-dir> && cp -r <frontend-dist>/. <target-dir>/. If the dist was built with a base path mismatch, rebuild with the correct base instead of editing route code. Budget at most 2-3 rounds for UI mounting; the priority is backend process up + API endpoints reported.',
+        'PYTHON APPS WITH WHEEL-INTEGRITY SELF-CHECKS (apps whose pyproject declares custom wheel build hooks — the Cython/license extensions + integrity manifest only exist in a real wheel): If plan.context.backendWheel.built is TRUE, the platform ALREADY built and installed the wheel (pkg: plan.context.backendWheel.pkg, entry: plan.context.backendWheel.entry) — do NOT pip install anything again, and NEVER pip install -e . ; just run the installed entry point (see the WHEEL ENTRY REQUIREMENT below). If backendWheel is false/absent and you see exit 78 with "integrity manifest missing", build it yourself: cd <backend-dir> && python3 -m pip wheel . -w /tmp/wheels --no-deps && python3 -m pip install --break-system-packages /tmp/wheels/<pkg>-*.whl, then run the installed binary. Never run integrity-hooked apps from the source dir. TOOL CHOICE IS SECONDARY — ALIVENESS IS THE ONLY JUDGE: starting via the installed binary, `uv run <entry>`, or `python -m <pkg>` are all acceptable IF the process comes up healthy; you must PROVE it: curl a real API route (e.g. /version) and require application/json. A start that fails self-checks (exit 78), exits after startup errors, or serves only text/html is a FAILED start — then fall back to the platform-installed entry in PATH. Do not re-install dependencies or wipe databases to fix a failed start; read the backend log for the root cause first.',
+        ...wheelEntryBlock,
         'HEALTH CHECK (MANDATORY):',
         '- Confirm the app is up with ONE successful curl (2xx/3xx). Then IMMEDIATELY output your final answer.',
         '- Never curl / pgrep / ps the same port repeatedly. Repeating curls wastes rounds — once a single 2xx/3xx curl succeeds, the platform performs the final port discovery and health verification itself.',
@@ -1045,7 +1101,6 @@ function buildSystemPrompt(plan, toolchain) {
         'SERVING RULES (MANDATORY):',
         '- Exception for plain static sites: IF the project really is a static site — its root has a NON-EMPTY index.html and there is NO package.json / build tooling / backend — then serving that directory is CORRECT (e.g. `python3 -m http.server` or `npx serve .`). This is the ONLY case where serving a workspace dir is allowed.',
         '- In EVERY other case: NEVER serve the raw workspace root or source directories (no `npx serve .`, `serve -s .`, `python3 -m http.server`, `caddy file-server` at /workspace or inside src/). That would expose source code and is a FAILURE. Serve ONLY a built artifact directory (e.g. `web/dist`, `build/`, `out/`) or the real app entry; for a monorepo, build and serve the frontend app under the correct subdir, and start the backend too when present.',
-        '- PRODUCTION SERVER FIRST (MANDATORY): serve the app in PRODUCTION mode, not dev mode. Run the project\'s build script first (e.g. `npm run build` / `pnpm build` / `next build` / `vite build` / `nuxt build` / `react-scripts build` / `ng build`), then start the PRODUCTION server or serve the built output (`npm start` / `pnpm start` / `next start` / `vite preview` / `nuxt start` / serve the built dist directory). The package.json "dev" script (`next dev`, `vite dev`, `nuxt dev`, `ng serve` …) is NOT a valid final preview target: dev servers depend on dev-only channels (HMR websocket, on-demand compilation, devtools) that fail under the preview reverse proxy and leave the page rendered but non-interactive. Use a dev server ONLY when the project genuinely has NO build/production-start script; in that case still start its real entry so client-side rendering completes.',
         '- The sandbox may already run its OWN placeholder services on ports 3000 and 5173 — they are NOT your app. Start your app on a free port and confirm YOUR process is the one answering (pgrep -af "<serve cmd>" + curl its port several times).',
         '- A "directory listing" page (titles like "Index of /" or "Directory listing for /") or an EMPTY index.html is NOT a valid app — treat it as FAILURE. Never fake a pass with a static file server.',
         '- Health check must return the REAL application content (HTML with a <title> and app markup, or the backend API JSON). A 200 on a file listing or an empty page is NOT success.',
@@ -1133,8 +1188,9 @@ function buildSystemPrompt(plan, toolchain) {
         'SELF-CONTAINED FULLSTACK SERVERS: some backends also serve their own built frontend, so a single port answers both HTML and API. If the project works that way:',
         '- Detect: the backend reads a built frontend dir (dist / public / build) and serves it, and there is no separate frontend dev server needed for the app to be usable.',
         '- Build the frontend into the location the server expects (check its config / README for the expected output dir), then start the backend WITH the config it needs — many servers do NOT auto-load their .env, so source it or export the required DATABASE_URL etc. (e.g. `cd server && set -a && . ./.env && set +a && npm start`).',
+         'PREVIEW MUST BE A PRODUCTION BUILD — never a dev server. The platform preview proxy serves the app under a sub-path (/preview/<id>/), where dev toolchains break: umi MFSU loads modules via absolute file paths (mf-va_remoteEntry → 404), webpack-dev-server/HMR and Vite dev overlays are unreliable through a proxy. So for frontends: run the production build (e.g. `npm run build` → dist/) and serve the built output statically (npx serve dist -l $PORT) or via the backend; the platform health check REJECTS dev-server pages (it detects MFSU/HMR markers) and will keep rejecting until you serve a production build. Static-serve the dist directory, never the repo root (serving the repo root shows a directory listing of the repos).',
         '- The app answers on the backend port: verify it returns real HTML for / and JSON for an API endpoint. That port IS the app — do not start a second static file server on top of it.',
-        'API ENDPOINTS REPORT (important for full-stack apps): the platform runs a code-side backend check after your final answer to detect a dead backend (root 200 but backend dead = white-screen app). It uses ONLY what you report — there is no path guessing. Include "apiEndpoints": 1-3 REAL API paths that pass through the frontend proxy to the backend — read them from the code (router definitions, next.config rewrites destination, vite proxy target, axios/fetch baseURL + routes, e.g. "/api/v1/auth/login"). PREFER WRITE ENDPOINTS with an explicit method prefix like "POST /api/v1/users/signup" — a GET probe on a POST-only route answers 405 WITHOUT touching the business/DB layer, so it cannot detect a missing migration or a dead database; POSTing an empty JSON body reaches the app validation layer and proves it works. Same for the auth/login endpoint ("POST /api/v1/login/access-token"). If the frontend calls the backend through a NON-standard prefix (e.g. "/console/api", "/v1", "/gateway/api" — read the frontend fetch/axios baseURL and route definitions to find it), ALSO include "apiPrefixes": ["/console/api"] — the platform preview proxy will route those prefixes to your reported backendPort, so a split-frontend/backend app (Next web + Flask/Go/Node api as separate processes) MUST have BOTH processes running: start the backend first (nohup), then the frontend, and report "backendPort" (the backend listen port) plus "apiPrefixes". If you cannot name concrete API paths but know the backend listens on a fixed port (e.g. rewrites destination http://localhost:8080, vite proxy target), include "backendPort": 8080 instead — the platform only checks that the port is LISTENING. Report neither field only if the app truly has no backend.',
+        'API ENDPOINTS REPORT (important for full-stack apps): the platform runs a code-side backend check after your final answer to detect a dead backend (root 200 but backend dead = white-screen app). It uses ONLY what you report — there is no path guessing. Include "apiEndpoints": 1-3 REAL API paths that pass through the frontend proxy to the backend — read them from the code (router definitions, next.config rewrites destination, vite proxy target, axios/fetch baseURL + routes, e.g. "/api/v1/auth/login"). PREFER WRITE ENDPOINTS with an explicit method prefix like "POST /api/v1/users/signup" — a GET probe on a POST-only route answers 405 WITHOUT touching the business/DB layer, so it cannot detect a missing migration or a dead database; POSTing an empty JSON body reaches the app validation layer and proves it works. Same for the auth/login endpoint ("POST /api/v1/login/access-token"). If the frontend calls the backend through a NON-standard prefix (e.g. "/console/api", "/v1", "/gateway/api" — read the frontend fetch/axios baseURL and route definitions to find it), ALSO include "apiPrefixes": ["/console/api"] — the platform preview proxy will route those prefixes to your reported backendPort, so a split-frontend/backend app (Next web + Flask/Go/Node api as separate processes) MUST have BOTH processes running: start the backend first (nohup), then the frontend, and report "backendPort" (the backend listen port) plus "apiPrefixes". If you cannot name concrete API paths but know the backend listens on a fixed port (e.g. rewrites destination http://localhost:8080, vite proxy target), include "backendPort": 8080 instead — the platform only checks that the port is LISTENING. Report neither field only if the app truly has no backend. CRITICAL for split-frontend/backend apps: the frontend must call the backend through SAME-ORIGIN relative paths (e.g. fetch("/api/...") or fetch("/console/api/...")) so requests flow through the preview proxy. If the frontend is configured with an absolute backend URL (e.g. http://localhost:5001, http://api:8000 — check .env.production / NEXT_PUBLIC_API_PREFIX / axios baseURL), REWRITE it to a relative path (empty prefix or "/console/api") before building/starting, and make the backend listen on the port your proxy config targets — absolute localhost URLs will be unreachable from the user\'s browser and the app will hang forever.',
         'When the app responds correctly, output your final answer:',
         '{"action":"final","result":{"ok":true,"tested":["npm install","npm run build","curl /"],"apiEndpoints":["POST /api/v1/users/signup","POST /api/v1/login/access-token"],"backendPort":8080,"finalStderr":"","summary":"<1-2 sentences>"}}',
         'If you cannot make it pass after exhaustive fixes, output:',
@@ -1187,6 +1243,24 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
     // 确定性后端签名（宿主侧毫秒级文件扫描，只算一次）：final 通过时用于校验
     // "agent 上报的 API 面"与"项目实际含后端"的一致性，防止后端死掉仍判成功。
     const backendEvidence = detectBackendSignature(hostWorkspacePath || null);
+    // 平台级 PG 保活：provision 阶段装的 PG 是系统服务，verify 阶段（20+ 分钟）
+    // 可能已被 OOM/清理杀掉（长寿 VM 服务存活问题）——agent 不该管 PG 存活，
+    // 进 verify 前平台确定性拉起（幂等：UP 直接跳过）。仅当 plan 声明需要 PG。
+    if (plan?.context?.dbReady) {
+        try {
+            const runtime = getRuntime();
+            const pg = await runtime.exec.exec('sh', ['-c',
+                'pg_isready -q 2>/dev/null && echo UP || (pg_ctlcluster $(ls /etc/postgresql | head -1) main start >/dev/null 2>&1; sleep 2; pg_isready -q 2>/dev/null && echo REVIVED || echo DOWN)'],
+                {}, { runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
+            if (String(pg.stdout || '').includes('REVIVED')) {
+                console.error('[analyzeVerify] platform revived postgres before verify (was down) — app DB connectivity restored');
+            } else if (String(pg.stdout || '').includes('DOWN')) {
+                console.error('[analyzeVerify] platform could not revive postgres — app migrations may fail (non-fatal, agent fallback covers)');
+            }
+        } catch (e) {
+            console.error(`[analyzeVerify] PG keepalive check error (non-fatal): ${e.message?.slice(0, 100)}`);
+        }
+    }
     // Live-probe the sandbox toolchain so the LLM is told the truth about
     // what is and isn't installed. The previous prompt claimed
     // "node/python/go/cargo" were all available — that was a lie on
@@ -1293,9 +1367,23 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
             }
         };
 
+        let degenerateRounds = 0;
+        let pgKeepaliveLastCheck = 0;
         for (let round = roundStart; round < MAX_AGENT_ROUNDS; round++) {
         if (isAborted?.()) {
             return { ok: false, source: 'ai', aborted: true, warning: '部署已中止', finalStderr: '', tested: [], trail, messages: trimContext(messages), roundsUsed: round };
+        }
+        // PG 周期保活（最长 60s 一次，非阻塞主流程）：verify 阶段 20+ 分钟里 PG 进程
+        // 会反复死（长寿 VM 实测：provision 装好 → 中途死 → app migrations 连接被拒
+        // → agent 拉起 → 又死）。PG 是平台预配的服务，存活是平台职责——每轮开始时
+        // 检查并拉起，agent 无感知。失败 non-fatal（agent 的 DB 排查知识仍兜底）。
+        if (plan?.context?.dbReady && Date.now() - pgKeepaliveLastCheck > 60000) {
+            pgKeepaliveLastCheck = Date.now();
+            getRuntime().exec.exec('sh', ['-c',
+                'pg_isready -q 2>/dev/null && true || { pg_ctlcluster $(ls /etc/postgresql | head -1) main start >/dev/null 2>&1; sleep 1; pg_isready -q 2>/dev/null && echo PG_REVIVED || true; }'],
+                {}, { runtimeRef, cwd: workspacePath, timeoutMs: 45000 })
+                .then((r) => { if (/PG_REVIVED/.test(String(r.stdout || ''))) console.error(`[analyzeVerify] round ${round}: platform revived postgres (was down mid-verify)`); })
+                .catch(() => {});
         }
         if (onRound) onRound(round);
         if (checkAborted()) {
@@ -1387,9 +1475,14 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
             }
             // 泛化命令级去重：同一条核心命令（install/build/start）刚跑过、期间无 edit_file → 阻止重复执行，
             // 而不是让 agent 换日志文件名再跑一次。成功过的命令还可能是"产物没找到"型循环的根因。
+            // 只读类命令（ls/cat/grep/head/find 等）豁免：它们无副作用，重复是正常代码探索
+            // （gpustack 类 fork 的 UI 挂载考古实测 20+ 轮读路由文件——拦截它们只会误杀真探索）。
             let dupSig = null;
             if (parsed.tool === 'run_shell') {
                 dupSig = normalizeCmdSig(parsed.args?.cmd);
+                if (dupSig && /^(ls|cat|grep|head|tail|find|wc|sed|awk|echo|pwd|which|command|stat|file|env|printenv|ss|curl)$/.test(dupSig)) {
+                    dupSig = null; // 只读命令不参与去重/熔断
+                }
                 const prev = dupSig ? ranCmds.get(dupSig) : null;
                 if (prev && lastEditRound < prev.round) {
                     trail.push({ round, action: 'repeat_cmd', cmd: dupSig, prevOk: prev.ok });
@@ -1568,7 +1661,7 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
                         appCheckNudges++;
                         messages.push({
                             role: 'user',
-                            content: `Code-side check REJECTED your final answer: ${probe.reason}. No port is serving real application page content - this usually means the FRONTEND (the page users open in a browser) is NOT running; the API backend alone is not enough for a preview. Start the frontend's PRODUCTION server: first run its build script (\`npm run build\` / \`pnpm build\` / \`next build\` / \`vite build\` / \`nuxt build\` / \`react-scripts build\`), then start the production serve or serve the built output (\`npm start\` / \`pnpm start\` / \`next start\` / \`vite preview\` / \`nuxt start\` / the built dist directory). Do NOT use the "dev" script (\`next dev\`, \`vite dev\`, \`nuxt dev\`) as the final preview target — dev servers depend on dev-only websocket/on-demand channels that fail under the preview proxy and leave the page non-interactive. Only if the project truly has NO build/start script may you use a dev/static server. Confirm the production server returns an HTML page on its port, then output final again with ok:true. Do NOT output ok:true while only the backend/API is listening.`,
+                            content: `Code-side check REJECTED your final answer: ${probe.reason}. No port is serving real application page content - this usually means the FRONTEND (the page users open in a browser) is NOT running; the API backend alone is not enough for a preview. Start the frontend (find it from package.json "dev"/"start" scripts, next.config / vite.config / app package.json / Dockerfile.web; e.g. \`npm run dev\` / \`pnpm dev\` / \`npx serve dist\`), confirm it returns an HTML page on its port, then output final again with ok:true. Do NOT output ok:true while only the backend/API is listening.`,
                         });
                         messages = trimContext(messages);
                         continue;
@@ -1732,7 +1825,27 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
             : (probe.reason || concreteStderr);
         console.error(`[analyzeVerify] fallback FAILURE outcome=${fallbackOutcome} appPort=${probe.port}`);
     }
-    const ok = lastResult ? lastResult.ok : fallbackOk;
+    let ok = lastResult ? lastResult.ok : fallbackOk;
+    // fallback 直跑成功的部署也要校验后端：有后端证据但后端端口未监听的"半成品"
+    // （UI/静态页起了、后端没起——gpustack 类多仓库项目实测）不能放行，否则
+    // 前端拿 HTML 当 JSON → 白屏。校验标准：后端端口监听（verifyBackendAlive，
+    // 排除系统服务端口）。失败 → 部署失败并给出明确原因。
+    if (ok && backendEvidence && backendEvidence.hasBackend) {
+        try {
+            const alive = await verifyBackendAlive(runtimeRef, workspacePath, [], plan, defaultPort).catch(() => null);
+            // 排除前端端口误判：findListeningBackendPort 扫 COMMON_APP_PORTS，可能命中
+            // 前端静态 serve 自己的端口（==appPort）——"backend"==前端 说明后端根本没起
+            // （gpustack 类多仓库实测：agent 没起后端，fallback 的 serve 被当成后端放行）。
+            const backendIsFrontendSelf = alive && appPort && alive.backendPort === appPort;
+            if (!alive || backendIsFrontendSelf) {
+                concreteStderr = `[fallback API check] 项目含后端（${(backendEvidence.evidence || []).slice(0, 2).join('; ')}），但 fallback 直跑后没有任何后端服务端口在监听——后端未启动（只有前端页面在服务）。${concreteStderr || ''}`.slice(0, 4000);
+                ok = false;
+                console.error(`[analyzeVerify] fallback ok but backend not listening (alive=${alive ? alive.backendPort : 'none'}, appPort=${appPort}, selfHit=${backendIsFrontendSelf}) — rejecting (UI-only half-deploy)`);
+            }
+        } catch (e) {
+            console.error(`[analyzeVerify] fallback backend check error (non-fatal): ${e.message}`);
+        }
+    }
     const usedRounds = loopExit ? loopExit.round : MAX_AGENT_ROUNDS;
     const exitDesc = loopExit
         ? `第 ${loopExit.round} 轮提前退出（${loopExit.reason}）`

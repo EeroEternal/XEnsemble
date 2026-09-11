@@ -32,7 +32,7 @@ const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 const VERIFY_STATE_TTL_MS = 30 * 60 * 1000;
 // 单次部署（阶段 1 分析 + 阶段 2 验证）整体超时：verify agent 可能因 run_shell 启动服务未正确
 // 后台化（缺少 &/nohup）而挂起，必须有总超时自动中止，否则部署永不结束、前端一直显示 running。
-const DEPLOY_TOTAL_TIMEOUT_MS = Number(process.env.DEPLOY_TOTAL_TIMEOUT_MS) || 40 * 60 * 1000;
+const DEPLOY_TOTAL_TIMEOUT_MS = Number(process.env.DEPLOY_TOTAL_TIMEOUT_MS) || 60 * 60 * 1000;
 // 缓存版本：verify 判定逻辑每次升级（如 "ok" 页面拒绝、backend_listening 兜底）时 +1。
 // 旧版本缓存自动作废——判定标准变了，旧标准盖的"成功"章不可信，重新生成。
 const CACHE_VERSION = 2;
@@ -501,6 +501,10 @@ function enrichWithDevKind(stack, hostWorkspacePath) {
             const p = readJson(path.join(d, 'package.json')) || {};
             const deps = { ...(p.dependencies || {}), ...(p.devDependencies || {}) };
             const scripts = p.scripts || {};
+            // umi（@umijs/max）排除：其 dev 工具链（MFSU/module federation）用绝对路径
+            // 引用模块，在 /preview/<id>/ 子路径代理下 remoteEntry 404 → live 白屏。
+            // umi 走 build + 静态 serve（生产模式），不做 live。
+            if (deps['@umijs/max'] || deps.umi) continue;
             if (deps.vite) return { devKind: 'vite', dir: d };
             if (deps.next) return { devKind: 'next', dir: d };
             if (deps.nuxt) return { devKind: 'nuxt', dir: d };
@@ -512,9 +516,15 @@ function enrichWithDevKind(stack, hostWorkspacePath) {
     // dev script 兜底留给 startLiveDevServer 自己根据 devKind==='npm' 走 PORT。
     let devKind = stack.framework;
     let devDir = '.';
+    // umi（@umijs/max）的 dev 工具链（MFSU/module federation）用绝对路径引用模块，
+    // 在 /preview/<id>/ 子路径代理下 remoteEntry 404 → live 预览白屏 → umi 走 build +
+    // 静态 serve（frontend/dist 或根 dist 由 ensureFrontendServed 探测）。
+    if (devKind === 'umi' || devKind === '@umijs/max') devKind = null;
     if (stack.type === 'monorepo' || !devKind) {
         const sub = detectSubDev();
         if (sub) { devKind = sub.devKind; devDir = sub.dir; }
+        // 子目录检出 umi 也不走 live（monorepo 里前端是 umi 的场景）
+        if (devKind === 'umi' || devKind === '@umijs/max') devKind = null;
     }
     return {
         type: stack.type,
@@ -2529,6 +2539,263 @@ async function ensureDependencyExcludeInGuest(runtimeRef, workspacePath, onLog) 
 
 // 系统侧自动 provision PostgreSQL：检测项目是否需要 PG，需要则启动沙箱内 PG，
 // 并尝试从配置解析出连接信息后直接建库建用户（幂等），使 verify agent 只需跑 migration。
+// k3s 控制面预配（k8s 依赖应用，方案 A 实测可行 2026-09-10）：
+// boxlite VM 内容器不能 mount overlay/fuse（guest OCI spec 剔除 CAP_SYS_ADMIN），
+// 但 k3s **纯控制面**（--disable-agent）完全不创建容器 → 绕开该限制：
+// apiserver/etcd/controller-manager 以普通进程运行，实测 /readyz 正常、CRD 可写。
+// gpustack 类应用只需 k8s API 写 Higress 资源（--gateway-mode external），不需要
+// 真 Pod 调度 → 该模式完全满足。判定用 apiserver /readyz（无 node 注册是预期）。
+async function ensureK3sIfNeeded(runtimeRef, workspacePath, systemDeps) {
+    const needs = systemDeps && Array.isArray(systemDeps.services) && systemDeps.services.includes('k3s');
+    if (!needs) return { ready: false, reason: 'not needed' };
+    const runtime = getRuntime();
+    try {
+        const readyProbe = '/usr/local/bin/k3s kubectl get --raw /readyz 2>/dev/null | grep -q ok && echo READY || echo NO';
+        // 已装且 Ready？（幂等快速路径）
+        const chk = await runtime.exec.exec('sh', ['-c',
+            'if [ -x /usr/local/bin/k3s ] && ' + readyProbe.replace('/usr/local/bin/k3s kubectl', '/usr/local/bin/k3s kubectl') + '; then echo READY; else echo NO; fi'],
+            {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 });
+        if (String(chk.stdout || '').includes('READY')) {
+            return { ready: true, kubeconfig: '/etc/rancher/k3s/k3s.yaml' };
+        }
+        // 安装二进制（ghfast.top 加速 github release，实测 200；github 直连兜底）
+        console.error('[twoStage] k3s provision: installing k3s binary (control-plane only)...');
+        const inst = await runtime.exec.exec('sh', ['-c',
+            'mkdir -p /usr/local/bin && '
+            + 'curl -sfL --retry 2 -o /usr/local/bin/k3s https://ghfast.top/https://github.com/k3s-io/k3s/releases/download/v1.30.5%2Bk3s1/k3s || curl -sfL --retry 2 -o /usr/local/bin/k3s https://github.com/k3s-io/k3s/releases/download/v1.30.5%2Bk3s1/k3s; '
+            + 'chmod +x /usr/local/bin/k3s && /usr/local/bin/k3s --version && echo BINARY_OK'],
+            {}, { runtimeRef, cwd: workspacePath, timeoutMs: 300000 });
+        if (!/BINARY_OK/.test(String(inst.stdout || ''))) {
+            console.error(`[twoStage] k3s binary download failed: ${String(inst.stdout || '').slice(0, 200)}`);
+            return { ready: false, reason: 'k3s binary download failed' };
+        }
+        // 清掉旧状态（半初始化的 db/token 残留会导致 "failed to normalize server token" fatal）
+        await runtime.exec.exec('sh', ['-c',
+            'pkill -9 k3s 2>/dev/null; sleep 1; rm -rf /var/lib/rancher/k3s /etc/rancher/k3s /tmp/k3s-cp.log; echo PURGED'],
+            {}, { runtimeRef, cwd: workspacePath, timeoutMs: 30000 });
+        // 启动纯控制面：--disable-agent 不创建任何容器（绕开 guest 容器 overlay/fuse
+        // mount EPERM 限制）；--snapshotter native 双保险；TRAEFIK/SERVICELB 关闭瘦身。
+        await runtime.exec.exec('sh', ['-c',
+            'setsid nohup /usr/local/bin/k3s server --disable traefik --disable servicelb --disable-agent --write-kubeconfig-mode 644 --https-listen-port 6443 --snapshotter native > /tmp/k3s-cp.log 2>&1 & echo STARTED'],
+            {}, { runtimeRef, cwd: workspacePath, timeoutMs: 30000 });
+        // 等 apiserver Ready（/readyz 返回 ok；控制面冷启动实测 ~40s，给 180s）
+        let ready = false;
+        for (let i = 0; i < 60; i++) {
+            await new Promise((r) => setTimeout(r, 3000));
+            const rdy = await runtime.exec.exec('sh', ['-c', readyProbe], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+            if (String(rdy.stdout || '').includes('READY')) { ready = true; break; }
+            if (i > 0 && i % 20 === 0) console.error(`[twoStage] k3s provision: waiting for control-plane ready... ${Math.round((i + 1) * 3 / 60 * 10) / 10}min`);
+        }
+        if (!ready) {
+            const diag = await runtime.exec.exec('sh', ['-c',
+                'curl -sk -m 5 -o /dev/null -w "readyz:%{http_code}" https://127.0.0.1:6443/readyz; echo; grep -iE "fatal|error" /tmp/k3s-cp.log | tail -5'],
+                {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 });
+            console.error(`[twoStage] k3s provision: control-plane not ready after 180s. diag: ${String(diag.stdout || '').slice(0, 400)}`);
+            return { ready: false, reason: 'k3s control-plane not ready' };
+        }
+        // CRD 写入冒烟：gpustack 只需要 k8s API 写资源，验证创建/删除 namespace 通过
+        const smoke = await runtime.exec.exec('sh', ['-c',
+            '/usr/local/bin/k3s kubectl create namespace gpustack-smoke >/dev/null 2>&1 && /usr/local/bin/k3s kubectl delete namespace gpustack-smoke >/dev/null 2>&1 && echo SMOKE_OK || echo SMOKE_FAIL'],
+            {}, { runtimeRef, cwd: workspacePath, timeoutMs: 30000 });
+        if (!/SMOKE_OK/.test(String(smoke.stdout || ''))) {
+            console.error('[twoStage] k3s provision: control-plane up but CRD write smoke failed');
+            return { ready: false, reason: 'k3s CRD write failed' };
+        }
+        // 预注册 Higress CRD（gpustack 启动时用 NetworkingHigressIoV1Api create/edit
+        // McpBridge——CRD 未注册会抛 non-404 ApiException → RuntimeError → 启动失败）。
+        // 只 apply CRD 定义（纯 YAML，不跑容器——兼容无 agent 控制面）；数据面
+        // (envoy) 不装：预览场景不产生真实流量路由。
+        const hg = await runtime.exec.exec('sh', ['-c',
+            'curl -sfL --retry 2 -o /tmp/higress-crds.yaml https://ghfast.top/https://raw.githubusercontent.com/higress-group/higress/main/helm/core/crds/customresourcedefinitions.gen.yaml || curl -sfL --retry 2 -o /tmp/higress-crds.yaml https://raw.githubusercontent.com/higress-group/higress/main/helm/core/crds/customresourcedefinitions.gen.yaml; '
+            + 'grep -q "kind: CustomResourceDefinition" /tmp/higress-crds.yaml && '
+            + '/usr/local/bin/k3s kubectl apply -f /tmp/higress-crds.yaml >/dev/null 2>&1 && '
+            + '/usr/local/bin/k3s kubectl get crd mcpbridges.networking.higress.io >/dev/null 2>&1 && echo HIGRESS_CRDS_OK || echo HIGRESS_CRDS_FAIL'],
+            {}, { runtimeRef, cwd: workspacePath, timeoutMs: 90000 });
+        if (!/HIGRESS_CRDS_OK/.test(String(hg.stdout || ''))) {
+            console.error(`[twoStage] k3s provision: Higress CRD registration failed (non-fatal, app can fall back to --gateway-mode disabled): ${String(hg.stdout || '').slice(0, 150)}`);
+        } else {
+            console.error('[twoStage] k3s provision: Higress CRDs registered (mcpbridge/wasmplugin) — external gateway mode fully usable');
+        }
+        console.error('[twoStage] k3s control-plane provisioned and Ready (agent-less, CRD write verified)');
+        return { ready: true, kubeconfig: '/etc/rancher/k3s/k3s.yaml', higressCrds: /HIGRESS_CRDS_OK/.test(String(hg.stdout || '')) };
+    } catch (e) {
+        console.error(`[twoStage] k3s provision error (non-fatal): ${e.message?.slice(0, 150)}`);
+        return { ready: false, reason: e.message?.slice(0, 120) || 'error' };
+    }
+}
+
+// 修复已安装 wheel 的 _integrity.json（上游 gpustack/cubex fork 打包 bug：
+// build hook 生成的 manifest 没被 hatchling 打进 wheel——pyproject artifacts
+// 只列 *.so——装出的包 license 自检必失败 exit 78）。用 hook 相同算法对安装
+// 目录的 .so 重算 sha256 写 manifest，然后 import 冒烟。返回 true = 自检通过。
+async function repairWheelManifest(runtime, runtimeRef, workspacePath, pkg) {
+    try {
+        const fix = await runtime.exec.exec('sh', ['-c',
+            `python3 - <<'PYEOF'\n`
+            + `import hashlib, json, sysconfig\nfrom pathlib import Path\n`
+            + `d = Path("/usr/local/lib/python3.11/dist-packages/${pkg}/license")\n`
+            + `suffix = sysconfig.get_config_var("EXT_SUFFIX") or ".so"\n`
+            + `digests = {}\n`
+            + `for so in sorted(d.glob(f"*{suffix}")):\n`
+            + `    digests[so.name[: -len(suffix)]] = hashlib.sha256(so.read_bytes()).hexdigest()\n`
+            + `if digests:\n`
+            + `    (d / "_integrity.json").write_text(json.dumps(digests, indent=2) + "\\n")\n`
+            + `    print("MANIFEST_OK", len(digests))\n`
+            + `else:\n`
+            + `    print("MANIFEST_NO_SO")\n`
+            + `PYEOF`],
+            {}, { runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
+        const smoke = await runtime.exec.exec('sh', ['-c',
+            'cd /tmp && python3 -c "import gpustack; print(gpustack.__name__ + \' IMPORT_OK\')" 2>&1 | tail -2'],
+            {}, { runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
+        return /MANIFEST_OK/.test(String(fix.stdout || '')) && /IMPORT_OK/.test(String(smoke.stdout || ''));
+    } catch (e) {
+        console.error(`[twoStage] wheel manifest repair error: ${e.message?.slice(0, 120)}`);
+        return false;
+    }
+}
+
+// UI 目录预置（wheel-integrity 类 fork 的确定性问题，同 manifest 修复）：fork 的
+// routes/ui.py 启动时挂载 <pkg安装目录>/ui/{css,js,static,images} 并要求目录存在
+// （不存在 raise → 启动失败）。wheel 不带 ui，前端 dist 又在 frontend/ 下构建——
+// 预配阶段直接把构建产物拷到安装目录，agent 的 20+ 轮 UI 考古（实测）归零。
+// 幂等：ui/index.html 已在则跳过。dist 在 repo 的常见位置中找。
+async function provisionWheelUi(runtime, runtimeRef, workspacePath, pkg) {
+    try {
+        const r = await runtime.exec.exec('sh', ['-c',
+            `UI=/usr/local/lib/python3.11/dist-packages/${pkg}/ui; `
+            + `[ -f "$UI/index.html" ] && echo ALREADY && exit 0; `
+            + `DIST=$(ls -d /workspace/frontend/dist /workspace/web/dist /workspace/dist /workspace/*/dist 2>/dev/null | head -1); `
+            + `[ -n "$DIST" ] && [ -f "$DIST/index.html" ] || { echo NO_DIST; exit 0; }; `
+            + `mkdir -p "$UI" && cp -r "$DIST"/. "$UI"/ && echo UI_OK:$(ls "$UI"/index.html 2>/dev/null | wc -l)`],
+            {}, { runtimeRef, cwd: workspacePath, timeoutMs: 120000 });
+        const out = String(r.stdout || '').trim();
+        if (/UI_OK/.test(out)) console.error(`[twoStage] wheel ui provision: ${pkg} ui mounted from built frontend dist`);
+        else if (/ALREADY/.test(out)) console.error(`[twoStage] wheel ui provision: ${pkg} ui already present (idempotent skip)`);
+        else console.error(`[twoStage] wheel ui provision: ${pkg} no built frontend dist yet — agent will copy it (non-fatal)`);
+        return /UI_OK|ALREADY/.test(out);
+    } catch (e) {
+        console.error(`[twoStage] wheel ui provision error (non-fatal): ${e.message?.slice(0, 120)}`);
+        return false;
+    }
+}
+
+// 平台兜底：verify 失败后用预配的 wheel 入口确定性拉起后端并探活。
+// 与 preview 复验同一套机制（manifest 补齐 + spawn 长命通道 + JSON 探测），
+// 但在这里用于「把失败转成功」——agent 忘了起后端时平台保证最终可用性。
+// 数据驱动：entry/port/dbUrl 全部由调用方传入（来自预配实况），无项目名硬编码。
+async function platformRescueWheelBackend({ runtimeRef, workspacePath, entry, port, dbUrl }) {
+    const runtime = getRuntime();
+    try {
+        // 0) manifest 幂等补齐（agent 自建 wheel 同样可能缺）
+        await repairWheelManifest(runtime, runtimeRef, workspacePath, entry);
+        // 1) 清理目标端口上的残留进程（静态 serve 等），避免端口冲突
+        await runtime.exec.exec('sh', ['-c', `fuser -k ${port}/tcp 2>/dev/null; sleep 1; true`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+        // 2) spawn 长命通道拉起（与 blinkForwarder 同理：exec 起的 detached 进程会被会话收割）
+        await runtime.exec.spawn(
+            entry,
+            ['start', '--port', String(port), '--data-dir', '/tmp/gsdata', '--gateway-mode', 'disabled', '--disable-update-check', '--database-url', dbUrl],
+            { HOME: '/root', PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin' },
+            { runtimeRef, cwd: workspacePath },
+        );
+        // 3) 探活：/version 等 API 路径返回 JSON（最长 40s）
+        for (let i = 0; i < 20; i++) {
+            await new Promise((r) => setTimeout(r, 2000));
+            const rdy = await runtime.exec.exec('sh', ['-c',
+                `for p in /version /health /api/health /; do ct=$(curl -s -m 4 -o /dev/null -w '%{content_type}' http://127.0.0.1:${port}$p 2>/dev/null); case "$ct" in *json*) echo API_JSON; break;; esac; done`],
+                {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 });
+            if (/API_JSON/.test(String(rdy.stdout || ''))) {
+                return { ok: true, port };
+            }
+        }
+        return { ok: false, reason: `spawned ${entry} but no JSON API alive on :${port} within 40s (see /tmp/gs.log in guest)` };
+    } catch (e) {
+        return { ok: false, reason: e.message?.slice(0, 150) || 'spawn error' };
+    }
+}
+
+// 后端 wheel 预构建（Python 私有构建要求代码化，方案同 k3s/PG 预配）：
+// 检测 pyproject.toml 声明自定义 wheel 构建 hook（如 gpustack/cubex 的
+// cythonize_license——编译 .so 并生成 _integrity.json，应用启动自检必需）的包，
+// editable 安装（pip install -e .）永远没有这些产物 → 启动即 exit 78。
+// 平台在 provision 阶段确定性执行：pip wheel . --no-deps（PEP 517 构建隔离自动
+// 拉 cython/hatchling）→ pip install <wheel>；幂等（/tmp marker + wheel 文件）。
+// 结果注入 plan.context.backendWheel，agent 只需直接运行入口。
+async function ensureBackendWheelIfNeeded(runtimeRef, workspacePath) {
+    const runtime = getRuntime();
+    try {
+        // 检测：根 + 一层子目录的 pyproject.toml 含自定义 wheel hook
+        const find = await runtime.exec.exec('sh', ['-c',
+            'for d in . */; do [ -f "${d}pyproject.toml" ] || continue; '
+            + 'grep -qE "hooks\\.custom|cythonize_license" "${d}pyproject.toml" 2>/dev/null && echo "${d%/}"; done'],
+            {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+        const dirs = String(find.stdout || '').split('\n').map((s) => s.trim()).filter(Boolean);
+        if (dirs.length === 0) return { ok: false, reason: 'no wheel-hook packages' };
+        const built = [];
+        for (const dir of dirs) {
+            const meta = await runtime.exec.exec('sh', ['-c',
+                `cd '${dir}' && pkg=$(grep -m1 '^name = ' pyproject.toml | sed 's/^name = "\\(.*\\)"/\\1/'); `
+                + `entry=$(sed -n '/\\[project.scripts\\]/,/^\\[/p' pyproject.toml | grep -m1 '=' | sed 's/ *=.*//; s/"//g'); echo "PKG=$pkg ENTRY=$entry"`],
+                {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+            const m = String(meta.stdout || '').match(/PKG=(\S+) ENTRY=(\S*)/);
+            if (!m || !m[1]) continue;
+            const pkg = m[1], entry = m[2] || pkg;
+            // 幂等：marker + wheel 文件已在 → 跳过构建（同会话 VM 跨部署复用）
+            const idem = await runtime.exec.exec('sh', ['-c',
+                `test -f /tmp/.wheel-built-${pkg} && ls /tmp/wheels/${pkg}-*.whl >/dev/null 2>&1 && echo ALREADY || echo BUILD`],
+                {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+            const alreadyBuilt = String(idem.stdout || '').includes('ALREADY');
+            if (alreadyBuilt) {
+                built.push({ pkg, entry, dir });
+                // 旧版本 marker 只记录「构建过」，不保证 manifest 修复过（上游 fork 的
+                // wheel 缺 _integrity.json）——安装目录没有 manifest 就补，天然幂等。
+                const mf = await runtime.exec.exec('sh', ['-c',
+                    `test -f /usr/local/lib/python3.11/dist-packages/${pkg}/license/_integrity.json && echo HAVE || echo MISSING`],
+                    {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+                if (String(mf.stdout || '').includes('MISSING')) {
+                    await repairWheelManifest(runtime, runtimeRef, workspacePath, pkg);
+                }
+                await provisionWheelUi(runtime, runtimeRef, workspacePath, pkg);
+                continue;
+            }
+            console.error(`[twoStage] backend wheel provision: building ${pkg} (wheel-integrity hooks detected)...`);
+            // gcc（cython 编译）；构建隔离自动拉 cython/hatchling（镜像已配 CN 源）
+            const prep = await runtime.exec.exec('sh', ['-c',
+                'command -v gcc >/dev/null 2>&1 || apt-get install -y -qq gcc >/tmp/gcc-install.log 2>&1; command -v gcc >/dev/null && echo GCC_OK || echo GCC_FAIL; '
+                + 'python3 -m pip --version >/dev/null 2>&1 && echo PIP_OK || { apt-get install -y -qq python3-pip >/tmp/pip-install.log 2>&1 && python3 -m pip --version >/dev/null 2>&1 && echo PIP_OK || echo PIP_FAIL; }'],
+                {}, { runtimeRef, cwd: workspacePath, timeoutMs: 300000 });
+            if (!/GCC_OK/.test(String(prep.stdout || '')) || !/PIP_OK/.test(String(prep.stdout || ''))) {
+                console.error(`[twoStage] backend wheel provision: gcc/pip prep failed (gcc=${/GCC_OK/.test(String(prep.stdout || ''))}, pip=${/PIP_OK/.test(String(prep.stdout || ''))}), skip (agent fallback covers)`);
+                continue;
+            }
+            const build = await runtime.exec.exec('sh', ['-c',
+                `cd '${dir}' && python3 -m pip wheel . -w /tmp/wheels --no-deps -q >/tmp/wheel-build.log 2>&1; `
+                + `ec=$?; tail -3 /tmp/wheel-build.log; `
+                + `[ $ec -eq 0 ] && python3 -m pip install --break-system-packages -q /tmp/wheels/${pkg}-*.whl >>/tmp/wheel-build.log 2>&1 && echo WHEEL_INSTALLED || echo WHEEL_FAIL`],
+                {}, { runtimeRef, cwd: workspacePath, timeoutMs: 360000 });
+            if (!/WHEEL_INSTALLED/.test(String(build.stdout || ''))) {
+                console.error(`[twoStage] backend wheel provision: ${pkg} build failed (non-fatal, agent fallback covers): ${String(build.stdout || '').slice(0, 200)}`);
+                continue;
+            }
+            // 补 _integrity.json（上游 fork 打包 bug——hook 生成的 manifest 没被
+            // 打进 wheel）+ UI 目录预置 + import 自检冒烟。
+            const postFix = await repairWheelManifest(runtime, runtimeRef, workspacePath, pkg);
+            await provisionWheelUi(runtime, runtimeRef, workspacePath, pkg);
+            if (postFix) {
+                console.error(`[twoStage] backend wheel provision: ${pkg} built, manifest repaired, import self-check passed (entry: ${entry})`);
+                built.push({ pkg, entry, dir });
+            } else {
+                console.error(`[twoStage] backend wheel provision: ${pkg} post-fix failed (manifest/import smoke did not pass)`);
+            }
+        }
+        const first = built[0];
+        return { ok: Boolean(first), pkg: first?.pkg || null, entry: first?.entry || null, builtAll: built.map((b) => b.pkg) };
+    } catch (e) {
+        console.error(`[twoStage] backend wheel provision error (non-fatal): ${e.message?.slice(0, 150)}`);
+        return { ok: false, reason: e.message?.slice(0, 120) || 'error' };
+    }
+}
+
 async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan, appConn = null) {
     const runtime = getRuntime();
     // 单次 apt 安装 postgres 的预算（首次冷装 40 包约需 3~5 分钟；太短会在超时边界被杀，
@@ -2540,11 +2807,17 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan, appCon
         // go.mod）、docker-compose（postgres 服务）、启动脚本/Makefile（DATABASE_URL 写死在
         // start-server.sh 这类文件里，如 AgentHarness 的 Go 后端）。
         const r = await runtime.exec.exec('sh', ['-c', `
-            grep -lE '\\"(pg|postgres)\\"|pg-promise|pgx|postgres://' package.json server/package.json apps/*/package.json go.mod */go.mod 2>/dev/null
+            grep -lE '\\"(pg|postgres)\\"|pg-promise|pgx|postgres://' package.json server/package.json apps/*/package.json */package.json go.mod */go.mod 2>/dev/null
             find . -maxdepth 3 \\( -name 'schema.sql' -o -name 'init.sql' \\) 2>/dev/null | grep -v node_modules | head -3
-            grep -lE 'DATABASE_URL|POSTGRES_HOST|POSTGRES_DB|POSTGRES_USER' .env server/.env .env.example server/.env.example apps/*/.env apps/*/.env.example start-server.sh Makefile docker-compose.yml docker-compose.deploy.yml docker-compose.selfhost.yml 2>/dev/null
+            grep -lE 'DATABASE_URL|POSTGRES_HOST|POSTGRES_DB|POSTGRES_USER' .env server/.env .env.example server/.env.example apps/*/.env apps/*/.env.example */.env */.env.example start-server.sh Makefile docker-compose.yml docker-compose.deploy.yml docker-compose.selfhost.yml 2>/dev/null
         `], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
         needs = Boolean(String(r.stdout || '').trim());
+        // 与 detectSystemDeps 的结果互通：它的扫描面含 pyproject.toml（Python 后端的
+        // psycopg2/asyncpg 写在那里，上面的 grep 面不覆盖）——gpustack 类项目实测：
+        // systemDeps 检测到 postgres，但本函数自己的 grep 全空 → 静默跳过安装 →
+        // agent 起后端时 migrations 连接被拒。两处任一命中即装。
+        // （新架构下这个互通判定由 provisionDbServices 外层完成——services 列表本身
+        // 已含 systemDeps 命中的服务，这里不再重复引用 systemDeps。）
     } catch { needs = false; }
     if (!needs) return { ready: false };
 
@@ -2571,9 +2844,10 @@ async function provisionPostgresIfNeeded(runtimeRef, workspacePath, plan, appCon
             }
         }
         await runtime.exec.exec('sh', ['-c', `(service postgresql start 2>/dev/null || pg_ctlcluster $(ls /etc/postgresql 2>/dev/null | head -1) main start 2>/dev/null) || true`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 30000 });
-        // 等 PG 真正就绪（最多 30s，apt 安装后首次启动可能偏慢）
+        // 等 PG 真正就绪（最多 60s：新 VM 首次 apt 装完的冷启动 + initdb 可能偏慢，
+        // 30s 实测不够——超时后 agent 要多花 2-3 轮手动 service start）
         let pgReady = false;
-        for (let i = 0; i < 30; i++) {
+        for (let i = 0; i < 60; i++) {
             await new Promise((r) => setTimeout(r, 1000));
             try {
                 const chk = await runtime.exec.exec('sh', ['-c', 'pg_isready -q 2>/dev/null && echo UP || echo DOWN'], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 8000 });
@@ -3070,7 +3344,10 @@ done
                 );
                 const out = String(check.stdout || '');
                 // serve 的 /api 404 页含 "could not be found"；聚合是 "Backend unavailable" 或后端响应。
-                if (/<html|<head|<!doctype/i.test(out) && !/could not be found/i.test(out)) {
+                // 目录列表页（serve 在无 index.html 的目录起的 "Files within ..."）不算成功——
+                // 多仓库布局下 serve 起在仓库根会列出各仓库目录（用户看到的"项目目录"页）。
+                if (/<html|<head|<!doctype/i.test(out) && !/could not be found/i.test(out)
+                    && !/(Directory listing for|Files within|Index of \/)/i.test(out)) {
                     servedOk = true;
                     break;
                 }
@@ -3164,6 +3441,26 @@ async function clearStaleBuildArtifacts(runtimeRef, workspacePath) {
         return String(r.stdout || '').includes('__CLEAR_BUILD_ARTIFACTS_DONE__');
     } catch (e) {
         console.error(`[twoStage] clear stale build artifacts failed (non-fatal): ${e.message?.slice(0, 120)}`);
+        return false;
+    }
+}
+
+// 部署前清理陈旧监听（长寿 VM 实测隐患：多次部署积累 serve 尸体——npx serve/
+// http.server/python -m http.server 等静态服务器残留监听 8000/3000/9000 等常见
+// 端口，verify agent 会被"端口已被占"误导进 pkill 循环，端口扫描兜底也可能把
+// 尸体误判为应用。只杀通用静态服务进程模式，不碰 DB/应用后端（那些由 PG 预配
+// 与本次部署自己管理）。幂等、best-effort：清理失败不阻塞部署。
+async function clearStaleListeners(runtimeRef, workspacePath) {
+    const runtime = getRuntime();
+    const cmd = `pkill -f "npx --yes serve" 2>/dev/null; pkill -f "serve -s" 2>/dev/null; `
+        + `pkill -f "serve dist" 2>/dev/null; pkill -f "http.server" 2>/dev/null; `
+        + `pkill -f "caddy file-server" 2>/dev/null; sleep 1; echo "__STALE_LISTENERS_CLEARED__"`;
+    try {
+        const r = await runtime.exec.exec('sh', ['-c', cmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 });
+        console.error('[twoStage] stale static listeners cleared (serve/http.server remnants)');
+        return String(r.stdout || '').includes('__STALE_LISTENERS_CLEARED__');
+    } catch (e) {
+        console.error(`[twoStage] clear stale listeners failed (non-fatal): ${e.message?.slice(0, 120)}`);
         return false;
     }
 }
@@ -3562,6 +3859,10 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
     // 函数级声明：provision 裸块（L3051 起）内的 let 是块作用域，verify 失败分支（裸块外）
     // 引用会 ReferenceError: dbProvision is not defined（xensemble 实测部署因此崩溃）。
     let dbProvision = { ready: false, reason: 'not needed' };
+    // 同理函数级：preview 复验（backendWheel.built）在 plan 缓存路径下也要拿到本次
+    // provision 实况（缓存 plan 不含 backendWheel 字段——白屏复现实测）。
+    let k3sProvision = { ready: false, reason: 'not needed' };
+    let backendWheel = { built: false, pkg: null, entry: null };
 
     // A new deploy attempt supersedes any existing 'running' deployment for
     // this project. Mark them 'stopped' so a failed retry doesn't leave a
@@ -3651,8 +3952,11 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
     // 同时清掉上次部署起的残留服务进程，避免端口占用污染本次 verify。
     if (resumeState && ref) {
         try {
+            // 多仓库布局：.git 在各子目录（frontend/.git、backend/.git），/workspace 本身
+            // 不是 git 仓库——对每个含 .git 的目录分别回滚；单仓库则 /workspace/.git 命中。
             await runtime.exec.exec('sh', ['-c',
-                'git checkout -- . 2>&1 | head -3; '
+                'if [ -d .git ]; then git checkout -- . 2>&1 | head -3; fi; '
+                + 'for d in */; do if [ -d "$d.git" ]; then (cd "$d" && git checkout -- . 2>&1 | head -3); fi; done; '
                 + 'pkill -f "node src/server.js" 2>/dev/null; pkill -f "next dev" 2>/dev/null; pkill -f "next-server" 2>/dev/null; '
                 + 'pkill -f uvicorn 2>/dev/null; pkill -f gunicorn 2>/dev/null; pkill -f "npx serve" 2>/dev/null; '
                 + 'pkill -f "python3 -m http.server" 2>/dev/null; pkill -f "vite --host" 2>/dev/null; sleep 1; true'],
@@ -3710,6 +4014,33 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
     }
 
     report({ stage: 'B', message: resumeState ? '阶段 2：续修（接回上次对话继续修复）' : '阶段 2：调用 LLM 2（agent）准备环境 + 测试 + 自动修复' });
+    // 多仓库导入的 clone 是后台异步任务——verify 前必须等所有仓库 clone 到达终态
+    // （ready/failed），否则 backend/ 等副仓库目录不存在/不完整 → 结构探测全部漏判
+    // （hasBackend=false）→ 后端没起也被静默放行 → 白屏部署（frontend+backend 实测）。
+    // 上限 3 分钟：clone 正常几十秒；超时不阻塞部署（按当前状态继续，backend 缺失由
+    // verify 的 backendEvidence/nudge 机制兜底提示）。
+    try {
+        const repoRows = await db.select().from(schema.projectRepos).where(eq(schema.projectRepos.projectId, project.id));
+        const pending = repoRows.filter((r) => r.cloneStatus === 'pending' || r.cloneStatus === 'cloning');
+        if (pending.length) {
+            console.error(`[twoStage] waiting for multi-repo clone (${pending.map((r) => r.subPath).join(', ')} still cloning)...`);
+            const waitStart = Date.now();
+            for (let i = 0; i < 60; i++) {
+                await new Promise((r) => setTimeout(r, 3000));
+                const rows2 = await db.select().from(schema.projectRepos).where(eq(schema.projectRepos.projectId, project.id));
+                const stillPending = rows2.filter((r) => r.cloneStatus === 'pending' || r.cloneStatus === 'cloning');
+                if (!stillPending.length) break;
+                if (isAborted?.()) break;
+                if (Date.now() - waitStart > 180000) {
+                    console.error(`[twoStage] multi-repo clone wait timeout after 3min (${stillPending.map((r) => r.subPath).join(', ')} still cloning) — continuing with current state`);
+                    break;
+                }
+            }
+            console.error(`[twoStage] multi-repo clone wait done in ${Math.round((Date.now() - waitStart) / 1000)}s`);
+        }
+    } catch (e) {
+        console.error(`[twoStage] multi-repo clone wait failed (non-fatal): ${e.message?.slice(0, 150)}`);
+    }
     verifyStart = Date.now();
     console.error(`[twoStage] project=${projectId} verify agent START after ${verifyStart - deployStart}ms`);
     // detected 用真实 host 路径（hostPath），而非 hostWs —— boxlite 下 hostWs 可能是 undefined，
@@ -3769,6 +4100,8 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             repairHostWorkspaceOwnership(hostPath), // host 侧 chown，同步快
             detectDepsCached(ref, wsPath, detected), // guest 侧 deps 探测（改动 2：传入 stack 选对应语言脚本）
             provisionDbServices({ runtimeRef: ref, workspacePath: wsPath, hostWorkspacePath: hostPath, services: systemDeps.services, plan, onLog: (m) => { console.error(`[twoStage] ${m}`); report({ stage: 'B', substage: 'prepare', message: m }); } }),
+            ensureK3sIfNeeded(ref, wsPath, systemDeps), // k8s 依赖应用：预装 k3s 单节点（幂等）
+            ensureBackendWheelIfNeeded(ref, wsPath), // wheel-integrity 类 Python 包：预构建+安装 wheel（幂等）
             ensureGuestToolchains({
                 runtimeRef: ref, workspacePath: wsPath, toolchains: systemDeps.toolchains || [],
                 onLog: (m) => { console.error(`[twoStage] ${m}`); report({ stage: 'B', substage: 'prepare', message: m }); },
@@ -3781,7 +4114,23 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         const ownershipResult = results[0];
         const depsResult = results[1];
         const pgResult = results[2];
-        const toolchainsResult = results[3];
+        const k3sResult = results[3];
+        if (k3sResult.status === 'fulfilled') k3sProvision = k3sResult.value || k3sProvision;
+        else console.error(`[twoStage] k3s provision rejected: ${k3sResult.reason}`);
+        if (k3sProvision.ready) {
+            console.error(`[twoStage] k3s ready: kubeconfig at ${k3sProvision.kubeconfig}`);
+        } else if (k3sProvision.reason === 'k3s_unavailable_overlay_forbidden') {
+            console.error('[twoStage] k3s confirmed unavailable in this sandbox (nested overlay forbidden) — verify prompt will steer the agent to the app no-k8s mode');
+        }
+        const wheelResult = results[4];
+        if (wheelResult.status === 'fulfilled') {
+            const w = wheelResult.value || {};
+            backendWheel = { built: Boolean(w.ok), pkg: w.pkg || null, entry: w.entry || null };
+            if (backendWheel.built) console.error(`[twoStage] backend wheel ready: ${w.pkg} (entry: ${w.entry}) — agent runs it directly`);
+        } else {
+            console.error(`[twoStage] backend wheel provision rejected: ${wheelResult.reason}`);
+        }
+        const toolchainsResult = results[5];
 
         if (ownershipResult.status === 'rejected') {
             console.error(`[twoStage] ownership fix failed: ${ownershipResult.reason}`);
@@ -3834,7 +4183,6 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             console.error(`[twoStage] platform install error (non-fatal, agent will install): ${e.message?.slice(0, 200)}`);
         }
         // Go 工具链版本预检与预装：go.mod 要求版本高于沙箱时平台直接装好（npmmirror 镜像），
-        // 避免 agent 在「apt 装旧 Go / 降级 go.mod / 编译失败」循环上烧掉 30+ 分钟（multica 实测）。
         let goToolchain = { ran: false };
         try {
             goToolchain = await ensureGuestGoToolchain({
@@ -3860,7 +4208,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             await injectGatewayBinary(ref, wsPath, (m) => console.error(`[twoStage] ${m}`));
         }
         // 改动 2：plan.context 同时存 depsCached (boolean, 向后兼容) + depsStatus (per-subpackage)
-        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, runtimeVersions: runtimeVersions.ran ? runtimeVersions : null, stack: { type: detected?.type, framework: detected?.framework }, systemDeps: systemDeps.services, toolchains: systemDeps.toolchains || [], toolchainResults: toolchainsResult.status === 'fulfilled' ? toolchainsResult.value : null, startCandidates, dbServices, dbReady: dbProvision.ready, dbProvision: dbProvision.ready ? { ready: true } : { ready: false, code: dbProvision.code || null, reason: dbProvision.reason || null }, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, dbPassword: dbProvision.dbPassword || null, successRun: plan._successRun || null } };
+        plan = { ...plan, context: { tree, depsCached, depsStatus, platformInstall: platformInstall.ran ? { ran: true, ok: !!platformInstall.ok, cmds: platformInstall.cmds || [], remainingStale: platformInstall.remainingStale ?? null } : null, goToolchain: goToolchain.ran ? { ok: !!goToolchain.ok, version: goToolchain.version || null, installed: !!goToolchain.installed } : null, runtimeVersions: runtimeVersions.ran ? runtimeVersions : null, stack: { type: detected?.type, framework: detected?.framework }, systemDeps: systemDeps.services, toolchains: systemDeps.toolchains || [], toolchainResults: toolchainsResult.status === 'fulfilled' ? toolchainsResult.value : null, startCandidates, dbServices, dbReady: dbProvision.ready, dbProvision: dbProvision.ready ? { ready: true } : { ready: false, code: dbProvision.code || null, reason: dbProvision.reason || null }, dbUser: dbProvision.dbUser || null, dbName: dbProvision.dbName || null, dbPassword: dbProvision.dbPassword || null, k3sReady: k3sProvision.ready, k3sKubeconfig: k3sProvision.kubeconfig || null, k3sHigressCrds: k3sProvision.higressCrds === true, backendWheel, successRun: plan._successRun || null } };
         delete plan._successRun;
         // 新分析出的计划回写缓存，供二次部署跳过阶段 A（depsCached 是本次检测结果，不固化）。
         // 缓存策略：只缓存真正从 LLM 出的 plan（source='opencode'/'ai'）。detectStack 兜底
@@ -3873,6 +4221,13 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
             console.error(`[twoStage] skip caching plan (source=${plan.source || 'unknown'}) — heuristic or fallback plan, recompute on next deploy`);
         }
     }
+    // backendWheel 等预配实况必须在 planFresh 分支之外补写：二次部署走 plan 缓存时
+    // 不会进入上面的注入点，而 preview 复验（backendWheel.built）依赖它判断是否为
+    // wheel-integrity 项目——缓存 plan 缺字段会导致复验被跳过（白屏复现实测）。
+    // 注意：这里只引用函数级变量（backendWheel/k3sProvision/dbProvision），绝不引用
+    // planFresh 分支内的局部变量（tree/depsCached 等）——否则走缓存路径必然
+    // ReferenceError 且被外层 catch 吞掉，后续 preview 全部失效（两轮白屏实测）。
+    plan = { ...plan, context: { ...(plan.context || {}), backendWheel: { built: Boolean(backendWheel.built), pkg: backendWheel.pkg || null, entry: backendWheel.entry || null }, k3sReady: plan?.context?.k3sReady ?? k3sProvision.ready, dbReady: plan?.context?.dbReady ?? dbProvision.ready } };
     // 阶段 B 子阶段心跳：长任务（单条 run_shell 可能跑几十秒）期间周期复报当前子阶段，
     // 让前端进度条保持"进行中"而非停在旧步骤。纯上报，不改 verify 逻辑。
     let currentSubstage = null;
@@ -3885,8 +4240,9 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         report({ stage: 'B', substage: currentSubstage, message: `阶段 2 · ${currentSubstage}` });
     }, 5000);
 
-    // 总超时固定 15 分钟（DEPLOY_TOTAL_TIMEOUT_MS 可配）。超时不加时——性能问题
-    // 通过镜像源提速（configureGuestMirrors）与断点续修解决，而非延长等待。
+    // 总超时默认 60 分钟（DEPLOY_TOTAL_TIMEOUT_MS 可配）。40min 实测不够重型项目
+    // （multi-repo + gpustack 依赖安装 4min + umi 构建 3min + agent 深思考每轮至 100s）。
+    // 超时不加时——性能问题通过镜像源提速（configureGuestMirrors）与断点续修解决。
     const totalTimeoutMs = DEPLOY_TOTAL_TIMEOUT_MS;
 
     // 超时语义：到点触发 cancelled 让 verify agent 在下一轮检查点优雅退出（带回
@@ -3903,6 +4259,7 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
     // 清掉残留的前端构建产物（.next/out/dist），迫使 verify 重新构建——
     // 避免 agent 看到 .next 已存在就跳过 build、复用残缺产物导致预览白屏（见函数注释）。
     await clearStaleBuildArtifacts(ref, wsPath);
+    await clearStaleListeners(ref, wsPath);
 
     let verifySettled = false;
     const verify = await new Promise((resolve) => {
@@ -3968,6 +4325,36 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         stage: 'B',
         message: `阶段 2 ${verify.ok ? '✓ 通过' : '✗ 失败'}（agent: ${verify.source || 'opencode'}）`,
     });
+    // 平台兜底（代码级，数据驱动）：verify 失败但平台预构建了 wheel-integrity 后端时，
+    // 不立即判死——平台确定性拉起后端（spawn 长命通道）+ 探活，成功则部署转成功。
+    // 触发条件全部来自预配实况（backendWheel.built），无 wheel 的项目零感知；
+    // 拉起失败维持原失败结果（不掩盖 agent 的真实错误）。
+    if (!verify.ok && !verify.aborted && backendWheel?.built && backendWheel?.entry) {
+        const rescuePort = Number(verify?.appPort) || Number(plan?.context?.startCandidates?.ports?.[0]) || 8000;
+        const rUser = dbProvision?.dbUser || plan?.context?.dbUser || backendWheel.entry;
+        const rDb = dbProvision?.dbName || plan?.context?.dbName || backendWheel.entry;
+        const rPass = dbProvision?.dbPassword || plan?.context?.dbPassword || backendWheel.entry;
+        console.error(`[twoStage] verify failed but wheel backend available — platform rescue attempt: spawn ${backendWheel.entry} on :${rescuePort}`);
+        try {
+            const rescue = await platformRescueWheelBackend({ runtimeRef: ref, workspacePath: wsPath, entry: backendWheel.entry, port: rescuePort, dbUrl: `postgresql://${rUser}:${rPass}@127.0.0.1:5432/${rDb}` });
+            if (rescue.ok) {
+                console.error(`[twoStage] platform rescue SUCCESS: backend alive on :${rescuePort} — converting verify failure to success`);
+                verify = {
+                    ...verify,
+                    ok: true,
+                    appPort: rescuePort,
+                    apiVerdict: 'platform_rescued',
+                    apiEndpoints: verify.apiEndpoints?.length ? verify.apiEndpoints : ['/version'],
+                    source: verify.source || 'ai',
+                    warning: `${verify.warning || ''} [平台兜底：agent 未启动后端，平台已通过预配的 ${backendWheel.entry} 确定性拉起并探活]`.slice(0, 400),
+                };
+            } else {
+                console.error(`[twoStage] platform rescue failed (${rescue.reason}) — keeping original verify failure`);
+            }
+        } catch (e) {
+            console.error(`[twoStage] platform rescue error (non-fatal): ${e.message?.slice(0, 150)}`);
+        }
+    }
     if (!verify.ok) {
         // 超轮数/无 final：保存对话历史，前端可"从上次继续修复"。
         if (Array.isArray(verify.messages) && verify.messages.length) {
@@ -4067,6 +4454,69 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         let mode = 'static';
         const previewLog = (m) => console.error(`[twoStage] ${m}`);
         console.error(`[twoStage] preview: verify.ok=${verify.ok} verify.appPort=${verify?.appPort ?? 'null'} -> using port ${port}`);
+
+        // preview 时刻复验：verify 通过（apiVerdict=alive）≠ preview 时刻后端还活着——
+        // 实测 gpustack 在 verify 结束到 preview 之间死掉（boxlite exec 会话收割后台
+        // 进程），其 UI 目录被静态 serve 接管（全部 API 路径回 index.html）→ 前端 JS
+        // 拿 HTML 当 JSON → orgs.filter/nodes.forEach 白屏。
+        // 触发条件【不依赖】backendWheel.built：wheel 可能是 agent 兜底构建的（预配
+        // 失败时），其 wheel 同样缺 _integrity.json（上游打包 bug 与谁构建无关，实测
+        // agent 构建 → exit 78 → cp 修复被熔断 → 阶段 2 失败）。流程：
+        //   1) 探 appPort 是否 JSON；2) 检测安装目录缺 manifest → 幂等补；3) spawn 拉起。
+        // 重启用 runtime.exec.spawn（长命通道，同 blinkForwarder 的教训：exec 起的
+        // detached 进程随 exec 会话 WS 关闭被收割——spawn 起的才与预览同生命周期）。
+        previewLog(`preview: recheck gate: backendWheel.built=${backendWheel?.built} verify.ok=${verify?.ok} appPort=${verify?.appPort} (diag)`);
+        let previewBackendRestarted = false;
+        if (verify?.ok && verify?.appPort) {
+            const bePort = backendPortFromVerify || verify.appPort;
+            const chk = await runtime.exec.exec('sh', ['-c',
+                `for p in /version /health /api/health /auth/config /; do `
+                + `ct=$(curl -s -m 4 -o /dev/null -w '%{content_type}' http://127.0.0.1:${bePort}$p 2>/dev/null); `
+                + `case "$ct" in *json*) echo API_JSON; break;; esac; done; echo CHK_DONE; `
+                + `ls /usr/local/lib/python3.11/dist-packages/gpustack/license/_integrity.json >/dev/null 2>&1 && echo MANIFEST_HAVE || echo MANIFEST_MISSING`],
+                {}, { runtimeRef: ref, cwd: wsPath, timeoutMs: 30000 });
+            const apiAlive = /API_JSON/.test(String(chk.stdout || ''));
+            const manifestMissing = /MANIFEST_MISSING/.test(String(chk.stdout || ''));
+            if (!apiAlive) {
+                // manifest 缺失（无论 wheel 谁装的）→ 平台补（幂等；上游打包 bug 的确定性修复）
+                if (manifestMissing) {
+                    previewLog('preview: manifest missing in installed wheel (agent-built fallback path) — repairing');
+                    await repairWheelManifest(runtime, ref, wsPath, 'gpustack');
+                }
+                previewLog(`preview: port ${bePort} serves no JSON at preview time — backend died after verify; restarting via spawn (long-lived channel)`);
+                const entry = backendWheel?.entry || plan?.context?.backendWheel?.entry || 'gpustack';
+                // DB 凭据优先用本次预配实况（dbProvision 函数级变量——provisionDbServices
+                // 解析 app 自身配置得出的 user/db/password），plan.context.dbUser 只作兜底
+                // （走 plan 缓存的部署里是旧值或缺失——实测导致 spawn 的后端 DB 认证失败起不来）。
+                const dbUser = dbProvision?.dbUser || plan?.context?.dbUser || entry;
+                const dbName = dbProvision?.dbName || plan?.context?.dbName || entry;
+                const dbPassword = dbProvision?.dbPassword || plan?.context?.dbPassword || entry;
+                const dbUrl = `postgresql://${dbUser}:${dbPassword}@127.0.0.1:5432/${dbName}`;
+                try {
+                    await runtime.exec.exec('sh', ['-c', `fuser -k ${bePort}/tcp 2>/dev/null; sleep 1; true`], {}, { runtimeRef: ref, cwd: wsPath, timeoutMs: 15000 });
+                    await runtime.exec.spawn(
+                        entry,
+                        ['start', '--port', String(bePort), '--data-dir', '/tmp/gsdata', '--gateway-mode', 'disabled', '--disable-update-check', '--database-url', dbUrl],
+                        { HOME: '/root', PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin' },
+                        { runtimeRef: ref, cwd: wsPath },
+                    );
+                    previewBackendRestarted = true;
+                    // 等后端就绪：轮询 API JSON（最长 90s——gpustack 冷启动要跑 DB 迁移 +
+                    // 种子化内置后端，实测 40s 不够；探针从单一路径扩为多路径 + content-type 判定）
+                    let up = false;
+                    for (let i = 0; i < 45; i++) {
+                        await new Promise((r) => setTimeout(r, 2000));
+                        const rdy = await runtime.exec.exec('sh', ['-c',
+                            `for p in /version /health /; do ct=$(curl -s -m 4 -o /dev/null -w '%{content_type}' http://127.0.0.1:${bePort}$p 2>/dev/null); case "$ct" in *json*) echo UP; break;; esac; done`],
+                            {}, { runtimeRef: ref, cwd: wsPath, timeoutMs: 20000 });
+                        if (/UP/.test(String(rdy.stdout || ''))) { up = true; break; }
+                    }
+                    previewLog(up ? `preview: backend restarted via spawn, API alive on :${bePort}` : `preview: backend spawn did not come up within 90s — check /tmp/gs-preview.log in guest`);
+                } catch (e) {
+                    previewLog(`preview: backend spawn failed (non-fatal): ${e.message?.slice(0, 150)}`);
+                }
+            }
+        }
 
         // xensemble 自身嵌套部署：verify agent 常只 serve 前端 dist（web/dist）而漏起后端，
         // 登录/注册 API 无人响应。系统侧确定性拉起后端（PG + db:migrate + node src/server.js）。
