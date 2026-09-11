@@ -343,7 +343,7 @@ export default function ProjectSourceSelect({
                     disabled={selectedIds.length === 0}
                     className={`ml-auto shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                       selectedIds.length > 0
-                        ? 'bg-zinc-900 text-white hover:bg-zinc-800'
+                        ? 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800'
                         : 'border border-zinc-200 bg-zinc-50 text-zinc-400 cursor-not-allowed'
                     }`}
                   >
@@ -415,7 +415,7 @@ export default function ProjectSourceSelect({
                     type="button"
                     onClick={submitUrlImport}
                     disabled={!urlInput.trim()}
-                    className="shrink-0 px-2.5 py-1.5 rounded-md text-xs font-medium bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40"
+                    className="shrink-0 px-2.5 py-1.5 rounded-md text-xs font-medium bg-zinc-900 text-zinc-50 hover:bg-zinc-800 disabled:opacity-40"
                   >
                     {t('git:import_url_confirm', { defaultValue: 'Confirm' })}
                   </button>
