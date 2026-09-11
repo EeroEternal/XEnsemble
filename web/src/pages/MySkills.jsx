@@ -260,12 +260,6 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
   return (
     <div className={`${consoleAdminPageClass} px-4 sm:px-6 lg:px-8 py-6 ${className}`} aria-hidden={ariaHidden}>
       <PageHeader title={t('skills:my_skills')} />
-      <div className="flex items-center gap-2">
-        <Button size="sm" variant="secondary" onClick={() => navigate('/skills/market')}>
-          <Store className="w-4 h-4" />
-          {t('skills:market', { defaultValue: 'Skills Market' })}
-        </Button>
-      </div>
 
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs text-zinc-500 shrink-0">{t('skills:count', { count: skills.length, defaultValue: '{{count}} skills' })}</span>
@@ -280,6 +274,10 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
           <button type="button" onClick={() => fetchSkills()} disabled={refreshing} className={consoleIconButtonClass} title={t('common:action.refresh')}>
             {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           </button>
+          <Button type="button" onClick={() => navigate('/skills/market')} variant="secondary" size="md" className="shrink-0">
+            <Store className="w-4 h-4" />
+            {t('skills:market', { defaultValue: 'Skills Market' })}
+          </Button>
           <Button type="button" onClick={() => fileInputRef.current?.click()} disabled={importing} variant="secondary" size="md" className="shrink-0">
             {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
             {t('skills:import', { defaultValue: 'Import Skill' })}
