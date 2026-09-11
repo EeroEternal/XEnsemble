@@ -45,7 +45,6 @@ export default function GeneralSettingsPanel() {
           max_runtimes: Number(quota.max_runtimes ?? 1),
           resource_tier: quota.resource_tier,
         },
-        session_ttl_hours: Number(draft.session_ttl_hours),
       }),
     });
     const data = await res.json();
@@ -178,31 +177,6 @@ export default function GeneralSettingsPanel() {
           </div>
 
           <div className="border-t border-zinc-100 my-4" />
-
-          {/* Session TTL — horizontal label:value in both modes */}
-          <div className="mb-3">
-            <h3 className={consoleSectionLabelClass}>{t('sessions:title')}</h3>
-          </div>
-
-          <div className="mb-6">
-            {isEdit ? (
-              <div className="flex items-center justify-between gap-4 min-h-[38px]">
-                <span className="text-xs text-zinc-500 shrink-0">{t('settings:general.session_ttl')}</span>
-                <Input
-                  type="number"
-                  min={1}
-                  value={draft.session_ttl_hours ?? 24}
-                  onChange={(e) => editMode.setDraft({ ...draft, session_ttl_hours: e.target.value })}
-                  className="w-32"
-                />
-              </div>
-            ) : (
-              <ReadOnlyField
-                label={t('settings:general.session_ttl')}
-                value={settings.session_ttl_hours ? `${settings.session_ttl_hours} ${t('settings:general.hours_unit')}` : null}
-              />
-            )}
-          </div>
 
           {/* Action buttons */}
           <div className="pt-2 flex justify-end gap-2">
