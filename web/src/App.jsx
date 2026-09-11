@@ -24,6 +24,7 @@ import { cn } from './lib/utils';
 import { APP_SHELL_MAIN_PY_CLASS, APP_SHELL_PAD_CLASS } from './lib/appShellLayout';
 import { bgCanvas, consoleButtonFocusClass } from './lib/consoleTokens';
 import { getAccessToken, setTokens, clearTokens, apiFetch, isStoredAuthStale, setAuthExpiredHandler, getStoredUser, setStoredUser, clearStoredUser } from './lib/api';
+import { setSessionContext } from './lib/sessionContext';
 import { TerminalThemeProvider } from './hooks/useTerminalTheme.jsx';
 
 export const AuthContext = React.createContext(null);
@@ -402,6 +403,9 @@ function App() {
   const logout = async () => {
     await clearTokens();
     clearStoredUser();
+    // 模块级 sessionContext 是 SPA 单例，登出必须清掉，否则下一个账号
+    // 的 API 调用会带上一个账号的 session_id →「会话不存在」。
+    setSessionContext(null);
     setToken(null);
     setUser(null);
     navigate('/login', { replace: true });
