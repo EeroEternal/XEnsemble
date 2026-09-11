@@ -1,5 +1,6 @@
 const platformSettings = require('../admin/PlatformSettings');
 const userPreferences = require('../admin/UserPreferences');
+const usageService = require('../admin/UsageService');
 const terminalThemes = require('../config/terminalThemes');
 const { previewSpawnEnv } = require('../agents/agentEnv');
 const { db } = require('../db/index');
@@ -26,6 +27,28 @@ function registerUserRoutes(fastify) {
             return await userPreferences.updatePreferences(request.user.id, request.body || {});
         } catch (err) {
             return sendPublicError(reply, err, 'Failed to update preferences', 400, request.locale || 'en');
+        }
+    });
+
+    // 本人 Token 用量（用户自助：强制 self 过滤，仅可见自己的数据）
+    fastify.get('/api/v1/usage/me', { preValidation: [fastify.authenticate] }, async (request, reply) => {
+        try {
+            const { days } = request.query || {};
+            const range = usageService.normalizeRange(days);
+            const [summary, byProject, trend, prevTotal] = await Promise.all([
+                usageService.getMyUsageSummary(request.user.id, { days }),
+                usageService.getMyUsageByProject(request.user.id, { days }),
+                usageService.getMyUsageTrend(request.user.id, { days }),
+                // 环比：上一个等长周期的总量
+                usageService.getTotalBetween(
+                    request.user.id,
+                    range.sinceTs - range.days * 24 * 60 * 60 * 1000,
+                    range.sinceTs,
+                ),
+            ]);
+            return { summary, byProject, trend, prevTotalTokens: prevTotal, days: range.days };
+        } catch (err) {
+            return sendPublicError(reply, err, 'Failed to query usage', 500, request.locale || 'en');
         }
     });
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, Pencil, Pause, Play, CheckCircle, Clock, KeyRound, Loader2, RefreshCw, Search } from 'lucide-react';
 
 import Button from '../components/Button';
@@ -24,6 +25,7 @@ import {
 
 import { apiFetch } from '../lib/api';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
+import { formatTokens, formatTokensFull } from '../lib/formatTokens';
 import { useTranslation } from 'react-i18next';
 
 const emptyForm = {
@@ -39,6 +41,7 @@ const emptyForm = {
 
 export default function UsersAdmin() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { showToast } = useToast();
 
   function statusBadge(status) {
@@ -267,6 +270,7 @@ export default function UsersAdmin() {
               <col className="w-1/6" />
               <col className="w-1/6" />
               <col className="w-1/6" />
+              <col className="w-1/6" />
               <col className="w-48" />
             </colgroup>
             <thead>
@@ -274,6 +278,7 @@ export default function UsersAdmin() {
                 <th className={consoleTableHeadCellClass}>{t('users:field.user')}</th>
                 <th className={consoleTableHeadCellClass}>{t('users:field.status')}</th>
                 <th className={consoleTableHeadCellClass}>{t('users:field.usage')}</th>
+                <th className={consoleTableHeadCellClass}>{t('users:usage.token_7d')}</th>
                 <th className={consoleTableHeadCellClass}>{t('users:field.last_login')}</th>
                 <th className={consoleTableHeadCellClass}>{t('common:table.actions')}</th>
               </tr>
@@ -281,11 +286,11 @@ export default function UsersAdmin() {
             <tbody className="divide-y divide-zinc-100">
               {loading ? (
                 <tr>
-                  <td colSpan={5} className={`${consoleTableBodyCellClass} text-zinc-400`}>{t('common:state.loading')}</td>
+                  <td colSpan={6} className={`${consoleTableBodyCellClass} text-zinc-400`}>{t('common:state.loading')}</td>
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>
+                  <td colSpan={6} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>
                     {users.length === 0 ? t('users:empty.no_users', { defaultValue: 'No users yet.' }) : t('users:empty.no_match', { defaultValue: 'No users match your search.' })}
                   </td>
                 </tr>
@@ -304,6 +309,16 @@ export default function UsersAdmin() {
                       <span>{t('users:field.sessions')} {user.active_sessions}/{user.quotas?.max_sessions == null ? t('common:state.unlimited') : user.quotas.max_sessions}</span>
                       <span>{t('users:field.previews')} {user.active_previews}/{user.quotas?.max_previews == null ? t('common:state.unlimited') : user.quotas.max_previews}</span>
                     </div>
+                  </td>
+                  <td className={consoleTableBodyCellClass}>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/admin/usage?user=${user.id}`)}
+                      className="font-mono text-xs tabular-nums text-zinc-700 hover:text-blue-600 hover:underline"
+                      title={formatTokensFull(user.usage_7d_total_tokens || 0)}
+                    >
+                      {formatTokens(user.usage_7d_total_tokens || 0)}
+                    </button>
                   </td>
                   <td className={consoleTableBodyCellClass}>
                     <span className="text-xs text-zinc-500" title={user.last_login_at ? new Date(user.last_login_at).toLocaleString() : undefined}>

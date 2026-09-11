@@ -9,6 +9,7 @@ import {
   GitBranch,
   Gauge,
   Palette,
+  BarChart3,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
@@ -25,6 +26,7 @@ const ALL_TABS = [
   { id: 'images', labelKey: 'images:agent_images', icon: Container, route: '/custom-images', adminOnly: true },
   { id: 'agents', labelKey: 'agents:title', icon: Bot, route: '/admin/agents', adminOnly: true },
   { id: 'users', labelKey: 'users:title', icon: Users, route: '/admin/users', adminOnly: true },
+  { id: 'usage', labelKey: 'users:usage.title', icon: BarChart3, route: '/admin/usage', adminOnly: true },
   { id: 'gateway', labelKey: 'gateway:title', icon: Globe, route: '/admin/gateway', adminOnly: true },
 ];
 

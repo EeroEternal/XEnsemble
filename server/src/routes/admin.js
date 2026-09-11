@@ -1,5 +1,6 @@
 const { eq } = require('drizzle-orm');
 const userAdmin = require('../admin/UserAdminService');
+const usageService = require('../admin/UsageService');
 const platformSettings = require('../admin/PlatformSettings');
 const platformSecrets = require('../admin/PlatformSecrets');
 const agentGatewayConfig = require('../admin/AgentGatewayConfig');
@@ -573,6 +574,55 @@ function registerAdminRoutes(fastify) {
             };
         } catch (err) {
             return sendPublicError(reply, err, 'Failed to get skill pipeline stats', 500, request.locale || 'en');
+        }
+    });
+
+    // ── Token 用量统计 ──
+    // 平台总览：汇总 + 日趋势 + TOP5 用户
+    fastify.get('/api/v1/admin/usage/overview', { preValidation: adminPre }, async (request, reply) => {
+        try {
+            return await usageService.getPlatformOverview({ days: request.query?.days });
+        } catch (err) {
+            return sendPublicError(reply, err, 'Failed to query usage overview', 500, request.locale || 'en');
+        }
+    });
+
+    // 用户用量排行（含 0 用量用户；支持 sort=tokens|requests）
+    fastify.get('/api/v1/admin/usage/summary', { preValidation: adminPre }, async (request, reply) => {
+        try {
+            let items = await usageService.getUsageByUser({ days: request.query?.days });
+            const sort = String(request.query?.sort || 'tokens');
+            if (sort === 'requests') {
+                items.sort((a, b) => b.requests - a.requests);
+            } else {
+                items.sort((a, b) => b.totalTokens - a.totalTokens);
+            }
+            const q = String(request.query?.q || '').trim().toLowerCase();
+            if (q) {
+                items = items.filter((u) =>
+                    (u.username || '').toLowerCase().includes(q)
+                    || (u.displayName || '').toLowerCase().includes(q));
+            }
+            const totalTokens = items.reduce((acc, u) => acc + u.totalTokens, 0);
+            return { items, total: items.length, totalTokens, days: usageService.normalizeRange(request.query?.days).days };
+        } catch (err) {
+            return sendPublicError(reply, err, 'Failed to query usage summary', 500, request.locale || 'en');
+        }
+    });
+
+    // 单用户详情：汇总 + 日趋势 + 模型分布 + 项目分布
+    fastify.get('/api/v1/admin/usage/users/:id', { preValidation: adminPre }, async (request, reply) => {
+        try {
+            const rows = await db.select({ id: schema.users.id, username: schema.users.username })
+                .from(schema.users).where(eq(schema.users.id, request.params.id));
+            if (rows.length === 0) {
+                return reply.code(404).send({ error: t('errors:user_not_found', { defaultValue: 'User not found' }, request.locale || 'en'), code: 'user_not_found' });
+            }
+            const detail = await usageService.getUserUsageDetail(request.params.id, { days: request.query?.days });
+            const recent = await usageService.getUserRecentRequests(request.params.id, { days: request.query?.days, limit: 20 });
+            return { user: rows[0], ...detail, recent, days: usageService.normalizeRange(request.query?.days).days };
+        } catch (err) {
+            return sendPublicError(reply, err, 'Failed to query user usage', 500, request.locale || 'en');
         }
     });
 

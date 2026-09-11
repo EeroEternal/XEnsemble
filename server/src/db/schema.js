@@ -3,6 +3,7 @@ const {
   text,
   integer,
   bigint,
+  bigserial,
   real,
   boolean,
   jsonb,
@@ -533,6 +534,28 @@ const agentImageBuilds = pgTable('agent_image_builds', {
 }));
 
 // LoopTask：用户自定义定时任务（执行 = TaskAgent 在 Workspace runtime 沙箱内 ReAct 循环）
+// 0028: LLM Token 用量事实表（proxy 每次成功转发的 chat 请求一行，查询时聚合）
+// 来源：llm/proxy.js onResponseBody 捕获的 usage（OpenAI/Anthropic 两种协议）
+// 注意：BYOK 流量不经过 proxy，不计入；会话标题/摘要等内部调用一期不计入
+const llmUsage = pgTable('llm_usage', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id'),
+  projectId: text('project_id'),
+  agentId: text('agent_id'),
+  model: text('model'),
+  promptTokens: integer('prompt_tokens').notNull().default(0),
+  completionTokens: integer('completion_tokens').notNull().default(0),
+  totalTokens: integer('total_tokens').notNull().default(0),
+  statusCode: integer('status_code'),
+  latencyMs: integer('latency_ms'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+}, (table) => ({
+  userCreatedIdx: index('idx_llm_usage_user_created').on(table.userId, table.createdAt),
+  userProjectIdx: index('idx_llm_usage_user_project').on(table.userId, table.projectId, table.createdAt),
+  createdIdx: index('idx_llm_usage_created').on(table.createdAt),
+}));
+
 const loopTasks = pgTable('loop_tasks', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id),
@@ -607,4 +630,5 @@ module.exports = {
   customImageBuilds,
   loopTasks,
   loopTaskRuns,
+  llmUsage,
 };

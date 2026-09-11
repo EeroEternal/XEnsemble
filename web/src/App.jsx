@@ -12,6 +12,7 @@ import AgentsAdmin from './pages/AgentsAdmin';
 import ImagesManager from './pages/ImagesManager';
 import UsersAdmin from './pages/UsersAdmin';
 import GatewayAdmin from './pages/GatewayAdmin';
+import UsageAdmin from './pages/UsageAdmin';
 import AppSidebar from './components/AppSidebar';
 import BrandMark from './components/BrandMark';
 import ConfirmDialog from './components/ConfirmDialog';
@@ -76,12 +77,13 @@ function AuthenticatedLayout({
   const isAgentsAdmin = location.pathname === '/admin/agents';
   const isUsersAdmin = location.pathname === '/admin/users';
   const isGatewayAdmin = location.pathname === '/admin/gateway';
+  const isUsageAdmin = location.pathname === '/admin/usage';
   const isImagesAdmin = location.pathname === '/admin/images';
   const isCustomImages = location.pathname === '/custom-images';
   const isImagesManager = isCustomImages || isImagesAdmin;
   const isSettingsPage = location.pathname === '/settings';
 
-  const isSettingsRoute = isAgentsAdmin || isUsersAdmin || isGatewayAdmin || isImagesManager || isSettingsPage;
+  const isSettingsRoute = isAgentsAdmin || isUsersAdmin || isGatewayAdmin || isUsageAdmin || isImagesManager || isSettingsPage;
 
   const offRouteClass = 'pointer-events-none invisible absolute inset-0 z-0 [&_*]:pointer-events-none';
 
@@ -260,6 +262,19 @@ function AuthenticatedLayout({
               <SettingsTabSidebar activeTab="gateway" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
               <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
                 <GatewayAdmin />
+              </div>
+            </div>
+        )}
+        {user?.role === 'admin' && isUsageAdmin && (
+            <div
+              className={cn(
+                'flex min-h-0 flex-1 flex-row overflow-hidden',
+                launchPanelOpen ? offRouteClass : 'relative z-10',
+              )}
+            >
+              <SettingsTabSidebar activeTab="usage" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
+              <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
+                <UsageAdmin />
               </div>
             </div>
         )}
@@ -456,6 +471,10 @@ function App() {
               />
               <Route
                 path="/admin/gateway"
+                element={user?.role === 'admin' ? null : <Navigate to="/sessions" replace />}
+              />
+              <Route
+                path="/admin/usage"
                 element={user?.role === 'admin' ? null : <Navigate to="/sessions" replace />}
               />
               <Route

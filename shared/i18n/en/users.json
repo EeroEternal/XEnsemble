@@ -68,5 +68,37 @@
     "agents_granted": "Agent authorization updated."
   },
   "search_placeholder": "Search users…",
-  "count": "{{count}} users"
+  "count": "{{count}} users",
+  "usage": {
+    "title": "Usage",
+    "subtitle": "Platform LLM token consumption overview and per-user ranking",
+    "total_tokens": "Total tokens",
+    "requests": "Requests",
+    "prompt": "Prompt",
+    "completion": "Completion",
+    "active_users": "Active users",
+    "tokens_per_user": "Tokens / user",
+    "trend": "Daily trend",
+    "ranking": "User ranking",
+    "user": "User",
+    "share": "Share",
+    "token_7d": "Tokens (7d)",
+    "detail_title": "{{username}}'s usage",
+    "detail_subtitle": "LLM token consumption, last {{days}} days",
+    "recent_requests": "Recent requests",
+    "by_model": "By model",
+    "by_project": "By workspace",
+    "time": "Time",
+    "model": "Model",
+    "project": "Workspace",
+    "status": "Status",
+    "avg_per_request": "Avg / request",
+    "period_7d": "Last 7 days",
+    "period_30d": "Last 30 days",
+    "period_90d": "Last 90 days",
+    "view_detail": "View trend detail",
+    "no_data": "No usage data yet",
+    "deleted_project": "Deleted workspace",
+    "unknown": "(unknown)"
+  }
 }

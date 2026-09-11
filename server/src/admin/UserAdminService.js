@@ -3,7 +3,7 @@ const { isUniqueViolation } = require('../http/publicError');
 const { t } = require('../i18n');
 const { db } = require('../db/index');
 const schema = require('../db/schema');
-const { eq, and, sql, inArray, ne, isNull, gt } = require('drizzle-orm');
+const { eq, and, sql, inArray, ne, isNull, gt, gte } = require('drizzle-orm');
 const auth = require('../auth/index');
 const policy = require('../auth/PolicyService');
 const platformSettings = require('./PlatformSettings');
@@ -105,6 +105,17 @@ async function getUsageSummary(userId) {
 async function listUsers() {
     const users = await db.select().from(schema.users);
     users.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    // 7 天 Token 用量：单条 GROUP BY 聚合（避免每用户一次查询的 N+1）
+    const since7d = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const usageRows = await db
+        .select({
+            userId: schema.llmUsage.userId,
+            total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
+        })
+        .from(schema.llmUsage)
+        .where(gte(schema.llmUsage.createdAt, since7d))
+        .groupBy(schema.llmUsage.userId);
+    const usage7dByUser = new Map(usageRows.map((r) => [r.userId, Number(r.total || 0)]));
     const result = [];
     for (const user of users) {
         const usage = await getUsageSummary(user.id);
@@ -112,6 +123,7 @@ async function listUsers() {
         const grantedIds = await policy.listGrantedAgentIds(user.id, user.role);
         result.push(formatUserRow(user, {
             ...usage,
+            usage_7d_total_tokens: usage7dByUser.get(user.id) || 0,
             quotas: {
                 max_projects: quota.max_projects,
                 max_sessions: quota.max_sessions,

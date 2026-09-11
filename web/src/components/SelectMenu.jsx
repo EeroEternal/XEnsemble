@@ -27,7 +27,7 @@ function OptionRow({ opt, isSelected, onPick }) {
         <span className="w-4 shrink-0 flex items-center justify-center">
           {isSelected && <Check className="w-3.5 h-3.5 text-zinc-900" strokeWidth={2.5} />}
         </span>
-        <span className="truncate">{opt.label}</span>
+        <span className="whitespace-nowrap">{opt.label}</span>
       </button>
     </li>
   );
@@ -208,9 +208,10 @@ export default function SelectMenu({
           position: 'fixed',
           top: menuRect.top,
           left: menuRect.left,
-          width: menuRect.width,
+          minWidth: menuRect.width,
+          maxWidth: `calc(100vw - ${menuRect.left}px - 8px)`,
         }}
-        className={`${consoleMenuDropdownZClass} ${consoleDropdownPanelClass} shadow-md overflow-hidden`}
+        className={`${consoleMenuDropdownZClass} ${consoleDropdownPanelClass} w-max shadow-md overflow-hidden`}
       >
         <ul
           id={listId}

@@ -68,5 +68,37 @@
     "agents_granted": "Agent 授权已更新。"
   },
   "search_placeholder": "搜索用户…",
-  "count": "{{count}} 个用户"
+  "count": "{{count}} 个用户",
+  "usage": {
+    "title": "用量统计",
+    "subtitle": "平台 LLM Token 消耗总览与用户排行",
+    "total_tokens": "总 Token",
+    "requests": "请求数",
+    "prompt": "Prompt",
+    "completion": "Completion",
+    "active_users": "活跃用户",
+    "tokens_per_user": "人均 Token",
+    "trend": "日趋势",
+    "ranking": "用户排行",
+    "user": "用户",
+    "share": "占比",
+    "token_7d": "Token (7天)",
+    "detail_title": "{{username}} 的用量详情",
+    "detail_subtitle": "近 {{days}} 天 LLM Token 消耗明细",
+    "recent_requests": "最近请求",
+    "by_model": "按模型",
+    "by_project": "按项目",
+    "time": "时间",
+    "model": "模型",
+    "project": "项目",
+    "status": "状态",
+    "avg_per_request": "单次均耗",
+    "period_7d": "近 7 天",
+    "period_30d": "近 30 天",
+    "period_90d": "近 90 天",
+    "view_detail": "查看趋势明细",
+    "no_data": "暂无用量数据",
+    "deleted_project": "已删除项目",
+    "unknown": "（未知）"
+  }
 }

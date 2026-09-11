@@ -1,0 +1,306 @@
+/**
+ * Token 用量聚合服务（UsageService）
+ *
+ * 数据源：llm_usage 事实表（llm/proxy.js 落库，每成功请求一行）。
+ * 查询时聚合（无 Redis、无预聚合表），按天/用户/项目/模型 GROUP BY。
+ *
+ * 用户自助接口（getMyUsage*）强制 userId 过滤；管理员接口见 getUserUsageDetail 等。
+ */
+
+const { and, eq, gte, lt, sql } = require('drizzle-orm');
+const { db } = require('../db/index');
+const schema = require('../db/schema');
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 周期参数归一化：days ∈ {7, 30, 90}，默认 30。
+ * @returns {{ days: number, sinceTs: number }}
+ */
+function normalizeRange(days) {
+    const parsed = Number(days);
+    const d = [7, 30, 90].includes(parsed) ? parsed : 30;
+    return { days: d, sinceTs: Date.now() - d * DAY_MS };
+}
+
+/** 本地时区 YYYY-MM-DD（按天分桶用） */
+function dayKey(ts) {
+    const d = new Date(ts);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${mm}-${dd}`;
+}
+
+// ── 用户自助（强制 self）─────────────────────────────────────────────
+
+/**
+ * 本人用量汇总。
+ * @returns {{ promptTokens:number, completionTokens:number, totalTokens:number, requests:number }}
+ */
+async function getMyUsageSummary(userId, { days } = {}) {
+    const { sinceTs } = normalizeRange(days);
+    const rows = await db
+        .select({
+            prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
+            completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
+            total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
+            requests: sql`count(*)::int`,
+        })
+        .from(schema.llmUsage)
+        .where(and(eq(schema.llmUsage.userId, userId), gte(schema.llmUsage.createdAt, sinceTs)));
+    const r = rows[0] || {};
+    return {
+        promptTokens: Number(r.prompt || 0),
+        completionTokens: Number(r.completion || 0),
+        totalTokens: Number(r.total || 0),
+        requests: Number(r.requests || 0),
+    };
+}
+
+/**
+ * 本人按项目分解（含已删除项目，projectName 为 null 时由调用方兜底展示）。
+ * @returns {Promise<Array<{ projectId:string|null, projectName:string|null, requests:number, promptTokens:number, completionTokens:number, totalTokens:number }>>}
+ */
+async function getMyUsageByProject(userId, { days } = {}) {
+    const { sinceTs } = normalizeRange(days);
+    const rows = await db
+        .select({
+            projectId: schema.llmUsage.projectId,
+            projectName: schema.projects.name,
+            requests: sql`count(*)::int`,
+            prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
+            completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
+            total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
+        })
+        .from(schema.llmUsage)
+        .leftJoin(schema.projects, eq(schema.projects.id, schema.llmUsage.projectId))
+        .where(and(eq(schema.llmUsage.userId, userId), gte(schema.llmUsage.createdAt, sinceTs)))
+        .groupBy(schema.llmUsage.projectId, schema.projects.name)
+        .orderBy(sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0) desc`);
+    return rows.map((r) => ({
+        projectId: r.projectId,
+        projectName: r.projectName ?? null,
+        requests: Number(r.requests || 0),
+        promptTokens: Number(r.prompt || 0),
+        completionTokens: Number(r.completion || 0),
+        totalTokens: Number(r.total || 0),
+    }));
+}
+
+/**
+ * 本人按天趋势（补齐无数据日为 0，便于前端直接画图）。
+ * @returns {Promise<Array<{ day:string, totalTokens:number, requests:number }>>}
+ */
+async function getMyUsageTrend(userId, { days } = {}) {
+    const { days: d, sinceTs } = normalizeRange(days);
+    // DAY_MS 为代码内常量，用 sql.raw 内联——参数化占位符在 floor(x / $n) 上
+    // 会让 PG 无法推断操作符类型，且 group by 与 select 必须逐字一致。
+    const bucketExpr = sql.raw(`floor(created_at / ${DAY_MS})`);
+    const rows = await db
+        .select({
+            bucket: bucketExpr,
+            prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
+            completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
+            total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
+            requests: sql`count(*)::int`,
+        })
+        .from(schema.llmUsage)
+        .where(and(eq(schema.llmUsage.userId, userId), gte(schema.llmUsage.createdAt, sinceTs)))
+        .groupBy(bucketExpr);
+    const byBucket = new Map(rows.map((r) => [Number(r.bucket), r]));
+    const todayStart = Math.floor(Date.now() / DAY_MS);
+    const out = [];
+    for (let i = d - 1; i >= 0; i--) {
+        const bucket = todayStart - i;
+        const r = byBucket.get(bucket);
+        out.push({
+            day: dayKey(bucket * DAY_MS),
+            promptTokens: Number(r?.prompt || 0),
+            completionTokens: Number(r?.completion || 0),
+            totalTokens: Number(r?.total || 0),
+            requests: Number(r?.requests || 0),
+        });
+    }
+    return out;
+}
+
+/**
+ * 区间 [fromTs, toTs) 内的 Token 总量（环比用）。
+ */
+async function getTotalBetween(userId, fromTs, toTs) {
+    const rows = await db
+        .select({ total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int` })
+        .from(schema.llmUsage)
+        .where(and(
+            eq(schema.llmUsage.userId, userId),
+            gte(schema.llmUsage.createdAt, fromTs),
+            lt(schema.llmUsage.createdAt, toTs),
+        ));
+    return Number(rows[0]?.total || 0);
+}
+
+// ── 管理员 ──────────────────────────────────────────────────────────
+
+/**
+ * 全部用户用量排行（LEFT JOIN users，含 0 用量用户）。
+ * @returns {Promise<Array<{ userId, username, displayName, role, promptTokens, completionTokens, totalTokens, requests }>>}
+ */
+async function getUsageByUser({ days } = {}) {
+    const { sinceTs } = normalizeRange(days);
+    const rows = await db
+        .select({
+            userId: schema.users.id,
+            username: schema.users.username,
+            displayName: schema.users.displayName,
+            role: schema.users.role,
+            prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
+            completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
+            total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
+            requests: sql`count(${schema.llmUsage.id})::int`,
+        })
+        .from(schema.users)
+        .leftJoin(
+            schema.llmUsage,
+            and(eq(schema.llmUsage.userId, schema.users.id), gte(schema.llmUsage.createdAt, sinceTs)),
+        )
+        .groupBy(schema.users.id, schema.users.username, schema.users.displayName, schema.users.role)
+        .orderBy(sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0) desc`);
+    return rows.map((r) => ({
+        userId: r.userId,
+        username: r.username,
+        displayName: r.displayName ?? null,
+        role: r.role,
+        promptTokens: Number(r.prompt || 0),
+        completionTokens: Number(r.completion || 0),
+        totalTokens: Number(r.total || 0),
+        requests: Number(r.requests || 0),
+    }));
+}
+
+/**
+ * 单用户详情：汇总 + 日趋势 + 模型分布 + 项目分布。
+ */
+async function getUserUsageDetail(userId, { days } = {}) {
+    const [summary, trend, byModel, byProject] = await Promise.all([
+        getMyUsageSummary(userId, { days }),
+        getMyUsageTrend(userId, { days }),
+        getUsageByModel(userId, { days }),
+        getMyUsageByProject(userId, { days }),
+    ]);
+    return { summary, trend, byModel, byProject };
+}
+
+/**
+ * 单用户按模型聚合。
+ * @returns {Promise<Array<{ key:string, totalTokens:number, requests:number }>>}
+ */
+async function getUsageByModel(userId, { days } = {}) {
+    const { sinceTs } = normalizeRange(days);
+    const rows = await db
+        .select({
+            key: schema.llmUsage.model,
+            total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
+            requests: sql`count(*)::int`,
+        })
+        .from(schema.llmUsage)
+        .where(and(eq(schema.llmUsage.userId, userId), gte(schema.llmUsage.createdAt, sinceTs)))
+        .groupBy(schema.llmUsage.model)
+        .orderBy(sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0) desc`);
+    return rows.map((r) => ({ key: r.key ?? '(unknown)', totalTokens: Number(r.total || 0), requests: Number(r.requests || 0) }));
+}
+
+/**
+ * 平台总览：汇总 + 日趋势 + TOP5 用户。
+ */
+async function getPlatformOverview({ days } = {}) {
+    const { days: d, sinceTs } = normalizeRange(days);
+    // 同 getMyUsageTrend：按天分桶用内联常量表达式（select/group by 逐字一致）
+    const bucketExpr = sql.raw(`floor(created_at / ${DAY_MS})`);
+    const [summaryRows, trendRows, topUsers] = await Promise.all([
+        db
+            .select({
+                prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
+                completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
+                total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
+                requests: sql`count(*)::int`,
+                activeUsers: sql`count(distinct ${schema.llmUsage.userId})::int`,
+            })
+            .from(schema.llmUsage)
+            .where(gte(schema.llmUsage.createdAt, sinceTs)),
+        db
+            .select({
+                bucket: bucketExpr,
+                prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
+                completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
+                total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
+                requests: sql`count(*)::int`,
+            })
+            .from(schema.llmUsage)
+            .where(gte(schema.llmUsage.createdAt, sinceTs))
+            .groupBy(bucketExpr),
+        getUsageByUser({ days }),
+    ]);
+    const s = summaryRows[0] || {};
+    const byBucket = new Map(trendRows.map((r) => [Number(r.bucket), r]));
+    const trend = [];
+    const todayStart = Math.floor(Date.now() / DAY_MS);
+    for (let i = d - 1; i >= 0; i--) {
+        const bucket = todayStart - i;
+        const r = byBucket.get(bucket);
+        trend.push({
+            day: dayKey(bucket * DAY_MS),
+            promptTokens: Number(r?.prompt || 0),
+            completionTokens: Number(r?.completion || 0),
+            totalTokens: Number(r?.total || 0),
+            requests: Number(r?.requests || 0),
+        });
+    }
+    return {
+        summary: {
+            promptTokens: Number(s.prompt || 0),
+            completionTokens: Number(s.completion || 0),
+            totalTokens: Number(s.total || 0),
+            requests: Number(s.requests || 0),
+            activeUsers: Number(s.activeUsers || 0),
+        },
+        trend,
+        topUsers: topUsers.filter((u) => u.totalTokens > 0).slice(0, 5),
+    };
+}
+
+/** 最近请求明细（管理员单用户详情用，不含消息内容） */
+async function getUserRecentRequests(userId, { days = 7, limit = 20 } = {}) {
+    const { sinceTs } = normalizeRange(days);
+    const rows = await db
+        .select({
+            id: schema.llmUsage.id,
+            sessionId: schema.llmUsage.sessionId,
+            projectId: schema.llmUsage.projectId,
+            projectName: schema.projects.name,
+            model: schema.llmUsage.model,
+            promptTokens: schema.llmUsage.promptTokens,
+            completionTokens: schema.llmUsage.completionTokens,
+            totalTokens: schema.llmUsage.totalTokens,
+            statusCode: schema.llmUsage.statusCode,
+            createdAt: schema.llmUsage.createdAt,
+        })
+        .from(schema.llmUsage)
+        .leftJoin(schema.projects, eq(schema.projects.id, schema.llmUsage.projectId))
+        .where(and(eq(schema.llmUsage.userId, userId), gte(schema.llmUsage.createdAt, sinceTs)))
+        .orderBy(sql`${schema.llmUsage.createdAt} desc`)
+        .limit(Math.min(Number(limit) || 20, 100));
+    return rows;
+}
+
+module.exports = {
+    normalizeRange,
+    getMyUsageSummary,
+    getMyUsageByProject,
+    getMyUsageTrend,
+    getTotalBetween,
+    getUsageByUser,
+    getUsageByModel,
+    getUserUsageDetail,
+    getPlatformOverview,
+    getUserRecentRequests,
+};

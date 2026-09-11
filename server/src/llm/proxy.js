@@ -14,6 +14,7 @@ const schema = require('../db/schema');
 const { eq } = require('drizzle-orm');
 const agentGatewayConfig = require('../admin/AgentGatewayConfig');
 const { toOpencodeModelAlias } = require('../agents/agentModelAlias');
+const { extractUsage } = require('./usageExtractor');
 const { t } = require('../i18n');
 
 const LLM_PROXY_PREFIX = '/api/v1/llm';
@@ -449,7 +450,7 @@ function stripInjectedContext(text) {
 
 function extractUserMessage(bodyBuffer) {
     if (!Buffer.isBuffer(bodyBuffer) || bodyBuffer.length === 0) return null;
-    try {
+    try {  
         const parsed = JSON.parse(bodyBuffer.toString('utf8'));
         const messages = parsed?.messages;
         if (!Array.isArray(messages)) return null;
@@ -886,6 +887,27 @@ async function proxyLlmRequest(request, reply) {
             recordLlmErrorEvent(claims.sid, 'upstream', sseErrorText);
             return;
         }
+        // Token 用量计量（0028）：usage 只在成功响应上出现，这里直接落库
+        // （fire-and-forget）。不能放 finally——流式响应的 usage 尾块在
+        // onEnd 时才到达，可能晚于 finally 执行。失败只打日志，不影响主流程。
+        try {
+            const usage = extractUsage(bodyBuffer, contentType);
+            if (usage) {
+                void db.insert(schema.llmUsage).values({
+                    userId: claims.uid,
+                    sessionId: claims.sid || null,
+                    projectId: claims.pid || null,
+                    agentId: claims.aid || null,
+                    model: bodyModel || claims.model || null,
+                    promptTokens: usage.promptTokens,
+                    completionTokens: usage.completionTokens,
+                    totalTokens: usage.totalTokens,
+                    statusCode: 200,
+                    latencyMs: Date.now() - started,
+                    createdAt: Date.now(),
+                }).catch((e) => request.log.warn(e, '[llm-proxy] failed to persist usage'));
+            }
+        } catch (_) { /* usage 提取失败不影响主流程 */ }
         const assistantText = extractAssistantMessage(bodyBuffer, contentType);
         if (assistantText) {
             void chatTranscript.append(claims.sid, {
