@@ -127,7 +127,13 @@ const WorkspaceShell = forwardRef(function WorkspaceShell({ projectId, sessionId
       cursorBlink: true,
       cursorStyle: 'bar',
       drawBoldTextInBrightColors: true,
-      theme: themeRef.current,
+      theme: {
+        ...themeRef.current,
+        // 与 AgentConsole 一致：中性半透明灰滚动条（xterm 6 自绘滚动条）
+        scrollbarSliderBackground: 'rgba(113, 113, 122, 0.35)',
+        scrollbarSliderHoverBackground: 'rgba(113, 113, 122, 0.6)',
+        scrollbarSliderActiveBackground: 'rgba(113, 113, 122, 0.75)',
+      },
     });
     termRef.current = terminal;
 

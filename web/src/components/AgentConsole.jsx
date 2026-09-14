@@ -132,7 +132,14 @@ function AgentConsole({
 }) {
   const { t } = useTranslation();
   const { preset } = useTerminalTheme();
-  const xtermTheme = preset?.xterm || FALLBACK_XTERM_THEME;
+  const xtermTheme = {
+    ...(preset?.xterm || FALLBACK_XTERM_THEME),
+    // xterm 6 滚动条颜色（Monaco 风格自绘滚动条）：中性半透明灰，深浅主题下都协调；
+    // 尺寸/圆角由 index.css 统一定制（overlay 细条风格）
+    scrollbarSliderBackground: 'rgba(113, 113, 122, 0.35)',
+    scrollbarSliderHoverBackground: 'rgba(113, 113, 122, 0.6)',
+    scrollbarSliderActiveBackground: 'rgba(113, 113, 122, 0.75)',
+  };
 
   const hostRef = useRef(null);
   const overlayRef = useRef(null);

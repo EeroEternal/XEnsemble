@@ -219,6 +219,24 @@
   display: none;
 }
 
+/* xterm 6.x (Monaco-style scrollable element) — slim overlay scrollbar.
+   Slider size/position are inline styles set by xterm.js, hence !important.
+   Colors come from theme.scrollbarSlider* (see AgentConsole/WorkspaceShell). */
+.xterm .xterm-scrollable-element > .scrollbar > .scra {
+  display: none !important; /* hide Monaco-style arrow buttons */
+}
+.xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
+  left: 4px !important;
+  width: 6px !important;
+  min-height: 24px !important; /* 长会话滑块缩成小点难点中 — 业界普遍 20-30px 保底 */
+  border-radius: 9999px !important;
+}
+.xterm .xterm-scrollable-element > .scrollbar.horizontal > .slider {
+  top: 4px !important;
+  height: 6px !important;
+  border-radius: 9999px !important;
+}
+
 /* ───────────────────────────────────────────────────────────
  * Markdown code-block syntax highlighting (rehype-highlight / highlight.js)
  * Scoped to .markdown-body so tokens never leak into the app chrome.
