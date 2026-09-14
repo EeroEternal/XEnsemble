@@ -15,6 +15,7 @@ const { eq } = require('drizzle-orm');
 const agentGatewayConfig = require('../admin/AgentGatewayConfig');
 const { toOpencodeModelAlias } = require('../agents/agentModelAlias');
 const { extractUsage } = require('./usageExtractor');
+const promptCapture = require('./promptCapture');
 const { t } = require('../i18n');
 
 const LLM_PROXY_PREFIX = '/api/v1/llm';
@@ -821,6 +822,13 @@ async function proxyLlmRequest(request, reply) {
             bodyModel = parsed.model || null;
         } catch { /* non-JSON body */ }
         userPrompt = extractUserMessage(request.body);
+    }
+    // TEMPORARY prompt capture: dump the agent's raw request body (assembled
+    // system prompt + full message array) BEFORE the opencode alias rewrite
+    // below mutates it. On by default (LLM_CAPTURE_MODE=all, disk-quota
+    // guarded) — see .env.example LLM_CAPTURE_* to tune or disable.
+    if (isChatPath) {
+        promptCapture.capture(claims, path, request.body, bodyModel);
     }
     // opencode 1.18.x /model picker re-splits the candidate id on `/` (see
     // agentModelAlias.js), so we hand it a no-`/`/no-`:` alias in its config

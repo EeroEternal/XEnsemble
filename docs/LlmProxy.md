@@ -84,6 +84,7 @@ JWT claims（`typ: llm_session`）：`sid`、`uid`、`pid`、`aid`、`model`（�
 | `llm/quota.js` | 按用户每分钟固定配额（tier 前端下线后不再按 `resource_tier` 区分） |
 | `agents/agentEnv.js` | spawn env |
 | `admin/GatewaySettings.js` | `public_url`、`upstream_url` 配置 |
+| `llm/promptCapture.js` | 临时：原始请求落盘采集（`LLM_CAPTURE_*`，默认 all，见 §11） |
 
 ## 7. Phase 2（已实现）
 
@@ -113,3 +114,12 @@ npm run test:llm-acceptance           # 需 UniGateway 二进制 + RUN_LLM_ACCEP
 ## 10. 与 BYOK 的关系
 
 BYOK 模式不变：用户 Vault → spawn env，不经过 `/api/v1/llm`。仅 Gateway 模式走反代 + session token。
+
+## 11. 临时诊断：原始请求采集（promptCapture）
+
+**TEMPORARY**——为分析各 agent 组装后的提示词（system prompt / messages 顺序 / 上下文增长）而加，网关消息归一化功能上线后整体移除。默认 **all**（全量采集，零配置生效——部署链路不透传新增环境变量，开关语义落在代码默认值上）。磁盘由总量配额（2GB）+ 保留期（7 天）+ 单请求上限（8MB）兜底；设 `LLM_CAPTURE_MODE=off` 关闭。
+
+- 接入点：`proxy.js` 转发前、opencode alias 改写之前，捕获 agent 原始请求体字节
+- 布局：`$LLM_CAPTURE_DIR/<日期>/<agent>/<sessionId>/t<turn>_<时间>.json`（pretty JSON，meta + 原始 body）
+- 开关与磁盘保护见 `.env.example` 的 `LLM_CAPTURE_*` 段：采样模式、单请求上限、总量配额（删最旧日期目录，当天不删）、保留期清理、ENOSPC 自动停采
+- 下线：关 env → 删 `$LLM_CAPTURE_DIR` → 删 `promptCapture.js` 与 proxy.js 接入行
