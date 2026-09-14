@@ -20,6 +20,22 @@ function inferGrayRamp(bg, black, mid, brightBlack) {
   ]);
 }
 
+function mixHex(a, b, t) {
+  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
+  return `#${pa.map((c, i) => Math.round(c + (pb[i] - c) * t).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/**
+ * 256-color grayscale ramp (ANSI 232–255) retuned for light backgrounds.
+ * The standard ramp ends near-white (#EEEEEE), which vanishes on a light
+ * canvas — compress the light half into readable mid grays instead, the
+ * same approach as VS Code Light+. Dark half stays dark.
+ */
+function buildLightGrayRamp(black, mid) {
+  return buildDarkGrayRamp(Array.from({ length: 16 }, (_, i) => mixHex(black, mid, i / 15)));
+}
+
 function createDarkPreset({
   id,
   label,
@@ -37,6 +53,37 @@ function createDarkPreset({
     label,
     appearance: 'dark',
     spawnEnv: { COLORFGBG: '15;0', COLORTERM: 'truecolor' },
+    xterm: {
+      background,
+      foreground,
+      cursor,
+      cursorAccent: cursorAccent ?? background,
+      selectionBackground,
+      selectionForeground,
+      ...palette,
+      extendedAnsi: grayRamp ?? buildLightGrayRamp(palette.black, palette.brightBlack),
+    },
+  };
+}
+
+function createLightPreset({
+  id,
+  label,
+  background,
+  foreground,
+  cursor,
+  cursorAccent,
+  selectionBackground,
+  selectionForeground,
+  palette,
+  grayRamp,
+}) {
+  return {
+    id,
+    label,
+    appearance: 'light',
+    // COLORFGBG 0;15 = 前景黑、背景白（浅色终端的标准反转，与 dark 的 15;0 相反）
+    spawnEnv: { COLORFGBG: '0;15', COLORTERM: 'truecolor' },
     xterm: {
       background,
       foreground,
@@ -357,11 +404,45 @@ const SYNTHWAVE = createDarkPreset({
   },
 });
 
+const GITHUB_LIGHT = createLightPreset({
+  id: 'github-light',
+  label: 'GitHub Light',
+  background: '#FFFFFF',
+  foreground: '#1F2328',
+  cursor: '#0969DA',
+  selectionBackground: '#0969DA33',
+  selectionForeground: '#1F2328',
+  // GitHub 官方浅色终端配色（Primer）：白底上所有 ANSI 色 ≥ 4.5:1 对比度
+  palette: {
+    black: '#24292F', red: '#CF222E', green: '#116329', yellow: '#9A6700',
+    blue: '#0969DA', magenta: '#8250DF', cyan: '#1B7C83', white: '#57606A',
+    brightBlack: '#57606A', brightRed: '#A40E26', brightGreen: '#1A7F37', brightYellow: '#633C01',
+    brightBlue: '#218BFF', brightMagenta: '#A475F9', brightCyan: '#3192AA', brightWhite: '#6E7781',
+  },
+});
+
+const SOLARIZED_LIGHT = createLightPreset({
+  id: 'solarized-light',
+  label: 'Solarized Light',
+  background: '#FDF6E3',
+  foreground: '#657B83',
+  cursor: '#657B83',
+  selectionBackground: '#EEE8D599',
+  selectionForeground: '#586E75',
+  palette: {
+    black: '#073642', red: '#DC322F', green: '#859900', yellow: '#B58900',
+    blue: '#268BD2', magenta: '#D33682', cyan: '#2AA198', white: '#EEE8D5',
+    brightBlack: '#586E75', brightRed: '#CB4B16', brightGreen: '#859900', brightYellow: '#B58900',
+    brightBlue: '#268BD2', brightMagenta: '#D33682', brightCyan: '#2AA198', brightWhite: '#FDF6E3',
+  },
+});
+
 const PRESETS = [
   NORD, DRACULA, TOKYO_NIGHT, ONE_DARK, SOLARIZED_DARK, GRUVBOX_DARK,
   MONOKAI, CATPPUCCIN_MOCHA, GITHUB_DARK, ROSE_PINE_MOON, AYU_DARK,
   EVERFOREST_DARK, TOMORROW_NIGHT, ZENBURN, OCEANIC_NEXT, PALENIGHT,
   NIGHT_OWL, MATERIAL_DARKER, SYNTHWAVE,
+  GITHUB_LIGHT, SOLARIZED_LIGHT,
 ];
 
 const PRESET_BY_ID = Object.fromEntries(PRESETS.map((p) => [p.id, p]));

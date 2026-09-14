@@ -34,9 +34,20 @@
       "id": "solarized-light",
       "label": "Solarized Light",
       "appearance": "light",
-      "enabled": false,
+      "enabled": true,
       "spawn_env": {
-        "COLORFGBG": "0;15"
+        "COLORFGBG": "0;15",
+        "COLORTERM": "truecolor"
+      }
+    },
+    {
+      "id": "github-light",
+      "label": "GitHub Light",
+      "appearance": "light",
+      "enabled": true,
+      "spawn_env": {
+        "COLORFGBG": "0;15",
+        "COLORTERM": "truecolor"
       }
     }
   ],

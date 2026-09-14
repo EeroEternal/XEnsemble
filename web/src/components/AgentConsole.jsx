@@ -64,6 +64,26 @@ function stripAlternateScreen(text) {
     .replace(/\x1b\[\?1015l/g, '');
 }
 
+// East-Asian Wide / Fullwidth BMP 区段——这些字形在终端占 2 个单元格。
+// vsScreen 是按"单元格"建模的行缓冲：宽字符存储为 `char + '\u0000'`
+// （第二格占位符），光标推进 2 列，保证模型列号与终端真实列一致。
+// 之前按 JS 字符数推进导致含中文的行（如 qwen 技能表格）列号漂移，
+// 差分误判"该行未变"跳过重写，旧帧字符残留在屏幕上。
+// Astral 平面字符（代理对 = 2 个 JS 字符）天然占 2 格，无需特殊处理。
+function isWideCharCode(code) {
+  return (
+    (code >= 0x1100 && code <= 0x115F) // Hangul Jamo
+    || (code >= 0x2E80 && code <= 0x303E) // CJK Radicals .. CJK Symbols
+    || (code >= 0x3041 && code <= 0x9FFF) // Hiragana .. CJK Unified
+    || (code >= 0xA000 && code <= 0xA4CF) // Yi / Vai
+    || (code >= 0xAC00 && code <= 0xD7A3) // Hangul Syllables
+    || (code >= 0xF900 && code <= 0xFAFF) // CJK Compatibility Ideographs
+    || (code >= 0xFE30 && code <= 0xFE4F) // CJK Compatibility Forms
+    || (code >= 0xFF00 && code <= 0xFF60) // Fullwidth Forms
+    || (code >= 0xFFE0 && code <= 0xFFE6) // Fullwidth Signs
+  );
+}
+
 function parseMessage(raw) {
   if (typeof raw === 'string') return JSON.parse(raw);
   return JSON.parse(raw.toString());
@@ -520,7 +540,15 @@ function AgentConsole({
           let syncTermPending = '';
 
           function vsStripAnsi(text) {
-            return text.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/\x1b\].*?\x07/g, '');
+            const bare = text.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/\x1b\].*?\x07/g, '');
+            // 展开宽字符到单元格空间（char + 占位符），使字符串与终端列
+            // 一一对齐，才能和 vsScreen（单元格模型）正确比较。
+            let out = '';
+            for (const ch of bare) {
+              out += ch;
+              if (isWideCharCode(ch.charCodeAt(0))) out += '\u0000';
+            }
+            return out;
           }
 
           function vsProcess(data) {
@@ -555,6 +583,8 @@ function AgentConsole({
                     if (f === 'A') cy = Math.max(0, cy - n);
                     else if (f === 'B') cy = Math.min(vsRows - 1, cy + n);
                     else if (f === 'G') cx = Math.max(0, n - 1);
+                    else if (f === 'C') cx = Math.min(terminal.cols - 1, cx + n);
+                    else if (f === 'D') cx = Math.max(0, cx - n);
                     else if (f === 'H') { const s = p.split(';'); cy = Math.max(0, (parseInt(s[0]) || 1) - 1); cx = Math.max(0, (parseInt(s[1]) || 1) - 1); }
                     else if (f === 'J' && n === 2) for (let y = 0; y < vsRows; y++) vsScreen[y] = '';
                     else if (f === 'K' && (n === 2 || !p)) vsScreen[cy] = '';
@@ -567,11 +597,18 @@ function AgentConsole({
                 else if (data[i] === '\r') { cx = 0; i++; }
                 else if (data[i] === '\n') { cy++; i++; }
                 else if (data[i] >= ' ') {
-                  if (cy >= 0 && cy < vsRows && cx < 120) {
-                    const r = vsScreen[cy];
-                    vsScreen[cy] = r.substring(0, cx) + data[i] + r.substring(cx + 1);
+                  const wide = isWideCharCode(data.charCodeAt(i));
+                  if (cy >= 0 && cy < vsRows && cx < terminal.cols) {
+                    const r = vsScreen[cy] || '';
+                    if (wide) {
+                      // 宽字符占 2 格：char + 占位符，列号推进 2。
+                      vsScreen[cy] = r.substring(0, cx) + data[i] + '\u0000' + r.substring(cx + 2);
+                    } else {
+                      vsScreen[cy] = r.substring(0, cx) + data[i] + r.substring(cx + 1);
+                    }
                   }
-                  cx++; i++;
+                  cx += wide ? 2 : 1;
+                  i++;
                 } else i++;
               }
               vsCursorY = cy;
@@ -922,6 +959,15 @@ function AgentConsole({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, reconnectVersion]);
 
+  // 主题热更新：应用切换深色/浅色时 Provider 会切到对应外观的终端主题，
+  // 终端实例已存在，直接更新 options.theme（xterm 会即时重渲染配色），
+  // 无需重建终端或刷新页面。创建 effect 依赖不含主题，避免切主题重建终端。
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    try { terminal.options.theme = xtermTheme; } catch (_) { /* ignore */ }
+  }, [xtermTheme]);
+
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-transparent">
       <div
@@ -934,7 +980,12 @@ function AgentConsole({
           {t('common:state.loading', { defaultValue: 'Loading…' })}
         </div>
       </div>
-      <style>{`.xterm{width:100%!important;height:100%!important}.xterm-screen{width:100%!important;height:100%!important}.xterm-viewport{width:100%!important}`}</style>
+      {/* xterm v6 遗留结构：.xterm-viewport 硬编码 background-color:#000
+          （见 xterm.css "scroll bar fully opaque" 注释），且 v6 不再用主题色
+          覆盖它。.xterm-scrollable-element（白色，随主题）高度跟随 screen
+          自然高度（rows×cellHeight），比容器最多矮一行，缝隙处黑色 viewport
+          就会露出来——表现为终端底部一条黑条。置为透明，露出容器的主题背景。 */}
+      <style>{`.xterm{width:100%!important;height:100%!important}.xterm-screen{width:100%!important;height:100%!important}.xterm-viewport{width:100%!important;height:100%!important;background-color:transparent!important}`}</style>
       <div ref={hostRef} className="min-h-0 w-full flex-1" />
       {guideVisible && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-6">

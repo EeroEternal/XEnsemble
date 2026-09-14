@@ -4,10 +4,13 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { apiFetch } from '../lib/api';
+import { useTheme } from './useTheme';
 import {
+  DEFAULT_TERMINAL_THEME_ID,
   getTerminalTheme,
   listTerminalThemes,
   mergeTerminalCatalog,
@@ -56,9 +59,31 @@ async function fetchRemotePreference(token) {
 }
 
 export function TerminalThemeProvider({ token, children }) {
+  const { isDark } = useTheme();
   const [themeId, setThemeIdState] = useState(loadTerminalThemeId);
   const [themeRevision, setThemeRevision] = useState(0);
   const [catalog, setCatalog] = useState(listTerminalThemes);
+
+  // 记住每种外观下用户最后选的终端主题，用于跟随应用主题（light/dark）自动切换。
+  const darkIdRef = useRef(null);
+  const lightIdRef = useRef(null);
+  if (darkIdRef.current === null) {
+    const initial = getTerminalTheme(themeId);
+    darkIdRef.current = initial.appearance === 'dark' ? themeId : DEFAULT_TERMINAL_THEME_ID;
+    lightIdRef.current = initial.appearance === 'light' ? themeId : 'github-light';
+  }
+
+  // 跟随应用主题切换终端外观：应用浅色 → 浅色终端；深色 → 深色终端。
+  useEffect(() => {
+    const current = getTerminalTheme(themeId);
+    const targetAppearance = isDark ? 'dark' : 'light';
+    if (current.appearance === targetAppearance) return;
+    const targetId = isDark ? darkIdRef.current : lightIdRef.current;
+    if (getTerminalTheme(targetId).id === targetId) {
+      setThemeIdState(targetId);
+      setThemeRevision((n) => n + 1);
+    }
+  }, [isDark, themeId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +109,9 @@ export function TerminalThemeProvider({ token, children }) {
     if (!next || next.id !== nextId) return false;
 
     const prev = getTerminalTheme(themeId);
+
+    if (next.appearance === 'dark') darkIdRef.current = nextId;
+    else lightIdRef.current = nextId;
 
     saveTerminalThemeId(nextId);
     setThemeIdState(nextId);
