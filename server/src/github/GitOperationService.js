@@ -31,6 +31,55 @@ const DIR_EXPAND_FILE_LIMIT = 50;
 // 展开后条目总量软上限：达到后剩余 untracked 目录一律保持折叠并标记 truncated。
 const MAX_EXPANDED_ENTRIES = 500;
 
+/**
+ * 反转义 git status porcelain 输出中的 C 风格路径。
+ *
+ * git 对含空格、引号、反斜杠、控制字符或非 ASCII 字节的路径会用双引号包裹并转义，
+ * 例如 `?? "test dictionary/"`、`"qu\"ote"`、`"back\\slash"`、`"nl\nline"`、
+ * `"\344\270\255\346\226\207.txt"`（非 ASCII 按 UTF-8 字节转八进制）。
+ * 若不做反转义，前端把这些路径原样回传给 `git add` 会报
+ * `fatal: pathspec '"test dictionary/"' did not match any files`，导致 stage/commit/PR 全链路失败。
+ *
+ * 未加引号的路径原样返回。解析顺序：先 trim（去掉 `XY ` 前缀的空格），再调用本函数，
+ * 以免把路径内首尾的空格误删。
+ */
+function unquoteGitPath(raw) {
+    if (!raw || raw[0] !== '"') return raw;
+    let out = '';
+    let bytes = []; // 连续八进制字节缓冲：UTF-8 多字节字符由多个 \nnn 组成
+    const flush = () => {
+        if (bytes.length) {
+            out += Buffer.from(bytes).toString('utf8');
+            bytes = [];
+        }
+    };
+    let i = 1;
+    const last = raw.length - 1;
+    // git 的 C 风格引号总是在整个路径外加一对 `"..."`，路径内部的引号会被转义成 `\"`，
+    // 因此 raw 的最后一个字符必然是收尾引号，跳过它（结尾不是引号时按原样处理）。
+    while (i < (raw[last] === '"' ? last : raw.length)) {
+        const ch = raw[i];
+        if (ch === '\\' && i + 1 < raw.length) {
+            const next = raw[i + 1];
+            const simple = { a: '\x07', b: '\x08', f: '\x0c', n: '\n', r: '\r', t: '\t', v: '\x0b' };
+            if (next in simple) { flush(); out += simple[next]; i += 2; continue; }
+            if (next === '\\' || next === '"') { flush(); out += next; i += 2; continue; }
+            const oct = raw.slice(i + 1, i + 4);
+            if (/^[0-7]{3}$/.test(oct)) {
+                bytes.push(parseInt(oct, 8));
+                i += 4;
+                continue;
+            }
+            flush(); out += '\\'; i += 1; continue; // 未知转义原样保留
+        }
+        flush();
+        out += ch;
+        i += 1;
+    }
+    flush();
+    return out;
+}
+
 async function defaultResolveTokenCandidates(userId, repoUrl, preferredProvider) {
     const { GitConnectionService } = require('../git/GitConnectionService');
     return new GitConnectionService().resolveTokenCandidates(userId, repoUrl, preferredProvider);
@@ -527,7 +576,7 @@ class GitOperationService {
         let truncated = false;
         for (const line of lines) {
             if (line.length < 3) { expanded.push(line); continue; }
-            const filePath = line.slice(3).trim();
+            const filePath = unquoteGitPath(line.slice(3).trim());
             if (!filePath.endsWith('/') || line[0] !== '?' || line[1] !== '?') {
                 expanded.push(line);
                 continue;
@@ -594,7 +643,7 @@ class GitOperationService {
             if (line.length < 2) continue;
             const x = line[0];
             const y = line[1];
-            const filePath = line.slice(3).trim();
+            const filePath = unquoteGitPath(line.slice(3).trim());
             const entry = { path: filePath, status: x + y };
             if (x === '?' && y === '?') {
                 dirty = true;
@@ -695,7 +744,7 @@ class GitOperationService {
         // check-ignore 只对 untracked 文件有意义（已跟踪文件不受 .gitignore 影响）
         const untrackedPaths = lines
             .filter((line) => line.length >= 3 && line[0] === '?' && line[1] === '?')
-            .map((line) => line.slice(3).trim());
+            .map((line) => unquoteGitPath(line.slice(3).trim()));
 
         const [ignoredResult, aheadBehindResult] = await Promise.all([
             untrackedPaths.length > 0
@@ -726,7 +775,7 @@ class GitOperationService {
             }
             const x = line[0];
             const y = line[1];
-            const filePath = line.slice(3).trim();
+            const filePath = unquoteGitPath(line.slice(3).trim());
             if (ignoredSet.has(filePath)) continue;
             const xy = x + y;
             const isConflict = CONFLICT_STATUSES.has(xy);
@@ -836,7 +885,7 @@ class GitOperationService {
             for (const line of lines) {
                 const x = line[0];
                 const y = line[1];
-                const filePath = line.slice(3).trim();
+                const filePath = unquoteGitPath(line.slice(3).trim());
                 if (x === '?' && y === '?') {
                     cleanPaths.push(filePath);
                 } else if (x === 'A' && y === ' ') {

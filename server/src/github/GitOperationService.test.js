@@ -395,6 +395,45 @@ describe('GitOperationService (mock exec)', () => {
         assert.strictEqual(untrackedEntry.path, 'nested-repo', 'trailing slash should be stripped');
     });
 
+    it('getStatus unquotes git-quoted paths (space / quotes / backslash / UTF-8)', async () => {
+        // git status --porcelain=v1 quotes paths containing space/quote/backslash/
+        // non-ASCII bytes (C-style). Paths must be unquoted before being sent to the
+        // frontend, otherwise the client echoes them back to `git add` verbatim and
+        // git fails with "pathspec did not match any files".
+        const responses = new Map([
+            [JSON.stringify(['rev-parse', '--abbrev-ref', 'HEAD']), 'dev\n'],
+            [JSON.stringify(['rev-parse', 'HEAD']), 'sha\n'],
+            [JSON.stringify(['--no-optional-locks', 'status', '--porcelain=v1', '-unormal']),
+                '?? "test dictionary/"\n?? "qu\\"ote.txt"\n?? "back\\\\slash.txt"\n?? "nl\\nline.txt"\n?? "\\344\\270\\255\\346\\226\\207.txt"\n'],
+            [JSON.stringify(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']), '0\t0\n'],
+        ]);
+        const exec = makeMockExec((args) => responses.get(JSON.stringify(args)) ?? '');
+        const service = createService(exec);
+
+        const status = await service.getStatus({ id: 'p1', userId: 'u1' });
+        const paths = status.files.map((f) => f.path).sort();
+        assert.deepStrictEqual(paths, [
+            'nl\nline.txt',
+            'qu"ote.txt',
+            'test dictionary/',
+            'back\\slash.txt',
+            '中文.txt',
+        ].sort());
+        // check-ignore 收到的是反转义后的路径
+        const checkIgnoreCall = exec.calls.find((c) => c.args[0] === 'check-ignore');
+        assert.ok(checkIgnoreCall, 'check-ignore should be invoked for untracked entries');
+        assert.ok(checkIgnoreCall.args.some((a) => a === 'test dictionary/'));
+    });
+
+    it('stageFiles passes unquoted paths to git add (regression: quoted pathspec)', async () => {
+        const exec = makeMockExec();
+        const service = createService(exec);
+        await service.stageFiles({ id: 'p1', userId: 'u1' }, ['test dictionary/', '中文.txt']);
+        const addCall = exec.calls.find((c) => c.args[0] === 'add' && c.args[1] === '--');
+        assert.ok(addCall, 'git add -- should be called');
+        assert.deepStrictEqual(addCall.args.slice(2), ['test dictionary/', '中文.txt']);
+    });
+
     it('getStatus returns null divergence for detached HEAD instead of falling back to currentBranch', async () => {
         // Detached HEAD → rev-parse --abbrev-ref HEAD returns "HEAD" → branch=null.
         // Must NOT fall back to project.currentBranch (which could be 'main'
