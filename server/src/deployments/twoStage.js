@@ -163,7 +163,9 @@ function withTimeout(promise, ms, fallback, onTimeout) {
 
 // 并发超限时，返回"当前占用额度"的部署/预览（结构化，含 sessionId + projectName），
 // 供前端在超限报错时展示"哪个 project 的哪个 session 正在部署/运行"。
-async function buildConcurrencyOccupants(userId, getProjectForUser) {
+async function buildConcurrencyOccupants(userId, getProjectForUser, exclude) {
+    // exclude: { projectId, sessionId }——当前请求自己（quota 路径 self 已注册+插记录，
+    // 把"自己"列为占用者会误导"我只开了一个部署却显示 2 个"）。
     const items = [];
     const seen = new Set();
     const nameCache = new Map();
@@ -187,18 +189,14 @@ async function buildConcurrencyOccupants(userId, getProjectForUser) {
         return name;
     };
     try {
-        // 进行中的部署（activeDeploys）
-        for (const { projectId, sessionId } of listByUser(userId)) {
-            const key = `deploy:${projectId}:${sessionId || ''}`;
-            if (seen.has(key)) continue;
-            seen.add(key);
-            items.push({ sessionId: sessionId || null, projectId, projectName: await getProjectName(projectId), sessionName: await getSessionName(sessionId), kind: 'deploy', status: 'building' });
-        }
-        // 运行中 / building / pending 的 preview 与部署记录（与 previews 计数口径一致）
+        // DB 记录是唯一可信来源（真实 sessionId/kind/status）。此前还遍历 activeDeploys
+        // 注册表，但其键只含 projectId——session 信息丢失（恒显示"未命名会话"）且必然
+        // 与 DB 记录重复，同一部署被列两次；已移除该来源。
         const rows = await db.select({
             projectId: schema.deployments.projectId,
             sessionId: schema.deployments.sessionId,
             kind: schema.deployments.kind,
+            status: schema.deployments.status,
         }).from(schema.deployments)
             .where(and(
                 eq(schema.deployments.userId, userId),
@@ -207,6 +205,16 @@ async function buildConcurrencyOccupants(userId, getProjectForUser) {
         for (const r of rows) {
             const key = `${r.kind}:${r.projectId}:${r.sessionId || ''}`;
             if (seen.has(key)) continue;
+            // 排除"自己"：当前请求的 deploy 记录（quota 路径 self 已插入 building 记录）。
+            // deploy_in_progress 路径 self 无记录，此条件天然不命中。
+            const isSelf = exclude
+                && r.kind === 'deploy'
+                && r.projectId === exclude.projectId
+                && (r.sessionId || null) === (exclude.sessionId || null);
+            if (isSelf) continue;
+            // building/pending 必须有活跃注册表条目（activeDeploys）才算真实占用——孤儿记录
+            // （进程被杀后 status 停在 building）会虚增占用列表，误导用户"有多个部署在跑"。
+            if ((r.status === 'building' || r.status === 'pending') && !peekDeploy(r.projectId, r.sessionId)) continue;
             seen.add(key);
             items.push({ sessionId: r.sessionId || null, projectId: r.projectId, projectName: await getProjectName(r.projectId), sessionName: await getSessionName(r.sessionId), kind: r.kind, status: 'running' });
         }
@@ -3606,10 +3614,13 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
         const otherSessionInFlight = await findBuildingDeployRecord(project.id, null, userId);
         if (otherSessionInFlight) {
             console.error(`[twoStage] deploy_in_progress: project=${project.id} requested by session=${sessionId || '-'} but in-flight deploy=${otherSessionInFlight.id} (other session)`);
+            // 与 quota_exceeded 同构：附 occupants 让前端展示「谁在占用」而不是一句冷冰冰的拒绝
+            const occupants = await buildConcurrencyOccupants(userId, getProjectForUser, { projectId: project.id, sessionId });
             return {
                 ok: false,
                 code: 'deploy_in_progress',
-                error: `该项目已有部署在进行中（${otherSessionInFlight.stage || 'A'} 阶段，由其他会话发起），请等它完成或到对应会话中止后再试`,
+                error: '该工作区已有部署/预览在进行中',
+                occupants,
             };
         }
         // 注册表有条目但项目内无任何 building 记录（陈旧注册）→ 走新部署并接管该键
@@ -3688,7 +3699,8 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
             return {
                 ok: false,
                 code: 'deploy_in_progress',
-                error: `该项目已有部署在进行中（${otherSessionRace.stage || 'A'} 阶段，由其他会话发起），请等它完成或到对应会话中止后再试`,
+                error: '该工作区已有部署/预览在进行中',
+                occupants: await buildConcurrencyOccupants(userId, getProjectForUser, { projectId: project.id, sessionId }),
             };
         }
         // 接管：registerDeploy 已把条目覆盖为新鲜状态（aborted=false），继续新部署
@@ -3717,7 +3729,7 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
             const current = countByUser(userId) + usage.previews;
             if (current > limit) {
                 unregisterDeploy(project.id, sessionId);
-                const occupants = await buildConcurrencyOccupants(userId, getProjectForUser);
+                const occupants = await buildConcurrencyOccupants(userId, getProjectForUser, { projectId: project.id, sessionId });
                 console.error(`[twoStage] quota_exceeded user=${userId} current=${current} limit=${limit} countByUser=${countByUser(userId)} previews=${usage.previews} listByUser=${JSON.stringify(listByUser(userId))} occupants=${JSON.stringify(occupants)}`);
                 return {
                     ok: false,
@@ -4304,7 +4316,18 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
                 if (verifySettled) return;
                 verifySettled = true;
                 clearTimeout(timer);
-                resolve({ ...verifyTimeoutPayload, error: e.message || verifyTimeoutPayload.error });
+                // verify promise reject（如 ReferenceError）≠ 用户超时：error 单独标记
+                // verify_crash 并打全堆栈——此前复用 deploy_timeout 语义把代码崩溃
+                // 伪装成"部署超时"（p is not defined / runtime is not defined 均实测），
+                // 堆栈不落日志导致无从定位。
+                console.error(`[twoStage] verify promise rejected: ${e?.message}\n${e?.stack || '(no stack)'}`);
+                resolve({
+                    ok: false,
+                    aborted: true,
+                    code: 'verify_crash',
+                    error: `验证过程内部错误：${e?.message || e}（可点击“继续部署”重试）`,
+                    warning: String(e?.message || e),
+                });
             },
         );
     });

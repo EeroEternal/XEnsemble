@@ -68,8 +68,9 @@
   "failed": {
     "title": "部署失败",
     "quota_title": "已达并发部署上限",
+    "in_progress_title": "当前占用该工作区的部署/预览：",
     "occupants_title": "当前占用并发额度的部署/预览：",
-    "occupants_hint": "请到对应会话停止预览或等待部署完成后重试",
+    "occupants_hint": "请到对应会话停止部署/预览后重试",
     "show_details": "查看报错详情",
     "hide_details": "收起报错详情",
     "fallback_title": "按计划直接执行时发现："

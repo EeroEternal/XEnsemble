@@ -416,6 +416,19 @@ function FailureView({ result }) {
                     <div className="text-[11px] text-amber-700 mt-1">{t('deploy:failed.occupants_hint')}</div>
                 </div>
             )}
+            {result?.code === 'deploy_in_progress' && Array.isArray(result?.occupants) && result.occupants.length > 0 && (
+                <div className="w-full max-w-md text-left bg-amber-50 border border-amber-200 rounded p-3">
+                    <div className="text-xs font-semibold text-amber-800 mb-1">{t('deploy:failed.in_progress_title')}</div>
+                    <ul className="text-xs text-amber-900 space-y-0.5">
+                        {result.occupants.map((o, i) => (
+                            <li key={i}>
+                                · {t('deploy:occupant.workspace')}「{o.projectName || o.projectId}」- {t('deploy:occupant.session_label')}「{o.sessionName || t('deploy:occupant.unnamed')}」{o.kind === 'preview' ? t('deploy:occupant.preview_running') : t('deploy:occupant.deploying')}
+                            </li>
+                        ))}
+                    </ul>
+                    <div className="text-[11px] text-amber-700 mt-1">{t('deploy:failed.occupants_hint')}</div>
+                </div>
+            )}
             {hasDetails && (
                 <>
                     <button

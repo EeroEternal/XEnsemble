@@ -68,8 +68,9 @@
   "failed": {
     "title": "Deployment failed",
     "quota_title": "Concurrency limit reached",
+    "in_progress_title": "Currently occupying this workspace:",
     "occupants_title": "Currently occupying deployment quota:",
-    "occupants_hint": "Go to the corresponding session to stop the preview or wait for deployment to finish",
+    "occupants_hint": "Go to the corresponding session to stop the deployment/preview and retry",
     "show_details": "View error details",
     "hide_details": "Hide error details",
     "fallback_title": "Issues found during direct execution:"
