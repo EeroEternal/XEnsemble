@@ -25,7 +25,7 @@ import {
 
 const GIT_PROVIDERS = new Set(['github', 'gitlab', 'gitea', 'local_git']);
 
-export default function GitStatusBar({ projectId, project, git }) {
+export default function GitStatusBar({ projectId, project, git, disabled = false }) {
   const isGitProject = Boolean(projectId && project?.repoProvider && GIT_PROVIDERS.has(project.repoProvider));
   // Use the shared git state passed from the parent (merged useGitStatus)
   // instead of mounting a second useGitStatus instance (which would double
@@ -62,6 +62,7 @@ export default function GitStatusBar({ projectId, project, git }) {
   const newBranchInputRef = useRef(null);
 
   const openBranchMenu = async () => {
+    if (disabled) return;
     if (branchBtnRef.current) {
       const rect = branchBtnRef.current.getBoundingClientRect();
       setBranchMenuRect({ bottom: window.innerHeight - rect.top + 4, left: rect.left, width: 200 });
@@ -79,12 +80,14 @@ export default function GitStatusBar({ projectId, project, git }) {
   };
 
   const handleSwitchBranch = async (name) => {
+    if (disabled) return;
     setBranchMenuOpen(false);
     if (name === (status?.branch || project?.currentBranch)) return;
     await switchBranch?.(name);
   };
 
   const handleCreateBranch = async () => {
+    if (disabled) return;
     const name = newBranchName.trim();
     if (!name) return;
     setNewBranchName('');
@@ -141,9 +144,9 @@ export default function GitStatusBar({ projectId, project, git }) {
               ref={branchBtnRef}
               type="button"
               onClick={openBranchMenu}
-              disabled={operation === 'switch'}
-              title="Switch branch"
-              className={`flex items-center gap-1 max-w-[12rem] truncate font-mono font-medium hover:text-[#5F6368] transition-colors ${consoleButtonFocusClass}`}
+              disabled={disabled || operation === 'switch'}
+              title={disabled ? 'Branch switching is disabled in this session' : 'Switch branch'}
+              className={`flex items-center gap-1 max-w-[12rem] truncate font-mono font-medium hover:text-[#5F6368] transition-colors disabled:opacity-50 disabled:cursor-default ${consoleButtonFocusClass}`}
             >
               {operation === 'switch' ? (
                 <Loader2 className="h-3 w-3 animate-spin" />

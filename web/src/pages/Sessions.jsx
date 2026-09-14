@@ -1464,7 +1464,7 @@ export default React.forwardRef(function Sessions({
             <>
               <div className="flex items-center min-w-0 justify-center">
                 {activeSession?.projectId && activeProject?.repoProvider && GIT_REPO_PROVIDERS.has(activeProject.repoProvider) && (
-                  <BranchSwitcher projectId={activeSession.projectId} project={activeProject} git={gitChanges} />
+                  <BranchSwitcher projectId={activeSession.projectId} project={activeProject} git={gitChanges} disabled />
                 )}
               </div>
               <div className="flex items-center gap-0.5 shrink-0">

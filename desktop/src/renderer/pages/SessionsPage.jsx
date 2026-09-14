@@ -1482,7 +1482,7 @@ export default React.forwardRef(function Sessions({
                     sessionWakeable={sessionWakeable}
                   />
                 </div>
-                <GitStatusBar projectId={activeSession.projectId} project={activeProject} git={gitChanges} />
+                <GitStatusBar projectId={activeSession.projectId} project={activeProject} git={gitChanges} disabled />
               </div>
               {panelOpen && (
                 <>

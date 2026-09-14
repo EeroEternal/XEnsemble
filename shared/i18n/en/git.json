@@ -1,6 +1,7 @@
 {
   "source_control": "Source Control",
   "switch_branch": "Switch branch",
+  "switch_disabled_in_session": "Branch switching is disabled in this session",
   "new_branch_placeholder": "New branch…",
   "create_branch": "Create branch",
   "changes": "Changes",

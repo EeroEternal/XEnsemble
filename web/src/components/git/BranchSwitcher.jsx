@@ -19,7 +19,7 @@ import {
 
 export const GIT_REPO_PROVIDERS = new Set(['github', 'gitlab', 'gitea', 'local_git']);
 
-export default function BranchSwitcher({ projectId, project, git }) {
+export default function BranchSwitcher({ projectId, project, git, disabled = false }) {
   const { t } = useTranslation();
   const branch = git?.branch;
   const operation = git?.operation;
@@ -55,6 +55,7 @@ export default function BranchSwitcher({ projectId, project, git }) {
   }, [projectId, t]);
 
   const openMenu = async () => {
+    if (disabled) return;
     if (btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
       setMenuRect({ top: rect.bottom + 4, left: rect.left, width: 220 });
@@ -71,12 +72,14 @@ export default function BranchSwitcher({ projectId, project, git }) {
   };
 
   const handleSwitch = async (name) => {
+    if (disabled) return;
     setMenuOpen(false);
     if (name === (branch || project?.currentBranch)) return;
     await switchBranch?.(name, activeRepo?.id);
   };
 
   const handleCreate = async () => {
+    if (disabled) return;
     const name = newName.trim();
     if (!name) return;
     setNewName('');
@@ -114,11 +117,13 @@ export default function BranchSwitcher({ projectId, project, git }) {
           ref={btnRef}
           type="button"
           onClick={openMenu}
-          disabled={operation === 'switch'}
-          title={t('git:switch_branch', { defaultValue: 'Switch branch' })}
+          disabled={disabled || operation === 'switch'}
+          title={disabled
+            ? t('git:switch_disabled_in_session', { defaultValue: 'Branch switching is disabled in this session' })
+            : t('git:switch_branch', { defaultValue: 'Switch branch' })}
           className={`flex items-center gap-1 max-w-[16rem] truncate rounded-md px-2 py-1 text-[13px] font-medium ${transitionBase} ${consoleButtonFocusClass} ${
             menuOpen ? `${bgSecondary} ${textPrimary}` : `text-zinc-700 ${hoverBgTertiary}`
-          } disabled:opacity-50`}
+          } disabled:opacity-50 disabled:cursor-default`}
         >
           {operation === 'switch' ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />

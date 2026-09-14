@@ -1,6 +1,7 @@
 {
   "source_control": "版本控制",
   "switch_branch": "切换分支",
+  "switch_disabled_in_session": "当前会话中禁止切换分支",
   "new_branch_placeholder": "新分支…",
   "create_branch": "创建分支",
   "changes": "更改",
