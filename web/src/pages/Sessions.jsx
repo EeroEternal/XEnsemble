@@ -1563,7 +1563,7 @@ export default React.forwardRef(function Sessions({
                   />
                 ) : (
                   <div
-                    className="flex min-h-0 flex-1 flex-col overflow-hidden"
+                    className="flex min-h-0 flex-1 flex-col overflow-hidden p-3"
                     style={{ backgroundColor: preset.xterm.background }}
                   >
                     <AgentConsole
@@ -1591,15 +1591,22 @@ export default React.forwardRef(function Sessions({
                 ref={panelContainerRef}
                 className="flex min-h-0 shrink-0 overflow-hidden"
                 style={{
-                  width: panelOpen ? panelWidth + 4 : 0,
+                  width: panelOpen ? panelWidth + 6 : 0,
                   transition: panelDragging ? 'none' : 'width 150ms ease-out',
                 }}
               >
                 <div
                   onMouseDown={startPanelResize}
-                  className="w-1 shrink-0 cursor-col-resize bg-zinc-200 hover:bg-zinc-900 transition-colors"
+                  className="relative w-1.5 shrink-0 cursor-col-resize"
                   title={t('workspace:action.click_to_hide_drag_to_resize', { defaultValue: 'Click to hide · drag to resize' })}
-                />
+                >
+                  {/* 业界 sash 模式：热区 6px 透明，可见线仅 1px（hover/拖拽高亮）——可见宽条会有双线割裂感 */}
+                  <span
+                    className={`absolute inset-y-0 left-1/2 w-px -translate-x-1/2 transition-colors ${
+                      panelDragging ? 'bg-zinc-900' : 'bg-transparent hover:bg-zinc-900'
+                    }`}
+                  />
+                </div>
                 <div className="flex min-h-0 min-w-0 flex-1 flex-col border-l border-zinc-200 bg-surface">
                   <WorkspacePanel
                     ref={panelRef}

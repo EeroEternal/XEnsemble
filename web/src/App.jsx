@@ -166,7 +166,7 @@ function AuthenticatedLayout({
       />
       )}
       <main
-        className={`relative flex h-full min-h-0 flex-1 flex-col min-w-0 ${bgCanvas}`}
+        className={`relative flex h-full min-h-0 flex-1 flex-col min-w-0 overflow-hidden ${bgCanvas}`}
       >
         <Sessions
           ref={sessionsRef}
