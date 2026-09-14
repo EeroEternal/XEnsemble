@@ -639,6 +639,27 @@ function registerProjectGitRoutes(fastify) {
             return { ...result, status };
         } catch (err) {
             request.log.error(err);
+            const msg = err.message || '';
+            // push 认证失败（HTTP Basic Access denied / 401/403 等）通常是该 Git 服务器的
+            // 账号未连接、token 过期/无效或权限不足——返回明确指引，而不是裸的 git 报错。
+            const isAuth = /HTTP Basic: Access denied/i.test(msg)
+                || /Authentication failed/i.test(msg)
+                || /could not read (Username|Password) for/i.test(msg)
+                || /invalid username or password/i.test(msg)
+                || /authorization failed/i.test(msg)
+                || /authentication required/i.test(msg)
+                || /requested URL returned error: 40[13]/i.test(msg);
+            if (isAuth) {
+                let host = project.repoUrl || '';
+                try { host = new URL(project.repoUrl).host; } catch { /* keep raw url */ }
+                return reply.code(401).send({
+                    error: t('errors:git_auth_failed', {
+                        host,
+                        defaultValue: 'Push authentication failed for {{host}}: the account for this Git server is not connected, or the token is expired/invalid/insufficient. Connect the matching account in Settings → Git and try again.',
+                    }, request.locale || 'en'),
+                    code: 'git_auth_failed',
+                });
+            }
             return reply.code(500).send({ error: err.message });
         }
     });

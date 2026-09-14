@@ -24,6 +24,7 @@
   "invalid_session_token": "Invalid or expired session token",
   "llm_proxy_error": "LLM proxy error",
   "access_denied": "Access denied",
+  "git_auth_failed": "Push authentication failed for {{host}}: the account for this Git server is not connected, or the token is expired/invalid/insufficient. Connect the matching account in Settings → Git and try again.",
   "file_not_found": "File not found",
   "path_is_directory": "Path is a directory",
   "cannot_delete_dir_via_file": "Cannot delete directory via file endpoint",

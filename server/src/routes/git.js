@@ -206,6 +206,42 @@ async function buildMrService(request, project, repoId) {
     return { mrService: new MergeRequestService({ gitOperationService, repo }), repo };
 }
 
+/**
+ * URL 导入的 provider 识别与凭据绑定：
+ * - 公开托管域名 / 平台 apiBase 主机名匹配命中（matchProviderByUrl）→ 用该 provider；
+ * - 域名仍无法识别时，仅当 gitlab apiBase 主机名与仓库主机名一致才兜底绑定 gitlab，
+ *   避免把另一实例的 gitlab token 绑到本项目导致后续 push 用错凭据（Access denied）；
+ *   apiBase 未配置时保留「未知域名 → gitlab」旧约定，兼容单实例部署。
+ * 返回 { provider, connection, token }（provider 为 'url' 时 connection/token 为 null）。
+ */
+async function resolveUrlImportProvider(connectionService, userId, parsedUrl) {
+    const matchedProvider = await connectionService.matchProviderByUrl(parsedUrl.cloneUrl);
+    let provider = hasProvider(parsedUrl.provider) ? parsedUrl.provider : (matchedProvider || 'url');
+    if (provider === 'url') {
+        const glConn = await connectionService.getConnection(userId, 'gitlab').catch(() => null);
+        if (glConn) {
+            let bindGitlab = true;
+            const config = await getProviderConfig('gitlab');
+            if (config?.apiBase) {
+                try {
+                    const apiHost = new URL(config.apiBase).hostname.toLowerCase().replace(/^www\./, '');
+                    bindGitlab = apiHost === parsedUrl.hostname;
+                } catch {
+                    bindGitlab = false;
+                }
+            }
+            if (bindGitlab) provider = 'gitlab';
+        }
+    }
+    const connection = provider !== 'url'
+        ? await connectionService.getConnection(userId, provider).catch(() => null)
+        : null;
+    const token = connection
+        ? await connectionService.getDecryptedToken(userId, provider).catch(() => null)
+        : null;
+    return { provider, connection, token };
+}
+
 /** 读取 merge_requests 行（含 repoId），用于按仓库路由后续操作。 */
 async function loadMrRow(mrId) {
     const rows = await db.select().from(schema.mergeRequests).where(eq(schema.mergeRequests.id, mrId));
@@ -431,19 +467,12 @@ function registerGitRoutes(fastify) {
             // identified for this URL (known host, or apiBase hostname match)
             // and the user has a connection for it, use its token for the
             // clone (helps with private repos); otherwise clone publicly.
-            // 识别不出时默认按 gitlab 处理（用户约定：域名未知 → gitlab 兜底）。
-            const matchedProvider = await connectionService.matchProviderByUrl(parsedUrl.cloneUrl);
-            let resolvedProvider = hasProvider(parsedUrl.provider) ? parsedUrl.provider : (matchedProvider || 'url');
-            if (resolvedProvider === 'url') {
-                const glConn = await connectionService.getConnection(request.user.id, 'gitlab').catch(() => null);
-                if (glConn) resolvedProvider = 'gitlab';
-            }
-            try {
-                connection = await connectionService.getConnection(request.user.id, resolvedProvider).catch(() => null);
-                token = connection ? await connectionService.getDecryptedToken(request.user.id, resolvedProvider).catch(() => null) : null;
-            } catch (_) {
-                token = null;
-            }
+            // 域名识别不出时仅当 gitlab apiBase 主机名与仓库主机名一致才绑定凭据
+            // （resolveUrlImportProvider），避免误绑另一实例的 gitlab token。
+            const { provider: resolvedProvider, connection: urlConn, token: urlToken } =
+                await resolveUrlImportProvider(connectionService, request.user.id, parsedUrl);
+            connection = urlConn;
+            token = urlToken;
             const defaultBranch = branch || await probeDefaultBranch(parsedUrl.cloneUrl);
             repoInfo = {
                 cloneUrl: parsedUrl.cloneUrl,
@@ -507,13 +536,9 @@ function registerGitRoutes(fastify) {
                     if (r.repo_url) {
                         const parsed = resolveRepoUrl(r.repo_url);
                         if (!parsed) throw new Error('invalid repo_url');
-                        // 与单仓库 URL 导入一致：域名识别 → 默认 gitlab 兜底
-                        const matched = await connectionService.matchProviderByUrl(parsed.cloneUrl);
-                        let resolvedProvider = hasProvider(parsed.provider) ? parsed.provider : (matched || 'url');
-                        if (resolvedProvider === 'url') {
-                            const glConn = await connectionService.getConnection(request.user.id, 'gitlab').catch(() => null);
-                            if (glConn) resolvedProvider = 'gitlab';
-                        }
+                        // 与单仓库 URL 导入一致：域名识别 → 仅域名匹配时才绑定对应 provider
+                        const { provider: resolvedProvider } =
+                            await resolveUrlImportProvider(connectionService, request.user.id, parsed);
                         itemInfo = {
                             cloneUrl: parsed.cloneUrl,
                             fullName: parsed.fullName,
