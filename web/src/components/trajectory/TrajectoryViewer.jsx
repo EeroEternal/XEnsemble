@@ -1204,7 +1204,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
         <div ref={listRef} className="flex-1 min-w-0 overflow-y-auto">
           {loading && steps.length === 0 && (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-5 h-5 text-zinc-400 animate-spin" strokeWidth={1.5} />
+              <Loader2 className="w-5 h-5 text-zinc-400 dark:text-zinc-500 animate-spin" strokeWidth={1.5} />
             </div>
           )}
           {groups.map((g, gi) => {
