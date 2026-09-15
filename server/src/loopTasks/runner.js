@@ -153,7 +153,7 @@ async function executeRun(task, run, log = console) {
             type: `loop_task_run_${status}`,
             data: { taskId: task.id, sessionId: sessionId || undefined, error: error || undefined },
         }).catch(() => {});
-        log.log?.(`[loop-task-runner] run ${runId} (task "${task.title}") → ${status}${sessionId ? ` session=${sessionId}` : ''}`);
+        log.log?.(`[loop-task-runner] run ${runId} (task "${task.title}") → ${status}${sessionId ? ` session=${sessionId}` : ''}${error ? ` error=${error}` : ''}`);
     };
 
     try {
