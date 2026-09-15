@@ -24,6 +24,7 @@
   "invalid_session_token": "会话令牌无效或已过期",
   "llm_proxy_error": "LLM 代理错误",
   "access_denied": "访问被拒绝",
+  "ai_empty_output": "AI 返回内容为空，请重试，或检查 AI 模型/输出 token 配置。",
   "git_auth_failed": "Push 认证失败（{{host}}）：该 Git 服务器的账号未连接，或 token 已过期/无效/权限不足。请在 Settings → Git 连接对应账号后重试。",
   "file_not_found": "文件不存在",
   "path_is_directory": "路径是目录",

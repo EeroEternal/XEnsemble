@@ -303,9 +303,12 @@ async function generateAIDescription(project, gitOperationService, type, opts = 
                 { role: 'system', content: prompts[type] || prompts.commit },
                 { role: 'user', content: truncated },
             ],
-            // Allow more tokens for subject + blank + 2-5 bullet body. Previous
-            // 200 covered single-line messages but truncated multi-line bodies.
-            max_tokens: type === 'pr' ? 2000 : 800,
+            // 推理模型（如 glm-5.3-flash 等）会把大量输出 token 花在
+            // reasoning_content 思考上，800/2000 常被思考耗尽导致
+            // message.content 为空（finish_reason=length），前端误报
+            // 「无更改可描述」。提到 8192 给「思考 + 正文」留足空间，
+            // 兼顾最坏情况（长 diff 下 prompt/reasoning 均更大）。
+            max_tokens: 8192,
             temperature: 0.4,
         }),
     });
@@ -313,7 +316,14 @@ async function generateAIDescription(project, gitOperationService, type, opts = 
     const data = await res.json();
     const content = (data.choices?.[0]?.message?.content || '').trim();
 
+    // content 为空：AI 未返回有效结果（多半是推理 token 耗尽 / 模型异常）。
+    // 返回明确 error，避免前端把「AI 生成失败」误判成「没有改动可描述」。
+    const emptyError = t('errors:ai_empty_output', {
+        defaultValue: 'AI returned an empty result. Try again, or check the AI model/output token configuration.',
+    }, locale);
+
     if (type === 'pr') {
+        if (!content) return { title: '', body: '', error: emptyError };
         let parsed;
         try {
             const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
@@ -340,6 +350,7 @@ async function generateAIDescription(project, gitOperationService, type, opts = 
 
     // Commit message: preserve newlines from the model so the body renders
     // properly. Strip outer quotes if the model wrapped the whole message.
+    if (!content) return { message: '', error: emptyError };
     return {
         message: content
             .replace(/^["'`]|["'`]$/g, '')
