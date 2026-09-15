@@ -1132,14 +1132,14 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', SURFACE, T1)}>
       {/* 指标栏：三个指标即可点击开关（对齐 DeepSeek toolbar） */}
-      <div className={cn('shrink-0 border-b px-3 py-2', BORDER)}>
-        <div className="flex items-center gap-4">
+      <div className={cn('shrink-0 border-b px-3 h-8 flex items-center', BORDER)}>
+        <div className="flex items-center gap-4 flex-1 min-w-0">
           <button
             type="button"
             aria-pressed={durationOn}
             title={durationOn ? t('trajectory.use_equal_width') : t('trajectory.use_actual_duration')}
             onClick={() => setDurationOn((p) => !p)}
-            className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5', consoleButtonFocusClass, durationOn ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100')}
+            className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 h-7', consoleButtonFocusClass, durationOn ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100')}
           >
             <Clock className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.75} />
             {t('trajectory.metric_duration')} <b className={cn(T1, 'font-mono')}>{(totalLatency / 1000).toFixed(1)}s</b>
@@ -1149,7 +1149,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
             aria-pressed={turnsCollapsed}
             title={turnsCollapsed ? t('trajectory.expand_turns') : t('trajectory.collapse_turns')}
             onClick={toggleAllGroups}
-            className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5', consoleButtonFocusClass, turnsCollapsed ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100')}
+            className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 h-7', consoleButtonFocusClass, turnsCollapsed ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100')}
           >
             <Layers className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.75} />
             {t('trajectory.metric_rounds')} <b className={cn(T1, 'font-mono')}>{rounds}</b>
@@ -1160,14 +1160,14 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
             aria-pressed={callsCollapsed}
             title={callsCollapsed ? t('trajectory.expand_calls') : t('trajectory.collapse_calls')}
             onClick={() => { setCallsCollapsed((p) => !p); setExpandedSteps({}); }}
-            className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5', consoleButtonFocusClass, callsCollapsed ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100')}
+            className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 h-7', consoleButtonFocusClass, callsCollapsed ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100')}
           >
             <Zap className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.75} />
             {t('trajectory.metric_calls')} <b className={cn(T1, 'font-mono')}>{steps.length}</b>
             <span className="text-[10px] text-zinc-400">{callsCollapsed ? '⊞' : '⊟'}</span>
           </button>
           <div className="flex-1" />
-          <div className={cn('flex items-center gap-1.5 w-44 h-8 px-2 rounded-md border bg-surface focus-within:border-zinc-500', 'border-zinc-300')}>
+          <div className={cn('flex items-center gap-1.5 w-44 h-7 px-2 rounded-md border bg-surface focus-within:border-zinc-500', 'border-zinc-300')}>
             <Search className="w-3.5 h-3.5 text-zinc-400 shrink-0" strokeWidth={1.75} />
             <input
               value={query}
@@ -1181,7 +1181,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
             onClick={extractSkill}
             disabled={extracting}
             title={t('skills:extract_from_session', { defaultValue: 'Extract as Skill' })}
-            className={cn('flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed', 'border-zinc-300 bg-surface text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900', consoleButtonFocusClass)}
+            className={cn('flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed', 'border-zinc-300 bg-surface text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900', consoleButtonFocusClass)}
           >
             {extracting ? <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} /> : <Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} />}
           </button>
@@ -1190,7 +1190,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
             onClick={exportJsonl}
             disabled={exporting}
             title={t('trajectory.export_jsonl')}
-            className={cn('flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed', 'border-zinc-300 bg-surface text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900', consoleButtonFocusClass)}
+            className={cn('flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed', 'border-zinc-300 bg-surface text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900', consoleButtonFocusClass)}
           >
             {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} /> : <Download className="w-3.5 h-3.5" strokeWidth={1.75} />}
           </button>

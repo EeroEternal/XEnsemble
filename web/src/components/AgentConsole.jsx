@@ -1004,23 +1004,23 @@ function AgentConsole({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-transparent">
+      {/* 加载遮罩跟随终端主题色（不透明），与终端背景融为一体；spinner/文字用终端前景色保证可读 */}
       <div
         ref={overlayRef}
-        className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/90 backdrop-blur-sm"
-        style={{ display: 'none' }}
+        className="absolute inset-0 z-10 flex items-center justify-center"
+        style={{ display: 'none', backgroundColor: xtermTheme.background }}
       >
-        <div className="flex items-center gap-2 text-sm text-zinc-400">
+        <div className="flex items-center gap-2 text-sm" style={{ color: xtermTheme.foreground, opacity: 0.7 }}>
           <Loader2 className="h-4 w-4 animate-spin" />
           {t('common:state.loading', { defaultValue: 'Loading…' })}
         </div>
       </div>
-      {/* xterm v6 遗留结构：.xterm-viewport 硬编码 background-color:#000
-          （见 xterm.css "scroll bar fully opaque" 注释），且 v6 不再用主题色
-          覆盖它。.xterm-scrollable-element（白色，随主题）高度跟随 screen
-          自然高度（rows×cellHeight），比容器最多矮一行，缝隙处黑色 viewport
-          就会露出来——表现为终端底部一条黑条。置为透明，露出容器的主题背景。 */}
-      <style>{`.xterm{width:100%!important;height:100%!important}.xterm-screen{width:100%!important;height:100%!important}.xterm-viewport{width:100%!important;height:100%!important;background-color:transparent!important}`}</style>
-      <div ref={hostRef} className="min-h-0 w-full flex-1" />
+      {/* xterm v6 遗留结构：.xterm-viewport 硬编码 background-color:#000，
+          .xterm-scrollable-element 默认白色（应用主题前的首帧背景）。切换会话时
+          新终端首帧会短暂露出这两个默认色，与当前主题相反造成白底/黑底闪烁。
+          全部置为透明，露出 host 的主题背景色兜底。 */}
+      <style>{`.xterm{width:100%!important;height:100%!important}.xterm-screen{width:100%!important;height:100%!important}.xterm-viewport{width:100%!important;height:100%!important;background-color:transparent!important}.xterm-scrollable-element{background-color:transparent!important}`}</style>
+      <div ref={hostRef} className="min-h-0 w-full flex-1" style={{ backgroundColor: xtermTheme.background }} />
       {guideVisible && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-6">
           <div className="pointer-events-auto w-full max-w-md rounded-xl border border-zinc-700/60 bg-zinc-900/95 p-5 shadow-2xl backdrop-blur">

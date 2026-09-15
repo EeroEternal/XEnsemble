@@ -509,7 +509,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
       </div>
 
       {mainTab === 'files' && (
-        <div className="flex items-center justify-end gap-0.5 px-1 py-0.5 border-b border-zinc-200 shrink-0 bg-surface">
+        <div className="flex h-8 items-center justify-end gap-0.5 px-1 border-b border-zinc-200 shrink-0 bg-surface">
           <button title={t('workspace:action.new_file')} onClick={() => { setNewName(''); setShowNewFile(true); }}
             className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}>
             <Plus className="h-3.5 w-3.5" />
