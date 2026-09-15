@@ -24,7 +24,7 @@ const schema = require('../db/schema');
 const sessionManager = require('../session/SessionManager');
 const { broadcastSse } = require('../session/sseManager');
 const { recordEvent } = require('../events/recordEvent');
-const { nextRunForTask } = require('./cron');
+const { computeNextRunAt } = require('./cron');
 const { createAgentSession } = require('../session/createAgentSession');
 
 const TIMEOUT_MS = Number(process.env.LOOP_TASK_TIMEOUT_MS) || 30 * 60_000;
@@ -261,7 +261,7 @@ async function tick({ log = console } = {}) {
         let nextAt = now + 60 * 60_000; // 解析失败兜底：1h 后重试
         let taskPatch = { lastRunAt: now, updatedAt: now };
         try {
-            nextAt = nextRunForTask(task, new Date(now));
+            nextAt = computeNextRunAt(task, new Date(now));
             taskPatch.nextRunAt = nextAt;
         } catch (e) {
             log.warn?.(`[loop-task-runner] schedule parse failed for task "${task.title}": ${e.message}`);

@@ -20,25 +20,28 @@ const { db } = require('../db');
 const schema = require('../db/schema');
 const { sendPublicError } = require('../http/publicError');
 const { t } = require('../i18n');
-const { validateCron, describeSchedule, nextRunForTask, MIN_INTERVAL_MS, MAX_INTERVAL_MS } = require('../loopTasks/cron');
+const { validateCron, describeSchedule, computeNextRunAt, MIN_INTERVAL_MS, MAX_INTERVAL_MS } = require('../loopTasks/cron');
 const runner = require('../loopTasks/runner');
 const policy = require('../auth/PolicyService');
 const { isTaskRunSupported } = require('../agents/taskRunModes');
 
 const MAX_TASKS_PER_USER = Number(process.env.LOOP_TASK_MAX_PER_USER) || 10;
-const TIMEZONES = [
-    'UTC',
-    'Asia/Shanghai',
-    'Asia/Hong_Kong',
-    'Asia/Singapore',
-    'Asia/Tokyo',
-    'Asia/Seoul',
-    'Europe/London',
-    'Europe/Berlin',
-    'America/New_York',
-    'America/Chicago',
-    'America/Los_Angeles',
-];
+
+// 时区接受任意合法 IANA 名称（覆盖用户全局偏好的所有条目），非法值回退。
+// 此前是 11 项硬编码白名单——不在表内的全局偏好会被静默回退 UTC，属隐患。
+const SUPPORTED_TZ = new Set(
+    typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [],
+);
+
+function isValidTimezone(tz) {
+    if (SUPPORTED_TZ.size) return SUPPORTED_TZ.has(tz);
+    try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; }
+}
+
+function normalizeTimezone(value, fallback) {
+    const tz = String(value ?? '').trim();
+    return tz && isValidTimezone(tz) ? tz : fallback;
+}
 
 function httpError(statusCode, code, message) {
     const err = new Error(message);
@@ -60,6 +63,13 @@ function scheduleDescription(task, locale) {
 }
 
 function serializeTask(row, locale = 'en') {
+    let desc = scheduleDescription(row, locale);
+    // 工作日感知任务：描述补充日历语义（节假日跳过 / 调休补班照跑）
+    if (desc && row.holidayAware === true && (row.scheduleKind || 'cron') === 'cron') {
+        desc += locale?.startsWith('zh')
+            ? '（按中国法定日历：节假日跳过，调休补班照常）'
+            : ' (CN holiday-aware: skips statutory holidays, runs on makeup workdays)';
+    }
     return {
         id: row.id,
         userId: row.userId,
@@ -68,12 +78,13 @@ function serializeTask(row, locale = 'en') {
         prompt: row.prompt,
         agentId: row.agentId ?? null,
         autoApprove: row.autoApprove !== false,
+        holidayAware: row.holidayAware === true,
         scheduleKind: row.scheduleKind || 'cron',
         cronExpr: row.cronExpr,
         timezone: row.timezone,
         intervalMs: row.intervalMs ?? null,
         status: row.status,
-        scheduleDescription: scheduleDescription(row, locale),
+        scheduleDescription: desc,
         nextRunAt: row.nextRunAt ?? null,
         lastRunAt: row.lastRunAt ?? null,
         createdAt: row.createdAt ?? null,
@@ -137,15 +148,16 @@ function parseSchedule(body, existing, locale) {
     const kind = ['cron', 'every', 'at'].includes(String(body?.kind))
         ? String(body.kind)
         : (existing?.scheduleKind || 'cron');
-    const timezone = TIMEZONES.includes(String(body?.timezone))
-        ? String(body.timezone)
-        : String(existing?.timezone || 'UTC');
+    const timezone = normalizeTimezone(body?.timezone, String(existing?.timezone || 'UTC'));
 
     const draft = {
         scheduleKind: kind,
         timezone,
         cronExpr: String(body?.cronExpr ?? body?.cron_expr ?? existing?.cronExpr ?? '* * * * *').trim(),
         intervalMs: body?.intervalMs != null ? Number(body.intervalMs) : (existing?.intervalMs ?? null),
+        holidayAware: body?.holidayAware !== undefined
+            ? Boolean(body.holidayAware)
+            : Boolean(existing?.holidayAware),
         nextRunAt: existing?.nextRunAt ?? 0,
     };
 
@@ -173,8 +185,11 @@ function parseSchedule(body, existing, locale) {
     }
 
     // 语法/参数校验完成后统一算 next_run_at（at 已在上方确定）
+    // holidayAware 的 cron 任务走工作日日历（computeNextRunAt 内部自动降级）
     try {
-        draft.nextRunAt = kind === 'at' ? draft.nextRunAt : nextRunForTask(draft, new Date());
+        draft.nextRunAt = kind === 'at'
+            ? draft.nextRunAt
+            : computeNextRunAt(draft, new Date());
     } catch (err) {
         throw loopError(locale, err?.code === 'loop_interval_invalid' ? 'loop_interval_invalid' : 'loop_cron_invalid', {
             message: String(err?.message || err).slice(0, 200),
@@ -206,7 +221,7 @@ function registerLoopTaskRoutes(fastify) {
         }
         const draft = {
             scheduleKind: kind,
-            timezone: TIMEZONES.includes(String(body?.timezone)) ? String(body.timezone) : 'UTC',
+            timezone: normalizeTimezone(body?.timezone, 'UTC'),
             cronExpr: String(body?.cronExpr ?? '').trim(),
             intervalMs: body?.intervalMs != null ? Number(body.intervalMs) : null,
             nextRunAt: kind === 'at' ? parseRunAt(body.runAt) : 0,
@@ -279,6 +294,7 @@ function registerLoopTaskRoutes(fastify) {
                 prompt,
                 agentId,
                 autoApprove,
+                holidayAware: schedule.holidayAware === true,
                 scheduleKind: schedule.scheduleKind,
                 cronExpr: schedule.cronExpr,
                 timezone: schedule.timezone,
@@ -329,16 +345,17 @@ function registerLoopTaskRoutes(fastify) {
                 patch.autoApprove = Boolean(body.autoApprove);
             }
 
-            // 调度字段变更，或恢复 active → 重算 next_run_at
+            // 调度字段变更（含工作日感知开关），或恢复 active → 重算 next_run_at
             const scheduleChanged = body.kind !== undefined || body.cronExpr !== undefined || body.cron_expr !== undefined
                 || body.intervalMs !== undefined || body.runAt !== undefined || body.run_at !== undefined
-                || body.timezone !== undefined;
+                || body.timezone !== undefined || body.holidayAware !== undefined;
             if (scheduleChanged) {
                 const schedule = parseSchedule(body, task, locale);
                 patch.scheduleKind = schedule.scheduleKind;
                 patch.cronExpr = schedule.cronExpr;
                 patch.timezone = schedule.timezone;
                 patch.intervalMs = schedule.scheduleKind === 'every' ? schedule.intervalMs : null;
+                patch.holidayAware = schedule.holidayAware === true;
                 patch.nextRunAt = schedule.nextRunAt;
             } else if (patch.status === 'active' && task.status !== 'active') {
                 // 恢复：按当前类型重算（at 类型目标时间已过 → 明确报错）

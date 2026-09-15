@@ -592,6 +592,8 @@ const loopTasks = pgTable('loop_tasks', {
   agentId: text('agent_id'),
   // 无人值守自动批准工具调用（Agent 支持的前提下注入对应 flag）；false = 只读保守执行
   autoApprove: boolean('auto_approve').notNull().default(true),
+  // 工作日感知（仅 cron 周一至周五形态生效）：按中国法定日历过滤——节假日跳过、调休补班照跑
+  holidayAware: boolean('holiday_aware').notNull().default(false),
   scheduleKind: text('schedule_kind').notNull().default('cron'), // cron / every / at
   cronExpr: text('cron_expr').notNull().default('* * * * *'),
   timezone: text('timezone').notNull().default('Asia/Shanghai'),

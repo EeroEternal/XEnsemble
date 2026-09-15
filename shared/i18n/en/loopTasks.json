@@ -28,7 +28,7 @@
   "kind": {
     "daily": "Daily",
     "weekly": "Weekly",
-    "weekdays": "Weekdays",
+    "weekdays": "Workdays",
     "every": "Interval",
     "at": "Run once",
     "cron": "Custom cron"

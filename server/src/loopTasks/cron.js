@@ -290,6 +290,80 @@ function nextRunForTask(task, after = new Date()) {
     return nextRun(task.cronExpr, task.timezone, after);
 }
 
+// ---------------------------------------------------------------------------
+// 工作日感知调度（holidayAware，中国法定日历）
+//
+// 仅支持 cron `M H * * 1-5` 形态（前端"工作日"预设生成的表达式）。语义：
+//   - 法定节假日（周中）→ 跳过
+//   - 调休补班（周末上班）→ 照常触发（cron 本身不会给出周末槽位，这里显式补上）
+// 日历数据来自 chinese-days 包；超出其覆盖年份的日期退化为纯周一至周五语义。
+// ---------------------------------------------------------------------------
+
+let chineseDaysCache = null;
+function getChineseDays() {
+    if (chineseDaysCache === null) {
+        try { chineseDaysCache = require('chinese-days'); } catch { chineseDaysCache = false; }
+    }
+    return chineseDaysCache || null;
+}
+
+/** epoch → 任务时区下的 YYYY-MM-DD */
+function zonedDateStr(epochMs, timezone) {
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(epochMs));
+}
+
+/** 任务时区下"某日 hh:mm"的 epoch（两段式偏移换算，天然处理 DST） */
+function zonedTimeToEpoch(dateStr, hh, mm, timezone) {
+    const naive = Date.parse(`${dateStr}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00Z`);
+    const fmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone || 'UTC', hour12: false,
+        year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    const parts = Object.fromEntries(fmt.formatToParts(new Date(naive)).map((p) => [p.type, p.value]));
+    const asUTC = Date.parse(`${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}Z`);
+    return naive - (asUTC - naive);
+}
+
+function addDaysStr(dateStr, days) {
+    const d = new Date(`${dateStr}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+}
+
+/** 工作日感知的下一次触发；表达式形态不支持或日历依赖缺失时返回 null（调用方退回纯 cron） */
+function nextWorkdayRunAt(cronExpr, timezone, from) {
+    const m = String(cronExpr || '').trim().match(/^(\d{1,2}) (\d{1,2}) \* \* 1-5$/);
+    if (!m) return null;
+    const cn = getChineseDays();
+    if (!cn) return null;
+    const mm = Number(m[1]); // cron 顺序：分 时
+    const hh = Number(m[2]);
+    let cursor = from.getTime() + 60_000; // 下一分钟起算
+    for (let i = 0; i < 400; i += 1) { // 上限 ~13 个月，越过数据边界自然退化
+        const dateStr = zonedDateStr(cursor, timezone);
+        const fireAt = zonedTimeToEpoch(dateStr, hh, mm, timezone);
+        if (fireAt >= cursor && cn.isWorkday(dateStr)) return fireAt;
+        cursor = zonedTimeToEpoch(addDaysStr(dateStr, 1), 0, 0, timezone);
+    }
+    return null;
+}
+
+/**
+ * 统一的"下一次触发"入口：调度类型感知 + holidayAware 分支。
+ * runner 与 routes 的 next_run_at 计算都必须走这里，保证两处语义一致。
+ */
+function computeNextRunAt(task, after = new Date()) {
+    const kind = task.scheduleKind || 'cron';
+    if (kind === 'cron' && task.holidayAware) {
+        const at = nextWorkdayRunAt(task.cronExpr, task.timezone, after);
+        if (at != null) return at;
+        // chinese-days 依赖缺失或表达式形态不支持 → 退回纯 cron 语义
+    }
+    return nextRunForTask(task, after);
+}
+
 function humanizeInterval(ms, locale = 'en') {
     const days = ms / 86_400_000;
     if (Number.isInteger(days)) return locale?.startsWith('zh') ? `每 ${days} 天执行。` : `Every ${days} days.`;
@@ -332,4 +406,4 @@ function describeSchedule(task, locale = 'en') {
     return describeCron(task.cronExpr, locale);
 }
 
-module.exports = { validateCron, nextRun, describeCron, nextRunForTask, describeSchedule, MIN_INTERVAL_MS, MAX_INTERVAL_MS };
+module.exports = { validateCron, nextRun, describeCron, nextRunForTask, computeNextRunAt, nextWorkdayRunAt, describeSchedule, MIN_INTERVAL_MS, MAX_INTERVAL_MS };

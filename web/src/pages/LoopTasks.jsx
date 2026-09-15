@@ -72,7 +72,8 @@ const emptyForm = {
   agentId: '', autoApprove: true,
   // GLM/Coze 风格调度预设：自然预设优先，cron 折叠为"自定义"。
   // daily/weekly/weekdays 在前端生成标准 5 段 cron，后端仍只认 cron/every/at。
-  kind: 'daily', time: '09:00', weekdays: [1, 2, 3, 4, 5],
+  // weekdays（工作日）附带 holidayAware：按中国法定日历调度（节假日跳过、调休补班照跑）。
+  kind: 'daily', time: '09:00', weekdays: [1, 2, 3, 4, 5], holidayAware: false,
   cron: '0 9 * * *', intervalValue: 30, intervalUnit: 'minutes', runAt: '',
   timezone: 'Asia/Shanghai',
 };
@@ -234,6 +235,8 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
     if (!schedule) { showToast('error', t(`loopTasks:error.${errKey}`)); return; }
     setSaving(true);
     try {
+      // 工作日预设携带法定日历感知；其他预设一律关闭
+      const holidayAware = form.kind === 'weekdays' ? true : false;
       if (dialogMode === 'create') {
         await createLoopTask({
           title: form.title.trim(),
@@ -241,6 +244,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
           projectId: form.projectId,
           agentId: form.agentId,
           autoApprove: form.autoApprove,
+          holidayAware,
           schedule,
           timezone: form.timezone,
         });
@@ -251,6 +255,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
           prompt: form.prompt.trim(),
           agentId: form.agentId,
           autoApprove: form.autoApprove,
+          holidayAware,
           ...schedule,
           timezone: form.timezone,
         });
@@ -332,7 +337,6 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
     .map((a) => ({ value: a.id, label: a.name })), [agents]);
   const schedulePresets = useMemo(() => SCHEDULE_PRESETS.map((v) => ({ value: v, label: t(`loopTasks:kind.${v}`) })), [t]);
   const weekdayLabels = useMemo(() => WEEKDAY_ORDER.map((dow) => ({ dow, label: t(`loopTasks:weekday.${dow}`) })), [t]);
-  const timezoneOptions = useMemo(() => TIMEZONES.map((tz) => ({ value: tz, label: tz })), []);
   const unitOptions = useMemo(() => [
     { value: 'minutes', label: t('loopTasks:unit.minutes') },
     { value: 'hours', label: t('loopTasks:unit.hours') },
@@ -523,7 +527,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                   {/* GLM/Coze 式预设 pills：自然预设优先，cron 折叠为高级自定义 */}
                   <div className="flex flex-wrap gap-1.5" role="group" aria-label={t('loopTasks:field.schedule')}>
                     {schedulePresets.map((p) => (
-                      <button key={p.value} type="button" onClick={() => setForm((f) => ({ ...f, kind: p.value }))}
+                      <button key={p.value} type="button" onClick={() => setForm((f) => ({ ...f, kind: p.value, holidayAware: p.value === 'weekdays' }))}
                         aria-pressed={form.kind === p.value}
                         className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                           form.kind === p.value
@@ -534,75 +538,72 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                       </button>
                     ))}
                   </div>
-                  {(form.kind === 'daily' || form.kind === 'weekly' || form.kind === 'weekdays') && (
-                    <div className="space-y-2 pt-1">
-                      {form.kind === 'weekly' && (
-                        <div className="flex flex-wrap gap-1">
-                          {weekdayLabels.map(({ dow, label }) => {
-                            const active = (form.weekdays || []).includes(dow);
-                            return (
-                              <button key={dow} type="button" aria-pressed={active}
-                                onClick={() => setForm((f) => ({
-                                  ...f,
-                                  weekdays: active ? (f.weekdays || []).filter((d) => d !== dow) : [...(f.weekdays || []), dow],
-                                }))}
-                                className={`h-7 w-9 rounded-md border text-xs font-medium transition-colors ${
-                                  active ? 'border-zinc-900 bg-zinc-900 text-zinc-50' : 'border-zinc-300 text-zinc-500 hover:border-zinc-400 hover:text-zinc-900'
-                                }`}>
-                                {label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
+                  {/* 固定高度变体区：min-h 取最高变体（weekly = 周几 chips 28 + 间距 8 + 时间 38 = 74），
+                      切换预设时弹窗高度不变（DESIGN.md 页面稳定性原则） */}
+                  <div className="min-h-[74px]">
+                    {form.kind === 'weekly' && (
+                      <div className="mb-2 flex flex-wrap gap-1">
+                        {weekdayLabels.map(({ dow, label }) => {
+                          const active = (form.weekdays || []).includes(dow);
+                          return (
+                            <button key={dow} type="button" aria-pressed={active}
+                              onClick={() => setForm((f) => ({
+                                ...f,
+                                weekdays: active ? (f.weekdays || []).filter((d) => d !== dow) : [...(f.weekdays || []), dow],
+                              }))}
+                              className={`h-7 w-9 rounded-md border text-xs font-medium transition-colors ${
+                                active ? 'border-zinc-900 bg-zinc-900 text-zinc-50' : 'border-zinc-300 text-zinc-500 hover:border-zinc-400 hover:text-zinc-900'
+                              }`}>
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {(form.kind === 'daily' || form.kind === 'weekly' || form.kind === 'weekdays') && (
                       <Input id="loop-task-time" type="time" value={form.time}
                         onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))} className="h-[38px] w-36" />
-                    </div>
-                  )}
-                  {form.kind === 'every' && (
-                    <div className="grid grid-cols-2 gap-2">
+                    )}
+                    {form.kind === 'every' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input
+                          type="number"
+                          min="1"
+                          value={form.intervalValue}
+                          onChange={(e) => setForm((f) => ({ ...f, intervalValue: e.target.value }))}
+                          className="h-[38px]"
+                        />
+                        <SelectMenu
+                          value={form.intervalUnit}
+                          onChange={(v) => setForm((f) => ({ ...f, intervalUnit: v }))}
+                          options={unitOptions}
+                        />
+                      </div>
+                    )}
+                    {form.kind === 'at' && (
+                      <DateTimeField
+                        id="loop-task-at"
+                        value={form.runAt}
+                        onChange={(v) => setForm((f) => ({ ...f, runAt: v }))}
+                        placeholder="YYYY-MM-DD HH:mm"
+                      />
+                    )}
+                    {form.kind === 'cron' && (
                       <Input
-                        type="number"
-                        min="1"
-                        value={form.intervalValue}
-                        onChange={(e) => setForm((f) => ({ ...f, intervalValue: e.target.value }))}
-                        className="h-[38px]"
+                        id="loop-task-cron"
+                        value={form.cron}
+                        onChange={(e) => setForm((f) => ({ ...f, cron: e.target.value }))}
+                        placeholder={t('loopTasks:field.cron_placeholder')}
+                        className="font-mono h-[38px]"
                       />
-                      <SelectMenu
-                        value={form.intervalUnit}
-                        onChange={(v) => setForm((f) => ({ ...f, intervalUnit: v }))}
-                        options={unitOptions}
-                      />
-                    </div>
-                  )}
-                  {form.kind === 'at' && (
-                    <DateTimeField
-                      id="loop-task-at"
-                      value={form.runAt}
-                      onChange={(v) => setForm((f) => ({ ...f, runAt: v }))}
-                      placeholder="YYYY-MM-DD HH:mm"
-                    />
-                  )}
-                  {form.kind === 'cron' && (
-                    <Input
-                      id="loop-task-cron"
-                      value={form.cron}
-                      onChange={(e) => setForm((f) => ({ ...f, cron: e.target.value }))}
-                      placeholder={t('loopTasks:field.cron_placeholder')}
-                      className="font-mono h-[38px]"
-                    />
-                  )}
+                    )}
+                  </div>
                   {/* 固定预留一行高度：描述/错误出现或消失时弹窗不抖动（DESIGN.md 页面稳定性） */}
                   <p className={`min-h-4 text-xs ${cronHint?.error ? 'text-red-700' : 'text-zinc-500'}`}>
                     {cronHint?.error || cronHint?.description || ''}
                   </p>
                 </div>
-                <div className="flex items-center justify-between gap-4">
-                  <FormLabel htmlFor="loop-task-tz">{t('loopTasks:field.timezone')}</FormLabel>
-                  <div className="w-44">
-                    <SelectMenu value={form.timezone} onChange={(v) => setForm((f) => ({ ...f, timezone: v }))} options={timezoneOptions} />
-                  </div>
-                </div>
+                {/* 时区不暴露 UI：静默取用户全局偏好并随任务落库（改全局偏好不影响存量任务） */}
               </div>
             </ConsoleStructuredDialogBody>
             <ConsoleStructuredDialogFooter>
