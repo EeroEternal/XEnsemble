@@ -6,6 +6,11 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 
 import { getAccessToken, getWsUrl, apiFetch, refreshAccessToken } from '../lib/api';
+import {
+  isFullRepaintDropAgent,
+  dropFullRepaintPrefix,
+  FULL_REPAINT_DROP_MIN_KEEP_BYTES,
+} from '../lib/terminalFrameDrop';
 import { useTerminalTheme } from '../hooks/useTerminalTheme.jsx';
 import { Loader2 } from 'lucide-react';
 import {
@@ -100,6 +105,7 @@ function setCachedSeq(sessionId, seq) {
 
 function AgentConsole({
   sessionId,
+  agentId,
   reconnectVersion = 0,
   onSessionEnd,
   onSessionConnected,
@@ -108,6 +114,9 @@ function AgentConsole({
 }) {
   const { preset } = useTerminalTheme();
   const { t } = useTranslation();
+  // 全屏重绘型 TUI（qwen-code）：积压超阈值时按「满整屏重绘帧」锚点裁剪。
+  // 其他 agent 为 false → 完全走原有字节透明管线，行为不变。
+  const fullRepaintDrop = isFullRepaintDropAgent(agentId);
   const xtermTheme = preset?.xterm || FALLBACK_XTERM_THEME;
 
   const hostRef = useRef(null);
@@ -444,6 +453,8 @@ function AgentConsole({
           replayDoneRef.current = false;
           let writeBuffer = '';
           let pendingSeq = null;
+          // 裁剪日志只打一次（每个连接），避免高频裁剪刷屏。
+          let fullRepaintDropLogged = false;
           // Backpressure: count terminal.write() calls not yet rendered by
           // xterm. When the WS output rate exceeds xterm's render capacity the
           // count grows; we then delay the next flush so xterm can drain its
@@ -638,6 +649,22 @@ function AgentConsole({
             let remaining = syncTermPending + (writeBuffer || '');
             syncTermPending = '';
             writeBuffer = '';
+
+            // 全屏重绘型 TUI（qwen-code）专用积压裁剪：超阈值时丢弃最旧前缀，
+            // 切点落在「满整屏重绘帧」的**起始**处并保留该锚点帧——锚点帧重画
+            // 整屏，被丢弃的更早帧在屏幕上被其完全覆盖。其他 agent 不进入此分支。
+            // 仅在 primary buffer 生效（alt screen 的 TUI 靠自身增量重绘，
+            // 不适用整屏覆盖语义）。
+            if (fullRepaintDrop && !inAltScreen && remaining.length > FULL_REPAINT_DROP_MIN_KEEP_BYTES) {
+              const trimmed = dropFullRepaintPrefix(remaining, { rows: terminal.rows });
+              if (trimmed.droppedBytes > 0) {
+                remaining = trimmed.data;
+                if (!fullRepaintDropLogged) {
+                  fullRepaintDropLogged = true;
+                  console.warn(`[AgentConsole] full-repaint backlog trimmed (dropped ${trimmed.droppedBytes} bytes, agent=${agentId})`);
+                }
+              }
+            }
 
             // Detect alt screen transitions in this chunk.
             // When entering alt screen: process pre-transition content with

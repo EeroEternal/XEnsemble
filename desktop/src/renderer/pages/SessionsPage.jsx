@@ -1475,6 +1475,7 @@ export default React.forwardRef(function Sessions({
                   <AgentConsole
                     key={activeSession.sessionId}
                     sessionId={activeSession.sessionId}
+                    agentId={activeSession.agentId}
                     reconnectVersion={reconnectVersion}
                     onSessionEnd={handleSessionEnd}
                     onSessionConnected={handleSessionConnected}
