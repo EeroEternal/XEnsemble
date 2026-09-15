@@ -182,6 +182,8 @@
     "tab_overview": "Overview",
     "tab_preview": "Preview",
     "tab_raw": "Raw",
+    "expand_all": "Expand all",
+    "collapse": "Collapse",
     "tab_source": "Source",
     "tab_input": "Input",
     "tab_output": "Output",

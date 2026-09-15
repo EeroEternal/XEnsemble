@@ -814,7 +814,8 @@ function JsonTree({ value, name = null }) {
 function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
   const { t } = useTranslation('sessions');
   const [tab, setTab] = useState('overview');
-  useEffect(() => { setTab('overview'); }, [entry?.id]);
+  const [overviewExpanded, setOverviewExpanded] = useState(false);
+  useEffect(() => { setTab('overview'); setOverviewExpanded(false); }, [entry?.id]);
   if (!entry) {
     return <div className={cn('flex-1 flex items-center justify-center text-xs', T3)}>{t('trajectory.detail_empty')}</div>;
   }
@@ -894,7 +895,19 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
     }
     return (
       <OverviewSection label={t('trajectory.tab_preview')} onOpen={() => setTab('preview')}>
-        {renderedBody(true)}
+        {/* DeepSeek harness 原则：折叠的是容器，不裁内容——默认折叠，就地展开全文 */}
+        <div className={cn('relative', !overviewExpanded && 'max-h-56 overflow-hidden')}>
+          {renderedBody(false)}
+        </div>
+        <button
+          type="button"
+          onClick={() => setOverviewExpanded((o) => !o)}
+          className={cn('mt-1 inline-flex items-center gap-1 text-[11px]', T3, 'hover:text-zinc-800 dark:hover:text-zinc-200', consoleButtonFocusClass)}
+        >
+          {overviewExpanded
+            ? t('trajectory.collapse', { defaultValue: '收起' })
+            : t('trajectory.expand_all', { defaultValue: '展开全部' })}
+        </button>
       </OverviewSection>
     );
   };
