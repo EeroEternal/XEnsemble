@@ -294,6 +294,18 @@ async function generateAIDescription(project, gitOperationService, type, opts = 
         ].join('\n'),
         pr: 'You are a pull request generator. Given a git diff, output a JSON object with "title" and "body" fields. The title should be a concise conventional commit style summary. The body should be a brief description of what changed and why, in markdown bullet points. Respond with valid JSON only, no markdown code blocks, no explanation.',
     };
+    // commit/PR 描述是「总结 diff」型任务，不需要深度推理。reasoning_effort=low
+    // 可大幅压缩思考量（实测 33s → ~5s），且为 OpenAI 兼容标准字段（GLM 全系 /
+    // DeepSeek 等通用，多余字段一般被忽略）。用环境变量可调/可关：
+    //   - 未配置 → 默认 'low'（推理模型提速）
+    //   - 配置为 high/max → 自定义思考强度
+    //   - 配置为空字符串 '' → 完全不传该字段（兼容严格校验未知字段的端点）
+    // 不用 thinking.type=disabled：官方文档明确 GLM-5.3 系列始终思考、不支持
+    // disabled，模型切换/升级后请求会失败（历史教训：thinking_budget / json_object
+    // 等 GLM 字段曾因兼容性引入问题）。
+    const reasoningEffort = process.env.LLM_ANALYZE_REASONING_EFFORT === undefined
+        ? 'low'
+        : String(process.env.LLM_ANALYZE_REASONING_EFFORT).trim();
     const res = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -310,6 +322,7 @@ async function generateAIDescription(project, gitOperationService, type, opts = 
             // 兼顾最坏情况（长 diff 下 prompt/reasoning 均更大）。
             max_tokens: 8192,
             temperature: 0.4,
+            ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         }),
     });
     if (!res.ok) throw new Error(`AI error ${res.status}`);
