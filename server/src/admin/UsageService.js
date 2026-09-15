@@ -59,7 +59,8 @@ async function getMyUsageSummary(userId, { days } = {}) {
 
 /**
  * 本人按项目分解（含已删除项目，projectName 为 null 时由调用方兜底展示）。
- * @returns {Promise<Array<{ projectId:string|null, projectName:string|null, requests:number, promptTokens:number, completionTokens:number, totalTokens:number }>>}
+ * 每项目附缓存命中率（分母只计上报了缓存信息的请求，与 getUsageByAgent 口径一致）。
+ * @returns {Promise<Array<{ projectId:string|null, projectName:string|null, requests:number, promptTokens:number, completionTokens:number, totalTokens:number, cachedTokens:number, cacheHitRate:number|null }>>}
  */
 async function getMyUsageByProject(userId, { days } = {}) {
     const { sinceTs } = normalizeRange(days);
@@ -70,6 +71,8 @@ async function getMyUsageByProject(userId, { days } = {}) {
             requests: sql`count(*)::int`,
             prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
             completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
+            cached: sql`coalesce(sum(${schema.llmUsage.cachedTokens}), 0)::int`,
+            reportedPrompt: sql`coalesce(sum(case when ${schema.llmUsage.cachedTokens} is not null then ${schema.llmUsage.promptTokens} else 0 end), 0)::int`,
             total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
         })
         .from(schema.llmUsage)
@@ -77,14 +80,21 @@ async function getMyUsageByProject(userId, { days } = {}) {
         .where(and(eq(schema.llmUsage.userId, userId), gte(schema.llmUsage.createdAt, sinceTs)))
         .groupBy(schema.llmUsage.projectId, schema.projects.name)
         .orderBy(sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0) desc`);
-    return rows.map((r) => ({
-        projectId: r.projectId,
-        projectName: r.projectName ?? null,
-        requests: Number(r.requests || 0),
-        promptTokens: Number(r.prompt || 0),
-        completionTokens: Number(r.completion || 0),
-        totalTokens: Number(r.total || 0),
-    }));
+    return rows.map((r) => {
+        const promptTokens = Number(r.prompt || 0);
+        const cachedTokens = Number(r.cached || 0);
+        const reportedPrompt = Number(r.reportedPrompt || 0);
+        return {
+            projectId: r.projectId,
+            projectName: r.projectName ?? null,
+            requests: Number(r.requests || 0),
+            promptTokens,
+            completionTokens: Number(r.completion || 0),
+            totalTokens: Number(r.total || 0),
+            cachedTokens,
+            cacheHitRate: reportedPrompt > 0 ? Number((cachedTokens / reportedPrompt).toFixed(4)) : null,
+        };
+    });
 }
 
 /**
@@ -142,8 +152,9 @@ async function getTotalBetween(userId, fromTs, toTs) {
 // ── 管理员 ──────────────────────────────────────────────────────────
 
 /**
- * 全部用户用量排行（LEFT JOIN users，含 0 用量用户）。
- * @returns {Promise<Array<{ userId, username, displayName, role, promptTokens, completionTokens, totalTokens, requests }>>}
+ * 全部用户用量排行（LEFT JOIN users，含 0 用量用户）。附每用户缓存命中率
+ * （分母只计上报了缓存信息的请求）。
+ * @returns {Promise<Array<{ userId, username, displayName, role, promptTokens, completionTokens, totalTokens, requests, cachedTokens, cacheHitRate }>>}
  */
 async function getUsageByUser({ days } = {}) {
     const { sinceTs } = normalizeRange(days);
@@ -155,6 +166,8 @@ async function getUsageByUser({ days } = {}) {
             role: schema.users.role,
             prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
             completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
+            cached: sql`coalesce(sum(${schema.llmUsage.cachedTokens}), 0)::int`,
+            reportedPrompt: sql`coalesce(sum(case when ${schema.llmUsage.cachedTokens} is not null then ${schema.llmUsage.promptTokens} else 0 end), 0)::int`,
             total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
             requests: sql`count(${schema.llmUsage.id})::int`,
         })
@@ -165,29 +178,73 @@ async function getUsageByUser({ days } = {}) {
         )
         .groupBy(schema.users.id, schema.users.username, schema.users.displayName, schema.users.role)
         .orderBy(sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0) desc`);
-    return rows.map((r) => ({
-        userId: r.userId,
-        username: r.username,
-        displayName: r.displayName ?? null,
-        role: r.role,
-        promptTokens: Number(r.prompt || 0),
-        completionTokens: Number(r.completion || 0),
-        totalTokens: Number(r.total || 0),
-        requests: Number(r.requests || 0),
-    }));
+    return rows.map((r) => {
+        const cachedTokens = Number(r.cached || 0);
+        const reportedPrompt = Number(r.reportedPrompt || 0);
+        return {
+            userId: r.userId,
+            username: r.username,
+            displayName: r.displayName ?? null,
+            role: r.role,
+            promptTokens: Number(r.prompt || 0),
+            completionTokens: Number(r.completion || 0),
+            totalTokens: Number(r.total || 0),
+            requests: Number(r.requests || 0),
+            cachedTokens,
+            cacheHitRate: reportedPrompt > 0 ? Number((cachedTokens / reportedPrompt).toFixed(4)) : null,
+        };
+    });
 }
 
 /**
- * 单用户详情：汇总 + 日趋势 + 模型分布 + 项目分布。
+ * 按 agent 聚合（平台总览或单用户）。命中率分母只计 provider 上报了缓存
+ * 信息的请求（cached_tokens 非空行），未上报缓存的流量不稀释命中率。
+ * @returns {Promise<Array<{ key:string, requests:number, promptTokens:number, cachedTokens:number, totalTokens:number, cacheHitRate:number|null }>>}
+ */
+async function getUsageByAgent({ days, userId } = {}) {
+    const { sinceTs } = normalizeRange(days);
+    const conds = [gte(schema.llmUsage.createdAt, sinceTs)];
+    if (userId) conds.push(eq(schema.llmUsage.userId, userId));
+    const rows = await db
+        .select({
+            key: schema.llmUsage.agentId,
+            requests: sql`count(*)::int`,
+            prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
+            cached: sql`coalesce(sum(${schema.llmUsage.cachedTokens}), 0)::int`,
+            reportedPrompt: sql`coalesce(sum(case when ${schema.llmUsage.cachedTokens} is not null then ${schema.llmUsage.promptTokens} else 0 end), 0)::int`,
+            total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
+        })
+        .from(schema.llmUsage)
+        .where(and(...conds))
+        .groupBy(schema.llmUsage.agentId)
+        .orderBy(sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0) desc`);
+    return rows.map((r) => {
+        const promptTokens = Number(r.prompt || 0);
+        const cachedTokens = Number(r.cached || 0);
+        const reportedPrompt = Number(r.reportedPrompt || 0);
+        return {
+            key: r.key ?? '(unknown)',
+            requests: Number(r.requests || 0),
+            promptTokens,
+            cachedTokens,
+            totalTokens: Number(r.total || 0),
+            cacheHitRate: reportedPrompt > 0 ? Number((cachedTokens / reportedPrompt).toFixed(4)) : null,
+        };
+    });
+}
+
+/**
+ * 单用户详情：汇总 + 日趋势 + 模型分布 + 项目分布 + agent 分布。
  */
 async function getUserUsageDetail(userId, { days } = {}) {
-    const [summary, trend, byModel, byProject] = await Promise.all([
+    const [summary, trend, byModel, byProject, byAgent] = await Promise.all([
         getMyUsageSummary(userId, { days }),
         getMyUsageTrend(userId, { days }),
         getUsageByModel(userId, { days }),
         getMyUsageByProject(userId, { days }),
+        getUsageByAgent({ days, userId }),
     ]);
-    return { summary, trend, byModel, byProject };
+    return { summary, trend, byModel, byProject, byAgent };
 }
 
 /**
@@ -210,18 +267,20 @@ async function getUsageByModel(userId, { days } = {}) {
 }
 
 /**
- * 平台总览：汇总 + 日趋势 + TOP5 用户。
+ * 平台总览：汇总（含缓存命中）+ 日趋势 + TOP5 用户 + agent 分布。
  */
 async function getPlatformOverview({ days } = {}) {
     const { days: d, sinceTs } = normalizeRange(days);
     // 同 getMyUsageTrend：按天分桶用内联常量表达式（select/group by 逐字一致）
     const bucketExpr = sql.raw(`floor(created_at / ${DAY_MS})`);
-    const [summaryRows, trendRows, topUsers] = await Promise.all([
+    const [summaryRows, trendRows, topUsers, byAgent] = await Promise.all([
         db
             .select({
                 prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
                 completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
                 total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
+                cached: sql`coalesce(sum(${schema.llmUsage.cachedTokens}), 0)::int`,
+                reportedPrompt: sql`coalesce(sum(case when ${schema.llmUsage.cachedTokens} is not null then ${schema.llmUsage.promptTokens} else 0 end), 0)::int`,
                 requests: sql`count(*)::int`,
                 activeUsers: sql`count(distinct ${schema.llmUsage.userId})::int`,
             })
@@ -239,8 +298,11 @@ async function getPlatformOverview({ days } = {}) {
             .where(gte(schema.llmUsage.createdAt, sinceTs))
             .groupBy(bucketExpr),
         getUsageByUser({ days }),
+        getUsageByAgent({ days }),
     ]);
     const s = summaryRows[0] || {};
+    const cachedTokens = Number(s.cached || 0);
+    const reportedPrompt = Number(s.reportedPrompt || 0);
     const byBucket = new Map(trendRows.map((r) => [Number(r.bucket), r]));
     const trend = [];
     const todayStart = Math.floor(Date.now() / DAY_MS);
@@ -262,9 +324,12 @@ async function getPlatformOverview({ days } = {}) {
             totalTokens: Number(s.total || 0),
             requests: Number(s.requests || 0),
             activeUsers: Number(s.activeUsers || 0),
+            cachedTokens,
+            cacheHitRate: reportedPrompt > 0 ? Number((cachedTokens / reportedPrompt).toFixed(4)) : null,
         },
         trend,
         topUsers: topUsers.filter((u) => u.totalTokens > 0).slice(0, 5),
+        byAgent,
     };
 }
 
@@ -300,6 +365,7 @@ module.exports = {
     getTotalBetween,
     getUsageByUser,
     getUsageByModel,
+    getUsageByAgent,
     getUserUsageDetail,
     getPlatformOverview,
     getUserRecentRequests,

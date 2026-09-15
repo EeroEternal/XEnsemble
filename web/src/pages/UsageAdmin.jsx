@@ -205,7 +205,8 @@ export default function UsageAdmin() {
                     <col className="w-1/7" />
                     <col className="w-1/7" />
                     <col className="w-1/7" />
-                    <col className="w-1/6" />
+                    <col className="w-1/7" />
+                    <col className="w-1/7" />
                     <col className="w-1/6" />
                     <col className="w-12" />
                   </colgroup>
@@ -217,6 +218,7 @@ export default function UsageAdmin() {
                       <th className={consoleTableHeadCellClass}>{t('users:usage.prompt')}</th>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.completion')}</th>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.total_tokens')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.cache_hit_rate')}</th>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.share')}</th>
                       <th className={consoleTableHeadCellClass} />
                     </tr>
@@ -224,7 +226,7 @@ export default function UsageAdmin() {
                   <tbody className="divide-y divide-zinc-100">
                     {visibleRows.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>
+                        <td colSpan={9} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>
                           {q ? t('users:empty.no_match', { defaultValue: 'No users match your search.' }) : t('users:usage.no_data')}
                         </td>
                       </tr>
@@ -250,7 +252,7 @@ export default function UsageAdmin() {
                         className="cursor-pointer transition-colors hover:bg-zinc-50"
                         onClick={() => setShowEmpty(true)}
                       >
-                        <td colSpan={8} className="px-4 py-2.5 text-center text-[11px] text-zinc-400">
+                        <td colSpan={9} className="px-4 py-2.5 text-center text-[11px] text-zinc-400">
                           <span className="mr-1 inline-flex items-center justify-center align-[-2px]">
                             <ChevronDown className="h-3 w-3" />
                           </span>
@@ -263,7 +265,7 @@ export default function UsageAdmin() {
                         className="cursor-pointer transition-colors hover:bg-zinc-50"
                         onClick={() => setShowEmpty(false)}
                       >
-                        <td colSpan={8} className="px-4 py-2.5 text-center text-[11px] text-zinc-400">
+                        <td colSpan={9} className="px-4 py-2.5 text-center text-[11px] text-zinc-400">
                           <span className="mr-1 inline-flex items-center justify-center align-[-2px]">
                             <ChevronUp className="h-3 w-3" />
                           </span>
@@ -271,6 +273,45 @@ export default function UsageAdmin() {
                         </td>
                       </tr>
                     )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          {/* Agent 分布（含缓存命中率） */}
+          <section>
+            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.by_agent')}</h2>
+            <div className={consoleAdminTableShellClass}>
+              <div className={consoleAdminTableScrollClass}>
+                <table className="w-full table-fixed border-collapse text-left text-sm">
+                  <thead className="sticky top-0 z-10">
+                    <tr className={consoleTableHeadRowClass}>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.agent')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.requests')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.prompt')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.cached_tokens')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.cache_hit_rate')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.total_tokens')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-100">
+                    {(overview?.byAgent || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>
+                          {t('users:usage.no_data')}
+                        </td>
+                      </tr>
+                    ) : (overview?.byAgent || []).map((a) => (
+                      <tr key={a.key} className="transition-colors hover:bg-zinc-50/70">
+                        <td className={`${consoleTableBodyCellClass} font-medium text-zinc-700`}>{a.key}</td>
+                        <td className={consoleTableBodyCellClass}>{formatTokens(a.requests)}</td>
+                        <td className={consoleTableBodyCellClass}>{formatTokens(a.promptTokens)}</td>
+                        <td className={consoleTableBodyCellClass}>{a.cachedTokens > 0 ? formatTokens(a.cachedTokens) : '—'}</td>
+                        <td className={consoleTableBodyCellClass}>{a.cacheHitRate != null ? `${Math.round(a.cacheHitRate * 100)}%` : '—'}</td>
+                        <td className={consoleTableBodyCellClass}>{formatTokens(a.totalTokens)}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -315,6 +356,9 @@ function Row({ user, idx, share, expanded, expandable, onToggle, onOpenDialog, t
         <td className={`${consoleTableBodyCellClass} font-mono text-xs font-semibold tabular-nums text-zinc-900`}>
           {formatTokens(user.totalTokens)}
         </td>
+        <td className={`${consoleTableBodyCellClass} font-mono text-xs tabular-nums text-zinc-500`}>
+          {user.cacheHitRate != null ? `${Math.round(user.cacheHitRate * 100)}%` : '—'}
+        </td>
         <td className={consoleTableBodyCellClass}>
           {share > 0 ? (
             <div className="flex items-center gap-2">
@@ -337,7 +381,7 @@ function Row({ user, idx, share, expanded, expandable, onToggle, onOpenDialog, t
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={8} className="bg-zinc-50/60 px-4 py-4" onClick={(e) => e.stopPropagation()}>
+          <td colSpan={9} className="bg-zinc-50/60 px-4 py-4" onClick={(e) => e.stopPropagation()}>
             <ExpandedDetail userId={user.userId} days={30} onOpenDialog={onOpenDialog} t={t} />
           </td>
         </tr>

@@ -941,6 +941,7 @@ async function proxyLlmRequest(request, reply) {
                     promptTokens: usage.promptTokens,
                     completionTokens: usage.completionTokens,
                     totalTokens: usage.totalTokens,
+                    cachedTokens: usage.cachedTokens ?? null,
                     statusCode: 200,
                     latencyMs: Date.now() - started,
                     createdAt: Date.now(),

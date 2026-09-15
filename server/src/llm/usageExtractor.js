@@ -14,8 +14,14 @@
  */
 
 /**
- * 规范化 usage 字段为 { promptTokens, completionTokens, totalTokens }。
+ * 规范化 usage 字段为 { promptTokens, completionTokens, totalTokens, cachedTokens }。
  * total 缺失时用 prompt + completion 兜底；两者也缺失时返回 null。
+ *
+ * cachedTokens：缓存命中的 prompt token 数（各 provider 形态不同）——
+ *   OpenAI 通用  usage.prompt_tokens_details.cached_tokens
+ *   DeepSeek     usage.prompt_cache_hit_tokens
+ *   Anthropic    usage.cache_read_input_tokens
+ * provider 未上报缓存信息时为 null（区分"命中 0"与"未上报"，聚合时 null 不计入命中率分母）。
  */
 function normalizeUsage(raw) {
     if (!raw || typeof raw !== 'object') return null;
@@ -24,7 +30,11 @@ function normalizeUsage(raw) {
     if (prompt <= 0 && completion <= 0) return null;
     const totalRaw = Number(raw.total_tokens ?? 0) || 0;
     const total = totalRaw > 0 ? totalRaw : prompt + completion;
-    return { promptTokens: prompt, completionTokens: completion, totalTokens: total };
+    const cacheRaw = raw.prompt_tokens_details?.cached_tokens
+        ?? raw.prompt_cache_hit_tokens
+        ?? raw.cache_read_input_tokens;
+    const cachedTokens = cacheRaw == null ? null : (Number(cacheRaw) || 0);
+    return { promptTokens: prompt, completionTokens: completion, totalTokens: total, cachedTokens };
 }
 
 function isEventStream(contentType) {
@@ -33,7 +43,7 @@ function isEventStream(contentType) {
 
 /**
  * 从 SSE 响应体提取 usage。
- * 返回 { promptTokens, completionTokens, totalTokens } 或 null。
+ * 返回 { promptTokens, completionTokens, totalTokens, cachedTokens } 或 null。
  */
 function extractUsageFromSse(bodyBuffer) {
     let text;
@@ -48,6 +58,7 @@ function extractUsageFromSse(bodyBuffer) {
     let openaiUsage = null;
     let anthropicPrompt = 0;
     let anthropicCompletion = 0;
+    let anthropicCacheRead = null;
     let sawAnthropic = false;
     let sawOpenAI = false;
     for (const line of lines) {
@@ -68,6 +79,9 @@ function extractUsageFromSse(bodyBuffer) {
             if (obj.usage.output_tokens) {
                 anthropicCompletion = Math.max(anthropicCompletion, Number(obj.usage.output_tokens) || 0);
             }
+            if (obj.usage.cache_read_input_tokens != null) {
+                anthropicCacheRead = Number(obj.usage.cache_read_input_tokens) || 0;
+            }
             continue;
         }
         if (obj.type === 'message_delta' && obj.usage) {
@@ -82,6 +96,7 @@ function extractUsageFromSse(bodyBuffer) {
     }
     if (sawAnthropic) {
         const raw = { prompt_tokens: anthropicPrompt, completion_tokens: anthropicCompletion };
+        if (anthropicCacheRead != null) raw.cache_read_input_tokens = anthropicCacheRead;
         return normalizeUsage(raw);
     }
     if (sawOpenAI) return normalizeUsage(openaiUsage);

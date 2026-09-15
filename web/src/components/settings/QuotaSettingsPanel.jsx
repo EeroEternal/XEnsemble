@@ -138,6 +138,7 @@ export default function QuotaSettingsPanel() {
                     <th className="px-4 py-2 text-right font-medium">{t('settings:usage.requests')}</th>
                     <th className="px-4 py-2 text-right font-medium">{t('settings:usage.prompt_tokens')}</th>
                     <th className="px-4 py-2 text-right font-medium">{t('settings:usage.completion_tokens')}</th>
+                    <th className="px-4 py-2 text-right font-medium">{t('settings:usage.cache_hit_rate')}</th>
                     <th className="px-4 py-2 text-right font-medium">{t('settings:usage.total_tokens')}</th>
                   </tr>
                 </thead>
@@ -150,6 +151,9 @@ export default function QuotaSettingsPanel() {
                       <td className="px-4 py-2.5 text-right font-mono tabular-nums">{p.requests}</td>
                       <td className="px-4 py-2.5 text-right font-mono tabular-nums">{formatTokens(p.promptTokens)}</td>
                       <td className="px-4 py-2.5 text-right font-mono tabular-nums">{formatTokens(p.completionTokens)}</td>
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums">
+                        {p.cacheHitRate != null ? `${Math.round(p.cacheHitRate * 100)}%` : '—'}
+                      </td>
                       <td className="px-4 py-2.5 text-right font-mono font-semibold tabular-nums text-zinc-900">
                         {formatTokens(p.totalTokens)}
                       </td>

@@ -225,6 +225,13 @@
       "when": 1789470000000,
       "tag": "0031_loop_task_holiday_aware",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1789480000000,
+      "tag": "0032_llm_usage_cached_tokens",
+      "breakpoints": true
     }
   ]
 }

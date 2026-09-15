@@ -573,6 +573,8 @@ const llmUsage = pgTable('llm_usage', {
   promptTokens: integer('prompt_tokens').notNull().default(0),
   completionTokens: integer('completion_tokens').notNull().default(0),
   totalTokens: integer('total_tokens').notNull().default(0),
+  // 0030: 缓存命中的 prompt token 数；provider 未上报时为 null（区分"命中 0"与"未上报"）
+  cachedTokens: integer('cached_tokens'),
   statusCode: integer('status_code'),
   latencyMs: integer('latency_ms'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
