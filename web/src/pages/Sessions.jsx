@@ -116,6 +116,19 @@ export default React.forwardRef(function Sessions({
     if (location.pathname !== '/sessions') navigate('/sessions');
   }, [location.pathname, navigate]);
 
+  // 循环任务执行历史 → 打开对应会话（loop_task 会话不在默认列表，直接激活）
+  useEffect(() => {
+    const st = location.state?.openLoopSession;
+    if (!st?.sessionId) return undefined;
+    setActiveSession({
+      sessionId: st.sessionId,
+      agentId: st.agentId,
+      projectId: st.projectId,
+      projectName: st.projectName || null,
+    });
+    navigate('.', { replace: true, state: null });
+  }, [location.state]);
+
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
   const [launchModalMode, setLaunchModalMode] = useState('workspace');

@@ -9,10 +9,14 @@
     "title_placeholder": "e.g. Nightly dependency check",
     "workspace": "Workspace",
     "workspace_placeholder": "Select a workspace",
+    "agent": "Agent",
+    "agent_placeholder": "Select an agent",
+    "auto_approve": "Auto-approve tool calls",
     "prompt": "Prompt",
     "prompt_placeholder": "e.g. Run `npm audit` and upgrade safe patches in this workspace, then run the tests. If tests fail, revert. Reply with the audit summary.",
     "prompt_help": "Describe what to do, what it may change, and how to verify it's done.",
-    "schedule": "Schedule (cron)",
+    "schedule": "Schedule",
+    "time": "Time",
     "timezone": "Timezone",
     "cron_placeholder": "0 9 * * *"
   },
@@ -22,9 +26,25 @@
     "completed": "Completed"
   },
   "kind": {
-    "cron": "Cron expression",
-    "every": "Fixed interval",
-    "at": "Run once"
+    "daily": "Daily",
+    "weekly": "Weekly",
+    "weekdays": "Weekdays",
+    "every": "Interval",
+    "at": "Run once",
+    "cron": "Custom cron"
+  },
+  "weekday": {
+    "0": "Su",
+    "1": "Mo",
+    "2": "Tu",
+    "3": "We",
+    "4": "Th",
+    "5": "Fr",
+    "6": "Sa"
+  },
+  "auto_approve": {
+    "yes": "Auto",
+    "no": "Manual confirm"
   },
   "unit": {
     "minutes": "Minutes",
@@ -43,6 +63,7 @@
     "no_runs": "No runs yet.",
     "logs": "Execution log",
     "rounds": "{{count}} rounds",
+    "open_session": "Open session",
     "error": "Error",
     "duration": "Duration",
     "started": "Started"
@@ -65,8 +86,12 @@
     "action_failed": "Action failed."
   },
   "error": {
+    "agent_required": "Please select an agent.",
     "cron_invalid": "Invalid cron expression.",
     "datetime_format": "Use the format YYYY-MM-DD HH:mm.",
+    "interval_invalid": "Interval must be greater than 0.",
+    "time_invalid": "Please enter a valid time (HH:mm).",
+    "weekday_required": "Select at least one weekday.",
     "required": "Title, workspace, prompt and schedule are required."
   }
 }

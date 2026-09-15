@@ -78,6 +78,8 @@
   "skill_validation_failed": "Skill validation failed: {{message}}",
   "skill_invalid_transition": "Invalid skill status transition",
   "loop_task_not_found": "Loop task not found",
+  "loop_agent_required": "Task has no agent configured — edit the task and pick one.",
+  "agent_task_unsupported": "This agent does not support unattended runs — pick another agent.",
   "loop_cron_invalid": "Invalid cron expression: {{message}}",
   "loop_task_limit_exceeded": "Loop task limit reached ({{limit}}).",
   "loop_run_in_progress": "Previous run is still in progress.",

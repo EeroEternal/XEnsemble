@@ -1,5 +1,11 @@
 import { apiFetch } from './api';
 
+// 支持无人值守一次性执行的 Agent（与 server/src/agents/taskRunModes.js 保持一致）
+export const TASK_RUN_AGENTS = [
+  'claude-code', 'codebuddy', 'qwen-code', 'cline', 'droid', 'hermes',
+  'kimi-code', 'opencode', 'glm-agent', 'github-copilot', 'cursor', 'openclaw',
+];
+
 /**
  * LoopTasks API 封装（对齐 skillsApi.js 风格）。
  */
@@ -18,11 +24,11 @@ export async function listLoopTasks() {
   return Array.isArray(data?.tasks) ? data.tasks : [];
 }
 
-export async function createLoopTask({ title, prompt, projectId, schedule, timezone }) {
+export async function createLoopTask({ title, prompt, projectId, agentId, autoApprove, schedule, timezone }) {
   const res = await apiFetch('/api/v1/loop-tasks', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, prompt, projectId, ...schedule, timezone }),
+    body: JSON.stringify({ title, prompt, projectId, agentId, autoApprove, ...schedule, timezone }),
   });
   if (!res.ok) await throwApiError(res, 'Failed to create loop task');
   return res.json();

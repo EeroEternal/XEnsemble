@@ -78,6 +78,8 @@
   "skill_validation_failed": "技能校验失败: {{message}}",
   "skill_invalid_transition": "非法的技能状态变更",
   "loop_task_not_found": "循环任务不存在",
+  "loop_agent_required": "任务未配置执行 Agent，请编辑任务后选择。",
+  "agent_task_unsupported": "该 Agent 不支持无人值守执行，请选择其他 Agent。",
   "loop_cron_invalid": "cron 表达式无效：{{message}}",
   "loop_task_limit_exceeded": "循环任务数量已达上限（{{limit}}）。",
   "loop_run_in_progress": "上一次执行仍在进行中。",

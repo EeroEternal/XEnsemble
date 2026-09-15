@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  Plus, Pencil, Play, Pause, Trash2, Loader2, RefreshCw, History as HistoryIcon, CheckCircle, Clock,
+  Plus, Pencil, Play, Pause, Trash2, Loader2, RefreshCw, History as HistoryIcon, CheckCircle, Clock, ExternalLink,
 } from 'lucide-react';
 
 import Button from '../components/Button';
@@ -30,7 +31,7 @@ import { TIMEZONES } from '../lib/timezones';
 import { loadTimezonePref } from '../lib/timezonePref';
 import DateTimeField from '../components/DateTimeField';
 import {
-  listLoopTasks, createLoopTask, updateLoopTask, deleteLoopTask, runLoopTaskNow, listLoopTaskRuns, previewSchedule,
+  listLoopTasks, createLoopTask, updateLoopTask, deleteLoopTask, runLoopTaskNow, listLoopTaskRuns, previewSchedule, TASK_RUN_AGENTS,
 } from '../lib/loopTasksApi';
 
 const UNIT_MS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
@@ -68,9 +69,24 @@ function fmtClock(ts) {
 
 const emptyForm = {
   title: '', projectId: '', prompt: '',
-  kind: 'cron', cron: '0 9 * * *', intervalValue: 30, intervalUnit: 'minutes', runAt: '',
+  agentId: '', autoApprove: true,
+  // GLM/Coze 风格调度预设：自然预设优先，cron 折叠为"自定义"。
+  // daily/weekly/weekdays 在前端生成标准 5 段 cron，后端仍只认 cron/every/at。
+  kind: 'daily', time: '09:00', weekdays: [1, 2, 3, 4, 5],
+  cron: '0 9 * * *', intervalValue: 30, intervalUnit: 'minutes', runAt: '',
   timezone: 'Asia/Shanghai',
 };
+
+const SCHEDULE_PRESETS = ['daily', 'weekly', 'weekdays', 'every', 'at', 'cron'];
+const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // 显示顺序：一..日（cron 0=周日）
+
+function timeToCronMMHH(time) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(time || '').trim());
+  if (!m) return null;
+  const hh = Number(m[1]); const mm = Number(m[2]);
+  if (hh > 23 || mm > 59) return null;
+  return `${mm} ${hh}`;
+}
 
 function intervalToParts(ms) {
   if (ms % UNIT_MS.days === 0) return { intervalValue: ms / UNIT_MS.days, intervalUnit: 'days' };
@@ -78,23 +94,66 @@ function intervalToParts(ms) {
   return { intervalValue: Math.round(ms / UNIT_MS.minutes), intervalUnit: 'minutes' };
 }
 
-/** 表单 → 调度 payload（kind 感知） */
+/** 表单 → 调度 payload。不完整/非法返回 { errKey }，合法返回 { schedule }。 */
 function buildSchedule(form) {
+  if (form.kind === 'daily' || form.kind === 'weekdays' || form.kind === 'weekly') {
+    const mmhh = timeToCronMMHH(form.time);
+    if (!mmhh) return { errKey: 'time_invalid' };
+    let dow = '*';
+    if (form.kind === 'weekdays') dow = '1-5';
+    else if (form.kind === 'weekly') {
+      const days = [...new Set(form.weekdays || [])].sort((a, b) => a - b);
+      if (days.length === 0) return { errKey: 'weekday_required' };
+      dow = days.join(',');
+    }
+    return { schedule: { kind: 'cron', cronExpr: `${mmhh} * * ${dow}` } };
+  }
   if (form.kind === 'every') {
-    return { kind: 'every', intervalMs: Math.round(Number(form.intervalValue) * UNIT_MS[form.intervalUnit]) };
+    const intervalMs = Math.round(Number(form.intervalValue) * UNIT_MS[form.intervalUnit]);
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) return { errKey: 'interval_invalid' };
+    return { schedule: { kind: 'every', intervalMs } };
   }
   if (form.kind === 'at') {
-    return { kind: 'at', runAt: parseAtLocal(form.runAt) }; // NaN = 格式错误
+    if (!form.runAt.trim()) return { errKey: 'required' };
+    const ms = parseAtLocal(form.runAt); // NaN = 格式错误
+    if (!Number.isFinite(ms)) return { errKey: 'datetime_format' };
+    return { schedule: { kind: 'at', runAt: ms } };
   }
-  return { kind: 'cron', cronExpr: form.cron.trim() };
+  const expr = form.cron.trim();
+  if (!expr) return { errKey: 'cron_invalid' };
+  return { schedule: { kind: 'cron', cronExpr: expr } };
+}
+
+/** 服务端任务 → 表单调度字段（反向解析：cron 预设还原为 daily/weekly/weekdays） */
+function scheduleToForm(task) {
+  const kind = task.scheduleKind || 'cron';
+  if (kind === 'every' && task.intervalMs) {
+    return { kind: 'every', ...intervalToParts(task.intervalMs), cron: task.cronExpr };
+  }
+  if (kind === 'at') {
+    return { kind: 'at', runAt: task.nextRunAt ? formatAtLocal(task.nextRunAt) : '', cron: task.cronExpr };
+  }
+  const m = String(task.cronExpr || '').trim().match(/^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+(\S+)$/);
+  if (m) {
+    const time = `${String(Number(m[2])).padStart(2, '0')}:${String(Number(m[1])).padStart(2, '0')}`;
+    const dow = m[3];
+    if (dow === '*') return { kind: 'daily', time, cron: task.cronExpr };
+    if (dow === '1-5') return { kind: 'weekdays', time, cron: task.cronExpr };
+    if (/^\d+(,\d+)*$/.test(dow)) {
+      return { kind: 'weekly', time, weekdays: dow.split(',').map(Number), cron: task.cronExpr };
+    }
+  }
+  return { kind: 'cron', cronExpr: task.cronExpr };
 }
 
 export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden }) {
   const { t } = useTranslation();
   const { showToast } = useToast();
+  const navigate = useNavigate();
 
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -116,6 +175,13 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
       .catch(() => {});
   }, []);
 
+  const fetchAgents = useCallback(() => {
+    apiFetch('/api/v1/agents')
+      .then((res) => res.json())
+      .then((data) => setAgents(Array.isArray(data) ? data : (data?.agents || [])))
+      .catch(() => {});
+  }, []);
+
   const fetchTasks = useCallback(({ silent = false } = {}) => {
     if (!silent) setRefreshing(true);
     return listLoopTasks()
@@ -127,7 +193,8 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
   useEffect(() => {
     void fetchTasks();
     fetchProjects();
-  }, [fetchTasks, fetchProjects]);
+    fetchAgents();
+  }, [fetchTasks, fetchProjects, fetchAgents]);
 
   const projectName = useCallback((id) => projects.find((p) => p.id === id)?.name || id, [projects]);
 
@@ -139,15 +206,14 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
 
   const openEdit = (task) => {
     setEditing(task);
-    const kind = task.scheduleKind || 'cron';
     setForm({
+      ...emptyForm,
       title: task.title,
       projectId: task.projectId,
       prompt: task.prompt,
-      kind,
-      cron: task.cronExpr,
-      ...(kind === 'every' && task.intervalMs ? intervalToParts(task.intervalMs) : { intervalValue: 30, intervalUnit: 'minutes' }),
-      runAt: kind === 'at' && task.nextRunAt ? formatAtLocal(task.nextRunAt) : '',
+      agentId: task.agentId || '',
+      autoApprove: task.autoApprove !== false,
+      ...scheduleToForm(task),
       timezone: TIMEZONES.includes(task.timezone) ? task.timezone : 'UTC',
     });
     setDialogMode('edit');
@@ -156,27 +222,16 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
   const closeDialog = () => { setDialogMode(null); setEditing(null); };
 
   const save = async () => {
-    const schedule = buildSchedule(form);
     if (!form.title.trim() || !form.prompt.trim() || !form.projectId) {
       showToast('error', t('loopTasks:error.required'));
       return;
     }
-    if (schedule.kind === 'cron' && !schedule.cronExpr) {
-      showToast('error', t('loopTasks:error.cron_invalid'));
+    if (!form.agentId) {
+      showToast('error', t('loopTasks:error.agent_required'));
       return;
     }
-    if (schedule.kind === 'every' && (!Number.isFinite(schedule.intervalMs) || schedule.intervalMs <= 0)) {
-      showToast('error', t('loopTasks:error.cron_invalid'));
-      return;
-    }
-    if (schedule.kind === 'at' && !form.runAt.trim()) {
-      showToast('error', t('loopTasks:error.required'));
-      return;
-    }
-    if (schedule.kind === 'at' && !Number.isFinite(schedule.runAt)) {
-      showToast('error', t('loopTasks:error.datetime_format'));
-      return;
-    }
+    const { schedule, errKey } = buildSchedule(form);
+    if (!schedule) { showToast('error', t(`loopTasks:error.${errKey}`)); return; }
     setSaving(true);
     try {
       if (dialogMode === 'create') {
@@ -184,6 +239,8 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
           title: form.title.trim(),
           prompt: form.prompt.trim(),
           projectId: form.projectId,
+          agentId: form.agentId,
+          autoApprove: form.autoApprove,
           schedule,
           timezone: form.timezone,
         });
@@ -192,6 +249,8 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
         await updateLoopTask(editing.id, {
           title: form.title.trim(),
           prompt: form.prompt.trim(),
+          agentId: form.agentId,
+          autoApprove: form.autoApprove,
           ...schedule,
           timezone: form.timezone,
         });
@@ -268,11 +327,12 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
   }, [runsOpenFor, fetchRuns]);
 
   const workspaceOptions = useMemo(() => projects.map((p) => ({ value: p.id, label: p.name })), [projects]);
-  const kindOptions = useMemo(() => [
-    { value: 'cron', label: t('loopTasks:kind.cron') },
-    { value: 'every', label: t('loopTasks:kind.every') },
-    { value: 'at', label: t('loopTasks:kind.at') },
-  ], [t]);
+  const agentOptions = useMemo(() => agents
+    .filter((a) => TASK_RUN_AGENTS.includes(a.id))
+    .map((a) => ({ value: a.id, label: a.name })), [agents]);
+  const schedulePresets = useMemo(() => SCHEDULE_PRESETS.map((v) => ({ value: v, label: t(`loopTasks:kind.${v}`) })), [t]);
+  const weekdayLabels = useMemo(() => WEEKDAY_ORDER.map((dow) => ({ dow, label: t(`loopTasks:weekday.${dow}`) })), [t]);
+  const timezoneOptions = useMemo(() => TIMEZONES.map((tz) => ({ value: tz, label: tz })), []);
   const unitOptions = useMemo(() => [
     { value: 'minutes', label: t('loopTasks:unit.minutes') },
     { value: 'hours', label: t('loopTasks:unit.hours') },
@@ -283,28 +343,18 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
   const [cronHint, setCronHint] = useState(null);
   useEffect(() => {
     if (!dialogMode) { setCronHint(null); return undefined; }
-    let payload = null;
-    if (form.kind === 'cron' && form.cron.trim()) {
-      payload = { kind: 'cron', cronExpr: form.cron.trim(), timezone: form.timezone };
-    } else if (form.kind === 'every' && Number(form.intervalValue) > 0) {
-      payload = { kind: 'every', intervalMs: Math.round(Number(form.intervalValue) * UNIT_MS[form.intervalUnit]), timezone: form.timezone };
-    } else if (form.kind === 'at') {
-      if (!form.runAt.trim()) { setCronHint(null); return undefined; }
-      const ms = parseAtLocal(form.runAt);
-      if (!Number.isFinite(ms)) {
-        setCronHint({ error: t('loopTasks:error.datetime_format') }); // 本地格式校验，免请求
-        return undefined;
-      }
-      payload = { kind: 'at', runAt: ms, timezone: form.timezone };
+    const { schedule, errKey } = buildSchedule(form);
+    if (!schedule) {
+      setCronHint(errKey === 'datetime_format' ? { error: t('loopTasks:error.datetime_format') } : null);
+      return undefined;
     }
-    if (!payload) { setCronHint(null); return undefined; }
     const timer = setTimeout(() => {
-      previewSchedule(payload)
-        .then((data) => setCronHint(data))
+      previewSchedule({ ...schedule, timezone: form.timezone })
+        .then(setCronHint)
         .catch(() => setCronHint(null));
     }, 300);
     return () => clearTimeout(timer);
-  }, [form.kind, form.cron, form.intervalValue, form.intervalUnit, form.runAt, form.timezone, dialogMode, t]);
+  }, [form, dialogMode, t]);
 
   return (
     <div className={`${consoleAdminPageClass} px-4 sm:px-6 lg:px-8 py-6 ${className}`} aria-hidden={ariaHidden}>
@@ -445,6 +495,19 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                   />
                 </div>
                 <div className="space-y-1.5">
+                  <FormLabel htmlFor="loop-task-agent">{t('loopTasks:field.agent')}</FormLabel>
+                  <SelectMenu value={form.agentId} onChange={(v) => setForm((f) => ({ ...f, agentId: v }))}
+                    options={agentOptions} placeholder={t('loopTasks:field.agent_placeholder')} />
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-xs text-zinc-500">{t('loopTasks:field.auto_approve')}</span>
+                    <div className="w-36">
+                      <SelectMenu value={form.autoApprove ? 'yes' : 'no'}
+                        onChange={(v) => setForm((f) => ({ ...f, autoApprove: v === 'yes' }))}
+                        options={[{ value: 'yes', label: t('loopTasks:auto_approve.yes') }, { value: 'no', label: t('loopTasks:auto_approve.no') }]} />
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
                   <FormLabel htmlFor="loop-task-prompt">{t('loopTasks:field.prompt')}</FormLabel>
                   <Textarea
                     id="loop-task-prompt"
@@ -457,19 +520,44 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                 </div>
                 <div className="space-y-1.5">
                   <FormLabel htmlFor="loop-task-schedule">{t('loopTasks:field.schedule')}</FormLabel>
-                  <SelectMenu
-                    value={form.kind}
-                    onChange={(v) => setForm((f) => ({ ...f, kind: v }))}
-                    options={kindOptions}
-                  />
-                  {form.kind === 'cron' && (
-                    <Input
-                      id="loop-task-cron"
-                      value={form.cron}
-                      onChange={(e) => setForm((f) => ({ ...f, cron: e.target.value }))}
-                      placeholder={t('loopTasks:field.cron_placeholder')}
-                      className="font-mono h-[38px]"
-                    />
+                  {/* GLM/Coze 式预设 pills：自然预设优先，cron 折叠为高级自定义 */}
+                  <div className="flex flex-wrap gap-1.5" role="group" aria-label={t('loopTasks:field.schedule')}>
+                    {schedulePresets.map((p) => (
+                      <button key={p.value} type="button" onClick={() => setForm((f) => ({ ...f, kind: p.value }))}
+                        aria-pressed={form.kind === p.value}
+                        className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                          form.kind === p.value
+                            ? 'border-zinc-900 bg-zinc-900 text-zinc-50'
+                            : 'border-zinc-300 text-zinc-600 hover:border-zinc-400 hover:text-zinc-900'
+                        }`}>
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  {(form.kind === 'daily' || form.kind === 'weekly' || form.kind === 'weekdays') && (
+                    <div className="space-y-2 pt-1">
+                      {form.kind === 'weekly' && (
+                        <div className="flex flex-wrap gap-1">
+                          {weekdayLabels.map(({ dow, label }) => {
+                            const active = (form.weekdays || []).includes(dow);
+                            return (
+                              <button key={dow} type="button" aria-pressed={active}
+                                onClick={() => setForm((f) => ({
+                                  ...f,
+                                  weekdays: active ? (f.weekdays || []).filter((d) => d !== dow) : [...(f.weekdays || []), dow],
+                                }))}
+                                className={`h-7 w-9 rounded-md border text-xs font-medium transition-colors ${
+                                  active ? 'border-zinc-900 bg-zinc-900 text-zinc-50' : 'border-zinc-300 text-zinc-500 hover:border-zinc-400 hover:text-zinc-900'
+                                }`}>
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <Input id="loop-task-time" type="time" value={form.time}
+                        onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))} className="h-[38px] w-36" />
+                    </div>
                   )}
                   {form.kind === 'every' && (
                     <div className="grid grid-cols-2 gap-2">
@@ -495,10 +583,25 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                       placeholder="YYYY-MM-DD HH:mm"
                     />
                   )}
+                  {form.kind === 'cron' && (
+                    <Input
+                      id="loop-task-cron"
+                      value={form.cron}
+                      onChange={(e) => setForm((f) => ({ ...f, cron: e.target.value }))}
+                      placeholder={t('loopTasks:field.cron_placeholder')}
+                      className="font-mono h-[38px]"
+                    />
+                  )}
                   {/* 固定预留一行高度：描述/错误出现或消失时弹窗不抖动（DESIGN.md 页面稳定性） */}
                   <p className={`min-h-4 text-xs ${cronHint?.error ? 'text-red-700' : 'text-zinc-500'}`}>
                     {cronHint?.error || cronHint?.description || ''}
                   </p>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <FormLabel htmlFor="loop-task-tz">{t('loopTasks:field.timezone')}</FormLabel>
+                  <div className="w-44">
+                    <SelectMenu value={form.timezone} onChange={(v) => setForm((f) => ({ ...f, timezone: v }))} options={timezoneOptions} />
+                  </div>
                 </div>
               </div>
             </ConsoleStructuredDialogBody>
@@ -562,6 +665,20 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                             )}
                             {run.rounds != null && (
                               <span>{t('loopTasks:run.rounds', { count: run.rounds })}</span>
+                            )}
+                            {run.sessionId && (
+                              <span
+                                role="button" tabIndex={0}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate('/sessions', { state: { openLoopSession: { sessionId: run.sessionId, agentId: run.agentId, projectId: runsOpenFor.projectId, projectName: projectName(runsOpenFor.projectId) } } });
+                                }}
+                                onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); navigate('/sessions', { state: { openLoopSession: { sessionId: run.sessionId, agentId: run.agentId, projectId: runsOpenFor.projectId, projectName: projectName(runsOpenFor.projectId) } } }); } }}
+                                className="shrink-0 inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 hover:underline"
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                                {t('loopTasks:run.open_session')}
+                              </span>
                             )}
                           </span>
                         </button>
