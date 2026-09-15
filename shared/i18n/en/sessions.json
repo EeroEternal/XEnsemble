@@ -2,6 +2,7 @@
   "title": "Sessions",
   "new_session": "New Session",
   "search": "Search",
+  "exited_sessions": "Exited sessions",
   "launch": {
     "title": "New Session",
     "repository": "Repository",
@@ -58,7 +59,8 @@
     "preparing_environment": "Preparing your environment…",
     "preparing_environment_desc": "Pulling image and starting virtual machine. This usually takes less than a minute.",
     "session_failed": "Session failed to start",
-    "provisioning_error": "An unexpected error occurred during provisioning."
+    "provisioning_error": "An unexpected error occurred during provisioning.",
+    "exited": "Exited"
   },
   "error": {
     "no_workspace": "Could not create workspace for this session.",

@@ -58,7 +58,8 @@
     "preparing_environment": "正在准备你的环境…",
     "preparing_environment_desc": "正在拉取镜像并启动虚拟机。通常不到一分钟。",
     "session_failed": "会话启动失败",
-    "provisioning_error": "配置过程中发生意外错误。"
+    "provisioning_error": "配置过程中发生意外错误。",
+    "exited": "已退出"
   },
   "error": {
     "no_workspace": "无法为此会话创建工作空间。",

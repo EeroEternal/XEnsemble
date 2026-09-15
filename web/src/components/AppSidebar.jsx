@@ -227,6 +227,7 @@ export default function AppSidebar({
     }
   });
   const [sessionListExpanded, setSessionListExpanded] = useState(false);
+  const [exitedExpanded, setExitedExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const { showToast } = useToast();
   const [renamingId, setRenamingId] = useState(null);
@@ -387,6 +388,7 @@ export default function AppSidebar({
     const isLive = s.alive === true;
     const isPending = s.status === 'pending';
     const isFailed = s.status === 'failed';
+    const isExited = s.status === 'exited';
     // 可退出（结束会话、释放配额、可 resume）：running/pending/idle。
     // failed 会话仅提供物理删除。
     const canExit = isLive || isPending || s.status === 'idle';
@@ -400,7 +402,7 @@ export default function AppSidebar({
         key={s.id}
         className={`group/session relative flex items-center gap-1 rounded-md pl-2.5 pr-1.5 py-1.5 ${transitionBase} ${
           isActive ? `${bgCanvas} shadow-sm ring-1 ring-zinc-200` : hoverBgTertiary
-        } ${!isLive && !isActive ? 'opacity-70' : ''}`}
+        } ${isExited && !isActive ? 'opacity-45' : !isLive && !isActive ? 'opacity-70' : ''}`}
       >
         {isActive && (
           <span className="absolute left-1 top-1.5 bottom-1.5 w-1 rounded-full bg-zinc-900" />
@@ -427,7 +429,7 @@ export default function AppSidebar({
             className="flex flex-1 min-w-0 items-center gap-2 text-left"
             title={imageName ? `${label} · ${imageName}` : label}
           >
-            <span className={`flex-1 truncate text-[13px] ${isActive ? 'font-medium text-zinc-900' : 'text-zinc-700'}`}>
+            <span className={`flex-1 truncate text-[13px] ${isActive ? 'font-medium text-zinc-900' : isExited ? 'text-zinc-400' : 'text-zinc-700'}`}>
               {label}
             </span>
             {imageName && (
@@ -470,22 +472,31 @@ export default function AppSidebar({
   };
 
   const visibleSessions = useMemo(() => {
-    // 退出的会话也显示（灰点 + 置底）：可查看轨迹/历史，但不会触发 resume
+    // 退出的会话收进底部「已退出」归档分组（折叠），不占主列表视觉层级
     const filtered = sessions.filter(
       (s) =>
         !isArchivedSession(sidebarPrefs, s.id) &&
         (activeWorkspaceId ? s.projectId === activeWorkspaceId : true),
     );
-    const sorted = sortSessions(filtered, sidebarPrefs);
-    return [
-      ...sorted.filter((s) => s.status !== 'exited'),
-      ...sorted.filter((s) => s.status === 'exited'),
-    ];
+    return sortSessions(filtered, sidebarPrefs);
   }, [sessions, sidebarPrefs, activeWorkspaceId]);
 
-  const filteredSessions = useMemo(
-    () => visibleSessions.filter((s) => sessionMatchesQuery(s)),
-    [visibleSessions, sessionMatchesQuery],
+  const activeSessions = useMemo(
+    () => visibleSessions.filter((s) => s.status !== 'exited'),
+    [visibleSessions],
+  );
+  const exitedSessions = useMemo(
+    () => visibleSessions.filter((s) => s.status === 'exited'),
+    [visibleSessions],
+  );
+
+  const filteredActive = useMemo(
+    () => activeSessions.filter((s) => sessionMatchesQuery(s)),
+    [activeSessions, sessionMatchesQuery],
+  );
+  const filteredExited = useMemo(
+    () => exitedSessions.filter((s) => sessionMatchesQuery(s)),
+    [exitedSessions, sessionMatchesQuery],
   );
 
   const sidebarNavItemClass =
@@ -627,7 +638,7 @@ export default function AppSidebar({
 
       <div className="flex-1 min-h-0 overflow-auto px-2 py-3">
         <div className="flex flex-col gap-0.5">
-          {filteredSessions.length === 0 ? (
+          {filteredActive.length === 0 && filteredExited.length === 0 ? (
             <p className={`text-xs ${textSecondary} px-2.5 py-2`}>
               {searchQuery.trim()
                 ? t('sessions:empty.no_matching')
@@ -637,20 +648,20 @@ export default function AppSidebar({
             </p>
           ) : (
             <>
-              {(sessionListExpanded || filteredSessions.length <= SESSION_PREVIEW_LIMIT
-                ? filteredSessions
-                : filteredSessions.slice(0, SESSION_PREVIEW_LIMIT)
+              {(sessionListExpanded || filteredActive.length <= SESSION_PREVIEW_LIMIT
+                ? filteredActive
+                : filteredActive.slice(0, SESSION_PREVIEW_LIMIT)
               ).map((s) => renderSessionRow(s))}
-              {filteredSessions.length > SESSION_PREVIEW_LIMIT && !sessionListExpanded && (
+              {filteredActive.length > SESSION_PREVIEW_LIMIT && !sessionListExpanded && (
                 <button
                   type="button"
                   onClick={() => setSessionListExpanded(true)}
                   className={`px-2.5 py-1 text-xs ${textPlaceholder} ${hoverTextPrimary} text-left ${transitionBase}`}
                 >
-                  {t('common:pagination.more')} ({filteredSessions.length - SESSION_PREVIEW_LIMIT})
+                  {t('common:pagination.more')} ({filteredActive.length - SESSION_PREVIEW_LIMIT})
                 </button>
               )}
-              {filteredSessions.length > SESSION_PREVIEW_LIMIT && sessionListExpanded && (
+              {filteredActive.length > SESSION_PREVIEW_LIMIT && sessionListExpanded && (
                 <button
                   type="button"
                   onClick={() => setSessionListExpanded(false)}
@@ -658,6 +669,24 @@ export default function AppSidebar({
                 >
                   {t('common:pagination.show_fewer')}
                 </button>
+              )}
+
+              {filteredExited.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setExitedExpanded((v) => !v)}
+                    className={`mt-2 flex items-center gap-1.5 px-2.5 py-1 text-xs ${textPlaceholder} ${hoverTextPrimary} text-left ${transitionBase} ${consoleButtonFocusClass}`}
+                    aria-expanded={exitedExpanded || Boolean(searchQuery.trim())}
+                  >
+                    <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${exitedExpanded || searchQuery.trim() ? '' : '-rotate-90'}`} />
+                    <span className="flex-1 truncate">
+                      {t('sessions:exited_sessions', { defaultValue: 'Exited sessions' })}
+                    </span>
+                    <span className="shrink-0 tabular-nums">{filteredExited.length}</span>
+                  </button>
+                  {(exitedExpanded || searchQuery.trim()) && filteredExited.map((s) => renderSessionRow(s))}
+                </>
               )}
             </>
           )}

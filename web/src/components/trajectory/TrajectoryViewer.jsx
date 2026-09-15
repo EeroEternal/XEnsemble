@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Loader2, Download, Search, Clock, Layers, Zap,
@@ -24,24 +25,25 @@ const MINIMUM_DRAG_PX = 3;
 const MINIMUM_ZOOM_UNITS = 4;      // sequence 模式最小缩放（4 条记录）
 const MINIMUM_ZOOM_MS = 20;        // duration 模式最小缩放（20ms）
 
-// 明暗双主题表面色
-const SURFACE = 'bg-zinc-50 dark:bg-zinc-950';
-const CARD = 'bg-white dark:bg-zinc-950';
-const BORDER = 'border-zinc-200 dark:border-zinc-800';
-const T1 = 'text-zinc-900 dark:text-zinc-200';
-const T2 = 'text-zinc-600 dark:text-zinc-400';
-const T3 = 'text-zinc-400 dark:text-zinc-500';
-const HOVER_ROW = 'hover:bg-zinc-100 dark:hover:bg-zinc-900/70';
-const SELECTED_ROW = 'bg-zinc-200/70 dark:bg-zinc-800/80';
+// 明暗双主题表面色 —— 注意：zinc/surface 色在 .dark 下经 CSS 变量自动反转，
+// 勿加 dark: 前缀（否则双重反转回浅色）；语义色(red/blue/amber/sky/violet)才需 dark:
+const SURFACE = 'bg-zinc-50';
+const CARD = 'bg-surface';
+const BORDER = 'border-zinc-200';
+const T1 = 'text-zinc-900';
+const T2 = 'text-zinc-600';
+const T3 = 'text-zinc-400';
+const HOVER_ROW = 'hover:bg-zinc-100';
+const SELECTED_ROW = 'bg-zinc-200/70';
 
 const KIND_STYLES = {
   system: {
     badge: 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30',
-    text: 'text-zinc-700 dark:text-zinc-400', icon: Bot, bar: 'border-l-blue-400 dark:border-l-blue-500',
+    text: 'text-zinc-700', icon: Bot, bar: 'border-l-blue-400 dark:border-l-blue-500',
   },
   context: {
     badge: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30',
-    text: 'text-zinc-500 dark:text-zinc-400', icon: BookOpen, bar: 'border-l-emerald-400 dark:border-l-emerald-500',
+    text: 'text-zinc-500', icon: BookOpen, bar: 'border-l-emerald-400 dark:border-l-emerald-500',
   },
   user: {
     badge: 'bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-500/30',
@@ -49,19 +51,19 @@ const KIND_STYLES = {
   },
   assistant: {
     badge: 'bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30',
-    text: 'text-zinc-800 dark:text-zinc-200', icon: Bot, bar: 'border-l-violet-400 dark:border-l-violet-500',
+    text: 'text-zinc-800', icon: Bot, bar: 'border-l-violet-400 dark:border-l-violet-500',
   },
   thinking: {
     badge: 'bg-violet-100 text-violet-600 border-violet-200 dark:bg-violet-500/10 dark:text-violet-300/80 dark:border-violet-500/20',
-    text: 'text-zinc-500 dark:text-zinc-400 italic', icon: Sparkles, bar: 'border-l-violet-300 dark:border-l-violet-500/50',
+    text: 'text-zinc-500 italic', icon: Sparkles, bar: 'border-l-violet-300 dark:border-l-violet-500/50',
   },
   tool: {
     badge: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30',
-    text: 'text-zinc-600 dark:text-zinc-400', icon: Wrench, bar: 'border-l-amber-400 dark:border-l-amber-500',
+    text: 'text-zinc-600', icon: Wrench, bar: 'border-l-amber-400 dark:border-l-amber-500',
   },
   error: {
     badge: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-500/15 dark:text-red-300 dark:border-red-500/30',
-    text: 'text-zinc-600 dark:text-zinc-400', icon: XCircle, bar: 'border-l-red-400 dark:border-l-red-500',
+    text: 'text-zinc-600', icon: XCircle, bar: 'border-l-red-400 dark:border-l-red-500',
   },
 };
 
@@ -493,9 +495,9 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
   if (model.end <= model.start) {
     return (
       <div className={cn('flex items-stretch gap-0 border-b', BORDER)}>
-        <div className="flex h-[50px] w-11 shrink-0 flex-col justify-around border-r border-zinc-200 pr-1 text-right dark:border-zinc-800">
+        <div className="flex h-[50px] w-11 shrink-0 flex-col justify-around border-r border-zinc-200 pr-1 text-right">
           {[t('trajectory.lane_input'), t('trajectory.lane_model'), t('trajectory.role_tool')].map((l) => (
-            <span key={l} className="text-[10px] leading-none text-zinc-400 dark:text-zinc-500">{l}</span>
+            <span key={l} className="text-[10px] leading-none text-zinc-400">{l}</span>
           ))}
         </div>
         <div className="relative h-[50px] flex-1">
@@ -636,12 +638,12 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
       className={cn('relative z-[1] select-none border-b', BORDER)}
       aria-label={t('trajectory.timeline_aria')}
     >
-      <div className="grid h-[50px] grid-cols-[44px_minmax(0,1fr)] overflow-hidden bg-zinc-50 dark:bg-zinc-900/60">
-        <div className="relative border-r border-zinc-200 dark:border-zinc-800">
+      <div className="grid h-[50px] grid-cols-[44px_minmax(0,1fr)] overflow-hidden bg-zinc-50">
+        <div className="relative border-r border-zinc-200">
           {[t('trajectory.lane_input'), t('trajectory.lane_model'), t('trajectory.role_tool')].map((l, i) => (
             <span
               key={l}
-              className="absolute right-1 flex h-2 items-center justify-end text-[10px] leading-none text-zinc-400 dark:text-zinc-500"
+              className="absolute right-1 flex h-2 items-center justify-end text-[10px] leading-none text-zinc-400"
               style={{ top: 7 + i * 14 }}
             >
               {l}
@@ -678,7 +680,7 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
               .map((b) => (
                 <span
                   key={b}
-                  className="absolute bottom-0 top-0 w-px bg-zinc-300 dark:bg-zinc-700"
+                  className="absolute bottom-0 top-0 w-px bg-zinc-300"
                   style={{ left: `${pos(b)}%` }}
                 />
               ))}
@@ -729,17 +731,17 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
           </div>
         </div>
       </div>
-      {/* 悬停提示（DeepSeek 风格：角色 + 时间范围 + 总计毫秒；fixed 相对视口，
-          垂直固定在时间线下方，不受 overflow-hidden 裁剪；跟随主题明暗） */}
-      {tip && (
+      {/* 悬停提示：createPortal 渲染到 body，z 最高，不被 sticky 轮次头/overflow 裁剪遮挡 */}
+      {tip && createPortal(
         <div
-          className="pointer-events-none fixed z-50 rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-[11px] leading-snug text-zinc-900 shadow-lg dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+          className="pointer-events-none fixed z-[9999] rounded-md border border-zinc-300 bg-zinc-50 px-2.5 py-1.5 text-[11px] leading-snug text-zinc-900 shadow-lg"
           style={{ left: `${tip.x}px`, top: `${tip.y}px` }}
         >
           <div className="font-medium">{tip.label}</div>
-          {tip.range && <div className="font-mono text-[10px] text-zinc-500 dark:text-zinc-300">{tip.range}</div>}
-          {tip.total && <div className="font-mono text-[10px] text-zinc-500 dark:text-zinc-300">{tip.total}</div>}
-        </div>
+          {tip.range && <div className="font-mono text-[10px] text-zinc-500">{tip.range}</div>}
+          {tip.total && <div className="font-mono text-[10px] text-zinc-500">{tip.total}</div>}
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -789,7 +791,7 @@ function DetailPanel({ entry, round = 0 }) {
             key={v}
             type="button"
             onClick={() => setTab(v)}
-            className={cn('h-7 px-3 rounded text-xs font-medium', consoleButtonFocusClass, tab === v ? 'bg-zinc-200/80 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-500 dark:hover:text-zinc-300')}
+            className={cn('h-7 px-3 rounded text-xs font-medium', consoleButtonFocusClass, tab === v ? 'bg-zinc-200/80 text-zinc-900' : 'text-zinc-500 hover:text-zinc-800')}
           >
             {label}
           </button>
@@ -822,22 +824,22 @@ function DetailPanel({ entry, round = 0 }) {
             <div>
               <div className={cn('text-[11px] font-semibold tracking-wider mb-1.5', T3)}>{t('trajectory.field_preview')}</div>
               {entry.kind === 'tool' ? (
-                <pre className={cn('font-mono text-[11.5px] leading-relaxed rounded-md p-2.5 overflow-x-auto whitespace-pre-wrap break-words border', CARD, 'text-zinc-800 dark:text-zinc-200', BORDER)}>{preview(fullPreview, 600)}</pre>
+                <pre className={cn('font-mono text-[11.5px] leading-relaxed rounded-md p-2.5 overflow-x-auto whitespace-pre-wrap break-words border', CARD, 'text-zinc-800', BORDER)}>{preview(fullPreview, 600)}</pre>
               ) : (
-                <p className={cn('text-[13px] leading-relaxed whitespace-pre-wrap break-words', entry.kind === 'thinking' ? 'italic text-zinc-500 dark:text-zinc-400' : T1)}>{preview(entry.text, 600) || '—'}</p>
+                <p className={cn('text-[13px] leading-relaxed whitespace-pre-wrap break-words', entry.kind === 'thinking' ? 'italic text-zinc-500' : T1)}>{preview(entry.text, 600) || '—'}</p>
               )}
             </div>
           </div>
         )}
         {tab === 'preview' && (
           entry.kind === 'tool' ? (
-            <pre className={cn('font-mono text-[11.5px] leading-relaxed rounded-md p-3 overflow-auto whitespace-pre-wrap break-words border', CARD, 'text-zinc-800 dark:text-zinc-200', BORDER)}>{fullPreview}</pre>
+            <pre className={cn('font-mono text-[11.5px] leading-relaxed rounded-md p-3 overflow-auto whitespace-pre-wrap break-words border', CARD, 'text-zinc-800', BORDER)}>{fullPreview}</pre>
           ) : (
-            <p className={cn('text-[13px] leading-relaxed whitespace-pre-wrap break-words', entry.kind === 'thinking' ? 'italic text-zinc-500 dark:text-zinc-400' : T1)}>{entry.text || '—'}</p>
+            <p className={cn('text-[13px] leading-relaxed whitespace-pre-wrap break-words', entry.kind === 'thinking' ? 'italic text-zinc-500' : T1)}>{entry.text || '—'}</p>
           )
         )}
         {tab === 'raw' && (
-          <pre className={cn('font-mono text-[11.5px] leading-relaxed rounded-md p-3 overflow-auto whitespace-pre border', 'bg-zinc-100 text-zinc-800 border-zinc-200 dark:bg-zinc-900 dark:text-zinc-200 dark:border-zinc-800')}>{JSON.stringify(raw, null, 2)}</pre>
+          <pre className={cn('font-mono text-[11.5px] leading-relaxed rounded-md p-3 overflow-auto whitespace-pre border', 'bg-zinc-100 text-zinc-800 border-zinc-200')}>{JSON.stringify(raw, null, 2)}</pre>
         )}
         {tab === 'source' && (
           <div className="grid grid-cols-[72px_1fr] gap-x-3 gap-y-2.5 text-xs">
@@ -895,6 +897,8 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   const [turnsCollapsed, setTurnsCollapsed] = useState(false);
   const [groupOverrides, setGroupOverrides] = useState({});
   const [callsCollapsed, setCallsCollapsed] = useState(false);
+  // 局部展开的 stepSeq（折叠状态下点某个摘要行，只展开该步的工具调用）
+  const [expandedSteps, setExpandedSteps] = useState({});
   const afterSeqRef = useRef(0);
   const loadingMoreRef = useRef(false);
   const listRef = useRef(null);
@@ -936,6 +940,10 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
     setSteps([]);
     setSelectedId(null);
     setRange(null);
+    setTurnsCollapsed(false);
+    setGroupOverrides({});
+    setCallsCollapsed(false);
+    setExpandedSteps({});
     fetchSteps({ reset: true });
   }, [sessionId, fetchSteps]);
 
@@ -1016,11 +1024,12 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   const visibleEntries = useMemo(() => {
     const q = query.trim().toLowerCase();
     return entries.filter((e) => {
-      if (callsCollapsed && e.kind === 'tool') return false;
+      // 折叠工具调用：折叠状态下仅隐藏未被局部展开的 step 的工具条目
+      if (callsCollapsed && e.kind === 'tool' && !expandedSteps[e.stepSeq]) return false;
       if (q && !(`${e.text} ${e.name || ''}`.toLowerCase().includes(q))) return false;
       return true;
     });
-  }, [entries, callsCollapsed, query]);
+  }, [entries, callsCollapsed, expandedSteps, query]);
 
   // 选区聚焦：span 与选区相交的条目保持高亮，其余在列表中变暗（用当前激活投影）
   const focusIds = useMemo(() => {
@@ -1130,9 +1139,9 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
             aria-pressed={durationOn}
             title={durationOn ? t('trajectory.use_equal_width') : t('trajectory.use_actual_duration')}
             onClick={() => setDurationOn((p) => !p)}
-            className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5', consoleButtonFocusClass, durationOn ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100 dark:hover:bg-zinc-900')}
+            className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5', consoleButtonFocusClass, durationOn ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100')}
           >
-            <Clock className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-500" strokeWidth={1.75} />
+            <Clock className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.75} />
             {t('trajectory.metric_duration')} <b className={cn(T1, 'font-mono')}>{(totalLatency / 1000).toFixed(1)}s</b>
           </button>
           <button
@@ -1140,9 +1149,9 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
             aria-pressed={turnsCollapsed}
             title={turnsCollapsed ? t('trajectory.expand_turns') : t('trajectory.collapse_turns')}
             onClick={toggleAllGroups}
-            className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5', consoleButtonFocusClass, turnsCollapsed ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100 dark:hover:bg-zinc-900')}
+            className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5', consoleButtonFocusClass, turnsCollapsed ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100')}
           >
-            <Layers className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-500" strokeWidth={1.75} />
+            <Layers className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.75} />
             {t('trajectory.metric_rounds')} <b className={cn(T1, 'font-mono')}>{rounds}</b>
             <span className="text-[10px] text-zinc-400">{turnsCollapsed ? '⊞' : '⊟'}</span>
           </button>
@@ -1150,21 +1159,21 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
             type="button"
             aria-pressed={callsCollapsed}
             title={callsCollapsed ? t('trajectory.expand_calls') : t('trajectory.collapse_calls')}
-            onClick={() => setCallsCollapsed((p) => !p)}
-            className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5', consoleButtonFocusClass, callsCollapsed ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100 dark:hover:bg-zinc-900')}
+            onClick={() => { setCallsCollapsed((p) => !p); setExpandedSteps({}); }}
+            className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5', consoleButtonFocusClass, callsCollapsed ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100')}
           >
-            <Zap className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-500" strokeWidth={1.75} />
+            <Zap className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.75} />
             {t('trajectory.metric_calls')} <b className={cn(T1, 'font-mono')}>{steps.length}</b>
             <span className="text-[10px] text-zinc-400">{callsCollapsed ? '⊞' : '⊟'}</span>
           </button>
           <div className="flex-1" />
-          <div className={cn('flex items-center gap-1.5 w-44 h-8 px-2 rounded-md border bg-white dark:bg-zinc-900 focus-within:border-zinc-500 dark:focus-within:border-zinc-500', 'border-zinc-300 dark:border-zinc-700')}>
+          <div className={cn('flex items-center gap-1.5 w-44 h-8 px-2 rounded-md border bg-surface focus-within:border-zinc-500', 'border-zinc-300')}>
             <Search className="w-3.5 h-3.5 text-zinc-400 shrink-0" strokeWidth={1.75} />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t('trajectory.search_placeholder')}
-              className={cn('min-w-0 flex-1 bg-transparent text-xs outline-none', T1, 'placeholder:text-zinc-400 dark:placeholder:text-zinc-600')}
+              className={cn('min-w-0 flex-1 bg-transparent text-xs outline-none', T1, 'placeholder:text-zinc-400')}
             />
           </div>
           <button
@@ -1172,7 +1181,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
             onClick={extractSkill}
             disabled={extracting}
             title={t('skills:extract_from_session', { defaultValue: 'Extract as Skill' })}
-            className={cn('flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed', 'border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900', 'dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100', consoleButtonFocusClass)}
+            className={cn('flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed', 'border-zinc-300 bg-surface text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900', consoleButtonFocusClass)}
           >
             {extracting ? <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} /> : <Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} />}
           </button>
@@ -1181,7 +1190,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
             onClick={exportJsonl}
             disabled={exporting}
             title={t('trajectory.export_jsonl')}
-            className={cn('flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed', 'border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900', 'dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100', consoleButtonFocusClass)}
+            className={cn('flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed', 'border-zinc-300 bg-surface text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900', consoleButtonFocusClass)}
           >
             {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} /> : <Download className="w-3.5 h-3.5" strokeWidth={1.75} />}
           </button>
@@ -1204,7 +1213,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
         <div ref={listRef} className="flex-1 min-w-0 overflow-y-auto">
           {loading && steps.length === 0 && (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-5 h-5 text-zinc-400 dark:text-zinc-500 animate-spin" strokeWidth={1.5} />
+              <Loader2 className="w-5 h-5 text-zinc-400 animate-spin" strokeWidth={1.5} />
             </div>
           )}
           {groups.map((g, gi) => {
@@ -1216,7 +1225,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
                   <button
                     type="button"
                     onClick={() => expandable && toggleGroup(g.round)}
-                    className={cn('sticky top-0 z-10 w-full flex items-center gap-2 px-3 h-8 backdrop-blur border-b text-left', 'bg-zinc-100/95 dark:bg-zinc-900/95', 'border-zinc-200 dark:border-zinc-800/80', consoleButtonFocusClass, expandable && 'cursor-pointer')}
+                    className={cn('sticky top-0 z-10 w-full flex items-center gap-2 px-3 h-8 backdrop-blur border-b text-left', 'bg-zinc-100/95', 'border-zinc-200', consoleButtonFocusClass, expandable && 'cursor-pointer')}
                   >
                     <span className={cn('text-[11px]', T3)}>{t('trajectory.round_label', { n: g.round })}</span>
                     <span className="text-xs text-sky-700 dark:text-sky-300 truncate min-w-0">{preview(g.title, 60)}</span>
@@ -1255,13 +1264,13 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
                     </span>
                     {e.step.status === 'error' && <XCircle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" strokeWidth={2} />}
                   </button>
-                  {callsCollapsed && e.toolCount > 0 && (
+                  {callsCollapsed && e.toolCount > 0 && !expandedSteps[e.stepSeq] && (
                     <div className="pl-10 pr-3 -mt-0.5 mb-1">
                       <button
                         type="button"
-                        onClick={() => setCallsCollapsed(false)}
+                        onClick={() => setExpandedSteps((o) => ({ ...o, [e.stepSeq]: true }))}
                         title={t('trajectory.expand_calls')}
-                        className={cn('text-[10px] text-zinc-400 dark:text-zinc-500 font-mono hover:text-zinc-700 dark:hover:text-zinc-300', consoleButtonFocusClass)}
+                        className={cn('text-[10px] text-zinc-400 font-mono hover:text-zinc-700', consoleButtonFocusClass)}
                       >
                         ⚙ {t('trajectory.calls_summary', { count: e.toolCount, tools: (e.toolNames || []).join(', ') })}
                       </button>
