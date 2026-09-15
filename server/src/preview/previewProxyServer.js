@@ -18,7 +18,11 @@ const args = process.argv.slice(2);
 // --api-prefixes= 是 key=value flag，先剥离再解析位置参数（追加在末尾不打乱位置）。
 const apiPrefixesArg = args.find((a) => a.startsWith('--api-prefixes='));
 const backendPortFlag = args.find((a) => a.startsWith('--backend-port='));
-const rest = args.filter((a) => !a.startsWith('--api-prefixes=') && !a.startsWith('--backend-port='));
+// --no-base-forward：live 模式不把 base 补回转发路径。vite 以 --base 启动（应用自身
+// 服务在 base 前缀下）必须补；next/nuxt 没配 basePath，补了会把 base 当未知路由 308
+// 去尾斜杠 → Location 丢 preview_token → 网关 401 missing_preview_token（实测）。
+const noBaseForward = args.includes('--no-base-forward');
+const rest = args.filter((a) => !a.startsWith('--api-prefixes=') && !a.startsWith('--backend-port=') && a !== '--no-base-forward');
 let apiPrefixes = apiPrefixesArg
     ? apiPrefixesArg.slice('--api-prefixes='.length).split(',').map((s) => s.trim()).filter((s) => s.startsWith('/') && s.length > 1)
     : [];
@@ -174,7 +178,99 @@ const ROUTE_SHIM_SCRIPT = `<script>
   }
   var BASE = __XE_PREVIEW_BASE__;
   window.__xePreviewBase = BASE;
-  xeReport('log', 'boot pathname=' + location.pathname + ' base=' + BASE + ' baseURI=' + document.baseURI + ' origin=' + location.origin);
+  // ── API 地址运行时改写 + 令牌头自动携带 ──
+  // 被部署应用常把 API 地址烘焙进 bundle（NEXT_PUBLIC_* / VITE_* 构建期内联，如
+  // http://localhost:8080）。浏览器里 localhost 指向用户本机 → 所有 API 请求必死，
+  // 界面全是空态，看起来"跟 mock 没区别"（实测 AgentHarness）。这里做两件事：
+  // ① 把指向 loopback 的绝对 API 请求改写到 <base>/__backend/...，由代理层转发到
+  //    沙箱真实后端——不猜 API 前缀，通吃任意应用。只动 loopback 主机名。
+  // ② 首次见到 preview_token 就存 localStorage；之后所有同源请求自动带
+  //    x-preview-token 头（网关 extractToken 本就认它）。跨域 iframe 里 cookie 被
+  //    浏览器分区拦截、SPA 导航后 Referer 丢 token——令牌头是唯一可靠通道，
+  //    否则应用的所有 API/诊断请求都被网关 401（实测 __dev/console 全 REJECTED）。
+  var pageHost = location.host;
+  function xeIsLoopback(hostname) {
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0' || hostname === '[::1]' || hostname === '::1';
+  }
+  function xeStorageGet(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
+  function xeStorageSet(k, v) { try { window.localStorage.setItem(k, v); } catch (e) {} }
+  var xeToken = null;
+  (function () {
+    try {
+      var m = location.search.match(/[?&]preview_token=([^&]+)/);
+      if (m) {
+        xeToken = decodeURIComponent(m[1]);
+        xeStorageSet('xe_preview_token', xeToken);
+        return;
+      }
+      xeToken = xeStorageGet('xe_preview_token');
+    } catch (e) {}
+  })();
+  function xeRewriteApiUrl(u) {
+    try {
+      if (typeof u !== 'string' || !u) return u;
+      if (u.charAt(0) === '/') return u; // 相对路径本就同源，不动
+      var abs = new URL(u, location.href);
+      if (abs.host === pageHost) return u; // 同源不动
+      if (abs.protocol !== 'http:' && abs.protocol !== 'https:') return u;
+      if (!xeIsLoopback(abs.hostname)) return u; // 只改写 loopback（烘焙的沙箱内地址）
+      return BASE.replace(/\/$/, '') + '/__backend' + abs.pathname + abs.search;
+    } catch (e) { return u; }
+  }
+  // 同源请求才加令牌头（外部第三方 API 加自定义头会触发 CORS 预检，可能破坏其请求）
+  function xeIsSameOrigin(u) {
+    try {
+      if (typeof u === 'string' && u.charAt(0) === '/') return true;
+      var abs = new URL(u, location.href);
+      return abs.host === location.host;
+    } catch (e) { return false; }
+  }
+  var _xeFetch = window.fetch;
+  if (_xeFetch) {
+    window.fetch = function (input, init) {
+      try {
+        var url = (typeof input === 'string') ? input : (input && input.url) || '';
+        var rewritten = xeRewriteApiUrl(url);
+        if (rewritten !== url) {
+          if (typeof input === 'string') {
+            input = rewritten;
+          } else {
+            input = new Request(rewritten, input);
+          }
+        }
+        // 合并令牌头：init.headers / Request.headers 之外补 x-preview-token
+        var h = new Headers((init && init.headers) || (input && input.headers) || undefined);
+        if (xeToken && xeIsSameOrigin(rewritten) && !h.has('x-preview-token')) {
+          h.set('x-preview-token', xeToken);
+        }
+        if (typeof input === 'string') {
+          return _xeFetch.call(window, input, Object.assign({}, init || {}, { headers: h }));
+        }
+        return _xeFetch.call(window, new Request(input, { headers: h }));
+      } catch (e) {
+        return _xeFetch.call(window, input, init);
+      }
+    };
+  }
+  try {
+    var _xeXhrOpen = XMLHttpRequest.prototype.open;
+    var _xeXhrSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function () {
+      var args = Array.prototype.slice.call(arguments);
+      this.__xeUrl = (args.length > 1) ? xeRewriteApiUrl(args[1]) : args[1];
+      if (args.length > 1) args[1] = this.__xeUrl;
+      return _xeXhrOpen.apply(this, args);
+    };
+    XMLHttpRequest.prototype.send = function () {
+      try {
+        if (xeToken && xeIsSameOrigin(this.__xeUrl || '')) {
+          this.setRequestHeader('x-preview-token', xeToken);
+        }
+      } catch (e) {}
+      return _xeXhrSend.apply(this, arguments);
+    };
+  } catch (e) {}
+  xeReport('log', 'boot pathname=' + location.pathname + ' base=' + BASE + ' baseURI=' + document.baseURI + ' origin=' + location.origin + ' token=' + (xeToken ? 'captured' : 'none'));
   if (location.pathname.indexOf(BASE) === 0) {
     var rest = location.pathname.slice(BASE.length - 1) || '/';
     try {
@@ -421,6 +517,16 @@ function proxyToUpstream(req, res) {
 }
 
 // live 实时模式：/api/* → 后端；其它 → dev server（实时预览，前后端都可用）。
+// /__backend 保留通道：路由 shim 把烘焙的 loopback API 地址改写到 <base>/__backend/...，
+// 这里剥掉该前缀转发到 backendPort（真实后端 / mock）。backendPort=0 时回 502。
+function backendChannelPath(url) {
+    const q = url.indexOf('?');
+    const pathname = q >= 0 ? url.slice(0, q) : url;
+    if (pathname !== '/__backend' && !pathname.startsWith('/__backend/')) return null;
+    const rest = pathname.slice('/__backend'.length) || '/';
+    return rest + (q >= 0 ? url.slice(q) : '');
+}
+
 function handleLiveMode(req, res) {
     let pathname;
     let search = '';
@@ -437,11 +543,21 @@ function handleLiveMode(req, res) {
         proxyTo(req, res, backendPort, false);
         return;
     }
-    // 网关已把 /preview/<id> 前缀 strip 掉，vite 配了 base，请求不带 base 会 302 死循环，
-    // 这里把 base 补回 vite 请求路径。query（如 ?import/?worker）必须保留：vite 对 .json?import
-    // 返回 JS 模块，丢了 query 会返回原始 application/json，导致浏览器 MIME 错误白屏。
+    // /__backend 保留通道 → 真实后端（shim 改写的烘焙 API 地址走这里）
+    const backendPath = backendChannelPath(req.url);
+    if (backendPath !== null) {
+        proxyTo(req, res, backendPort, false, backendPath);
+        return;
+    }
+    // 网关已把 /preview/<id> 前缀 strip 掉。vite 配了 --base，请求不带 base 会 302 死循环，
+    // 这里把 base 补回 vite 请求路径；next/nuxt（--no-base-forward）直接转发原路径——
+    // 它们没配 basePath，补 base 反而制造 308 循环 + token 丢失（实测根因）。
+    // query（如 ?import/?worker）必须保留：vite 对 .json?import 返回 JS 模块，丢了 query
+    // 会返回原始 application/json，导致浏览器 MIME 错误白屏。
     const base = liveBase.replace(/\/$/, '');
-    const devPath = (pathname === '/' ? `${base}/` : `${base}${pathname}`) + search;
+    const devPath = noBaseForward
+        ? pathname + search
+        : (pathname === '/' ? `${base}/` : `${base}${pathname}`) + search;
     proxyTo(req, res, devPort, true, devPath);
 }
 
@@ -504,15 +620,38 @@ function handleLiveUpgrade(req, socket, head) {
         forwardUpgrade(req, socket, head, backendPort, req.url);
         return;
     }
-    // HMR 等 dev-server WS：补回 base 前缀并保留 query（vite 用 ?token 校验 HMR 连接）。
+    // HMR 等 dev-server WS：vite 补回 base 前缀并保留 query（vite 用 ?token 校验 HMR 连接）；
+    // next/nuxt（--no-base-forward）不补（同 handleLiveMode——没配 basePath，补了 308 循环）。
     const base = liveBase.replace(/\/$/, '');
-    const devPath = (pathname === '/' ? `${base}/` : `${base}${pathname}`) + search;
+    const devPath = noBaseForward
+        ? pathname + search
+        : (pathname === '/' ? `${base}/` : `${base}${pathname}`) + search;
     forwardUpgrade(req, socket, head, devPort, devPath);
 }
 
 const server = http.createServer((req, res) => {
     if (devPort) {
         handleLiveMode(req, res);
+        return;
+    }
+    // /__backend 保留通道（static/upstream 共用）：剥前缀转发真实后端。
+    const backendPath = backendChannelPath(req.url);
+    if (backendPath !== null) {
+        const proxy = http.request({
+            host: '127.0.0.1',
+            port: Number(backendPort || upstreamPort),
+            path: backendPath,
+            method: req.method,
+            headers: sameOriginHeaders(req.headers, Number(backendPort || upstreamPort)),
+        }, (pRes) => {
+            res.writeHead(pRes.statusCode, stripFrameBlockingHeaders(pRes.headers));
+            pRes.pipe(res);
+        });
+        proxy.on('error', () => {
+            if (!res.headersSent) { res.writeHead(502); }
+            res.end('Backend unavailable');
+        });
+        req.pipe(proxy);
         return;
     }
     if (upstreamPort) {

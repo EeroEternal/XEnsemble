@@ -231,6 +231,30 @@ async function stopPreview(userId, deployment) {
     } catch (_) {
         /* Local MVP：stop 可能未实现，仍标记 stopped */
     }
+    // 快速预览（kind='dev'）：BoxLite adapter 的 stopPreview 是 no-op stub——
+    // dev server / mock / 聚合代理都是沙箱内 spawn 的进程，必须显式清理，
+    // 否则进程残留（端口占用 + 旧 URL 仍可打开 + 下次部署被 pkill 逻辑误伤）。
+    if (deployment.kind === 'dev') {
+        try {
+            const ready = await ensureProjectRuntime({ id: deployment.projectId, userId: deployment.userId }, {});
+            const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
+            if (ref) {
+                const runtime = getRuntime();
+                await runtime.exec.exec('sh', ['-c',
+                    // next 15+ 服务进程名是 next-server（"next dev" 只是父 CLI），漏杀它
+                    // 就会留幽灵：占着 Next 单实例锁，下次预览新实例 Ready 后即自杀
+                    'pkill -f quickMockServer.cjs 2>/dev/null; pkill -f previewProxyServer.cjs 2>/dev/null; pkill -f "vite --host" 2>/dev/null; pkill -f "vite.*--port" 2>/dev/null; pkill -f "next dev" 2>/dev/null; pkill -f "next-server" 2>/dev/null; pkill -f "nuxt dev" 2>/dev/null; true'],
+                    {}, { runtimeRef: ref, cwd: ready.workspacePath, timeoutMs: 15000 });
+            }
+        } catch (e) {
+            console.error('[deployment] quick preview process cleanup failed (non-fatal):', e.message);
+        }
+        // dev 预览的隧道也一并停（与部署 preview 隧道同一 stopByProjectId 空间）
+        try {
+            const { stopByProjectId } = require('../preview/tunnelServer');
+            stopByProjectId(deployment.projectId);
+        } catch { /* tunnel may be gone */ }
+    }
     const now = Date.now();
     await db.update(schema.deployments).set({
         status: 'stopped',

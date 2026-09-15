@@ -17,11 +17,20 @@ import { withSessionId } from '../lib/sessionContext';
  * 成功 → 短暂显示完成状态后回调 onSuccess（父组件跳转到 Preview tab）；
  * 失败 → 显示错误 + 「重新部署」按钮。
  */
-const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSuccess, onDeployStatus, abortRequested, autoStartVersion = 0 }, ref) {
+const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSuccess, onDeployStatus, abortRequested, autoStartVersion = 0, quickPreviewVersion = 0, mode = 'deploy' }, ref) {
     const { t } = useTranslation();
-    // 前端分步展示：阶段 A（分析）+ 阶段 B 内子阶段（由后端 SSE substage 驱动）+ preview。
-    // 后端逻辑保持两阶段不变，这里只做更细的展示拆分。
-    const deploySteps = [
+    // mode='deploy'：完整部署（7 步，生产化构建 + verify 探测）；
+    // mode='preview'：快速预览（5 步，dev server + mock，秒级就绪）。
+    // 两个 tab 各挂一个本组件实例，流程阶段按模式拆分——预览不照搬部署的
+    // build/check/fix 阶段（跳过生产化，serve 里含自愈）。
+    const isPreview = mode === 'preview';
+    const deploySteps = isPreview ? [
+        { id: 'analyze', label: t('deploy:steps_preview.analyze'), icon: Search },
+        { id: 'prepare', label: t('deploy:steps_preview.prepare'), icon: Package },
+        { id: 'mock', label: t('deploy:steps_preview.mock'), icon: Activity },
+        { id: 'serve', label: t('deploy:steps_preview.serve'), icon: Rocket },
+        { id: 'connect', label: t('deploy:steps_preview.connect'), icon: Globe },
+    ] : [
         { id: 'analyze', label: t('deploy:steps.analyze'), icon: Search },
         { id: 'prepare', label: t('deploy:steps.prepare'), icon: Package },
         { id: 'build', label: t('deploy:steps.build'), icon: Hammer },
@@ -43,9 +52,37 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
     //    会把已到 fix 的进度拉回 build（长部署中途切 session 必现）。
     // 统一为单调 furthestStep：事件只前进，startRun（新一次部署）时重置；
     // 并持久化到 sessionStorage，重挂载恢复时取 max(存储值, DB 阶段播种)。
-    const STEP_ORDER = ['analyze', 'prepare', 'build', 'serve', 'check', 'fix', 'preview'];
+    const STEP_ORDER = isPreview
+        ? ['analyze', 'prepare', 'mock', 'serve', 'connect']
+        : ['analyze', 'prepare', 'build', 'serve', 'check', 'fix', 'preview'];
+    // 预览模式：后端 quick 流水线的 substage（prepare/install/mock/serve/proxy/preview）
+    // 映射到 5 步展示——install→prepare（同一"准备依赖"）、proxy/preview→connect（建立预览）。
+    const mapSubstage = (sub) => {
+        if (!isPreview) return sub;
+        if (sub === 'install' || sub === 'prepare') return 'prepare';
+        if (sub === 'proxy' || sub === 'preview') return 'connect';
+        return sub;
+    };
     const stepIndex = (id) => STEP_ORDER.indexOf(id);
-    const stepStoreKey = `xe_deploy_step_${projectId || 'p'}_${sessionId || 's'}`;
+    // 从 DB 记录推断"当前真实步骤"（刷新恢复 / 轮询用）。
+    // 预览：服务端把最新子阶段持久化在 stage 列（prepare/install/mock/serve/proxy），
+    //   映射到 5 步词汇表；'A'/空 = 还在分析。原先恢复只能硬编码 'prepare'、轮询硬编码
+    //   'serve'（一刷新进度条就往前跳两格），现在按真实子阶段走。
+    const stepFromRow = (row) => {
+        const st = String(row?.stage || '');
+        if (isPreview) {
+            if (!st || st === 'A') return 'analyze';
+            const mapped = mapSubstage(st);
+            return stepIndex(mapped) >= 0 ? mapped : 'prepare';
+        }
+        // 完整部署：stage 只存 'A'/'B'/'preview' 粗粒度，子阶段走 SSE，恢复取阶段下限。
+        if (st === 'B') return 'build';
+        if (st === 'preview') return 'preview';
+        return 'analyze';
+    };
+    // 按 mode 分命名空间：deploy/preview 两个实例共用 projectId+sessionId，
+    // 步骤词汇表不同（build/fix vs mock/connect），互不能读对方的持久化步骤。
+    const stepStoreKey = `xe_deploy_step_${mode}_${projectId || 'p'}_${sessionId || 's'}`;
     const [furthestStep, setFurthestStep] = useState(null);
     const advanceTo = (id) => setFurthestStep((prev) => {
         const ni = stepIndex(id);
@@ -66,6 +103,11 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
     const startedAtRef = useRef(0);
     const confirmedIdRef = useRef(null);
     const confirmTimerRef = useRef(null);
+    // 本次运行模式：'quick'（快速预览）| 'deploy'（完整部署）——决定失败文案用词
+    // （「预览失败」vs「部署失败」）。必须在 startRun 之前声明：startRun 闭包里引用它，
+    // 声明在使用之后会 TDZ ReferenceError → 整页白屏（实测）。
+    // 预览 tab 实例（mode='preview'）恒为 quick；部署 tab 实例由本次点击决定。
+    const runModeRef = useRef(isPreview ? 'quick' : 'deploy');
     const runStateRef = useRef(runState);
     runStateRef.current = runState;
     const DEPLOY_CONFIRM_TIMEOUT_MS = 5000;
@@ -78,16 +120,20 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
         if (abortRequested) setRunState('aborted');
     }, [abortRequested]);
 
-    // 上报部署状态：running / finished / aborted / idle（驱动右上角状态与中止按钮）
+    // 上报部署状态：running / finished / aborted / idle（驱动右上角状态与中止按钮）。
+    // 第二参数为运行模式（quick/deploy），顶栏据此显示「预览中/部署中」「停止预览/停止部署」。
     useEffect(() => {
         const s = runState === 'running' ? 'running'
             : (runState === 'success') ? 'finished'
             : (runState === 'failed') ? 'failed'
             : (runState === 'aborted' ? 'aborted' : 'idle');
-        onDeployStatus?.(s);
+        onDeployStatus?.(s, runModeRef.current);
     }, [runState, onDeployStatus]);
 
     const startRun = useCallback(async (opts = {}) => {
+        // 记录本次运行模式：快速预览（quick）还是完整部署——失败标题/文案按模式
+        // 显示「预览」/「部署」（快速预览触发的失败不该说"部署失败"）。
+        runModeRef.current = opts.quick ? 'quick' : 'deploy';
         // 确认闭环：记录点击时刻 + 清空确认状态。部署是否"生效"以两个信号为准：
         //  (1) SSE started 事件（服务端创建记录即推送，<1s）；
         //  (2) 兜底轮询到 created_at >= startedAt 的 building 记录。
@@ -96,6 +142,11 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
         startedAtRef.current = Date.now();
         confirmedIdRef.current = null;
         if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+        // 重置进度：新一轮必须从第一步重新走。此前 startRun 没清 furthestStep/持久化步骤
+        // （注释声称重置但代码缺失）→ 上一轮跑到 'connect' 后，新一轮进度条一开始就顶在
+        // 最后一步、整轮不再前进（表现为"进度条不对/卡住后直接出预览页"）。
+        try { sessionStorage.removeItem(stepStoreKey); } catch { /* ignore */ }
+        setFurthestStep(null);
         setRunState('running');
         setResult(null);
         setPhase(null);
@@ -120,8 +171,13 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
             }
         };
         try {
+            // quick=true 走快速预览流水线（两阶段：LLM 分析 + dev server/mock/隧道），
+            // 其余阶段/事件协议与完整部署完全同构，UI 无需分支。
+            const endpoint = opts.quick
+                ? `/api/v1/projects/${encodeURIComponent(projectId)}/quick-preview`
+                : `/api/v1/projects/${encodeURIComponent(projectId)}/auto-deploy`;
             const res = await apiFetch(
-                withSessionId(`/api/v1/projects/${encodeURIComponent(projectId)}/auto-deploy`),
+                withSessionId(endpoint),
                 { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resume: !!opts.resume }) },
             );
             if (!res.ok) {
@@ -148,10 +204,11 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                         advanceTo('analyze');
                     } else if (evt.stage === 'B') {
                         // 后端透传子阶段（prepare/build/serve/check/fix），驱动更细的步骤高亮。
+                        // 预览模式映射到 5 步词汇表（install→prepare、proxy/preview→connect）。
                         // 单调前进：迟到/重放的事件不会把进度拉回去。
-                        advanceTo(evt.substage || 'prepare');
+                        advanceTo(mapSubstage(evt.substage) || 'prepare');
                     } else if (evt.stage === 'preview') {
-                        advanceTo('preview');
+                        advanceTo(isPreview ? 'connect' : 'preview');
                     }
                 } else if (evt.type === 'result') {
                     finish(evt.result);
@@ -194,7 +251,12 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
         requestedRef.current = true;
         startRun();
     }, [startRun]);
-    useImperativeHandle(ref, () => ({ requestDeploy }), [requestDeploy]);
+    // 快速预览：同一面板/进度 UI，仅 endpoint 不同（dev server + mock，跳过生产化）
+    const requestQuickPreview = useCallback(() => {
+        requestedRef.current = true;
+        startRun({ quick: true });
+    }, [startRun]);
+    useImperativeHandle(ref, () => ({ requestDeploy, requestQuickPreview }), [requestDeploy, requestQuickPreview]);
 
     // autoStartVersion：父组件"Deploy"按钮自增，本组件以它为 key 重挂载。
     // 挂载 effect 里直接 startRun——挂载与发起在同一生命周期内，无 ref 时序
@@ -221,6 +283,22 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
         requestDeploy();
     }, [autoStartVersion, requestDeploy, autoStartStoreKey]);
 
+    // quickPreviewVersion：父组件「快速预览」按钮自增——同一次点击直接触发 quick 流水线。
+    // 防重放用「ref 初始化为当前 version」：挂载（含 session 切换 / 组件 remount）时 ref
+    // 已等于当前值 → 不触发；只有 version 真正递增（用户点击）才触发。
+    // 不能用 sessionStorage 消费标记：version 是父组件的全局计数器（刷新归 0、跨 session
+    // 沿用），而标记按 session 存 —— ①刷新后同 session 标记=1、version 归 0，首次点击
+    // (=1) 会被误判重放而静默跳过（表现为"按钮无效，狂点才生效"）；②切到新 session 时
+    // 新标记=0、version 沿用=1，会误触发一次真实预览流水线（右上角残留"预览中"）。
+    const lastQuickRef = useRef(quickPreviewVersion);
+    useEffect(() => {
+        if (!quickPreviewVersion || quickPreviewVersion === lastQuickRef.current) return;
+        lastQuickRef.current = quickPreviewVersion;
+        requestedRef.current = true;
+        startRun({ quick: true });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [quickPreviewVersion]);
+
     // 挂载先查该 session 的部署状态：有进行中/已完成的 kind='deploy' 则恢复展示，不重复触发。
     // 主动部署（requestedRef=true，由 requestDeploy 触发）时跳过本逻辑。
     // 无该 session 的部署记录 → 保持 idle 空态，等用户点"Deploy"再部署，绝不自动重新部署。
@@ -238,17 +316,20 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 const data = await res.json();
                 if (cancelled || requestedRef.current) return;
                 const list = Array.isArray(data) ? data : (data?.deployments || []);
-                // 部署与 session 强绑定：只查该 session 的部署记录
+                // 部署与 session 强绑定：只查该 session 的部署记录。
+                // kind 按 mode 过滤：deploy tab 认 deploy（完整部署）、preview tab 认
+                // dev（快速预览）——两个 tab 各自恢复自己的流程，互不串台。
+                const myKinds = isPreview ? ['dev'] : ['deploy'];
                 const deployRows = list
-                    .filter((d) => d.kind === 'deploy' && (!sessionId || d.session_id === sessionId))
+                    .filter((d) => myKinds.includes(d.kind) && (!sessionId || d.session_id === sessionId))
                     .sort((a, b) => b.created_at - a.created_at);
                 const active = deployRows.find((d) => d.status === 'building' || d.status === 'pending');
                 if (active) {
                     setRunState('running');
-                    // 恢复时 DB 只有阶段（A/B/preview），没有子阶段；按阶段下限播种，
-                    // 再与 sessionStorage 里持久化的最远步骤取 max（同标签页切走再切回的场景），
+                    // 恢复真实步骤：预览读服务端持久化的子阶段（stage 列），部署取阶段下限；
+                    // 再与 sessionStorage 持久化的最远步骤取 max（同一轮里 SSE 已推进过的情况）。
                     // advanceTo 单调，后续轮询不会把进度拉回。
-                    let seed = active.stage === 'B' ? 'build' : active.stage === 'preview' ? 'preview' : 'analyze';
+                    let seed = stepFromRow(active);
                     try {
                         const stored = sessionStorage.getItem(stepStoreKey);
                         if (stored && stepIndex(stored) > stepIndex(seed)) seed = stored;
@@ -284,10 +365,10 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 const res = await apiFetch(withSessionId(`/api/v1/deployments?project_id=${encodeURIComponent(projectId)}`));
                 const data = await res.json();
                 const list = Array.isArray(data) ? data : (data?.deployments || []);
-                const row = list.find((d) => d.kind === 'deploy' && d.id === recoveredId);
+                const row = list.find((d) => myKinds.includes(d.kind) && d.id === recoveredId);
                 if (!row) return;
                 if (row.status === 'building' || row.status === 'pending') {
-                    advanceTo(row.stage === 'B' ? 'build' : row.stage === 'preview' ? 'preview' : 'analyze');
+                    advanceTo(stepFromRow(row));
                 } else if (row.status === 'running') {
                     // runStateRef 守卫：SSE result 已接管（success）时不重复触发
                     if (runStateRef.current === 'running') {
@@ -321,7 +402,7 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 const res = await apiFetch(withSessionId(`/api/v1/deployments?project_id=${encodeURIComponent(projectId)}`));
                 const data = await res.json();
                 const list = Array.isArray(data) ? data : (data?.deployments || []);
-                const mine = list.find((d) => d.kind === 'deploy'
+                const mine = list.find((d) => myKinds.includes(d.kind)
                     && (!sessionId || d.session_id === sessionId)
                     && Number(d.created_at) >= startedAtRef.current
                     && (d.status === 'building' || d.status === 'pending'));
@@ -344,15 +425,27 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
         <div className="flex h-full min-h-0 flex-col">
             {runState === 'success' ? (
                 <div className="flex-1 min-h-0 overflow-hidden">
-                    <WorkspacePreviewPane projectId={projectId} sessionId={sessionId} deployInfo={result} />
+                    <WorkspacePreviewPane
+                        projectId={projectId}
+                        sessionId={sessionId}
+                        deployInfo={result}
+                        mode={isPreview ? 'preview' : 'deploy'}
+                        onRestartPreview={isPreview ? () => {
+                            // 重新预览：重跑快速流水线（改代码后无需先停止再启动）。
+                            // 进度重置由 startRun 统一负责。
+                            startRun({ quick: true });
+                        } : undefined}
+                    />
                 </div>
             ) : (
                 <div className="flex-1 min-h-0 overflow-y-auto flex items-center justify-center">
                 {runState === 'idle' && (
                     <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8">
-                        <Rocket className="w-9 h-9 text-zinc-300" />
-                        <div className="text-sm text-zinc-500">{t('deploy:idle.empty')}</div>
-                        <div className="text-xs text-zinc-400">{t('deploy:idle.hint')}</div>
+                        {isPreview
+                            ? <Globe className="w-9 h-9 text-zinc-300" />
+                            : <Rocket className="w-9 h-9 text-zinc-300" />}
+                        <div className="text-sm text-zinc-500">{t(isPreview ? 'deploy:idle.empty_preview' : 'deploy:idle.empty')}</div>
+                        <div className="text-xs text-zinc-400">{t(isPreview ? 'deploy:idle.hint_preview' : 'deploy:idle.hint')}</div>
                     </div>
                 )}
                 {runState === 'running' && (
@@ -367,12 +460,16 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                     <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8">
                         <AlertCircle className="w-9 h-9 text-zinc-400" />
                         <div className="text-sm font-semibold text-zinc-700">
-                            {result?.code === 'deploy_timeout' ? t('deploy:timeout') : t('deploy:aborted')}
+                            {/* 文案按运行模式区分：预览流程中止显示「预览已中止/预览超时」，
+                                完整部署显示「部署已中止/部署超时」 */}
+                            {result?.code === 'deploy_timeout'
+                                ? t(isPreview ? 'deploy:timeout_preview' : 'deploy:timeout')
+                                : t(isPreview ? 'deploy:aborted_preview' : 'deploy:aborted')}
                         </div>
                     </div>
                 )}
                 {runState === 'failed' && result && (
-                    <FailureView result={result} />
+                    <FailureView result={result} mode={runModeRef.current} />
                 )}
                 </div>
             )}
@@ -380,7 +477,7 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
     );
 });
 
-function FailureView({ result }) {
+function FailureView({ result, mode }) {
     const { t } = useTranslation();
     const [showDetails, setShowDetails] = useState(false);
     const trail = result?.verify?.trail || [];
@@ -392,8 +489,12 @@ function FailureView({ result }) {
     return (
         <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-8 w-full max-w-lg">
             <AlertCircle className="w-9 h-9 text-red-600" />
-            <div className="text-sm font-semibold text-red-700">{t(result?.code === 'quota_exceeded' ? 'deploy:failed.quota_title' : 'deploy:failed.title')}</div>
+            <div className="text-sm font-semibold text-red-700">{t(result?.code === 'quota_exceeded' ? 'deploy:failed.quota_title' : (mode === 'quick' ? 'deploy:failed.preview_title' : 'deploy:failed.title'))}</div>
             {(() => {
+                // 快速预览失败不显示副标题：服务端错误文案里常带「部署」字样（如
+                // "该工作区已有部署/预览在进行中"），与「预览失败」标题冲突——
+                // 用户要求 quick 模式只显示标题（并发占用信息仍完整展示）。
+                if (mode === 'quick') return null;
                 const line = result?.code === 'quota_exceeded'
                     ? t('deploy:error.quota_exceeded', { current: result?.current, limit: result?.limit })
                     : result?.code === 'deploy_stopping'
@@ -409,7 +510,7 @@ function FailureView({ result }) {
                     <ul className="text-xs text-amber-900 space-y-0.5">
                         {result.occupants.map((o, i) => (
                             <li key={i}>
-                                · {t('deploy:occupant.workspace')}「{o.projectName || o.projectId}」- {t('deploy:occupant.session_label')}「{o.sessionName || t('deploy:occupant.unnamed')}」{o.kind === 'preview' ? t('deploy:occupant.preview_running') : t('deploy:occupant.deploying')}
+                                · {t('deploy:occupant.workspace')}「{o.projectName || o.projectId}」- {t('deploy:occupant.session_label')}「{o.sessionName || t('deploy:occupant.unnamed')}」{o.kind === 'preview' || o.kind === 'dev' ? t('deploy:occupant.preview_running') : t('deploy:occupant.deploying')}
                             </li>
                         ))}
                     </ul>
@@ -422,7 +523,7 @@ function FailureView({ result }) {
                     <ul className="text-xs text-amber-900 space-y-0.5">
                         {result.occupants.map((o, i) => (
                             <li key={i}>
-                                · {t('deploy:occupant.workspace')}「{o.projectName || o.projectId}」- {t('deploy:occupant.session_label')}「{o.sessionName || t('deploy:occupant.unnamed')}」{o.kind === 'preview' ? t('deploy:occupant.preview_running') : t('deploy:occupant.deploying')}
+                                · {t('deploy:occupant.workspace')}「{o.projectName || o.projectId}」- {t('deploy:occupant.session_label')}「{o.sessionName || t('deploy:occupant.unnamed')}」{o.kind === 'preview' || o.kind === 'dev' ? t('deploy:occupant.preview_running') : t('deploy:occupant.deploying')}
                             </li>
                         ))}
                     </ul>

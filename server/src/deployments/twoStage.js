@@ -315,12 +315,15 @@ function extractSuccessCommands(trail, allowServeCommands = true) {
 }
 
 // 断点续修：verify 超轮数失败后把对话历史存库，resume 时接回继续修 ——
-async function loadVerifyState(projectId) {
+// opts.forPlanCache：quickPreview 存/取 plan（含 mockDataFactory 标志、devRecipe）时
+// 传 true——它 messages 恒为空数组、自己也只取 plan，跳过「续修点必须有对话历史」
+// 校验（否则写进去永远读不出来，标志全丢，工厂缓存失效——实测登录时好时坏根因）。
+async function loadVerifyState(projectId, opts = {}) {
     try {
         const rows = await db.select().from(schema.deployVerifyStates).where(eq(schema.deployVerifyStates.projectId, projectId));
         if (!rows.length) return null;
         const row = rows[0];
-        if (!Array.isArray(row.messages) || !row.messages.length) return null;
+        if (!opts.forPlanCache && (!Array.isArray(row.messages) || !row.messages.length)) return null;
         if (Date.now() - Number(row.updatedAt || 0) > VERIFY_STATE_TTL_MS) return null; // 过期失效
         // 版本化：判定逻辑升级（CACHE_VERSION 递增）后续修点作废——旧续修点的"成功步骤"
         // 与 agent 认知基于旧判定标准，接回来会误导新一轮修复。
@@ -499,11 +502,14 @@ function enrichWithDevKind(stack, hostWorkspacePath) {
     const has = (n) => { try { return fs.existsSync(path.join(hostWorkspacePath, n)); } catch { return false; } };
     const readJson = (n) => { try { return JSON.parse(fs.readFileSync(path.join(hostWorkspacePath, n), 'utf8')); } catch { return null; } };
 
-    // live 模式专用：探测 monorepo 子前端（web/frontend/client/app），
-    // 因为 monorepo 根 dev 常是 concurrently/electron 聚合，不是 web 前端。
-    // 子目录优先级：vite > next > nuxt > 有 dev script 的 npm 项目。
+    // live 模式专用：探测 monorepo 子前端（web/frontend/client/app + apps/*、
+    // packages/* 嵌套布局），因为 monorepo 根 dev 常是 concurrently/turbo/electron
+    // 聚合，不是 web 前端。子目录优先级：vite > next > nuxt > 有 dev script 的 npm 项目。
     const detectSubDev = () => {
-        const dirs = ['web', 'frontend', 'client', 'app'];
+        // 两级目录：一级 web/frontend/client/app + 二级 apps/X、packages/X
+        const dirs = ['web', 'frontend', 'client', 'app',
+            'apps/web', 'apps/frontend', 'apps/client', 'apps/app',
+            'packages/web', 'packages/frontend', 'packages/client', 'packages/app'];
         for (const d of dirs) {
             if (!has(path.join(d, 'package.json'))) continue;
             const p = readJson(path.join(d, 'package.json')) || {};
@@ -513,6 +519,9 @@ function enrichWithDevKind(stack, hostWorkspacePath) {
             // 引用模块，在 /preview/<id>/ 子路径代理下 remoteEntry 404 → live 白屏。
             // umi 走 build + 静态 serve（生产模式），不做 live。
             if (deps['@umijs/max'] || deps.umi) continue;
+            // electron 桌面包（electron-vite/electron-builder/electron）跳过：
+            // 无 GUI 沙箱必崩（libglib 缺失 → exit 127），不是浏览器可跑目标。
+            if (deps.electron || deps['electron-vite'] || deps['electron-builder']) continue;
             if (deps.vite) return { devKind: 'vite', dir: d };
             if (deps.next) return { devKind: 'next', dir: d };
             if (deps.nuxt) return { devKind: 'nuxt', dir: d };
@@ -682,9 +691,34 @@ async function startLiveDevServer({ runtimeRef, workspacePath, devKind, devDir, 
         if (onLog) onLog(`live dev server spawn failed: ${e.message}`);
         return { ok: false, reason: e.message };
     }
-    // 轮询探测 livePort，最多等 40s（vite 冷启动 + dep 预构建可能 10~30s）
+    // 幽灵实例防线：Next 15+ 的 dev server 单实例锁——两层残留都会顶死新实例：
+    //   a) 进程残留（服务进程名 next-server，`pkill -f "next dev"` 匹配不到）
+    //   b) 锁文件残留（.next/dev/lock 里写着已死 PID——进程杀了文件还在，Next 启动
+    //      读到锁即 "⨯ Failed to start server"，multica 13:09 实测）
+    // 处理：杀进程 + 删锁文件 + 重启（multica 复现：清理后 1.3s Ready + 200）。
+    if (devKind === 'next' || devKind === 'nuxt' || devKind === 'vite') {
+        try {
+            await runtime.exec.exec('sh', ['-c',
+                'pkill -f "next dev" 2>/dev/null; pkill -f "next-server" 2>/dev/null; pkill -f "nuxt dev" 2>/dev/null; pkill -f "vite --host" 2>/dev/null; pkill -f "vite.*--port" 2>/dev/null; sleep 1; rm -f .next/dev/lock */.next/dev/lock apps/*/.next/dev/lock 2>/dev/null; true'],
+                {}, { runtimeRef, cwd: workspacePath, timeoutMs: 10000 });
+        } catch { /* best-effort */ }
+        // 清掉后重启（锁释放需要一点时间）
+        try {
+            await runtime.exec.exec('sh', ['-c', `(setsid nohup sh -c '${startCmd}' > ${startLog} 2>&1 &) && echo restarted`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+        } catch (e) {
+            if (onLog) onLog(`live dev server respawn failed: ${e.message}`);
+            return { ok: false, reason: e.message };
+        }
+    }
+    // 轮询探测 livePort，最多等 40s（vite 冷启动 + dep 预构建可能 10~30s）。
+    // next/turbopack 例外：Next 15/16 首次全量编译大 app 目录要 1-2 分钟，banner
+    // （▲ Next.js）打出后仍要继续编译——40s 只够看到 banner（multica 实测 000 超时
+    // 但进程活着）。这类编译型 dev server 给 150s；失败后若日志显示进程仍在推进
+    // （banner 存在且无 error），再补等 60s——冷缓存首启 vs 真崩溃区分开。
+    const probeBudget = (devKind === 'next' || devKind === 'nuxt') ? 150 : 40;
+    const compilerBannerRe = /next\.js|turbopack|nuxt|remix|astro/i;
     let code = '';
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < probeBudget; i++) {
         await new Promise((r) => setTimeout(r, 1000));
         try {
             const probe = await runtime.exec.exec(
@@ -694,11 +728,33 @@ async function startLiveDevServer({ runtimeRef, workspacePath, devKind, devDir, 
             code = String(probe.stdout || '').trim();
             if (/^[23]\d\d$/.test(code)) break;
         } catch { /* keep waiting */ }
+
     }
     if (!/^[23]\d\d$/.test(code)) {
-        const log = await runtime.exec.exec('sh', ['-c', `tail -n 30 ${startLog} 2>/dev/null`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 8000 });
-        if (onLog) onLog(`live dev server not ready on :${livePort} (http ${code || '000'}) log=${String(log.stdout || '').slice(0, 400)}`);
-        return { ok: false, reason: `live dev server not ready (http ${code || '000'})` };
+        let log = '';
+        try {
+            log = String((await runtime.exec.exec('sh', ['-c', `tail -n 30 ${startLog} 2>/dev/null`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 8000 })).stdout || '');
+        } catch { /* ignore */ }
+        // 编译型 dev server 冷启动慢：banner 已出且无 error → 进程在推进，补等 60s
+        const stillCompiling = compilerBannerRe.test(log) && !/\berror\b/i.test(log);
+        if (stillCompiling && (devKind === 'next' || devKind === 'nuxt')) {
+            if (onLog) onLog(`dev server still compiling (${devKind}), extending probe by 60s`);
+            for (let i = 0; i < 60; i++) {
+                await new Promise((r) => setTimeout(r, 1000));
+                try {
+                    const probe2 = await runtime.exec.exec(
+                        'sh', ['-c', `curl -s -m 3 -o /dev/null -w "%{http_code}" http://127.0.0.1:${livePort}/`], {},
+                        { runtimeRef, cwd: workspacePath, timeoutMs: 8000 },
+                    );
+                    code = String(probe2.stdout || '').trim();
+                    if (/^[23]\d\d$/.test(code)) break;
+                } catch { /* keep waiting */ }
+            }
+        }
+        if (!/^[23]\d\d$/.test(code)) {
+            if (onLog) onLog(`live dev server not ready on :${livePort} (http ${code || '000'}) log=${log.slice(0, 400)}`);
+            return { ok: false, reason: `live dev server not ready (http ${code || '000'})` };
+        }
     }
     // —— 主动预热（辅助措施，失败绝不阻塞主流程）——
     // vite dev server 的 warm-up（esbuild 依赖预构建 + 按需转换）只在"首次完整请求"
@@ -733,7 +789,7 @@ async function startLiveDevServer({ runtimeRef, workspacePath, devKind, devDir, 
 
 // live 模式聚合代理：/api/* → 后端；其它 → vite dev server（实时预览，前后端都可用）。
 // base 传给代理，转发 vite 请求时补回 /preview/<id>/ 前缀（vite 配了该 base，不带会 302 死循环）。
-async function startViteAggregateProxy({ runtimeRef, workspacePath, devPort, backendPort, listenPort, base, apiPrefixes = [], onLog }) {
+async function startViteAggregateProxy({ runtimeRef, workspacePath, devPort, backendPort, listenPort, base, apiPrefixes = [], baseForward = true, onLog }) {
     const runtime = getRuntime();
     let proxyPath = null;
     try {
@@ -748,7 +804,9 @@ async function startViteAggregateProxy({ runtimeRef, workspacePath, devPort, bac
         await runtime.exec.spawn(
             'node',
             [proxyPath, '--live', String(devPort), String(backendPort), String(listenPort), base || '',
-                ...(Array.isArray(apiPrefixes) && apiPrefixes.length ? [`--api-prefixes=${apiPrefixes.join(',')}`] : [])],
+                ...(Array.isArray(apiPrefixes) && apiPrefixes.length ? [`--api-prefixes=${apiPrefixes.join(',')}`] : []),
+                // baseForward=false（next/nuxt）：应用没配 basePath，补 base 会 308 循环丢 token
+                ...(baseForward ? [] : ['--no-base-forward'])],
             { HOME: process.env.HOME || '/root', PATH: process.env.PATH || '/usr/bin:/bin' },
             { runtimeRef, cwd: workspacePath },
         );
@@ -764,7 +822,11 @@ async function startViteAggregateProxy({ runtimeRef, workspacePath, devPort, bac
                 {},
                 { runtimeRef, cwd: workspacePath, timeoutMs: 8000 },
             );
-            if (String(check.stdout || '').startsWith('2')) return true;
+            // 就绪判定 = 收到任意 HTTP 状态码（代理进程 listen 成功就会应答）。
+            // 不能只认 2xx：带 base 的聚合代理对根路径返回 502/308（正常行为——
+            // 只服务 base 前缀），multica 实测代理活着却因探活全 502 被误判失败。
+            const httpCode = String(check.stdout || '').trim();
+            if (/^\d{3}$/.test(httpCode) && httpCode !== '000') return true;
         } catch { /* retry */ }
     }
     if (onLog) onLog(`live aggregate proxy did not come up on :${listenPort}`);
@@ -4569,8 +4631,9 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         // 实时预览（live 模式）：项目有 dev server（vite/next/nuxt/npm）时，优先起常驻 dev server，
         // 改文件后 iframe 刷新即可见，无需重新 build。起不来回退到下面的静态/反代逻辑。
         if (detected.devKind) {
-            // 清理上一轮部署残留的 live 进程（vite/聚合代理），避免端口污染导致 appPort 误判
-            await runtime.exec.exec('sh', ['-c', 'pkill -f previewProxyServer 2>/dev/null; pkill -f "vite --host" 2>/dev/null; pkill -f "npx vite" 2>/dev/null; pkill -f "next dev" 2>/dev/null; pkill -f "nuxt dev" 2>/dev/null; sleep 1; true'], {}, { runtimeRef: ref, cwd: wsPath, timeoutMs: 15000 }).catch(() => {});
+            // 清理上一轮部署残留的 live 进程（vite/聚合代理/next-server），避免端口污染
+            // 与 Next 15+ 单实例锁顶死新实例（next-server 进程名，pkill "next dev" 不匹配）
+            await runtime.exec.exec('sh', ['-c', 'pkill -f previewProxyServer 2>/dev/null; pkill -f "vite --host" 2>/dev/null; pkill -f "npx vite" 2>/dev/null; pkill -f "next dev" 2>/dev/null; pkill -f "next-server" 2>/dev/null; pkill -f "nuxt dev" 2>/dev/null; sleep 1; true'], {}, { runtimeRef: ref, cwd: wsPath, timeoutMs: 15000 }).catch(() => {});
             const live = await startLiveDevServer({
                 runtimeRef: ref, workspacePath: wsPath,
                 devKind: detected.devKind, devDir: detected.devDir || '.', defaultPort: detected.defaultPort,
@@ -4586,6 +4649,8 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
                     runtimeRef: ref, workspacePath: wsPath,
                     devPort: live.port, backendPort: backendForApi, listenPort: aggPort,
                     base: `/preview/${deploymentId}/`, apiPrefixes,
+                    // 只有 vite 真配了 --base；next/nuxt 没配 basePath，补 base = 308 循环丢 token
+                    baseForward: detected.devKind === 'vite',
                     onLog: previewLog,
                 }) : false;
                 if (aggOk) {
@@ -4737,4 +4802,4 @@ function registerAutoDeployRoutes(fastify, { getProjectForUser }) {
     });
 }
 
-module.exports = { registerAutoDeployRoutes, runAutoTwoStageDeploy, detectProjectType };
+module.exports = { registerAutoDeployRoutes, runAutoTwoStageDeploy, detectProjectType, startLiveDevServer, startViteAggregateProxy, getGuestFreePort, runPlatformInstall, loadVerifyState, saveVerifyState };

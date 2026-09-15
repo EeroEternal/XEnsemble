@@ -8,6 +8,7 @@ const { probePreviewHealthy } = require('../runtime/previewHealth');
 const { getPreviewPort } = require('../workspace/previewPorts');
 const { projectDir } = require('../workspace');
 const { cleanupStale } = require('../deployments/activeDeploys');
+const { stopByProjectId } = require('../preview/tunnelServer');
 
 const SCAN_MS = 60_000;
 // activeDeploys 残留清理阈值：大于部署总超时（45 分钟）的合理缓冲，
@@ -130,17 +131,25 @@ async function reclaimStaleBuildingDeploys() {
     // 回收面含 running：deploy 的 running 记录超过 2 小时无更新必为僵尸（部署总超时
     // 40min，running 不可能超 2h）——PERN-Store 一条 running 挂了 5.7 天，占着并发
     // 额度导致后续部署误报"已达上限"。
+    // kind='dev'（快速预览）同规则：dev server 失败/进程异常退出时记录卡 building/
+    // running，占住互斥空间 → 之后每次预览被"已有预览在进行中"拒绝（幽灵占用实测）。
+    // 预览 TTL 2h，超过 2h 无更新必为残留（预览续期会更新 updatedAt）。
     const staleBuilding = Date.now() - STALE_DEPLOY_BUILDING_MS;
     const staleRunning = Date.now() - 2 * 60 * 60 * 1000;
-    const rows = await db.select({ id: schema.deployments.id }).from(schema.deployments)
+    const rows = await db.select({ id: schema.deployments.id, kind: schema.deployments.kind, projectId: schema.deployments.projectId }).from(schema.deployments)
         .where(and(
-            eq(schema.deployments.kind, 'deploy'),
+            inArray(schema.deployments.kind, ['deploy', 'dev']),
             inArray(schema.deployments.status, ['building', 'pending', 'running']),
             lt(schema.deployments.updatedAt, staleRunning),
         ));
     for (const r of rows) {
+        // dev（快速预览）僵尸：DB 标记前先拆隧道/杀沙箱内 dev server/mock/代理——
+        // 只改状态会留下真幽灵进程（预览页还挂着死隧道，资源也不释放）。
+        if (r.kind === 'dev') {
+            try { stopByProjectId(r.projectId); } catch (_) { /* tunnel may be gone */ }
+        }
         await db.update(schema.deployments)
-            .set({ status: 'failed', lastErrorMessage: '部署进程异常退出，已回收', updatedAt: Date.now() })
+            .set({ status: 'failed', lastErrorMessage: '部署/预览进程异常退出，已回收', updatedAt: Date.now() })
             .where(eq(schema.deployments.id, r.id));
     }
     void staleBuilding;

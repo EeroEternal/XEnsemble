@@ -249,13 +249,22 @@ export default React.forwardRef(function Sessions({
       setDeployVersion(0);
     }
   }, [activeSession?.projectId]);
-  // 切换 session 时重置部署状态：右上角状态/Stop 按钮属于当前 session 的部署
+  // 切换 session 时重置部署状态：右上角状态/Stop 按钮属于当前 session 的部署。
+  // runningMode 一并复位，避免把上一个 session 的"预览/部署"用词带到新 session。
   useEffect(() => {
     setDeployStatus('idle');
+    setRunningMode('deploy');
     setAbortRequested(false);
   }, [activeSession?.sessionId]);
-  // 当前会话的部署状态（idle/running/finished/aborted），驱动右上角状态与中止按钮
+  // 当前会话的部署状态（idle/running/finished/aborted），驱动右上角状态与中止按钮。
+  // runningMode：在跑的流程类型（quick/deploy）——DeployPanel onDeployStatus 回传，
+  // 决定顶栏显示「预览中/部署中」「停止预览/停止部署」。
   const [deployStatus, setDeployStatus] = useState('idle');
+  const [runningMode, setRunningMode] = useState('deploy');
+  const handleDeployStatus = useCallback((s, m) => {
+    setDeployStatus(s);
+    if (m) setRunningMode(m);
+  }, []);
   // 中止信号：点 Stop 时置 true，让 DeployPanel 立即显示"已中止"（不等后端 abort 返回）
   const [abortRequested, setAbortRequested] = useState(false);
   // 部署成功：就地显示预览（DeployPanel 内嵌 WorkspacePreviewPane），不再弹出 preview tab
@@ -274,6 +283,17 @@ export default React.forwardRef(function Sessions({
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
       });
     } catch { /* ignore */ }
+  }, [activeSession?.projectId]);
+
+  // 快速预览：打开独立的「预览」tab 并触发 quick 流水线（dev server + mock，秒级）。
+  // 预览 tab 挂独立 DeployPanel 实例（mode='preview'），与部署 tab 互不干扰：
+  // 各自的流程阶段、恢复逻辑、防重放标记（version 递增经 sessionStorage 消费标记防重放）。
+  const [quickPreviewVersion, setQuickPreviewVersion] = useState(0);
+  const handleQuickPreview = useCallback(() => {
+    if (!activeSession?.projectId) return;
+    setAbortRequested(false);
+    panelRef.current?.addTab('preview');
+    setQuickPreviewVersion((v) => v + 1);
   }, [activeSession?.projectId]);
 
   // 方案 B：deployStatus 不永久凝固——它是一次性"部署动作"状态，成功后若预览资源已消失
@@ -1527,7 +1547,7 @@ export default React.forwardRef(function Sessions({
                   {activeSession.projectId && !sessionExited ? (
                     <>
                       <div className="mx-0.5 h-5 w-px bg-zinc-200" />
-                      <PreviewControlGroup {...preview} deployStatus={deployStatus} onCancelDeploy={handleCancelDeploy} onAnalyze={() => { setAbortRequested(false); panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); }} />
+                      <PreviewControlGroup {...preview} deployStatus={deployStatus} runningMode={runningMode} onCancelDeploy={handleCancelDeploy} onAnalyze={() => { setAbortRequested(false); panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); }} onQuickPreview={handleQuickPreview} />
                     </>
                   ) : null}
                   {activeSession && (
@@ -1703,12 +1723,25 @@ export default React.forwardRef(function Sessions({
                     shellContent={<WorkspaceShell ref={shellRef} projectId={activeSession.projectId} sessionId={activeSession.sessionId} />}
                     deployContent={activeSession?.projectId ? (
                        <DeployPanel
-                         key={`${activeSession.projectId}-${activeSession.sessionId}-${deployVersion}`}
+                         key={`deploy-${activeSession.projectId}-${activeSession.sessionId}-${deployVersion}`}
+                         mode="deploy"
                          autoStartVersion={deployVersion}
                          projectId={activeSession.projectId}
                          sessionId={activeSession.sessionId}
                          onSuccess={onDeploySuccess}
-                         onDeployStatus={setDeployStatus}
+                         onDeployStatus={handleDeployStatus}
+                         abortRequested={abortRequested}
+                       />
+                    ) : null}
+                    previewContent={activeSession?.projectId ? (
+                       <DeployPanel
+                         key={`preview-${activeSession.projectId}-${activeSession.sessionId}`}
+                         mode="preview"
+                         quickPreviewVersion={quickPreviewVersion}
+                         projectId={activeSession.projectId}
+                         sessionId={activeSession.sessionId}
+                         onSuccess={onDeploySuccess}
+                         onDeployStatus={handleDeployStatus}
                          abortRequested={abortRequested}
                        />
                     ) : null}

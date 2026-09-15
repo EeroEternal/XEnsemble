@@ -15,15 +15,20 @@
     "minutes": "{{m}}m",
     "seconds": "{{s}}s",
     "empty": "Deploy a preview to view your app here",
-    "details": "Deployment details",
-    "show_details": "View deployment details",
-    "hide_details": "Hide deployment details",
+    "empty_preview_tab": "Start a preview to view your app here",
+    "details": "Details",
+    "details_preview": "Preview details",
+    "show_details": "View details",
+    "hide_details": "Hide details",
+    "elapsed_preview": "Preview time",
     "copied": "Access URL copied",
     "copy_failed": "Copy failed, please copy manually",
     "deploying": "Deploying preview…",
     "loading": "Loading…",
     "live": "Live",
-    "refresh": "Refresh"
+    "refresh": "Refresh",
+    "refresh_dev": "Restart preview",
+    "refresh_dev_hint": "Reopen the preview after the app restarts (picks up code changes)"
   },
   "previews": "Previews",
   "action": {
@@ -36,8 +41,11 @@
     "open_in_browser": "Open in browser",
     "deploy": "Deploy",
     "deploy_preview": "Deploy preview",
+    "quick": "Quick preview",
+    "quick_preview": "Quick preview (dev server + mock API)",
     "stop_deployment": "Stop deployment",
     "stop_deploy": "Stop deploy",
+    "stop_preview_short": "Stop preview",
     "open_preview_window": "Open preview window",
     "restart_preview": "Restart preview",
     "allow_popups": "Allow pop-ups to open the preview window",
@@ -52,7 +60,9 @@
   },
   "idle": {
     "empty": "Not deployed yet",
-    "hint": "Click the Deploy button in the top-right to start one-click deployment"
+    "hint": "Click the Deploy button in the top-right to start one-click deployment",
+    "empty_preview": "No preview yet",
+    "hint_preview": "Click the Quick preview button in the top-right to launch your app preview in seconds"
   },
   "steps": {
     "analyze": "Analyze project",
@@ -63,10 +73,20 @@
     "fix": "Fix issues",
     "preview": "Open preview"
   },
+  "steps_preview": {
+    "analyze": "Analyze project",
+    "prepare": "Prepare dependencies",
+    "mock": "Start mock API",
+    "serve": "Start app",
+    "connect": "Establish preview"
+  },
   "aborted": "Deployment aborted",
+  "aborted_preview": "Preview aborted",
   "timeout": "Deployment timed out",
+  "timeout_preview": "Preview timed out",
   "failed": {
     "title": "Deployment failed",
+    "preview_title": "Preview failed",
     "quota_title": "Concurrency limit reached",
     "in_progress_title": "Currently occupying this workspace:",
     "occupants_title": "Currently occupying deployment quota:",
@@ -91,6 +111,7 @@
     "failed": "failed",
     "expired": "expired",
     "deploying": "Deploying",
+    "deploying_preview": "Previewing",
     "finished": "Finished",
     "aborted": "Aborted"
   },

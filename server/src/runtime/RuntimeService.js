@@ -135,9 +135,20 @@ async function ensureProjectRuntime(project, opts = {}) {
         // "failed to spawn command in sandbox").
         const workspacePath = project.serverPath || runtimeRow?.endpoint;
         if (runtimeRow?.status === 'ready' && runtimeRow.runtimeRef && workspacePath) {
+            // attach-only 快路径也必须解析 hostWorkspacePath：部署链路（twoStage 的
+            // detectProjectType）与快速预览的 electron 守卫都依赖宿主侧文件系统读
+            // package.json。此前快路径返回对象缺该字段 → 调用方 fallback 到沙箱路径
+            // /workspace（宿主不存在）→ 守卫/devDir 预检全部静默失效（electron 崩溃
+            // 首现场排查 1h 的根因）。specs.host_workspace_path 在 provision 时落库。
+            let hostWorkspacePath = null;
+            try {
+                const specs = JSON.parse(runtimeRow.specs || '{}');
+                hostWorkspacePath = specs.host_workspace_path || null;
+            } catch { /* ignore */ }
             const result = {
                 runtime: runtimeRow,
                 workspacePath,
+                hostWorkspacePath,
                 recoverable: false,
             };
             setCachedRuntime(targetRuntimeId, result);

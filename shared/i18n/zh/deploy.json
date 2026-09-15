@@ -15,15 +15,20 @@
     "minutes": "{{m}} 分钟",
     "seconds": "{{s}} 秒",
     "empty": "部署预览后在此查看应用",
-    "details": "部署详情",
-    "show_details": "查看部署详情",
-    "hide_details": "收起部署详情",
+    "empty_preview_tab": "预览启动后在此查看应用",
+    "details": "详情",
+    "details_preview": "预览详情",
+    "show_details": "查看详情",
+    "hide_details": "收起详情",
+    "elapsed_preview": "本次预览用时",
     "copied": "访问地址已复制",
     "copy_failed": "复制失败，请手动复制",
     "deploying": "正在部署预览…",
     "loading": "加载中…",
     "live": "实时",
-    "refresh": "刷新"
+    "refresh": "刷新",
+    "refresh_dev": "重新预览",
+    "refresh_dev_hint": "应用重启后重新打开预览（代码改动生效）"
   },
   "previews": "预览",
   "action": {
@@ -36,8 +41,11 @@
     "open_in_browser": "在浏览器中打开",
     "deploy": "部署",
     "deploy_preview": "部署预览",
+    "quick": "快速预览",
+    "quick_preview": "快速预览（dev server + Mock API，秒级出预览）",
     "stop_deployment": "停止部署",
     "stop_deploy": "停止部署",
+    "stop_preview_short": "停止预览",
     "open_preview_window": "打开预览窗口",
     "restart_preview": "重启预览",
     "allow_popups": "请允许弹窗以打开预览窗口",
@@ -52,7 +60,9 @@
   },
   "idle": {
     "empty": "尚未部署",
-    "hint": "点击右上角「Deploy」按钮开始一键部署"
+    "hint": "点击右上角「Deploy」按钮开始一键部署",
+    "empty_preview": "尚未预览",
+    "hint_preview": "点击右上角「快速预览」按钮，秒级启动应用预览"
   },
   "steps": {
     "analyze": "分析项目",
@@ -63,10 +73,20 @@
     "fix": "修复问题",
     "preview": "开启预览"
   },
+  "steps_preview": {
+    "analyze": "分析项目",
+    "prepare": "准备依赖",
+    "mock": "启动 Mock API",
+    "serve": "启动应用",
+    "connect": "建立预览"
+  },
   "aborted": "部署已中止",
+  "aborted_preview": "预览已中止",
   "timeout": "部署超时",
+  "timeout_preview": "预览超时",
   "failed": {
     "title": "部署失败",
+    "preview_title": "预览失败",
     "quota_title": "已达并发部署上限",
     "in_progress_title": "当前占用该工作区的部署/预览：",
     "occupants_title": "当前占用并发额度的部署/预览：",
@@ -91,6 +111,7 @@
     "failed": "失败",
     "expired": "已过期",
     "deploying": "部署中",
+    "deploying_preview": "预览中",
     "finished": "已完成",
     "aborted": "已中止"
   },

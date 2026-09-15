@@ -4,6 +4,7 @@ import {
   Loader2,
   Rocket,
   Square,
+  Zap,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { withSessionId } from '../lib/sessionContext';
@@ -13,8 +14,9 @@ import { formatQuotaExceeded } from '../lib/quotaLabels';
 
 function pickActiveDeployment(list) {
   if (!Array.isArray(list) || list.length === 0) return null;
-  // 1) 优先真正可用的预览（preview running）——不被旧 building 残留顶掉
-  const runningPreview = list.find((d) => d.kind === 'preview' && d.status === 'running');
+  // 1) 优先真正可用的预览（preview/dev running）——不被旧 building 残留顶掉。
+  //    dev = 快速预览（kind='dev'），与 preview 同为可打开的 running 预览。
+  const runningPreview = list.find((d) => (d.kind === 'preview' || d.kind === 'dev') && d.status === 'running');
   if (runningPreview) return runningPreview;
   // 2) 其次只认"较新的"进行中部署（building/pending，updated 10 分钟内）——
   //    太旧的视为残留（部署进程异常退出后 finally 未执行、记录卡 building），
@@ -219,15 +221,18 @@ export function usePreview(projectId, token, sessionId) {
 const ICON_BTN =
   'rounded-md p-1.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 disabled:opacity-50';
 
-export function PreviewStatus({ deployStatus, status }) {
+export function PreviewStatus({ deployStatus, status, runningMode }) {
   const { t } = useTranslation();
-  // 部署流程状态：running（部署中）/ failed（失败）；成功(finished)后跟随 deployment
-  // 实际状态 —— 若已被停止则显示 stopped，避免残留 finished。aborted / idle 不显示。
+  // 部署流程状态：running（部署中/预览中，按运行模式区分文案）/ failed（失败）；
+  // 成功(finished)后跟随 deployment 实际状态 —— 若已被停止则显示 stopped，避免残留
+  // finished。aborted / idle 不显示。
   if (deployStatus === 'running') {
     return (
       <div className="flex items-center gap-1.5 shrink-0">
-        <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
-          {t('deploy:status.deploying')}
+        <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
+          runningMode === 'quick' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
+        }`}>
+          {t(runningMode === 'quick' ? 'deploy:status.deploying_preview' : 'deploy:status.deploying')}
         </span>
       </div>
     );
@@ -256,20 +261,21 @@ export function PreviewStatus({ deployStatus, status }) {
   );
 }
 
-export function PreviewControlGroup({ deployStatus, onCancelDeploy, ...props }) {
+export function PreviewControlGroup({ deployStatus, runningMode, onCancelDeploy, ...props }) {
   const { deployment } = props;
   const status = deployment?.status || 'none';
   return (
     <div className="flex items-center gap-0.5 shrink-0">
-      <PreviewStatus deployStatus={deployStatus} status={status} />
+      <PreviewStatus deployStatus={deployStatus} status={status} runningMode={runningMode} />
       {deployment && <div className="h-3.5 w-px bg-zinc-200 mx-0.5 shrink-0" aria-hidden />}
-      <PreviewActions {...props} deployStatus={deployStatus} onCancelDeploy={onCancelDeploy} />
+      <PreviewActions {...props} deployStatus={deployStatus} runningMode={runningMode} onCancelDeploy={onCancelDeploy} />
     </div>
   );
 }
 
 export function PreviewActions({
   deployStatus,
+  runningMode,
   onCancelDeploy,
   status,
   isBusy,
@@ -278,19 +284,28 @@ export function PreviewActions({
   deployPreview,
   stopPreview,
   onAnalyze,
+  onQuickPreview,
 }) {
   const { t } = useTranslation();
-  // 部署中：用"Stop deploy"按钮替代 Deploy 按钮（同位置、同样式）
+  // 运行中：顶栏停止按钮按运行模式区分文案与色系——预览（轻量蓝）vs 部署（黑色）。
+  // runningMode 由 Sessions 传入（DeployPanel onDeployStatus 的第二参数），缺省按部署。
   if (deployStatus === 'running') {
+    const isQuick = runningMode === 'quick';
     return (
       <button
         type="button"
         onClick={onCancelDeploy}
-        title={t('deploy:action.stop_deployment', { defaultValue: 'Stop deployment' })}
-        className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md bg-zinc-900 text-zinc-50 hover:bg-zinc-800 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-0"
+        title={isQuick
+          ? t('deploy:action.stop_preview_short', { defaultValue: 'Stop preview' })
+          : t('deploy:action.stop_deployment', { defaultValue: 'Stop deployment' })}
+        className={isQuick
+          ? 'inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-0'
+          : 'inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md bg-zinc-900 text-zinc-50 hover:bg-zinc-800 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-0'}
       >
         <Square className="w-3.5 h-3.5" />
-        {t('deploy:action.stop_deploy', { defaultValue: 'Stop deploy' })}
+        {isQuick
+          ? t('deploy:action.stop_preview_short', { defaultValue: 'Stop preview' })
+          : t('deploy:action.stop_deploy', { defaultValue: 'Stop deploy' })}
       </button>
     );
   }
@@ -321,15 +336,31 @@ export function PreviewActions({
   }
 
   return (
-    <button
-      type="button"
-      disabled={isBusy}
-      onClick={onAnalyze || deployPreview}
-      title={t('deploy:action.deploy_preview', { defaultValue: 'Deploy preview' })}
-      className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md bg-zinc-900 text-zinc-50 hover:bg-zinc-800 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-0"
-    >
-      {isBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />}
-      {t('deploy:action.deploy', { defaultValue: 'Deploy' })}
-    </button>
+    <div className="flex items-center gap-1">
+      {onQuickPreview && (
+        <button
+          type="button"
+          disabled={isBusy}
+          onClick={onQuickPreview}
+          title={t('deploy:action.quick_preview', { defaultValue: 'Quick preview (dev server + mock API)' })}
+          // 蓝色实心 = 轻量快速操作（秒级 dev server），与黑色「部署」（生产化构建）形成
+          // 语义对比：越重越黑、越轻越亮。色弱用户还可依赖图标（闪电 vs 火箭）与文案区分。
+          className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-0"
+        >
+          {isBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+          {t('deploy:action.quick', { defaultValue: 'Quick preview' })}
+        </button>
+      )}
+      <button
+        type="button"
+        disabled={isBusy}
+        onClick={onAnalyze || deployPreview}
+        title={t('deploy:action.deploy_preview', { defaultValue: 'Deploy preview' })}
+        className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md bg-zinc-900 text-zinc-50 hover:bg-zinc-800 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-0"
+      >
+        {isBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />}
+        {t('deploy:action.deploy', { defaultValue: 'Deploy' })}
+      </button>
+    </div>
   );
 }

@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo, memo, lazy, Suspense
 import { createPortal } from 'react-dom';
 import {
   FileText, Files, FolderPlus, Plus, PanelLeftClose, PanelLeft, Loader2,
-  Terminal, Globe, GitBranch, GitPullRequest, X, ArrowLeft,
+  Terminal, Globe, GitBranch, GitPullRequest, X, ArrowLeft, Eye,
   Trash2, Pencil, ClipboardCopy, FilePlus, Rocket,
 } from 'lucide-react';
 import WorkspaceFileTree from './WorkspaceFileTree';
@@ -41,6 +41,7 @@ const ADDABLE_TAB_DEFS = [
   { key: 'terminal', labelKey: 'workspace:tabs.terminal', icon: Terminal },
   { key: 'browser', labelKey: 'workspace:tabs.browser', icon: Globe },
   { key: 'deploy', labelKey: 'workspace:tabs.deploy', icon: Rocket },
+  { key: 'preview', labelKey: 'workspace:tabs.preview', icon: Eye },
 ];
 
 const ADDABLE_KEYS = new Set(ADDABLE_TAB_DEFS.map((t) => t.key));
@@ -59,10 +60,9 @@ function readExtraTabs(sessionId) {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        // deploy 面板也恢复：部署进行中时切走/刷新后能找回进度（DeployPanel 挂载会查状态，
-        // 有进行中则恢复、无则才部署，不会因恢复 tab 而重复部署）。
-        // preview 已并入 deploy 面板，不再恢复独立的 preview tab。
-        return parsed.map(migrateTabKey).filter((k) => ADDABLE_KEYS.has(k) && k !== 'preview');
+        // deploy/preview 面板也恢复：流程进行中时切走/刷新后能找回进度（面板挂载会查状态，
+        // 有进行中则恢复、无则不重复触发）。
+        return parsed.map(migrateTabKey).filter((k) => ADDABLE_KEYS.has(k));
       }
     }
   } catch {
@@ -112,6 +112,7 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   onRenameFile,
   onCopyPath,
   deployContent,
+  previewContent,
 }, ref) {
   const { t } = useTranslation();
   const [showNewFile, setShowNewFile] = useState(false);
@@ -446,8 +447,8 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
 
   const addableRemaining = ADDABLE_TAB_DEFS.filter((tab) => {
     if (extraTabs.includes(tab.key)) return false;
-    // deploy 通过页面右上角的 Deploy 按钮打开，不放进"添加新窗口"菜单
-    if (tab.key === 'deploy') return false;
+    // deploy/preview 通过页面右上角按钮打开，不放进"添加新窗口"菜单
+    if (tab.key === 'deploy' || tab.key === 'preview') return false;
     if (tab.key === 'pullrequests') return isExternalGit;
     return true;
   }).map((tab) => ({ ...tab, label: t(tab.labelKey) }));
@@ -689,6 +690,10 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
 
         <div className={mainTab === 'deploy' ? 'flex-1 min-h-0 overflow-hidden' : 'hidden'}>
           {deployContent || null}
+        </div>
+
+        <div className={mainTab === 'preview' ? 'flex-1 min-h-0 overflow-hidden' : 'hidden'}>
+          {previewContent || null}
         </div>
 
         {mainTab === 'browser' && (
