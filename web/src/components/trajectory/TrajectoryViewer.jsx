@@ -831,8 +831,17 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
     ? entries.find((e) => e.id !== entry.id && e.stepSeq === entry.stepSeq && (e.kind === 'assistant' || e.kind === 'thinking')) || null
     : null;
 
-  // assistant/user 消息按 markdown 渲染；context/thinking 保留纯文本
-  const isMarkdown = entry.kind === 'assistant' || entry.kind === 'user';
+  // 预览 tab 全量走 markdown 渲染（代码高亮 / KaTeX 公式，与会话历史一致）；
+  // thinking 保持弱化色调。原始 tab 保留纯文本 JSON 视图。
+  const renderedBody = (previewMode) => (
+    <div className={cn(
+      'text-[13px]',
+      previewMode && 'max-h-56 overflow-hidden relative',
+      entry.kind === 'thinking' && 'opacity-80',
+    )}>
+      <MarkdownView>{entry.text || '—'}</MarkdownView>
+    </div>
+  );
 
   // 工具调用：参数（tool_use.input）与结果（tool_result/tool.content）
   const toolInput = (() => {
@@ -863,21 +872,6 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
         ['preview', t('trajectory.tab_preview')],
         ['raw', t('trajectory.tab_raw')],
       ];
-
-  const renderedBody = (previewMode) => {
-    if (isMarkdown) {
-      return (
-        <div className={cn('text-[13px]', previewMode && 'max-h-56 overflow-hidden relative')}>
-          <MarkdownView>{entry.text}</MarkdownView>
-        </div>
-      );
-    }
-    return (
-      <pre className={cn('font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap break-words', entry.kind === 'thinking' ? 'italic text-zinc-500' : T1)}>
-        {entry.text || '—'}
-      </pre>
-    );
-  };
 
   const renderOverviewSections = () => {
     if (entry.kind === 'tool') {
