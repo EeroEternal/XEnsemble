@@ -442,6 +442,12 @@ export default function AppSidebar({
             {isFailed && (
               <span className="w-1.5 h-1.5 rounded-full bg-red-600 shrink-0" />
             )}
+            {s.status === 'exited' && (
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600 shrink-0"
+                title={t('sessions:state.exited', { defaultValue: 'Exited' })}
+              />
+            )}
             {timestamp && (
               <span className={`shrink-0 text-[11px] ${textPlaceholder}`}>{timestamp}</span>
             )}
@@ -464,13 +470,17 @@ export default function AppSidebar({
   };
 
   const visibleSessions = useMemo(() => {
+    // 退出的会话也显示（灰点 + 置底）：可查看轨迹/历史，但不会触发 resume
     const filtered = sessions.filter(
       (s) =>
         !isArchivedSession(sidebarPrefs, s.id) &&
-        s.status !== 'exited' &&
         (activeWorkspaceId ? s.projectId === activeWorkspaceId : true),
     );
-    return sortSessions(filtered, sidebarPrefs);
+    const sorted = sortSessions(filtered, sidebarPrefs);
+    return [
+      ...sorted.filter((s) => s.status !== 'exited'),
+      ...sorted.filter((s) => s.status === 'exited'),
+    ];
   }, [sessions, sidebarPrefs, activeWorkspaceId]);
 
   const filteredSessions = useMemo(

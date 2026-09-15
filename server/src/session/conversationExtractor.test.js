@@ -153,6 +153,217 @@ test('extract prefers chat transcript over state dir and transcript', async () =
     assert.equal(turns[0].text, 'from chat');
 });
 
+// ── trajectory 源（0029）─────────────────────────────────
+
+test('extract prefers trajectory over chat transcript (0029)', async () => {
+    const store = fakeTranscriptStore([]);
+    const steps = [
+        {
+            seq: 1, ts: 1000, msgCount: 1, status: 'ok', agentId: 'claude-code', model: 'm',
+            request: { snapshot: true, params: {}, messages: [{ role: 'user', content: 'from trajectory' }] },
+            response: { format: 'openai', content: [{ type: 'text', text: 'traj reply' }], finish_reason: 'stop', usage: null },
+        },
+    ];
+    const { source, turns } = await extractor.extract({
+        transcriptStore: store,
+        streamRef: 's1',
+        readChatHistory: async () => [
+            { seq: 1, ts: 1000, role: 'user', content: 'from chat' },
+            { seq: 2, ts: 1100, role: 'assistant', content: 'replied' },
+        ],
+        readTrajectorySteps: async () => steps,
+    });
+    assert.equal(source, 'trajectory');
+    assert.equal(turns[0].text, 'from trajectory');
+    assert.equal(turns[1].text, 'traj reply');
+});
+
+test('extractFromTrajectory pairs openai tool results and dedupes replayed history', () => {
+    const steps = [
+        {
+            seq: 1, ts: 1000, msgCount: 3, status: 'ok',
+            request: {
+                snapshot: true, params: {},
+                messages: [
+                    { role: 'user', content: 'run the tests' },
+                    { role: 'assistant', content: 'running', tool_calls: [{ id: 'c1', function: { name: 'bash', arguments: '{"command":"npm test"}' } }] },
+                    { role: 'user', content: 'context reminder blob' },
+                ],
+            },
+            response: null,
+        },
+        {
+            seq: 2, ts: 2000, msgCount: 4, status: 'ok',
+            request: {
+                snapshot: false, params: {},
+                messages: [
+                    { role: 'tool', tool_call_id: 'c1', content: 'all 10 tests passed' },
+                    { role: 'assistant', content: 'green — committing' },
+                ],
+            },
+            response: null,
+        },
+    ];
+    const { source, turns } = extractor.extractFromTrajectory(steps);
+    assert.equal(source, 'trajectory');
+    assert.equal(turns[0].role, 'user');
+    assert.equal(turns[0].text, 'run the tests');
+    const asst = turns.find((t) => t.role === 'assistant' && t.text === 'running');
+    assert.ok(asst);
+    assert.equal(asst.tools.length, 1);
+    assert.equal(asst.tools[0].tool, 'bash');
+    assert.equal(asst.tools[0].callId, 'c1');
+    assert.equal(asst.tools[0].result, 'all 10 tests passed');
+    assert.equal(turns.filter((t) => t.text === 'run the tests').length, 1);
+    assert.ok(turns.some((t) => t.role === 'assistant' && t.text === 'green — committing'));
+});
+
+test('extractFromTrajectory handles anthropic tool_use / tool_result blocks', () => {
+    const steps = [
+        {
+            seq: 1, ts: 1000, msgCount: 2, status: 'ok',
+            request: {
+                snapshot: true, params: {},
+                messages: [
+                    { role: 'user', content: [{ type: 'text', text: 'fix it' }] },
+                    {
+                        role: 'assistant',
+                        content: [
+                            { type: 'thinking', thinking: 'read first' },
+                            { type: 'text', text: 'reading the file' },
+                            { type: 'tool_use', id: 't9', name: 'read_file', input: { path: 'a.ts' } },
+                        ],
+                    },
+                ],
+            },
+            response: null,
+        },
+        {
+            seq: 2, ts: 2000, msgCount: 3, status: 'ok',
+            request: {
+                snapshot: false, params: {},
+                messages: [
+                    {
+                        role: 'user',
+                        content: [
+                            { type: 'tool_result', tool_use_id: 't9', content: 'file contents here' },
+                        ],
+                    },
+                ],
+            },
+            response: null,
+        },
+    ];
+    const { turns } = extractor.extractFromTrajectory(steps);
+    assert.equal(turns[0].role, 'user');
+    assert.equal(turns[0].text, 'fix it');
+    const asst = turns[1];
+    assert.equal(asst.role, 'assistant');
+    assert.equal(asst.text, 'reading the file');
+    assert.equal(asst.tools.length, 1);
+    assert.equal(asst.tools[0].tool, 'read_file');
+    assert.deepEqual(JSON.parse(asst.tools[0].args), { path: 'a.ts' });
+    assert.equal(asst.tools[0].result, 'file contents here');
+});
+
+test('extractFromTrajectory survives parallel synthetic memory calls (qwen memory)', () => {
+    // 真实场景：qwen-code 在轮次间并行发起记忆整理调用，其合成提示与真实
+    // 用户消息交错——真实消息不能被绝对游标误跳过，合成提示不计入用户轮次
+    const steps = [
+        {
+            seq: 1, ts: 1000, msgCount: 2, status: 'ok',
+            request: {
+                snapshot: true, params: {},
+                messages: [
+                    { role: 'user', content: '你是会总结对话内容吗' },
+                    { role: 'assistant', content: 'turn1 answer' },
+                ],
+            },
+            response: null,
+        },
+        {
+            seq: 2, ts: 2000, msgCount: 3, status: 'ok',
+            request: {
+                snapshot: false, params: {},
+                messages: [
+                    { role: 'user', content: 'Managed memory has TWO directories. Choose which one to write each memory into...' },
+                ],
+            },
+            response: null,
+        },
+        {
+            seq: 3, ts: 3000, msgCount: 3, status: 'ok',
+            request: {
+                snapshot: false, params: {},
+                messages: [
+                    { role: 'user', content: '你自己会总结对话内容吗' },
+                ],
+            },
+            response: null,
+        },
+    ];
+    const { turns } = extractor.extractFromTrajectory(steps);
+    const userTurns = turns.filter((t) => t.role === 'user');
+    assert.equal(userTurns.length, 2);
+    assert.ok(userTurns.some((t) => t.text === '你是会总结对话内容吗'));
+    assert.ok(userTurns.some((t) => t.text === '你自己会总结对话内容吗'));
+    assert.ok(!turns.some((t) => t.text && t.text.includes('Managed memory has')));
+});
+
+test('extractFromTrajectory skips parallel suggestion-mode calls (divergent snapshot)', () => {
+    // 真实场景：CLI 在轮次间并行发起「输入建议」生成调用，其上下文 = 主历史 +
+    // 末尾 [SUGGESTION MODE:] 指令（前缀比对失败 → 存为快照行）。若按绝对游标
+    // 消费，cursor 会被顶过真实用户消息的下标 → 真实消息被误跳过、指令泄漏成
+    // 用户轮次。正确行为：整行跳过，真实消息正常出现。
+    const steps = [
+        {
+            seq: 1, ts: 1000, msgCount: 2, status: 'ok',
+            request: {
+                snapshot: true, params: {},
+                messages: [
+                    { role: 'user', content: '你会总结对话内容吗' },
+                    { role: 'assistant', content: '不会主动总结' },
+                ],
+            },
+            response: null,
+        },
+        {
+            // 建议生成调用（并行）：分歧快照 = 主历史 + 末尾合成指令
+            seq: 2, ts: 2000, msgCount: 3, status: 'ok',
+            request: {
+                snapshot: true, params: {},
+                messages: [
+                    { role: 'user', content: '你会总结对话内容吗' },
+                    { role: 'assistant', content: '不会主动总结' },
+                    { role: 'user', content: '[SUGGESTION MODE: Suggest what the user might naturally type next]. FIRST: read the last few lines...' },
+                ],
+            },
+            response: { format: 'openai', content: [{ type: 'text', text: 'suggested reply text' }], finish_reason: 'stop', usage: null },
+        },
+        {
+            // 主调用 N+1：真实用户新消息（建议调用打断了前缀链 → 也是快照）
+            seq: 3, ts: 3000, msgCount: 3, status: 'ok',
+            request: {
+                snapshot: true, params: {},
+                messages: [
+                    { role: 'user', content: '你会总结对话内容吗' },
+                    { role: 'assistant', content: '不会主动总结' },
+                    { role: 'user', content: '我自己问的：你会总结对话内容吗' },
+                ],
+            },
+            response: null,
+        },
+    ];
+    const { turns } = extractor.extractFromTrajectory(steps);
+    const userTurns = turns.filter((t) => t.role === 'user');
+    assert.equal(userTurns.length, 2);
+    assert.ok(userTurns.some((t) => t.text === '你会总结对话内容吗'));
+    assert.ok(userTurns.some((t) => t.text === '我自己问的：你会总结对话内容吗'));
+    // 合成指令与其响应不得出现在对话投影里
+    assert.ok(!turns.some((t) => t.text && t.text.includes('[SUGGESTION MODE')));
+    assert.ok(!turns.some((t) => t.text === 'suggested reply text'));
+});
+
 test('extractFromTranscript coalesces consecutive keystroke in frames into one user turn', () => {
     const store = fakeTranscriptStore([
         { seq: 1, ts: 1000, kind: 'in', data: '/' },

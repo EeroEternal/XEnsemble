@@ -176,6 +176,8 @@ export default React.forwardRef(function Sessions({
     [sessions, activeSession?.sessionId],
   );
   const sessionAlive = activeSessionMeta?.alive === true;
+  // 已退出会话：只读档案（可看轨迹/历史/文件），不能重启/部署/运行终端
+  const sessionExited = activeSessionMeta?.status === 'exited';
 
   // Sync session context so all API calls (git, files, deploy) include session_id
   // for correct runtime/worktree routing.
@@ -1481,10 +1483,10 @@ export default React.forwardRef(function Sessions({
                       <button
                         type="button"
                         onClick={() => handleRestartSession()}
-                        disabled={sessionControlPending}
+                        disabled={sessionControlPending || sessionExited}
                         className={`${consoleIconButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
-                        title={restartingSession ? (sessionAlive ? t('sessions:action.restarting', { defaultValue: 'Restarting…' }) : t('sessions:action.starting', { defaultValue: 'Starting…' })) : (sessionAlive ? t('sessions:action.restart_session', { defaultValue: 'Restart session' }) : t('sessions:action.start_session', { defaultValue: 'Start session' }))}
-                        aria-label={restartingSession ? (sessionAlive ? t('sessions:action.restarting_session', { defaultValue: 'Restarting session' }) : t('sessions:action.starting_session', { defaultValue: 'Starting session' })) : (sessionAlive ? t('sessions:action.restart_session', { defaultValue: 'Restart session' }) : t('sessions:action.start_session', { defaultValue: 'Start session' }))}
+                        title={sessionExited ? t('sessions:action.exited_cannot_restart', { defaultValue: '会话已退出，无法重启' }) : restartingSession ? (sessionAlive ? t('sessions:action.restarting', { defaultValue: 'Restarting…' }) : t('sessions:action.starting', { defaultValue: 'Starting…' })) : (sessionAlive ? t('sessions:action.restart_session', { defaultValue: 'Restart session' }) : t('sessions:action.start_session', { defaultValue: 'Start session' }))}
+                        aria-label={sessionExited ? t('sessions:action.exited_cannot_restart', { defaultValue: '会话已退出，无法重启' }) : restartingSession ? (sessionAlive ? t('sessions:action.restarting_session', { defaultValue: 'Restarting session' }) : t('sessions:action.starting_session', { defaultValue: 'Starting session' })) : (sessionAlive ? t('sessions:action.restart_session', { defaultValue: 'Restart session' }) : t('sessions:action.start_session', { defaultValue: 'Start session' }))}
                       >
                         {restartingSession ? (
                           <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.75} />
@@ -1495,7 +1497,7 @@ export default React.forwardRef(function Sessions({
                         )}
                       </button>
                     )}
-                  {activeSession.projectId ? (
+                  {activeSession.projectId && !sessionExited ? (
                     <>
                       <div className="mx-0.5 h-5 w-px bg-zinc-200" />
                       <PreviewControlGroup {...preview} deployStatus={deployStatus} onCancelDeploy={handleCancelDeploy} onAnalyze={() => { setAbortRequested(false); panelRef.current?.addTab('deploy'); setDeployVersion((v) => v + 1); }} />

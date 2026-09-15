@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Loader2, Download, Search, Clock, Layers, Zap,
@@ -128,9 +128,28 @@ function splitInjectedSegments(text) {
   return segments;
 }
 
-// claude-code 压缩/警示开头模式 → 上下文
+// claude-code/qwen-code 压缩/警示/离开总结/记忆整理/输入建议生成等 CLI 注入开头模式 → 上下文
 const COMPACTED_RE = /^This session is being continued from a previous conversation/;
 const CAVEAT_RE = /^Caveat: The messages below/;
+const STEPPED_AWAY_RE = /^The user (?:stepped away|is away|has stepped away)/;
+const MEMORY_RE = /^Managed memory has/;
+const SUGGESTION_MODE_RE = /^\[SUGGESTION MODE:/;
+
+const SYNTHETIC_USER_RES = [COMPACTED_RE, CAVEAT_RE, STEPPED_AWAY_RE, MEMORY_RE, SUGGESTION_MODE_RE];
+
+/** 该消息是否为 CLI 合成的伪用户指令（与 server 端 conversationExtractor 同一约定集） */
+function isSyntheticUserMessage(m) {
+  if (!m || typeof m !== 'object' || (m.role !== 'user' && m.role !== 'human')) return false;
+  let text = '';
+  if (typeof m.content === 'string') text = m.content;
+  else if (Array.isArray(m.content)) {
+    for (const b of m.content) {
+      if (b?.type === 'text' && typeof b.text === 'string') text += (text ? '\n' : '') + b.text;
+    }
+  }
+  const trimmed = text.trim();
+  return trimmed.length > 0 && SYNTHETIC_USER_RES.some((re) => re.test(trimmed));
+}
 
 /**
  * 把 steps 展开为消息级条目。绝对游标去重（agent 每轮重放全量历史），
@@ -163,7 +182,10 @@ function buildEntries(steps, t) {
     if (!raw.trim()) return;
     let tag = null;
     if (COMPACTED_RE.test(raw)) tag = 'compacted';
+    else if (STEPPED_AWAY_RE.test(raw)) tag = 'recap';
+    else if (MEMORY_RE.test(raw)) tag = 'memory';
     else if (CAVEAT_RE.test(raw)) tag = 'caveat';
+    else if (SUGGESTION_MODE_RE.test(raw)) tag = 'suggestion';
     const segs = tag ? [{ kind: 'context', text: raw, tag }] : splitInjectedSegments(raw);
     for (const seg of segs) {
       if (seg.kind === 'context') push('context', t('trajectory.role_context'), seg.text, payload, step, seg.tag);
@@ -174,13 +196,32 @@ function buildEntries(steps, t) {
   for (const step of steps) {
     const req = step.request || {};
     if (!Array.isArray(req.messages)) continue;
+    // delta 行（非快照）的 messages 已由 proxy 前缀比对保证全是新增——
+    // 并行合成调用（如 qwen memory 刷新）会交错推进历史，绝对游标只对
+    // 快照行有效，delta 行必须全量处理，否则真实用户消息会被误跳过。
+    const isSnapshot = step.snapshot === true;
     const base = (Number(step.msgCount) || 0) - req.messages.length;
     const msgs = req.messages;
     const errored = step.status === 'error';
     src = 'req';
 
+    // 合成旁路调用（建议生成/记忆整理等）：整行的新增消息全部是 CLI 合成用户
+    // 指令时跳过——否则快照行会推进游标越过真实用户消息（真实消息被误跳过），
+    // 指令也会被标成「用户」。快照行看绝对下标 ≥ cursor 的增量；delta 行的
+    // 全部消息即增量。
+    {
+      const startIdx = isSnapshot ? Math.max(cursor - base, 0) : 0;
+      if (msgs.length > startIdx) {
+        let syntheticOnly = true;
+        for (let i = startIdx; i < msgs.length; i += 1) {
+          if (!isSyntheticUserMessage(msgs[i])) { syntheticOnly = false; break; }
+        }
+        if (syntheticOnly) continue;
+      }
+    }
+
     for (let i = 0; i < msgs.length; i += 1) {
-      if (base + i < cursor) continue;
+      if (isSnapshot && base + i < cursor) continue;
       const m = msgs[i];
       if (!m || typeof m !== 'object') continue;
       const content = m.content;
@@ -215,7 +256,8 @@ function buildEntries(steps, t) {
         systemSeen = true;
       }
     }
-    if ((Number(step.msgCount) || 0) > cursor) cursor = Number(step.msgCount);
+    // 快照行推进绝对游标；delta 行不推进（并行合成调用会交错改写 msgCount）
+    if (isSnapshot && (Number(step.msgCount) || 0) > cursor) cursor = Number(step.msgCount);
 
     // 该次调用的响应 → 助手文本 + 思考 + 工具调用
     src = 'resp';
@@ -226,12 +268,15 @@ function buildEntries(steps, t) {
     }
   }
 
-  // 每步的 tool_use 数量挂到该步首个助手/思考条目（调用折叠时显示计数）
+  // 每步的 tool_use 数量与工具名挂到该步首个助手/思考条目（调用折叠时显示摘要行）
   for (const s of steps) {
-    const n = respBlocks(s.response).filter((b) => b && b.type === 'tool_use').length;
-    if (n > 0) {
+    const calls = respBlocks(s.response).filter((b) => b && b.type === 'tool_use');
+    if (calls.length > 0) {
       const e = entries.find((en) => en.stepSeq === s.seq && (en.kind === 'assistant' || en.kind === 'thinking'));
-      if (e) e.toolCount = n;
+      if (e) {
+        e.toolCount = calls.length;
+        e.toolNames = calls.map((b) => b.name).filter(Boolean);
+      }
     }
   }
   return entries;
@@ -399,7 +444,7 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
   const [draft, setDraft] = useState(null);
   const [viewport, setViewport] = useState(null);
   const [panning, setPanning] = useState(false);
-  const [tip, setTip] = useState(null); // 悬停提示 {x, label, range, total}
+  const [tip, setTip] = useState(null); // 悬停提示 {x, y, label, range, total}
   const dragRef = useRef(null);
   const panRef = useRef(null);
   const rootRef = useRef(null);
@@ -616,11 +661,11 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
           onDoubleClick={(event) => { event.preventDefault(); onRangeChange(null); }}
           onContextMenu={(event) => event.preventDefault()}
         >
-          {/* 选区遮罩 + 边缘条 */}
+          {/* 选区遮罩（选区外变暗；明暗主题各自适配）+ 边缘条 */}
           {visible !== null && (
             <>
-              <div className="pointer-events-none absolute inset-y-0 z-[1]" style={{ left: 0, width: `${Math.max(0, visible.start) * 100}%`, backgroundColor: 'rgba(0,0,0,0.28)' }} />
-              <div className="pointer-events-none absolute inset-y-0 z-[1]" style={{ left: `${Math.min(100, visible.end) * 100}%`, right: 0, backgroundColor: 'rgba(0,0,0,0.28)' }} />
+              <div className="pointer-events-none absolute inset-y-0 z-[1] bg-black/30 dark:bg-white/10" style={{ left: 0, width: `${Math.max(0, visible.start) * 100}%` }} />
+              <div className="pointer-events-none absolute inset-y-0 z-[1] bg-black/30 dark:bg-white/10" style={{ left: `${Math.min(100, visible.end) * 100}%`, right: 0 }} />
               <div className={cn('pointer-events-none absolute inset-y-0 z-[1] min-w-[1px] bg-sky-500/15 dark:bg-sky-400/15', dragging && 'bg-sky-500/20 dark:bg-sky-400/20')} style={{ left: `${visible.start * 100}%`, width: `${(visible.end - visible.start) * 100}%` }} />
               <div className="pointer-events-none absolute inset-y-0 z-[4] w-[3px] bg-sky-600 dark:bg-sky-400" style={{ left: `${visible.start * 100}%` }} />
               <div className="pointer-events-none absolute inset-y-0 z-[4] w-[3px] bg-sky-600 dark:bg-sky-400" style={{ left: `calc(${Math.min(100, visible.end) * 100}% - 3px)` }} />
@@ -652,15 +697,16 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
                     aria-hidden="true"
                     data-timeline-record-id={sp.entryId}
                     onMouseEnter={(event) => {
-                      const rect = rootRef.current?.getBoundingClientRect();
-                      if (!rect) return;
+                      // fixed 定位相对视口；垂直固定在时间线下方（只水平跟随鼠标），
+                      // 避免 tooltip 盖住正在查看的时间线块，且不受祖先 overflow-hidden 裁剪
+                      const trackRect = trackRef.current?.getBoundingClientRect();
+                      const x = Math.min(event.clientX + 10, window.innerWidth - 200);
+                      const y = trackRect ? trackRect.bottom + 6 : Math.min(event.clientY + 14, window.innerHeight - 90);
                       const label = t(`trajectory.${SPAN_LABEL_KEY[sp.kind] || 'role_assistant'}`);
                       const range = sp.t1 > sp.t0 ? `${fmtClock(sp.t0)} → ${fmtClock(sp.t1)}` : fmtClock(sp.t0);
                       const ms = Math.max(0, Math.round(sp.dur || (sp.t1 - sp.t0)));
                       setTip({
-                        x: Math.min(Math.max(event.clientX - rect.left, 8), Math.max(8, rect.width - 190)),
-                        label,
-                        range,
+                        x, y, label, range,
                         total: t('trajectory.tip_total', { ms: ms.toLocaleString() }),
                       });
                     }}
@@ -681,19 +727,20 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
                 );
               })}
           </div>
-          {/* 悬停提示（DeepSeek 风格：角色 + 时间范围 + 总计毫秒） */}
-          {tip && (
-            <div
-              className="pointer-events-none absolute top-1 z-30 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-[11px] leading-snug text-zinc-100 shadow-lg dark:bg-zinc-800"
-              style={{ left: `${tip.x}px` }}
-            >
-              <div className="font-medium">{tip.label}</div>
-              {tip.range && <div className="font-mono text-[10px] text-zinc-300">{tip.range}</div>}
-              {tip.total && <div className="font-mono text-[10px] text-zinc-300">{tip.total}</div>}
-            </div>
-          )}
         </div>
       </div>
+      {/* 悬停提示（DeepSeek 风格：角色 + 时间范围 + 总计毫秒；fixed 相对视口，
+          垂直固定在时间线下方，不受 overflow-hidden 裁剪；跟随主题明暗） */}
+      {tip && (
+        <div
+          className="pointer-events-none fixed z-50 rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-[11px] leading-snug text-zinc-900 shadow-lg dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+          style={{ left: `${tip.x}px`, top: `${tip.y}px` }}
+        >
+          <div className="font-medium">{tip.label}</div>
+          {tip.range && <div className="font-mono text-[10px] text-zinc-500 dark:text-zinc-300">{tip.range}</div>}
+          {tip.total && <div className="font-mono text-[10px] text-zinc-500 dark:text-zinc-300">{tip.total}</div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -1183,8 +1230,8 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
                 const Icon = style.icon;
                 const dimmed = range !== null && focusIds !== null && !focusIds.has(e.id);
                 return (
+                  <Fragment key={e.id}>
                   <button
-                    key={e.id}
                     type="button"
                     data-entry-id={e.id}
                     onClick={() => selectEntry(e.id)}
@@ -1206,13 +1253,21 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
                         {preview(e.text, e.kind === 'tool' ? 120 : 200)}
                       </span>
                     </span>
-                    {callsCollapsed && e.toolCount > 0 && (
-                      <span className="shrink-0 inline-flex items-center h-4 px-1.5 rounded bg-violet-100 dark:bg-violet-500/15 text-[10px] text-violet-700 dark:text-violet-300 font-mono">
-                        ⚙ {e.toolCount}
-                      </span>
-                    )}
                     {e.step.status === 'error' && <XCircle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" strokeWidth={2} />}
                   </button>
+                  {callsCollapsed && e.toolCount > 0 && (
+                    <div className="pl-10 pr-3 -mt-0.5 mb-1">
+                      <button
+                        type="button"
+                        onClick={() => setCallsCollapsed(false)}
+                        title={t('trajectory.expand_calls')}
+                        className={cn('text-[10px] text-zinc-400 dark:text-zinc-500 font-mono hover:text-zinc-700 dark:hover:text-zinc-300', consoleButtonFocusClass)}
+                      >
+                        ⚙ {t('trajectory.calls_summary', { count: e.toolCount, tools: (e.toolNames || []).join(', ') })}
+                      </button>
+                    </div>
+                  )}
+                  </Fragment>
                 );
               })}
                 </div>
