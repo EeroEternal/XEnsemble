@@ -282,6 +282,12 @@ class BoxLiteExecAdapter extends ExecAdapter {
                 TERM: 'xterm-256color',
                 COLUMNS: '120',
                 LINES: '32',
+                // boxlite 沙箱内 agent 以 root 运行：无此标记时 Claude Code 等 CLI
+                // 会因「--dangerously-skip-permissions cannot be used with
+                // root/sudo privileges」直接退出码 1（LoopTask headless 全挂的根因）。
+                // IS_SANDBOX=1 是官方容器/VM 豁免标记；boxlite 为会话级 libkrun VM，
+                // 满足其隔离前提。放在 ...env 之前，用户/网关侧仍可显式覆盖。
+                IS_SANDBOX: '1',
                 ...env,
             },
             tty: true,

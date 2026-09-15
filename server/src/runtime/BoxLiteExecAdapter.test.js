@@ -72,3 +72,35 @@ test('BoxLiteExecAdapter forwards command output and timeout limits', async () =
 
     assert.deepEqual(observed[5], { maxBuffer: 1024, timeoutMs: 5000 });
 });
+
+test('BoxLiteExecAdapter.spawn injects IS_SANDBOX=1 and lets caller env override', async () => {
+    const adapter = new BoxLiteExecAdapter();
+    let captured = null;
+    adapter.client = {
+        async spawn(_name, spec) {
+            captured = spec;
+            return { execution_id: 'exec_1' };
+        },
+        createExecutionAttachWebSocket() {
+            const ws = makeWs();
+            setImmediate(() => ws.emit('open'));
+            return ws;
+        },
+    };
+
+    await adapter.spawn('claude', ['-p', 'hi', '--dangerously-skip-permissions'], { FOO: 'bar' }, {
+        runtimeRef: 'runtime-1',
+        cwd: '/workspace',
+    });
+
+    assert.equal(captured.env.IS_SANDBOX, '1');
+    assert.equal(captured.env.FOO, 'bar');
+    assert.equal(captured.tty, true);
+
+    // caller-provided IS_SANDBOX wins over the injected default
+    await adapter.spawn('sh', ['-c', 'true'], { IS_SANDBOX: '0' }, {
+        runtimeRef: 'runtime-1',
+        cwd: '/workspace',
+    });
+    assert.equal(captured.env.IS_SANDBOX, '0');
+});
