@@ -28,8 +28,6 @@ import { usePreview, PreviewControlGroup } from '../components/PreviewPanel';
 import DeployPanel from '../components/DeployPanel';
 import {
   TerminalSquare,
-  MessagesSquare,
-  Route,
   Play,
   RotateCw,
   Settings2,
@@ -1563,7 +1561,7 @@ export default React.forwardRef(function Sessions({
 <div ref={panelRowRef} className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden">
               <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                 {activeSession && !sessionPending && !sessionFailed && (
-                  <div className={cn('shrink-0 h-9 flex items-stretch gap-1 px-2 border-b', 'bg-zinc-50 dark:bg-zinc-950', 'border-zinc-200 dark:border-zinc-800')} role="tablist" aria-label={t('sessions:trajectory.view_switch_aria', { defaultValue: 'Agent view' })}>
+                  <div className={cn('shrink-0 flex items-center border-b border-zinc-200 px-1 bg-surface')} role="tablist" aria-label={t('sessions:trajectory.view_switch_aria', { defaultValue: 'Agent view' })}>
                     {[
                       { v: 'chat', label: t('sessions:trajectory.view_chat', { defaultValue: 'Chat' }) },
                       { v: 'trajectory', label: t('sessions:trajectory.view_trajectory', { defaultValue: 'Trajectory' }) },
@@ -1577,11 +1575,11 @@ export default React.forwardRef(function Sessions({
                           aria-selected={active}
                           onClick={() => setTrajOpen(v === 'trajectory')}
                           className={cn(
-                            'px-3 text-[13px] border-b-2 -mb-px flex items-center',
+                            'px-3 py-2 text-xs font-medium border-b-2 -mb-px flex items-center',
                             consoleButtonFocusClass,
                             active
-                              ? 'border-zinc-900 dark:border-white text-zinc-900 dark:text-white font-medium'
-                              : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:text-zinc-500 dark:hover:text-zinc-300',
+                              ? 'border-zinc-900 text-zinc-900'
+                              : 'border-transparent text-zinc-500 hover:text-zinc-900',
                           )}
                         >
                           {label}

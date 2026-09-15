@@ -247,6 +247,12 @@ const SPAN_COLORS = {
   tool: 'bg-amber-500 dark:bg-amber-400',
 };
 
+// span.kind → 悬停提示的角色标签 i18n key
+const SPAN_LABEL_KEY = {
+  user: 'role_user', system: 'role_system', context: 'role_context',
+  message: 'role_assistant', thinking: 'role_thinking', tool: 'role_tool', error: 'role_assistant',
+};
+
 function spanKind(entry) {
   if (entry.kind === 'assistant' || entry.kind === 'thinking') return 'message';
   if (entry.kind === 'error') return 'message';
@@ -259,41 +265,19 @@ function spanLane(kind) {
   return 0;
 }
 
-/** DeepSeek sequence 投影：每条记录占 1 单位；tool_result（无 name）不占 span。 */
-function buildSequenceTimeline(entries) {
-  const spans = [];
-  const boundaries = [];
-  entries.forEach((e, i) => {
-    if (e.kind === 'tool' && e.name == null) return;
-    if (e.kind === 'user') boundaries.push(i);
-    spans.push({
-      entryId: e.id,
-      kind: spanKind(e),
-      lane: spanLane(spanKind(e)),
-      start: i,
-      end: i + 1,
-      isError: e.step.status === 'error',
-    });
-  });
-  return { spans, boundaries, start: 0, end: entries.length };
+/** 悬停提示的时间格式：HH:MM:SS.mmm */
+function fmtClock(ms) {
+  const d = new Date(ms);
+  const p = (n, w = 2) => String(n).padStart(w, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
 }
 
-/**
- * DeepSeek duration 投影：span 按真实时间定位/定宽。
- * - 输入泳道：user/system/context 为请求时刻的瞬时点
- * - 模型泳道：每次模型调用 [start, start+latency]
- * - 工具泳道：tool_use 执行窗口 = 调用结束 → 下一次调用开始（均分）
- */
-function buildDurationTimeline(entries, steps) {
-  const spans = [];
-  const boundaries = [];
-  if (!steps.length) return { spans, boundaries, start: 0, end: 1 };
+/** 条目时间元数据：entryId -> {t0, t1, dur}（epoch ms）。 */
+function buildEntryTiming(entries, steps) {
+  const timing = new Map();
+  const boundariesMs = [];
+  if (!steps.length) return { timing, boundariesMs };
   const t0 = steps[0].ts || 0;
-  let t1 = t0;
-  for (const s of steps) t1 = Math.max(t1, (s.ts || 0) + (s.latencyMs || 0));
-  const span = Math.max(t1 - t0, 1);
-  const pos = (t) => (t - t0) / span * 100;
-
   const stepMeta = new Map();
   for (let i = 0; i < steps.length; i += 1) {
     const s = steps[i];
@@ -312,34 +296,88 @@ function buildDurationTimeline(entries, steps) {
   for (const s of steps) {
     const meta = stepMeta.get(s.seq);
     const list = byStep.get(s.seq) || [];
-
     for (const e of list) {
       if (e.kind === 'user' || e.kind === 'system' || e.kind === 'context') {
-        spans.push({ entryId: e.id, kind: spanKind(e), lane: 0, left: pos(meta.start), width: 0, dur: 0 });
+        timing.set(e.id, { t0: meta.start, t1: meta.start, dur: 0 });
       }
     }
-    if (list.some((e) => e.kind === 'user')) boundaries.push(pos(meta.start));
-
+    if (list.some((e) => e.kind === 'user')) boundariesMs.push(meta.start);
     const modelEntry = list.find((e) => e.kind === 'assistant' || e.kind === 'thinking' || e.kind === 'error');
-    if (modelEntry) {
-      spans.push({
-        entryId: modelEntry.id, kind: s.status === 'error' ? 'error' : 'message',
-        lane: 1, left: pos(meta.start), width: pos(meta.end) - pos(meta.start), dur: meta.end - meta.start,
-      });
-    }
-
+    if (modelEntry) timing.set(modelEntry.id, { t0: meta.start, t1: meta.end, dur: meta.end - meta.start });
     const calls = list.filter((e) => e.kind === 'tool' && e.name != null);
     if (calls.length) {
       const wEnd = meta.nextStart != null ? meta.nextStart : meta.end;
       const window = Math.max(wEnd - meta.end, 0);
       const per = window / calls.length;
       calls.forEach((e, j) => {
-        const left = meta.end + per * j;
-        spans.push({ entryId: e.id, kind: 'tool', lane: 2, left: pos(left), width: pos(left + per) - pos(left), dur: per });
+        timing.set(e.id, { t0: meta.end + per * j, t1: meta.end + per * (j + 1), dur: per });
       });
     }
   }
-  return { spans, boundaries, start: t0, end: t1, isMs: true };
+  return { timing, boundariesMs };
+}
+
+/** sequence 投影：每条记录 1 单位宽，附带真实时间用于悬停提示。 */
+function buildSequenceTimeline(entries, timing) {
+  const spans = [];
+  const boundaries = [];
+  entries.forEach((e, i) => {
+    if (e.kind === 'tool' && e.name == null) return;
+    if (e.kind === 'user') boundaries.push(i);
+    const tm = timing.get(e.id) || { t0: 0, t1: 0, dur: 0 };
+    spans.push({
+      entryId: e.id, kind: spanKind(e), lane: spanLane(spanKind(e)),
+      start: i, end: i + 1, isError: e.step.status === 'error',
+      t0: tm.t0, t1: tm.t1, dur: tm.dur,
+    });
+  });
+  return { spans, boundaries, start: 0, end: entries.length };
+}
+
+/**
+ * duration 投影：真实时间定位/定宽 + 空闲间隙压缩（DeepSeek duration 模式）。
+ * 没有任何记录覆盖的时间段（用户思考/等待）被折叠，块与块紧密相邻。
+ */
+function buildDurationTimeline(entries, timing, boundariesMs) {
+  const spans = [];
+  entries.forEach((e) => {
+    if (e.kind === 'tool' && e.name == null) return;
+    const tm = timing.get(e.id);
+    if (!tm) return;
+    spans.push({
+      entryId: e.id, kind: spanKind(e), lane: spanLane(spanKind(e)),
+      t0: tm.t0, t1: Math.max(tm.t1, tm.t0), dur: tm.dur,
+      isError: e.step.status === 'error',
+    });
+  });
+  if (!spans.length) return { spans: [], boundaries: [], start: 0, end: 1 };
+
+  // 空闲压缩：按时间排序游走，未被覆盖的间隙累计移除
+  const sorted = [...spans].sort((a, b) => a.t0 - b.t0 || a.t1 - b.t1);
+  let covered = null;
+  let removed = 0;
+  const gaps = [];
+  const offsetBySpan = new Map();
+  for (const sp of sorted) {
+    if (covered !== null && sp.t0 > covered) {
+      gaps.push({ from: covered, to: sp.t0 });
+      removed += sp.t0 - covered;
+    }
+    offsetBySpan.set(sp, removed);
+    covered = covered === null ? sp.t1 : Math.max(covered, sp.t1);
+  }
+  const offsetAt = (t) => gaps.reduce((n, g) => n + (g.to <= t ? g.to - g.from : t > g.from ? t - g.from : 0), 0);
+  let start = Infinity;
+  let end = -Infinity;
+  for (const sp of spans) {
+    const off = offsetBySpan.get(sp) ?? 0;
+    sp.start = sp.t0 - off;
+    sp.end = Math.max(sp.start, sp.t1 - off);
+    start = Math.min(start, sp.start);
+    end = Math.max(end, sp.end);
+  }
+  const boundaries = boundariesMs.map((b) => offsetAt(b));
+  return { spans, boundaries, start, end: Math.max(end, start + 1) };
 }
 
 function orderedRange(left, right) {
@@ -361,6 +399,7 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
   const [draft, setDraft] = useState(null);
   const [viewport, setViewport] = useState(null);
   const [panning, setPanning] = useState(false);
+  const [tip, setTip] = useState(null); // 悬停提示 {x, label, range, total}
   const dragRef = useRef(null);
   const panRef = useRef(null);
   const rootRef = useRef(null);
@@ -612,6 +651,20 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
                     key={sp.entryId}
                     aria-hidden="true"
                     data-timeline-record-id={sp.entryId}
+                    onMouseEnter={(event) => {
+                      const rect = rootRef.current?.getBoundingClientRect();
+                      if (!rect) return;
+                      const label = t(`trajectory.${SPAN_LABEL_KEY[sp.kind] || 'role_assistant'}`);
+                      const range = sp.t1 > sp.t0 ? `${fmtClock(sp.t0)} → ${fmtClock(sp.t1)}` : fmtClock(sp.t0);
+                      const ms = Math.max(0, Math.round(sp.dur || (sp.t1 - sp.t0)));
+                      setTip({
+                        x: Math.min(Math.max(event.clientX - rect.left, 8), Math.max(8, rect.width - 190)),
+                        label,
+                        range,
+                        total: t('trajectory.tip_total', { ms: ms.toLocaleString() }),
+                      });
+                    }}
+                    onMouseLeave={() => setTip(null)}
                     className={cn(
                       'absolute h-2 rounded-[1px]',
                       SPAN_COLORS[sp.kind] || SPAN_COLORS.message,
@@ -628,6 +681,17 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
                 );
               })}
           </div>
+          {/* 悬停提示（DeepSeek 风格：角色 + 时间范围 + 总计毫秒） */}
+          {tip && (
+            <div
+              className="pointer-events-none absolute top-1 z-30 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-[11px] leading-snug text-zinc-100 shadow-lg dark:bg-zinc-800"
+              style={{ left: `${tip.x}px` }}
+            >
+              <div className="font-medium">{tip.label}</div>
+              {tip.range && <div className="font-mono text-[10px] text-zinc-300">{tip.range}</div>}
+              {tip.total && <div className="font-mono text-[10px] text-zinc-300">{tip.total}</div>}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -897,8 +961,9 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   }, [live, sessionId, fetchSteps]);
 
   const entries = useMemo(() => buildEntries(steps, t), [steps, t]);
-  const seqModel = useMemo(() => buildSequenceTimeline(entries), [entries]);
-  const durationModel = useMemo(() => buildDurationTimeline(entries, steps), [entries, steps]);
+  const timingInfo = useMemo(() => buildEntryTiming(entries, steps), [entries, steps]);
+  const seqModel = useMemo(() => buildSequenceTimeline(entries, timingInfo.timing), [entries, timingInfo]);
+  const durationModel = useMemo(() => buildDurationTimeline(entries, timingInfo.timing, timingInfo.boundariesMs), [entries, timingInfo]);
   const model = durationOn ? durationModel : seqModel;
 
   const visibleEntries = useMemo(() => {

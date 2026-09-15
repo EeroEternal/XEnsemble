@@ -200,6 +200,7 @@
     "expand_calls": "Expand all tool calls",
     "collapse_calls": "Collapse all tool calls",
     "hidden_count": "{{count}} hidden",
+    "tip_total": "Total {{ms}} ms",
     "detail_empty": "Select an entry to inspect it",
     "search_placeholder": "Search…",
     "export_jsonl": "Export JSONL",
