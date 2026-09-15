@@ -9,8 +9,9 @@
  *  - POST   /api/v1/loop-tasks/:id/run-now      立即执行一次（同样幂等 + 防重入）
  *  - GET    /api/v1/loop-tasks/:id/runs         执行历史（最新 50 条）
  *
- * 执行模型：Run 由 loop-task-runner（Scheduler job）触发，TaskAgent（控制面 ReAct
- * 循环）在 Workspace runtime 沙箱内执行，不创建 Session（见 loopTasks/runner.js）。
+ * 执行模型：Run 由 loop-task-runner（Scheduler job）触发，在项目沙箱内创建真实
+ * Agent 会话执行（用户的 Agent + 用户的模型额度，headless 一次性模式，
+ * 见 loopTasks/runner.js 与 session/createAgentSession.js）。
  */
 
 const crypto = require('crypto');
@@ -21,6 +22,8 @@ const { sendPublicError } = require('../http/publicError');
 const { t } = require('../i18n');
 const { validateCron, describeSchedule, nextRunForTask, MIN_INTERVAL_MS, MAX_INTERVAL_MS } = require('../loopTasks/cron');
 const runner = require('../loopTasks/runner');
+const policy = require('../auth/PolicyService');
+const { isTaskRunSupported } = require('../agents/taskRunModes');
 
 const MAX_TASKS_PER_USER = Number(process.env.LOOP_TASK_MAX_PER_USER) || 10;
 const TIMEZONES = [
@@ -63,6 +66,8 @@ function serializeTask(row, locale = 'en') {
         projectId: row.projectId,
         title: row.title,
         prompt: row.prompt,
+        agentId: row.agentId ?? null,
+        autoApprove: row.autoApprove !== false,
         scheduleKind: row.scheduleKind || 'cron',
         cronExpr: row.cronExpr,
         timezone: row.timezone,
@@ -82,12 +87,29 @@ function serializeRun(row) {
         taskId: row.taskId,
         scheduledFor: row.scheduledFor ?? null,
         status: row.status,
+        sessionId: row.sessionId ?? null,
+        agentId: row.agentId ?? null,
         rounds: row.rounds ?? null,
         logs: Array.isArray(row.logs) ? row.logs.slice(-200) : [],
         error: row.error ?? null,
         startedAt: row.startedAt ?? null,
         finishedAt: row.finishedAt ?? null,
     };
+}
+
+/**
+ * 执行 Agent 校验：必填 + 用户可用 + 支持无人值守一次性执行。
+ * 不满足任一条（含存量 NULL）都拒绝——无 TaskAgent 兜底。
+ */
+async function validateTaskAgent(userId, userRole, agentId, locale) {
+    if (!agentId) throw loopError(locale, 'loop_agent_required', {}, 400);
+    const access = await policy.checkAgentAccess(userId, agentId, userRole);
+    if (!access.ok) {
+        throw httpError(403, 'agent_not_available', access.error || t('errors:agent_not_found', {}, locale));
+    }
+    if (!isTaskRunSupported(agentId)) {
+        throw loopError(locale, 'agent_task_unsupported', {}, 400);
+    }
 }
 
 async function getOwnedTask(taskId, userId, locale) {
@@ -242,6 +264,12 @@ function registerLoopTaskRoutes(fastify) {
             }
 
             const schedule = parseSchedule(body, null, locale);
+
+            // 执行 Agent（必填）+ 无人值守自动批准
+            const agentId = String(body.agentId || body.agent_id || '').trim();
+            await validateTaskAgent(request.user.id, request.user.role, agentId, locale);
+            const autoApprove = body.autoApprove !== undefined ? Boolean(body.autoApprove) : true;
+
             const now = Date.now();
             const task = {
                 id: `lt_${crypto.randomBytes(8).toString('hex')}`,
@@ -249,6 +277,8 @@ function registerLoopTaskRoutes(fastify) {
                 projectId,
                 title,
                 prompt,
+                agentId,
+                autoApprove,
                 scheduleKind: schedule.scheduleKind,
                 cronExpr: schedule.cronExpr,
                 timezone: schedule.timezone,
@@ -288,6 +318,15 @@ function registerLoopTaskRoutes(fastify) {
                     throw httpError(400, 'operation_not_permitted', t('errors:operation_not_permitted', {}, locale));
                 }
                 patch.status = status;
+            }
+
+            if (body.agentId !== undefined || body.agent_id !== undefined) {
+                const agentId = String(body.agentId ?? body.agent_id ?? '').trim();
+                await validateTaskAgent(request.user.id, request.user.role, agentId, locale);
+                patch.agentId = agentId;
+            }
+            if (body.autoApprove !== undefined) {
+                patch.autoApprove = Boolean(body.autoApprove);
             }
 
             // 调度字段变更，或恢复 active → 重算 next_run_at

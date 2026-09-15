@@ -51,6 +51,8 @@ async function getUsage(userId) {
             .where(and(
                 eq(schema.sessions.userId, userId),
                 inArray(schema.sessions.status, ['pending', 'running', 'idle']),
+                // loop_task 无人值守会话不占 sessions 配额（并发由任务闸管理）
+                sql`${schema.sessions.source} IS DISTINCT FROM 'loop_task'`,
             )),
         db.select({ count: sql`count(*)` })
             .from(schema.deployments)

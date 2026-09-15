@@ -65,6 +65,7 @@ const { registerSkillRoutes } = require('./routes/skills');
 const { registerLoopTaskRoutes } = require('./routes/loopTasks');
 const { LocalGitService } = require('./git/LocalGitService');
 const { applyTerminalMessage, subscribeTerminal } = require('./session/terminalBridge');
+const { createAgentSession } = require('./session/createAgentSession');
 const { resumeSession, registerSessionLifecycle } = require('./session/resumeSession');
 const {
     start: startConversationAutoSummarizer,
@@ -111,27 +112,8 @@ const { resolveRuntimeProvider, DEFAULT_RUNTIME_PROVIDER } = require('./config/r
 
 const runtime = getRuntime();
 
-async function markSessionFailed(sessionId, errMsg, log) {
-    // Never overwrite a user-cancelled / deleted session (exited) or an already-terminal row.
-    const updated = await db.update(schema.sessions)
-        .set({ status: 'failed', provisioningError: errMsg, updatedAt: Date.now() })
-        .where(and(
-            eq(schema.sessions.id, sessionId),
-            inArray(schema.sessions.status, ['pending', 'running']),
-        ))
-        .returning({ id: schema.sessions.id, userId: schema.sessions.userId });
-    if (!updated.length) return false;
-    if (log) log({ sessionId }, `[sessions] provisioning failed: ${errMsg}`);
-    try { broadcastSse({ type: 'session_status', sessionId, status: 'failed', userId: updated[0].userId }); } catch (_) {}
-    return true;
-}
-
-async function isSessionStillPending(sessionId) {
-    const rows = await db.select({ status: schema.sessions.status })
-        .from(schema.sessions)
-        .where(eq(schema.sessions.id, sessionId));
-    return Boolean(rows[0] && rows[0].status === 'pending');
-}
+// markSessionFailed / isSessionStillPending / applyStateDirEnv 已搬移至
+// session/createAgentSession.js（唯一使用方是会话创建流程）。
 
 function formatAgentRow(a) {
     const { DEFAULT_AGENTS } = require('./agents/defaultAgents');
@@ -147,29 +129,6 @@ function formatAgentRow(a) {
 }
 
 // getProjectForUser is imported from ./projects/getProjectForUser (cached)
-
-function applyStateDirEnv(env, resumeSpec, stateDirPath) {
-    if (!resumeSpec || !stateDirPath) return env;
-    const path = require('path');
-    let result = env;
-    // Set state env var (e.g. CLAUDE_CONFIG_DIR, QWEN_HOME)
-    if (resumeSpec.stateEnv && !env[resumeSpec.stateEnv]?.trim()) {
-        result = { ...result, [resumeSpec.stateEnv]: stateDirPath };
-    }
-    // Set additional state-derived env vars (e.g. OPENCLAW_WORKSPACE_DIR -> $STATE_DIR/workspace)
-    if (resumeSpec.extraStateEnvs) {
-        for (const [envName, suffix] of Object.entries(resumeSpec.extraStateEnvs)) {
-            if (!result[envName]?.trim()) {
-                result = { ...result, [envName]: path.join(stateDirPath, suffix) };
-            }
-        }
-    }
-    // Redirect HOME for agents that store state under ~/.<name>/ (e.g. commandcode)
-    if (resumeSpec.redirectHome) {
-        result = { ...result, HOME: stateDirPath };
-    }
-    return result;
-}
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
@@ -1013,6 +972,7 @@ fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async
             FROM sessions s
             LEFT JOIN projects p ON p.id = s.project_id
             WHERE s.user_id = ${request.user.id}
+              AND s.source = 'interactive'
         `);
         const rawRows = result.rows || result;
         return rawRows.map(mapSessionRow);
@@ -1033,7 +993,11 @@ fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async
         const escaped = String(query.q).replace(/[\\%_]/g, (m) => `\\${m}`);
         filters.push(sql`(s.title ILIKE ${`%${escaped}%`} OR s.agent_id ILIKE ${`%${escaped}%`} OR sc.summary::text ILIKE ${`%${escaped}%`})`);
     }
-    const whereClause = sql`WHERE s.user_id = ${request.user.id}${filters.length ? sql` AND ${sql.join(filters, sql` AND `)}` : sql``}`;
+    // loop_task 无人值守会话默认不进列表（include_loop_tasks=1 逃生口）
+    const sourceFilter = query.include_loop_tasks === '1' || query.include_loop_tasks === 'true'
+        ? sql``
+        : sql` AND s.source = 'interactive'`;
+    const whereClause = sql`WHERE s.user_id = ${request.user.id}${sourceFilter}${filters.length ? sql` AND ${sql.join(filters, sql` AND `)}` : sql``}`;
 
     const statsSelect = withStats
         ? sql`, sc.turns AS conversation_turns, sc.summary AS conversation_summary`
@@ -1693,444 +1657,31 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
         });
     }
 
-    // --- regular agent session: async provisioning ---
-
-    const dbAgents = await db.select().from(schema.agents).where(eq(schema.agents.id, agent_id));
-    if (dbAgents.length === 0) return reply.code(404).send({ error: t('errors:agent_not_found', {}, request.locale || 'en'), code: 'agent_not_found' });
-    const agentMeta = {
-        ...dbAgents[0],
-        args: JSON.parse(dbAgents[0].args),
-        env_required: JSON.parse(dbAgents[0].envRequired)
-    };
-    const resumeSpec = getAgentResume(agentMeta.id);
-    const recoverable = getAgentResumeLevel(agentMeta.id) === 'L2';
-
-    const authMode = await agentGatewayConfig.getAgentAuthMode(agentMeta.id);
-    let sessionToken = null;
-    if (authMode === 'gateway') {
-        const gwCfg = await agentGatewayConfig.getForAgent(agentMeta.id);
-        sessionToken = issueSessionToken({
-            sessionId,
-            userId: request.user.id,
-            projectId: project_id,
-            agentId: agentMeta.id,
-            model: agentGatewayConfig.primaryModel(gwCfg),
-            role: request.user.role,
-        });
-    }
-
-    const { resolveSpawnEnv, GATEWAY_MANAGED_ENV_KEYS } = require('./agents/agentEnv');
-    if (authMode === 'gateway' && custom_env && typeof custom_env === 'object') {
-        for (const key of Object.keys(custom_env)) {
-            if (GATEWAY_MANAGED_ENV_KEYS.includes(key)) delete custom_env[key];
-        }
-    }
-    const resolved = await resolveSpawnEnv({
-        userId: request.user.id,
-        agentId: agentMeta.id,
-        envRequired: agentMeta.env_required,
-        sessionToken,
-        projectId: project_id,
-        terminalThemeId: terminal_theme_id,
-        warn: (msg) => request.log.warn(msg),
-    });
-    if (!resolved.env) {
-        return reply.code(400).send({ error: resolved.error });
-    }
-
-    // Merge BYOK env vars + collect BYOK config files for this agent.
-    const { getByokFieldValues, generateByokConfig } = require('./agents/byokFields');
-    const { getUserSecrets } = require('./agents/agentEnv');
-    const byokSecrets = await getUserSecrets(request.user.id);
-    const byokValues = getByokFieldValues(agent_id, byokSecrets);
-    let byokConfigFiles = [];
-    if (Object.keys(byokValues).length) {
-        const byokConfig = generateByokConfig(agent_id, byokValues);
-        resolved.env = { ...resolved.env, ...byokConfig.env };
-        byokConfigFiles = byokConfig.configFiles || [];
-    }
-
-    // Validate config files BEFORE creating the session so we can reject
-    // invalid JSON without leaving an orphaned session row.
-    if (config_files?.length) {
-        const { validateConfigFiles } = require('./session/sessionConfig');
-        const { valid, invalidPaths, invalidJson } = validateConfigFiles(config_files, agent_id);
-        if (!valid) {
-            const errors = [];
-            if (invalidPaths.length) errors.push(`Invalid config file paths: ${invalidPaths.join(', ')}`);
-            if (invalidJson?.length) errors.push(`Invalid JSON in: ${invalidJson.map((j) => `${j.path} (${j.error})`).join('; ')}`);
-            return reply.code(400).send({ error: errors.join('; ') });
-        }
-    }
-
-    // Insert session as pending - user sees a provisioning UI immediately
-    await db.insert(schema.sessions).values({
-        id: sessionId,
-        userId: request.user.id,
-        projectId: project_id,
-        runtimeId: null,
+    // --- regular agent session: shared service (async provisioning) ---
+    const created = await createAgentSession({
+        user: request.user,
+        project,
         agentId: agent_id,
-        cwd: '',
-        streamRef: null,
-        stateDirRef: null,
-        recoverable,
-        status: 'pending',
+        customEnv: custom_env || null,
+        configFiles: config_files || null,
         customImageId: custom_image_id || null,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        customImageRef,
+        terminalThemeId: terminal_theme_id || null,
+        source: 'interactive',
+        log: fastify.log,
     });
-
-    try { broadcastSse({ type: 'session_created', sessionId, userId: request.user.id }); } catch (_) {}
-
-    // Save user-provided config files and custom env to DB
-    if ((config_files?.length) || (custom_env && Object.keys(custom_env).length)) {
-        const { saveSessionConfig } = require('./session/sessionConfig');
-        await saveSessionConfig(db, schema, sessionId, { configFiles: config_files, customEnv: custom_env || {} });
+    if (!created.ok) {
+        const errorPayload = { error: created.code ? t(`errors:${created.code}`, {}, request.locale || 'en') : created.error };
+        if (created.code) errorPayload.code = created.code;
+        return reply.code(created.statusCode || 400).send(errorPayload);
     }
 
     // Return 202 immediately — the frontend enters the agent page and shows a loading state
-    reply.code(202).send({
-        session_id: sessionId,
+    return reply.code(202).send({
+        session_id: created.sessionId,
         status: 'pending',
         project_id,
         agent_id: agent_id,
-    });
-
-    // --- async provisioning: VM creation + agent spawn ---
-    (async () => {
-        let ready;
-        let workspacePath;
-        let runtimeId;
-
-        try {
-            ready = await ensureProjectRuntime(project, {
-                agentId: agent_id,
-                ...(customImageRef ? { image: customImageRef } : {}),
-                ...(custom_image_id ? { customImageId: custom_image_id } : {}),
-                agentVmResources: dbAgents[0]?.vmResources || null,
-            });
-            workspacePath = ready.workspacePath;
-            runtimeId = ready.runtime.id;
-        } catch (err) {
-            fastify.log.error({ err, sessionId }, '[sessions] async provisioning: ensureProjectRuntime failed');
-            await markSessionFailed(sessionId, err instanceof RuntimeError ? err.message : (err.message || 'Failed to prepare project runtime'));
-            return;
-        }
-
-        // Backfill built-in git if create-time initRepo failed (e.g. BoxLite).
-        try {
-            const localGit = new LocalGitService({ runtimeId });
-            await localGit.ensureGitInit(project);
-        } catch (err) {
-            fastify.log.warn({ err, sessionId, projectId: project.id }, '[sessions] ensureGitInit failed (non-fatal)');
-        }
-
-        if (!(await isSessionStillPending(sessionId))) {
-            fastify.log.info({ sessionId }, '[sessions] session cancelled after runtime prepare');
-            return;
-        }
-
-        // Update cwd and runtimeId now that the VM is ready.
-        // Defer the DB write to merge with stateDirRef below (reduces serial DB writes).
-
-        // Run ensureSessionStateDir and ensureKimiConfig SEQUENTIALLY.
-        // Concurrent exec calls against a just-booted VM trigger a guest zygote race
-        // ("received unexpected message: InitReady, expected: IntermediateReady(0)")
-        // that surfaces as "mkdir failed" / "failed to spawn command in sandbox".
-        let sessionStateDir = null;
-        if (resumeSpec?.stateEnv || resumeSpec?.stateArgs || resumeSpec?.redirectHome) {
-            try {
-                sessionStateDir = await ensureSessionStateDir(runtime.fs, {
-                    workspaceRoot: workspacePath,
-                    sessionId,
-                    runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
-                });
-            } catch (err) {
-                fastify.log.error({ err, sessionId }, '[sessions] async provisioning: ensureSessionStateDir failed');
-                const errMsg = err instanceof RuntimeError ? err.message : (err.message || 'Failed to prepare agent state directory');
-                await markSessionFailed(sessionId, errMsg);
-                return;
-            }
-            if (!sessionStateDir) {
-                await markSessionFailed(sessionId, 'Failed to prepare agent state directory');
-                return;
-            }
-        }
-
-        // ensureKimiConfig is best-effort.
-        try {
-            const { ensureKimiConfig } = require('./workspace/kimiConfigBootstrap');
-            await ensureKimiConfig({
-                runtime,
-                runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
-                userId: request.user.id,
-                agentId: agentMeta.id,
-                warn: (msg) => fastify.log.warn(msg),
-            });
-        } catch (err) {
-            fastify.log.warn({ err, sessionId }, '[sessions] kimi config bootstrap failed');
-        }
-
-        // Write user-provided config files BEFORE bootstrap so that bootstrap
-        // logic (e.g. claude-code API key approval) can augment user-provided files.
-        const { writeConfigFilesToVM, applyCustomEnv, getSessionConfig, resolveAgentSpawnArgs } = require('./session/sessionConfig');
-        const { mergeByokConfigFiles } = require('./agents/byokFields');
-        const userSessionConfig = await getSessionConfig(db, schema, sessionId);
-        const mergedConfigFiles = mergeByokConfigFiles(byokConfigFiles, userSessionConfig.configFiles);
-        if (mergedConfigFiles.length) {
-            const vmRuntimeRef = ready.runtime ? ready.runtime.runtimeRef : undefined;
-            await writeConfigFilesToVM(runtime.fs, {
-                workspaceRoot: workspacePath,
-                runtimeRef: vmRuntimeRef,
-                configFiles: mergedConfigFiles,
-                stateDirPath: sessionStateDir?.stateDirPath || null,
-            }).catch((err) => fastify.log.warn({ err, sessionId }, '[sessions] writeConfigFilesToVM failed'));
-        }
-
-        if (sessionStateDir?.stateDirPath) {
-            resolved.env = applyStateDirEnv(resolved.env, resumeSpec, sessionStateDir.stateDirPath);
-            // Pre-approve custom API key for claude-code to skip the "Detected
-            // a custom API key" confirmation prompt that blocks --continue.
-            if (agentMeta.id === 'claude-code' && resolved.env.ANTHROPIC_API_KEY) {
-                try {
-                    const { ensureClaudeApiKeyApproved } = require('./workspace/claudeConfigBootstrap');
-                    await ensureClaudeApiKeyApproved({
-                        runtime,
-                        runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
-                        stateDirPath: sessionStateDir.stateDirPath,
-                        apiKey: resolved.env.ANTHROPIC_API_KEY,
-                    });
-                } catch (err) {
-                    fastify.log.warn({ err, sessionId }, '[sessions] claude api key approval failed');
-                }
-            }
-            if (resumeSpec?.redirectHome && sessionStateDir.stateDirRef) {
-                const runtimeRef = ready.runtime ? ready.runtime.runtimeRef : undefined;
-                await prepareHomeRedirect(runtime.fs, {
-                    workspaceRoot: workspacePath,
-                    stateDirRef: sessionStateDir.stateDirRef,
-                    runtimeRef,
-                }).catch((err) => fastify.log.warn({ err, sessionId }, '[sessions] prepareHomeRedirect failed'));
-            }
-        }
-
-        // Gateway mode: write agent-specific config files to route through the gateway.
-        // Runs AFTER user config files and state dir env so gateway config can override.
-        if (authMode === 'gateway') {
-            try {
-                const { ensureGatewayConfig } = require('./workspace/ensureGatewayConfig');
-                const { resolveAgentGatewayModelTargets } = require('./agents/agentEnv');
-                const { targets: modelTargets, defaultTarget } = await resolveAgentGatewayModelTargets(agentMeta.id);
-                await ensureGatewayConfig({
-                    runtime,
-                    runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
-                    agentId: agentMeta.id,
-                    authMode,
-                    stateDirPath: sessionStateDir?.stateDirPath || null,
-                    sessionToken: resolved.env.LLM_ROUTER_API_KEY,
-                    routerUrl: resolved.env.LLM_ROUTER_URL,
-                    modelTarget: resolved.env.OPENAI_MODEL,
-                    modelTargets,
-                    defaultTarget,
-                    warn: (msg) => fastify.log.warn(msg),
-                });
-            } catch (err) {
-                fastify.log.warn({ err, sessionId }, '[sessions] gateway config bootstrap failed');
-            }
-        }
-
-        if (!(await isSessionStillPending(sessionId))) {
-            fastify.log.info({ sessionId }, '[sessions] session cancelled before spawn');
-            return;
-        }
-
-        // Single DB update: merge cwd + runtimeId + stateDirRef (was 2 separate writes).
-        const sessionUpdate = {
-            cwd: workspacePath,
-            runtimeId,
-            updatedAt: Date.now(),
-        };
-        if (sessionStateDir?.stateDirRef) {
-            sessionUpdate.stateDirRef = sessionStateDir.stateDirRef;
-        }
-        await db.update(schema.sessions).set(sessionUpdate).where(eq(schema.sessions.id, sessionId));
-
-        applyProjectGitEnv(resolved.env, project);
-
-        let handle;
-        const spawnOpts = {
-            name: agentMeta.name,
-            cwd: workspacePath,
-            runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
-            uid: process.env.RUNTIME_UID,
-            gid: process.env.RUNTIME_GID,
-        };
-
-        // Merge user-provided custom env (config files already written above)
-        if (Object.keys(userSessionConfig.customEnv).length) {
-            resolved.env = applyCustomEnv(resolved.env, userSessionConfig.customEnv, {
-                blockedKeys: authMode === 'gateway' ? GATEWAY_MANAGED_ENV_KEYS : [],
-            });
-        }
-
-        // P4：spawn 前把 active skills 注入 workspace 指令文件（AGENTS.md / CLAUDE.md）。
-        // 失败仅 log，不阻断 spawn。workspace 目录由 workspace.js 在控制面本地创建
-        // （Local/BoxLite 均可见），故用默认本地 fs 适配器直写。
-        // 路径注意：注入器用「宿主机本地 fs」直写，因此必须传**宿主机真实路径**。
-        //   - Local runtime：ready.workspacePath 即宿主机路径（createProjectDirectory）
-        //   - BoxLite runtime：ready.workspacePath 是沙箱内 guest 路径（/workspace），
-        //     宿主机真实目录在 ready.hostWorkspacePath —— 传 guest 路径会写到宿主机 /workspace
-        //     导致沙箱挂载目录里看不到技能（历史 bug，已修复）。
-        if (skillInjectEnabled()) {
-            try {
-                // Claude Code / CodeBuddy / Qwen Code / OpenClaw 的 config 目录 env
-                // 改变扫描根为 <configDir>/skills。其余 Agent 若改变扫描根，子目录应与 userSkillDirs[0] 一致。
-                const stateSkillsSubdir = (agent_id === 'claude-code' || agent_id === 'codebuddy' || agent_id === 'qwen-code' || agent_id === 'openclaw' || agent_id === 'hermes')
-                    ? 'skills'
-                    : (getUserSkillDirs(agent_id)[0] || 'skills');
-                // Cline / OpenCode 的 stateEnv 不影响 skills 发现，走 /root/<userSkillDirs>
-                const stateSkillsDir = (agent_id !== 'cline' && agent_id !== 'opencode')
-                    && (resumeSpec?.stateEnv || resumeSpec?.redirectHome) && sessionStateDir?.stateDirPath && stateSkillsSubdir
-                    ? `${sessionStateDir.stateDirPath}/${stateSkillsSubdir}`
-                    : null;
-                const injectResult = await injectSkillsForSession({
-                    userId: request.user.id,
-                    projectId: project_id,
-                    agentId: agentMeta.id,
-                    workspacePath: ready.hostWorkspacePath || workspacePath,
-                    // 载体模式：spawn 前把宿主载体全量复制为 VM 内真目录（1 次 exec，
-                    // 每次会话启动即最新）——复制对所有 Agent 的扫描实现一致
-                    runtimeExec: runtime && runtime.exec ? runtime.exec : null,
-                    runtimeRef: ready.runtime ? ready.runtime.runtimeRef : null,
-                    carrierGuestRoot: ready.skillCarrierGuestRoot || null,
-                    vmSkillsDir: stateSkillsDir,
-                });
-                if (injectResult.injected) {
-                    fastify.log.info(
-                        `[skills] injected ${injectResult.count} skill(s) for ${agentMeta.id} (session ${sessionId}) → ${injectResult.targetDirs?.join(', ') || 'host carrier only'}`,
-                    );
-                }
-            } catch (err) {
-                fastify.log.warn({ err, sessionId }, '[skills] inject-for-session failed (non-fatal)');
-            }
-        }
-
-        try {
-            const stateArgs = sessionStateDir?.stateDirPath
-                ? buildStateArgs(resumeSpec, sessionStateDir.stateDirPath)
-                : [];
-            const spawnArgs = resolveAgentSpawnArgs(agent_id, mergedConfigFiles, {
-                authMode,
-                gatewayModel: resolved.env.OPENAI_MODEL,
-            });
-            handle = await runtime.exec.spawn(
-                agentMeta.cmd,
-                [...spawnArgs.prepend, ...stateArgs, ...agentMeta.args, ...spawnArgs.append],
-                resolved.env,
-                spawnOpts,
-            );
-        } catch (err) {
-            if (
-                err instanceof AgentSpawnError
-                && resolveRuntimeProvider() === 'boxlite'
-                && ready.runtime?.runtimeRef
-            ) {
-                fastify.log.warn({ err, sessionId }, '[sessions] spawn failed, recreating boxlite runtime');
-                try {
-                    ready = await ensureProjectRuntime(project, {
-                        agentId: agent_id,
-                        runtimeId: ready.runtime.id,
-                        forceRecreate: true,
-                    });
-                    workspacePath = ready.workspacePath;
-                    spawnOpts.cwd = workspacePath;
-                    spawnOpts.runtimeRef = ready.runtime.runtimeRef;
-                    // Re-create state dir and re-write user config files in the new VM
-                    if (sessionStateDir) {
-                        try {
-                            sessionStateDir = await ensureSessionStateDir(runtime.fs, {
-                                workspaceRoot: workspacePath,
-                                sessionId,
-                                runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
-                            });
-                        } catch (e) { /* best-effort */ }
-                    }
-                    if (mergedConfigFiles.length) {
-                        await writeConfigFilesToVM(runtime.fs, {
-                            workspaceRoot: workspacePath,
-                            runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
-                            configFiles: mergedConfigFiles,
-                            stateDirPath: sessionStateDir?.stateDirPath || null,
-                        }).catch(() => {});
-                    }
-                    const retryStateArgs = sessionStateDir?.stateDirPath
-                        ? buildStateArgs(resumeSpec, sessionStateDir.stateDirPath)
-                        : [];
-                    const retrySpawnArgs = resolveAgentSpawnArgs(agent_id, mergedConfigFiles, {
-                        authMode,
-                        gatewayModel: resolved.env.OPENAI_MODEL,
-                    });
-                    handle = await runtime.exec.spawn(
-                        agentMeta.cmd,
-                        [...retrySpawnArgs.prepend, ...retryStateArgs, ...agentMeta.args, ...retrySpawnArgs.append],
-                        resolved.env,
-                        spawnOpts,
-                    );
-                } catch (retryErr) {
-                    fastify.log.error({ err: retryErr, sessionId }, '[sessions] spawn retry failed');
-                    await markSessionFailed(sessionId, retryErr instanceof AgentSpawnError
-                        ? retryErr.message
-                        : (retryErr.message || 'Failed to start agent session'));
-                    return;
-                }
-            } else {
-                fastify.log.error({ err, sessionId }, '[sessions] spawn failed');
-                await markSessionFailed(sessionId, err instanceof AgentSpawnError
-                    ? err.message
-                    : (err.message || 'Failed to start agent session'));
-                return;
-            }
-        }
-
-        // Guard: if the user deleted the session while provisioning, abort
-        const currentRows = await db.select({ status: schema.sessions.status })
-            .from(schema.sessions)
-            .where(eq(schema.sessions.id, sessionId));
-        if (!currentRows[0] || currentRows[0].status !== 'pending') {
-            fastify.log.info({ sessionId }, '[sessions] session no longer pending, discarding spawn result');
-            try { handle.kill(); } catch {}
-            return;
-        }
-
-        sessionManager.createSession(sessionId, handle, agent_id, {
-            transcriptRef: handle.streamRef,
-            projectId: project_id,
-            runtimeId,
-            runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
-            stateDirRef: sessionStateDir?.stateDirRef || null,
-            userId: request.user.id,
-        });
-
-        await registerSessionLifecycle({
-            db,
-            schema,
-            sessionManager,
-            sessionId,
-            project,
-            fastifyLog: fastify.log,
-            runtimeId,
-        });
-
-        const streamRef = handle.streamRef ?? null;
-        await db.update(schema.sessions).set({
-            status: 'running',
-            streamRef: streamRef || null,
-            updatedAt: Date.now(),
-        }).where(eq(schema.sessions.id, sessionId));
-        broadcastSse({ type: 'session_status', sessionId, status: 'running', userId: request.user.id });
-    })().catch((err) => {
-        fastify.log.error({ err, sessionId }, '[sessions] async provisioning uncaught error');
-        markSessionFailed(sessionId, err.message || 'Unexpected error during session provisioning').catch(() => {});
     });
 });
 

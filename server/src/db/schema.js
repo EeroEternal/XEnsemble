@@ -120,6 +120,9 @@ const sessions = pgTable('sessions', {
   stateDirRef: text('state_dir_ref'),
   recoverable: boolean('recoverable').default(false),
   status: text('status').default('running'),
+  // 会话来源：interactive（用户手动创建）| loop_task（循环任务无人值守触发）。
+  // loop_task 会话在列表接口默认过滤，不进主侧边栏、不占 sessions 配额。
+  source: text('source').notNull().default('interactive'),
   title: text('title'),
   titleManual: boolean('title_manual').default(false),
   customImageId: text('custom_image_id'),
@@ -585,6 +588,10 @@ const loopTasks = pgTable('loop_tasks', {
   projectId: text('project_id').notNull().references(() => projects.id),
   title: text('title').notNull(),
   prompt: text('prompt').notNull(),
+  // 执行 Agent：每次触发在项目沙箱内创建该 Agent 的会话执行（无 TaskAgent 兜底）
+  agentId: text('agent_id'),
+  // 无人值守自动批准工具调用（Agent 支持的前提下注入对应 flag）；false = 只读保守执行
+  autoApprove: boolean('auto_approve').notNull().default(true),
   scheduleKind: text('schedule_kind').notNull().default('cron'), // cron / every / at
   cronExpr: text('cron_expr').notNull().default('* * * * *'),
   timezone: text('timezone').notNull().default('Asia/Shanghai'),
@@ -604,6 +611,9 @@ const loopTaskRuns = pgTable('loop_task_runs', {
   taskId: text('task_id').notNull().references(() => loopTasks.id),
   scheduledFor: bigint('scheduled_for', { mode: 'number' }).notNull(),
   status: text('status').notNull().default('running'), // running / succeeded / failed / timeout
+  // 每次触发新建的 Agent 会话（run↔session 一对一）。不加 FK：用户删会话不应级联删执行记录。
+  sessionId: text('session_id'),
+  agentId: text('agent_id'),
   rounds: integer('rounds'),
   logs: jsonb('logs'),
   error: text('error'),
@@ -612,6 +622,7 @@ const loopTaskRuns = pgTable('loop_task_runs', {
 }, (table) => ({
   unqSlot: unique('uq_loop_task_runs_slot').on(table.taskId, table.scheduledFor),
   taskIdx: index('idx_loop_task_runs_task').on(table.taskId, table.startedAt),
+  sessionIdx: index('idx_loop_task_runs_session').on(table.sessionId),
 }));
 
 module.exports = {
