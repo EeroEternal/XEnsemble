@@ -1,8 +1,8 @@
 {
-  "title": "定时任务",
-  "nav": "定时任务",
+  "title": "循环任务",
+  "nav": "循环任务",
   "count": "{{count}} 个任务",
-  "empty": "还没有定时任务。创建一个，让 Agent 按计划自动工作。",
+  "empty": "还没有循环任务。创建一个，让 Agent 按计划自动工作。",
   "new_task": "新建任务",
   "field": {
     "title": "任务名称",
@@ -43,7 +43,9 @@
     "no_runs": "还没有执行记录。",
     "logs": "执行日志",
     "rounds": "{{count}} 轮",
-    "error": "错误"
+    "error": "错误",
+    "duration": "时长",
+    "started": "开始"
   },
   "action": {
     "run_now": "立即执行",
@@ -55,9 +57,9 @@
     "actions_for": "「{{title}}」的操作"
   },
   "toast": {
-    "created": "定时任务已创建。",
-    "updated": "定时任务已更新。",
-    "deleted": "定时任务已删除。",
+    "created": "循环任务已创建。",
+    "updated": "循环任务已更新。",
+    "deleted": "循环任务已删除。",
     "run_started": "执行已启动。",
     "run_in_progress": "上一次执行仍在进行中。",
     "action_failed": "操作失败。"

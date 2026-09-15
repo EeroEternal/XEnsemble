@@ -43,7 +43,9 @@
     "no_runs": "No runs yet.",
     "logs": "Execution log",
     "rounds": "{{count}} rounds",
-    "error": "Error"
+    "error": "Error",
+    "duration": "Duration",
+    "started": "Started"
   },
   "action": {
     "run_now": "Run now",
