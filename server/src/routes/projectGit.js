@@ -836,7 +836,7 @@ function registerProjectGitRoutes(fastify) {
                     }
                 }
 
-                // Force pull: stash → pull → stash pop. Surface conflicts in working tree.
+                // Force pull: stash → pull --rebase → stash pop。分支保持线性。
                 if (force) {
                     // Detect local changes (tracked + untracked).
                     const { stdout: statusOut } = await gitOperationService._execGit(project, ['status', '--porcelain']);
@@ -847,11 +847,11 @@ function registerProjectGitRoutes(fastify) {
                         stashed = true;
                     }
                     try {
-                        await gitOperationService._execGit(project, ['pull', 'origin', target]);
+                        await gitOperationService._execGit(project, ['pull', '--rebase', 'origin', target]);
                     } catch (pullErr) {
-                        // Pull itself hit a merge conflict (between branches). Abort the
-                        // in-progress merge, restore stashed changes, and surface the error.
-                        await gitOperationService._execGit(project, ['merge', '--abort']).catch(() => {});
+                        // Pull --rebase 本身撞上分支冲突。终止进行中的 rebase、
+                        // 恢复 stash 的本地改动，并把错误抛给前端。
+                        await gitOperationService._execGit(project, ['rebase', '--abort']).catch(() => {});
                         if (stashed) {
                             await gitOperationService._execGit(project, ['stash', 'pop']).catch(() => {});
                         }
@@ -876,19 +876,25 @@ function registerProjectGitRoutes(fastify) {
                 }
 
                 try {
-                    await gitOperationService._execGit(project, ['pull', 'origin', target]);
+                    await gitOperationService._execGit(project, ['pull', '--rebase', 'origin', target]);
                     gitOperationService._invalidateAheadBehind(project.id);
                     return { ok: true };
                 } catch (pullErr) {
                     // Detect conflict-type failures so the frontend can prompt for force pull.
+                    // rebase 式 pull 对脏工作区直接拒绝（"cannot pull with rebase:
+                    // You have unstaged changes"），这类也归入 pull_conflict，
+                    // 由前端引导走强制拉取（stash → rebase → 恢复）。
                     const msg = (pullErr.message || '').toLowerCase();
                     const isConflict = msg.includes('conflict')
                         || msg.includes('would be overwritten')
-                        || msg.includes('local changes')
-                        || msg.includes('merge conflict');
+                        || msg.includes('unstaged changes')
+                        || msg.includes('uncommitted changes')
+                        || msg.includes('cannot pull with rebase')
+                        || msg.includes('local changes');
                     if (isConflict) {
-                        // Clean up any in-progress merge so the working tree is stashable.
-                        await gitOperationService._execGit(project, ['merge', '--abort']).catch(() => {});
+                        // pull --rebase 撞上冲突：终止进行中的 rebase，保持工作区
+                        // 可 stash（前端会引导走强制拉取流程）。
+                        await gitOperationService._execGit(project, ['rebase', '--abort']).catch(() => {});
                         const err = new Error(t('git:pull_conflict_message', {}, request.locale || 'en'));
                         err.code = 'pull_conflict';
                         throw err;

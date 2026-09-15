@@ -883,4 +883,39 @@ describe('GitOperationService (real git)', { skip: !hasGit() }, () => {
         assert.strictEqual(view.original, 'will be deleted');
         assert.strictEqual(view.modified, '');
     });
+
+    it('pull --rebase keeps branch linear when diverged (no merge commit)', async () => {
+        // 远端推进一个新提交 → 本地分叉
+        const seed = path.join(tmpRoot, 'seed');
+        fs.writeFileSync(path.join(seed, 'README.md'), 'remote change');
+        git(['add', '.'], seed);
+        git(['commit', '-m', 'remote advances'], seed);
+        git(['push', 'origin', 'main'], seed);
+
+        // 本地也提交一个（不同文件，保证 rebase 无冲突）。
+        // 先还原前面用例遗留的未提交改动——rebase 与 merge 不同，
+        // 工作区有任何 tracked 改动都会被拒绝（正是路由冲突检测覆盖的场景）。
+        git(['checkout', '--', '.'], workspacePath);
+        await service.switchBranch({ id: 'p1', userId: 'u1' }, 'main');
+        fs.writeFileSync(path.join(workspacePath, 'local.txt'), 'local work');
+        git(['add', 'local.txt'], workspacePath);
+        git(['commit', '-m', 'local commit'], workspacePath);
+
+        // 模拟路由里的 pull --rebase：fetch 后 rebase 到 origin/main
+        await service._execGit({ id: 'p1', userId: 'u1' }, ['fetch', 'origin', 'main']);
+        await service._execGit({ id: 'p1', userId: 'u1' }, ['rebase', 'origin/main']);
+
+        // 线性：HEAD 的祖先链必须包含 origin/main（即没有 merge commit 分叉）
+        const { status: ancestorStatus } = spawnSync('git', ['merge-base', '--is-ancestor', 'origin/main', 'HEAD'], {
+            cwd: workspacePath, encoding: 'utf8',
+        });
+        assert.strictEqual(ancestorStatus, 0);
+        // 无 merge commit：HEAD 的父提交数必须为 1
+        const { stdout: parents } = git(['rev-list', '--parents', '-n', '1', 'HEAD'], workspacePath);
+        assert.strictEqual(parents.trim().split(' ').length, 2, `expected single-parent HEAD, got: ${parents}`);
+        // 本地提交保留在历史里
+        const { stdout: log } = git(['log', '--oneline'], workspacePath);
+        assert.ok(log.includes('local commit'), 'local commit lost after rebase');
+        assert.ok(log.includes('remote advances'), 'remote commit missing after rebase');
+    });
 });

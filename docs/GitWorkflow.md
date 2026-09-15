@@ -595,7 +595,7 @@ MergeRequestService
 | GET | `/api/v1/projects/:id/git/log` | commit 历史 |
 | POST | `/api/v1/projects/:id/git/commit` | 提交变更 |
 | POST | `/api/v1/projects/:id/git/push` | 推送当前分支 |
-| POST | `/api/v1/projects/:id/git/pull` | 拉取最新代码 |
+| POST | `/api/v1/projects/:id/git/pull` | 拉取最新代码（`pull --rebase`，保持分支线性；冲突时返回 409 `pull_conflict`，由前端引导强制拉取：stash → rebase → 恢复） |
 
 ### 7.4 分支管理（保持不变）
 
