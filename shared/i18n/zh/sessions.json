@@ -2,6 +2,7 @@
   "title": "会话",
   "new_session": "新建会话",
   "search": "搜索",
+  "exited_sessions": "已退出会话",
   "launch": {
     "title": "新建会话",
     "repository": "仓库",
@@ -97,6 +98,8 @@
     "this_will_remove": "这将移除",
     "including_running_one": "含 {{count}} 个运行中",
     "including_running_other": "含 {{count}} 个运行中",
+    "including_exited_one": "含 {{count}} 个已退出",
+    "including_exited_other": "含 {{count}} 个已退出",
     "unassigned_description": "未分配不是工作空间——它聚合了没有项目的会话。清除会将那些会话从历史记录中移除。",
     "permanently_delete": "永久删除"
   },

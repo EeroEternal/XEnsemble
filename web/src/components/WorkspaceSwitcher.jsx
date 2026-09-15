@@ -199,7 +199,7 @@ export default function WorkspaceSwitcher({
                     const ws = {
                       id: p.id,
                       name: p.name,
-                      sessions: (sessions || []).filter((s) => s.projectId === p.id && s.status !== 'exited'),
+                      sessions: (sessions || []).filter((s) => s.projectId === p.id),
                     };
                     onDelete?.(ws);
                   }}

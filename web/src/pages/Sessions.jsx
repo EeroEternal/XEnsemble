@@ -1244,11 +1244,13 @@ export default React.forwardRef(function Sessions({
 
   const requestDeleteWorkspace = (ws) => {
     const liveCount = ws.sessions.filter((s) => s.alive === true).length;
+    const exitedCount = ws.sessions.filter((s) => s.status === 'exited').length;
     setDeleteConfirmWorkspace({
       workspaceId: ws.id,
       workspaceName: ws.name,
       sessionCount: ws.sessions.length,
       liveCount,
+      exitedCount,
       isOrphan: ws.id === '_orphan',
     });
   };
@@ -1347,8 +1349,14 @@ export default React.forwardRef(function Sessions({
                   <span>
                     {' '}
                     {t('sessions:dialog.this_will_remove')} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount })}
-                    {deleteConfirmWorkspace.liveCount > 0 && (
-                      <> ({t('sessions:dialog.including_running', { count: deleteConfirmWorkspace.liveCount })})</>
+                    {(deleteConfirmWorkspace.liveCount > 0 || deleteConfirmWorkspace.exitedCount > 0) && (
+                      <>
+                        {' ('}
+                        {deleteConfirmWorkspace.liveCount > 0 && t('sessions:dialog.including_running', { count: deleteConfirmWorkspace.liveCount })}
+                        {deleteConfirmWorkspace.liveCount > 0 && deleteConfirmWorkspace.exitedCount > 0 && ', '}
+                        {deleteConfirmWorkspace.exitedCount > 0 && t('sessions:dialog.including_exited', { count: deleteConfirmWorkspace.exitedCount })}
+                        {')'}
+                      </>
                     )}
                     .
                   </span>
@@ -1362,8 +1370,14 @@ export default React.forwardRef(function Sessions({
                   <span>
                     {' '}
                     {t('sessions:dialog.this_will_remove')} {t('sessions:count', { count: deleteConfirmWorkspace.sessionCount })}
-                    {deleteConfirmWorkspace.liveCount > 0 && (
-                      <> ({t('sessions:dialog.including_running', { count: deleteConfirmWorkspace.liveCount })})</>
+                    {(deleteConfirmWorkspace.liveCount > 0 || deleteConfirmWorkspace.exitedCount > 0) && (
+                      <>
+                        {' ('}
+                        {deleteConfirmWorkspace.liveCount > 0 && t('sessions:dialog.including_running', { count: deleteConfirmWorkspace.liveCount })}
+                        {deleteConfirmWorkspace.liveCount > 0 && deleteConfirmWorkspace.exitedCount > 0 && ', '}
+                        {deleteConfirmWorkspace.exitedCount > 0 && t('sessions:dialog.including_exited', { count: deleteConfirmWorkspace.exitedCount })}
+                        {')'}
+                      </>
                     )}
                     .
                   </span>

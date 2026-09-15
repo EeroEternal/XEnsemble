@@ -98,6 +98,8 @@
     "this_will_remove": "This will remove",
     "including_running_one": "including {{count}} running",
     "including_running_other": "including {{count}} running",
+    "including_exited_one": "including {{count}} exited",
+    "including_exited_other": "including {{count}} exited",
     "unassigned_description": "Unassigned is not a workspace — it groups sessions without a project. Clearing it removes those sessions from history.",
     "permanently_delete": "Permanently delete"
   },
