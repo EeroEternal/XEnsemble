@@ -179,6 +179,29 @@ const sessionChatMessages = pgTable('session_chat_messages', {
   sessionIdx: index('idx_session_chat_messages_session').on(table.sessionId),
 }));
 
+// 0029: 会话完整执行轨迹（trajectory.js 写入，每次模型调用一行，verbatim 降采样前的权威源）
+const sessionTrajectory = pgTable('session_trajectory', {
+  sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  seq: integer('seq').notNull(),
+  ts: bigint('ts', { mode: 'number' }).notNull(),
+  agentId: text('agent_id'),
+  model: text('model'),
+  // true=该行 request.messages 存全量上下文快照（首请求 / 检测到历史压缩或错位时重置）
+  snapshot: boolean('snapshot').notNull().default(false),
+  // 请求时上下文消息总数（delta 重放基准：上一次快照/delta 应用后的数组长度）
+  msgCount: integer('msg_count').notNull().default(0),
+  // 请求载荷：snapshot 行 {messages: 全量} / delta 行 {messages: 新增}；含 params 与 truncated 标记
+  request: jsonb('request').notNull(),
+  // 响应（归一化）：{format, content[], finish_reason, usage, truncated}
+  response: jsonb('response'),
+  status: text('status').notNull().default('ok'),
+  latencyMs: integer('latency_ms'),
+  error: text('error'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.sessionId, table.seq] }),
+  sessionIdx: index('idx_session_trajectory_session').on(table.sessionId),
+}));
+
 // 0016: 进程内调度器的 Job 注册表（PG 乐观锁，多实例安全）
 const schedulerJobs = pgTable('scheduler_jobs', {
   jobName: text('job_name').primaryKey(),
@@ -604,6 +627,7 @@ module.exports = {
   sessionStreams,
   sessionConfigs,
   sessionChatMessages,
+  sessionTrajectory,
   sessionConversations,
   schedulerJobs,
   skills,

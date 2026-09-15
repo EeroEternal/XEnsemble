@@ -7,6 +7,7 @@ const serviceRouter = require('./serviceRouter');
 const { checkLlmRequestQuota } = require('./quota');
 const { recordEvent } = require('../events/recordEvent');
 const chatTranscript = require('./chatTranscript');
+const trajectory = require('./trajectory');
 const { assertActiveUser } = require('../auth/assertActiveUser');
 const policy = require('../auth/PolicyService');
 const { db } = require('../db/index');
@@ -886,12 +887,42 @@ async function proxyLlmRequest(request, reply) {
             }
         }
     }
+    // 0029 trajectory: full verbatim request record. Awaiting recordRequest
+    // only costs a DB read on the first call per session (seq seeding); the
+    // row insert itself is awaited inside the module chain (recordResponse
+    // 的 UPDATE 依赖本行已存在)。
+    let trajSeq = null;
+    let trajDone = false;
+    if (isChatPath && claims.sid) {
+        try {
+            const trajBody = Buffer.isBuffer(request.body)
+                ? JSON.parse(request.body.toString('utf8'))
+                : (request.body && typeof request.body === 'object' ? request.body : null);
+            if (trajBody) {
+                trajSeq = await trajectory.recordRequest({
+                    sessionId: claims.sid,
+                    agentId: claims.aid,
+                    model: bodyModel || claims.model || null,
+                    body: trajBody,
+                });
+            }
+        } catch (_) { /* never block the proxy hot path */ }
+    }
     const onResponseBody = (bodyBuffer, contentType) => {
         if (!isChatPath) return;
         // 200-status SSE streams can still carry the gateway failure as an
         // in-stream error event — surface it before anything else.
         const sseErrorText = extractSseErrorText(bodyBuffer);
         if (sseErrorText) {
+            trajDone = true;
+            trajectory.recordFailure({
+                sessionId: claims.sid,
+                seq: trajSeq,
+                agentId: claims.aid,
+                model: bodyModel || claims.model || null,
+                error: sseErrorText,
+                latencyMs: Date.now() - started,
+            });
             recordLlmErrorEvent(claims.sid, 'upstream', sseErrorText);
             return;
         }
@@ -934,6 +965,16 @@ async function proxyLlmRequest(request, reply) {
                 });
             }
         }
+        // 0029 trajectory: normalized verbatim response for this call.
+        trajDone = true;
+        trajectory.recordResponse({
+            sessionId: claims.sid,
+            seq: trajSeq,
+            bodyBuffer,
+            contentType,
+            statusCode: 200,
+            latencyMs: Date.now() - started,
+        });
     };
     request.log.info(
         {
@@ -960,8 +1001,19 @@ async function proxyLlmRequest(request, reply) {
             gatewayKey: agentGatewayKey,
             path,
             onResponseBody,
-            onErrorResponse: (bodyBuffer, contentType) => {
+            onErrorResponse: (bodyBuffer, contentType, errStatusCode) => {
                 upstreamErrorText = extractUpstreamErrorText(bodyBuffer, contentType);
+                // 0029 trajectory: upstream rejected (429/5xx) — still verbatim.
+                trajDone = true;
+                trajectory.recordResponse({
+                    sessionId: claims.sid,
+                    seq: trajSeq,
+                    bodyBuffer,
+                    contentType,
+                    statusCode: errStatusCode,
+                    latencyMs: Date.now() - started,
+                    errorText: upstreamErrorText || null,
+                });
             },
         });
     } catch (err) {
@@ -998,6 +1050,21 @@ async function proxyLlmRequest(request, reply) {
                 ? String(forwardError.message || forwardError).slice(0, 200)
                 : (upstreamErrorText || '');
             recordLlmErrorEvent(claims.sid, status, detail);
+        }
+        // 0029 trajectory: call ended without a captured response (forward
+        // error, connection reset) — mark the row as failed so the trajectory
+        // shows the gap instead of silently dropping the step.
+        if (isChatPath && trajSeq != null && !trajDone) {
+            trajectory.recordFailure({
+                sessionId: claims.sid,
+                seq: trajSeq,
+                agentId: claims.aid,
+                model: bodyModel || claims.model || null,
+                error: forwardError
+                    ? String(forwardError.message || forwardError)
+                    : `upstream ${forwardResult?.statusCode ?? 'unknown'}`,
+                latencyMs: Date.now() - started,
+            });
         }
     }
 }

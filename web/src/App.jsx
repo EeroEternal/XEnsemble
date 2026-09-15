@@ -71,7 +71,7 @@ function AuthenticatedLayout({
   }, [location.pathname]);
 
   const isSessions = location.pathname === '/sessions';
-  const isHistory = location.pathname === '/history';
+  const isTrajectory = location.pathname === '/trajectory';
   const isMySkills = location.pathname === '/skills';
   const isSkillsMarket = location.pathname === '/skills/market';
   const isLoopTasks = location.pathname === '/loop-tasks';
@@ -130,7 +130,7 @@ function AuthenticatedLayout({
         ) : (
           <>
             {/* Workspace switcher lives in the global top bar (all routes), so
-                /history, /skills etc. never lose access to the active workspace.
+                /trajectory, /skills etc. never lose access to the active workspace.
                 Session-specific controls (branch/restart/preview) portal into
                 #xe-topbar-dynamic below and only render on /sessions. */}
             <WorkspaceSwitcher
@@ -160,7 +160,6 @@ function AuthenticatedLayout({
         user={user}
         onOpenSettings={() => navigate('/settings')}
         onLogout={logout}
-        onOpenHistory={() => navigate('/history')}
         onOpenSkills={() => navigate('/skills')}
         onOpenLoopTasks={() => navigate('/loop-tasks')}
       />
@@ -199,12 +198,12 @@ function AuthenticatedLayout({
         <History
           agents={agents}
           projects={projects}
-          active={isHistory}
+          active={isTrajectory}
           className={cn(
             'flex h-full min-h-0 flex-1 flex-col',
-            isHistory ? 'relative z-20' : offRouteClass,
+            isTrajectory ? 'relative z-20' : offRouteClass,
           )}
-          aria-hidden={!isHistory}
+          aria-hidden={!isTrajectory}
         />
         <MySkills
           className={cn(
@@ -455,7 +454,8 @@ function App() {
               }
             >
               <Route path="/sessions" element={null} />
-              <Route path="/history" element={null} />
+              <Route path="/trajectory" element={null} />
+              <Route path="/history" element={<Navigate to="/trajectory" replace />} />
               <Route path="/skills" element={null} />
               <Route path="/skills/market" element={null} />
               <Route path="/loop-tasks" element={null} />

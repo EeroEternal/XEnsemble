@@ -69,5 +69,12 @@ test('buildSignals normalizes and defaults', () => {
         successExit: true,
         turnCount: 35,
         clusterSize: 1,
+        trajErrorFree: false,
+        trajToolCalls: 0,
     });
+});
+
+test('computeScore adds trajectory bonus (0029)', () => {
+    assert.equal(scorer.computeScore({ successExit: true, trajErrorFree: true }), 30);
+    assert.equal(scorer.computeScore({ trajErrorFree: true }), 10);
 });

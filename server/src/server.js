@@ -20,6 +20,7 @@ const { recordEvent } = require('./events/recordEvent');
 const { registerPreviewGateway } = require('./preview/gateway');
 const { registerLlmProxy } = require('./llm/proxy');
 const chatTranscript = require('./llm/chatTranscript');
+const trajectory = require('./llm/trajectory');
 const { issueSessionToken } = require('./llm/sessionToken');
 const agentGatewayConfig = require('./admin/AgentGatewayConfig');
 const userAdmin = require('./admin/UserAdminService');
@@ -1282,6 +1283,34 @@ fastify.get('/api/v1/sessions/:sessionId/chat', { preValidation: [fastify.authen
         session_id: sessionId,
         messages: await chatTranscript.getHistory(sessionId),
     };
+});
+
+// 0029: 会话执行轨迹（分页步骤列表，供 Trajectory 查看器游标加载）
+fastify.get('/api/v1/sessions/:sessionId/trajectory', { preValidation: [fastify.authenticate] }, async (request, reply) => {
+    const { sessionId } = request.params;
+    const rows = await db.select({ id: schema.sessions.id }).from(schema.sessions)
+        .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
+
+    const afterSeq = Number(request.query.after_seq) || 0;
+    const limit = Number(request.query.limit) || 100;
+    const { steps, hasMore } = await trajectory.getSteps(sessionId, { afterSeq, limit });
+    return { session_id: sessionId, steps, has_more: hasMore };
+});
+
+// 0029: JSONL 导出。服务端重放 snapshot/delta，把每步还原为完整请求载荷
+// （语义等价于逐行存全量，存储端保持 O(n)）；每行一个 JSON 对象。
+fastify.get('/api/v1/sessions/:sessionId/trajectory/export', { preValidation: [fastify.authenticate] }, async (request, reply) => {
+    const { sessionId } = request.params;
+    const rows = await db.select({ id: schema.sessions.id }).from(schema.sessions)
+        .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
+    if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
+
+    const steps = await trajectory.getAllSteps(sessionId);
+    const lines = trajectory.replayToFull(steps);
+    reply.header('content-type', 'application/x-ndjson; charset=utf-8');
+    reply.header('content-disposition', `attachment; filename="trajectory-${sessionId}.jsonl"`);
+    return lines.map((l) => JSON.stringify(l)).join('\n') + (lines.length ? '\n' : '');
 });
 
 // 退出会话：标记 exited、停进程、清理 preview/runtime。记录保留（软删除），

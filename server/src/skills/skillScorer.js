@@ -53,9 +53,14 @@ function countCorrections(turns) {
 }
 
 /**
- * L1 评分公式（§6.2）：
+ * L1 评分公式（§6.2 + 0029 trajectory 信号）：
  *   score = 100*userMarked + 30*min(correctionCount,3) + 15*min(filesTouched,3)
  *         + 20*successExit + 25*(clusterSize-1) - 10*(turnCount>200)
+ *         + 10*trajErrorFree
+ *
+ * trajErrorFree：trajectory（0029）显示全部模型调用成功（无 error 步）——
+ * 比单纯 exitCode===0 更强的"一次跑通"信号；trajectory 不可用时为 false，
+ * 公式退化为原始 §6.2。
  *
  * @param {object} signals
  * @param {boolean} [signals.userMarked]
@@ -64,6 +69,7 @@ function countCorrections(turns) {
  * @param {boolean} [signals.successExit]
  * @param {number} [signals.turnCount]
  * @param {number} [signals.clusterSize]  L2 回填，首轮为 1
+ * @param {boolean} [signals.trajErrorFree] trajectory 全部步骤 ok（0029）
  * @returns {number}
  */
 function computeScore(signals = {}) {
@@ -73,6 +79,7 @@ function computeScore(signals = {}) {
     const success = signals.successExit ? 1 : 0;
     const cluster = Math.max(0, (Number(signals.clusterSize) || 1) - 1);
     const penalty = Number(signals.turnCount) > TURN_COUNT_PENALTY_THRESHOLD ? 1 : 0;
+    const trajClean = signals.trajErrorFree ? 1 : 0;
     return (
         (100 * userMarked)
         + (30 * corrections)
@@ -80,6 +87,7 @@ function computeScore(signals = {}) {
         + (20 * success)
         + (25 * cluster)
         - (10 * penalty)
+        + (10 * trajClean)
     );
 }
 
@@ -87,7 +95,7 @@ function computeScore(signals = {}) {
  * 根据原始信号构建完整 signals 对象（供 skill_candidates.signals / skills.signals 存储）。
  * 补充 clusterSize（默认 1）与 userMarked（默认 false）。
  */
-function buildSignals({ userMarked = false, correctionCount = 0, filesTouched = 0, successExit = false, turnCount = 0, clusterSize = 1 } = {}) {
+function buildSignals({ userMarked = false, correctionCount = 0, filesTouched = 0, successExit = false, turnCount = 0, clusterSize = 1, trajErrorFree = false, trajToolCalls = 0 } = {}) {
     return {
         userMarked: Boolean(userMarked),
         correctionCount: Number(correctionCount) || 0,
@@ -95,6 +103,8 @@ function buildSignals({ userMarked = false, correctionCount = 0, filesTouched = 
         successExit: Boolean(successExit),
         turnCount: Number(turnCount) || 0,
         clusterSize: Number(clusterSize) || 1,
+        trajErrorFree: Boolean(trajErrorFree),
+        trajToolCalls: Number(trajToolCalls) || 0,
     };
 }
 

@@ -278,6 +278,193 @@ function capTurns(turns, max = MAX_TURNS) {
     return turns.slice(turns.length - max);
 }
 
+// ---------------------------------------------------------------------------
+// Trajectory source (0029) — preferred: full verbatim model calls
+// ---------------------------------------------------------------------------
+
+/** Extract text from anthropic-style content blocks (string or block array). */
+function textFromBlocks(content) {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    const parts = [];
+    for (const b of content) {
+        if (typeof b === 'string') parts.push(b);
+        else if (b?.type === 'text' && typeof b.text === 'string') parts.push(b.text);
+    }
+    return parts.join('\n');
+}
+
+/**
+ * Extract turns from trajectory rows (session_trajectory, seq order).
+ * Replays snapshot/delta rows into per-call context (via llm/trajectory
+ * replayToFull) but only consumes messages not yet processed — agent CLIs
+ * resend the full history on every call, so a monotonic cursor keeps each
+ * user/assistant/tool message contributing exactly one turn.
+ *
+ * Both wire formats are handled per-message: OpenAI (role:'tool' results)
+ * and Anthropic (tool_result blocks inside user messages).
+ *
+ * @param {Array} steps trajectory.getAllSteps() rows
+ * @param {object} [opts]
+ * @param {number|null} [opts.maxTurns]
+ * @returns {{ source: 'trajectory', turns: Array }}
+ */
+function extractFromTrajectory(steps, { maxTurns = MAX_TURNS } = {}) {
+    const { replayToFull } = require('../llm/trajectory');
+    const lines = replayToFull(steps || []);
+    const turns = [];
+    let pendingAssistant = null;
+    const callMap = new Map(); // callId -> tools entry, for result pairing
+    let cursor = 0; // absolute count of context messages already turned
+
+    const pushAssistantTurn = (ts) => {
+        const turn = { role: 'assistant', ts, text: '', tools: [] };
+        turns.push(turn);
+        pendingAssistant = turn;
+        return turn;
+    };
+
+    const addUserText = (text, ts) => {
+        pendingAssistant = null;
+        const trimmed = String(text || '').trim();
+        if (!trimmed) return;
+        const t = truncateMiddle(trimmed, TURN_MAX_BYTES);
+        turns.push({ role: 'user', ts, text: t.text, truncated: t.truncated });
+    };
+
+    const addToolCall = (name, args, callId, ts) => {
+        if (!pendingAssistant) pushAssistantTurn(ts);
+        const entry = { tool: name || 'tool', args: String(args ?? '') };
+        if (entry.args.length > TURN_MAX_BYTES) {
+            entry.args = entry.args.slice(0, TURN_MAX_BYTES);
+            entry.argsTruncated = true;
+        }
+        if (callId != null) {
+            entry.callId = callId;
+            callMap.set(callId, entry);
+        }
+        pendingAssistant.tools.push(entry);
+    };
+
+    const addToolResult = (callId, result) => {
+        const entry = callId != null ? callMap.get(callId) : null;
+        if (!entry) return;
+        const res = truncateMiddle(String(result ?? ''), TURN_MAX_BYTES);
+        entry.result = res.text;
+        if (res.truncated) entry.resultTruncated = true;
+    };
+
+    // Emit the call's normalized response as an assistant turn. The next
+    // request's history normally resends this message — we drop the pending
+    // response when that resend is present (dedupe), and only emit it for the
+    // final call (whose reply has no following request) or when the agent
+    // rewrote history (compaction).
+    let pendingResp = null;
+    let pendingRespTs = null;
+    const emitResponse = (resp, ts) => {
+        if (!resp || !Array.isArray(resp.content)) return;
+        const text = [];
+        const tools = [];
+        for (const b of resp.content) {
+            if (b?.type === 'text' && b.text) text.push(b.text);
+            else if (b?.type === 'tool_use') tools.push(b);
+        }
+        if (!text.length && !tools.length) return;
+        const t = truncateMiddle(text.join('\n').trim(), TURN_MAX_BYTES);
+        const turn = pushAssistantTurn(ts);
+        turn.text = t.text;
+        turn.truncated = t.truncated;
+        for (const block of tools) {
+            let args = '';
+            try { args = JSON.stringify(block.input ?? {}); } catch (_) { args = ''; }
+            addToolCall(block.name, args, block.id ?? null, ts);
+        }
+    };
+
+    for (const line of lines) {
+        const req = line.request;
+        if (!req || !Array.isArray(req.messages)) continue;
+        const base = (Number(line.msg_count) || 0) - req.messages.length;
+        const ts = Number.isFinite(line.ts) ? line.ts : null;
+        // Resolve the previous call's pending response: if this history resend
+        // carries the assistant message (at abs index == cursor), it will be
+        // turned from the history itself — drop the pending copy.
+        if (pendingResp) {
+            const idx = cursor - base;
+            const histMsg = (idx >= 0 && idx < req.messages.length) ? req.messages[idx] : null;
+            if (!histMsg || histMsg.role !== 'assistant') emitResponse(pendingResp, pendingRespTs);
+            pendingResp = null;
+        }
+        for (let i = 0; i < req.messages.length; i += 1) {
+            if (base + i < cursor) continue;
+            const msg = req.messages[i];
+            if (!msg || typeof msg !== 'object') continue;
+            const content = msg.content;
+
+            if (msg.role === 'user' || msg.role === 'human') {
+                // Anthropic: tool results ride inside user messages — pair them
+                // instead of emitting a user turn.
+                if (Array.isArray(content)) {
+                    let userText = '';
+                    for (const b of content) {
+                        if (b?.type === 'tool_result') {
+                            addToolResult(b.tool_use_id ?? b.call_id ?? null, textFromBlocks(b.content));
+                        } else if (b?.type === 'text' && typeof b.text === 'string') {
+                            userText += (userText ? '\n' : '') + b.text;
+                        }
+                    }
+                    if (userText.trim()) addUserText(userText, ts);
+                } else {
+                    addUserText(typeof content === 'string' ? content : '', ts);
+                }
+            } else if (msg.role === 'assistant') {
+                const parts = [];
+                if (typeof content === 'string' && content) parts.push(content);
+                else if (Array.isArray(content)) {
+                    for (const b of content) {
+                        if (b?.type === 'text' && typeof b.text === 'string') parts.push(b.text);
+                        // thinking blocks are skipped — decisions land in the text
+                    }
+                }
+                const calls = msg.tool_calls || [];
+                if (!parts.length && !calls.length) continue;
+                const text = truncateMiddle(parts.join('\n').trim(), TURN_MAX_BYTES);
+                if (parts.length) {
+                    const turn = pushAssistantTurn(ts);
+                    turn.text = text.text;
+                    turn.truncated = text.truncated;
+                }
+                for (const tc of calls) {
+                    addToolCall(tc?.function?.name, tc?.function?.arguments, tc?.id ?? null, ts);
+                }
+                // Anthropic assistant blocks: tool_use inline
+                if (Array.isArray(content)) {
+                    for (const b of content) {
+                        if (b?.type === 'tool_use') {
+                            let args = '';
+                            try { args = JSON.stringify(b.input ?? {}); } catch (_) { args = ''; }
+                            addToolCall(b.name, args, b.id ?? null, ts);
+                        }
+                    }
+                }
+            } else if (msg.role === 'tool') {
+                // OpenAI tool result
+                addToolResult(msg.tool_call_id ?? null, typeof content === 'string' ? content : textFromBlocks(content));
+            }
+        }
+        if ((Number(line.msg_count) || 0) > cursor) cursor = Number(line.msg_count);
+        pendingResp = line.response;
+        pendingRespTs = ts;
+    }
+    // The final call's reply never appears in a later request — emit it here.
+    emitResponse(pendingResp, pendingRespTs);
+
+    // Drop assistant turns that carry neither text nor any tool call.
+    const cleaned = turns.filter((t) => !(t.role === 'assistant' && !t.text && (!t.tools || t.tools.length === 0)));
+    const capped = maxTurns == null ? cleaned : capTurns(cleaned, maxTurns);
+    return { source: 'trajectory', turns: capped };
+}
+
 /**
  * Extract conversation turns for a session.
  *
@@ -287,11 +474,25 @@ function capTurns(turns, max = MAX_TURNS) {
  * @param {string|null} [opts.stateDirRef]
  * @param {Function} [opts.readStateDir] async (stateDirRef) => jsonl string; injected for testability
  * @param {Function} [opts.readChatHistory] async () => chatTranscript history rows; injected for testability
+ * @param {Function} [opts.readTrajectorySteps] async () => trajectory rows (session_trajectory); injected for testability
  * @param {number} [opts.afterSeq] cursor (chat transcript & transcript sources only)
  * @param {number|null} [opts.maxTurns] 各来源统一截断到最近 N 条；null 表示不截断（默认 MAX_TURNS）
  * @returns {Promise<{ source: string, turns: Array }>}
  */
-async function extract({ transcriptStore, streamRef, stateDirRef, readStateDir, readChatHistory, afterSeq = 0, maxTurns = MAX_TURNS }) {
+async function extract({ transcriptStore, streamRef, stateDirRef, readStateDir, readChatHistory, readTrajectorySteps, afterSeq = 0, maxTurns = MAX_TURNS }) {
+    // Preferred source: trajectory (0029) — full verbatim model calls with
+    // complete tool args/results; the chat transcript is the realtime/降级 view.
+    if (typeof readTrajectorySteps === 'function') {
+        try {
+            const steps = await readTrajectorySteps();
+            if (Array.isArray(steps) && steps.length > 0) {
+                const result = extractFromTrajectory(steps, { maxTurns });
+                if (result.turns.length > 0) return result;
+            }
+        } catch {
+            // fall through to chat history / state dir / transcript sources
+        }
+    }
     if (typeof readChatHistory === 'function') {
         try {
             const history = await readChatHistory();
@@ -319,6 +520,7 @@ async function extract({ transcriptStore, streamRef, stateDirRef, readStateDir, 
 module.exports = {
     extract,
     extractFromChat,
+    extractFromTrajectory,
     extractFromTranscript,
     extractFromStateDir,
     parseStateDirLine,

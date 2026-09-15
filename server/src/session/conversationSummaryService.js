@@ -186,6 +186,8 @@ async function summarizeSession(sessionId, { force = false } = {}) {
         stateDirRef: session.stateDirRef,
         readStateDir: () => readStateDirJsonl(session),
         readChatHistory: () => chatTranscript.getHistory(sessionId),
+        // 0029: trajectory 优先 — 全量 verbatim 模型调用（完整工具参数/结果）
+        readTrajectorySteps: () => require('../llm/trajectory').getAllSteps(sessionId),
         afterSeq: 0,
         // 落库/历史读取全量（不截断），支持会话历史真正分页；
         // LLM prompt 的截断在下方单独控制。

@@ -51,6 +51,28 @@ function getSkillService() {
     return require('./skillService');
 }
 
+/**
+ * 0029: 从 trajectory 提炼 L1 真实信号。
+ * - trajErrorFree: 全部模型调用 status==='ok'（无 429/5xx/forward 失败）
+ * - trajToolCalls: 响应中的 tool_use 总数（真实工作量证据）
+ * trajectory 不可用（旧会话 / DB 异常）时返回中性默认值，公式退化。
+ */
+async function trajectorySignals(sessionId) {
+    try {
+        const steps = await require('../llm/trajectory').getAllSteps(sessionId);
+        if (!steps.length) return { trajErrorFree: false, trajToolCalls: 0 };
+        return {
+            trajErrorFree: steps.every((s) => s.status === 'ok'),
+            trajToolCalls: steps.reduce((n, s) => {
+                const content = s.response && Array.isArray(s.response.content) ? s.response.content : [];
+                return n + content.filter((c) => c && c.type === 'tool_use').length;
+            }, 0),
+        };
+    } catch (_) {
+        return { trajErrorFree: false, trajToolCalls: 0 };
+    }
+}
+
 // ---------------------------------------------------------------------------
 // L1 入池
 // ---------------------------------------------------------------------------
@@ -95,6 +117,8 @@ async function enqueueCandidate(sessionId, { exitCode = null, userMarked = false
     const correctionCount = scorer.countCorrections(turns);
     const filesTouched = Array.isArray(summary.filesTouched) ? summary.filesTouched.length : 0;
     const successExit = Number(exitCode) === 0;
+    // 0029: trajectory 真实信号（全部调用成功 / 工具调用数）
+    const trajSignals = await trajectorySignals(sessionId);
 
     const signals = scorer.buildSignals({
         userMarked,
@@ -103,6 +127,7 @@ async function enqueueCandidate(sessionId, { exitCode = null, userMarked = false
         successExit,
         turnCount: turns.length,
         clusterSize: 1,
+        ...trajSignals,
     });
     const score = scorer.computeScore(signals);
 
@@ -507,6 +532,7 @@ async function extractFromSession(sessionId, { userId, log = console } = {}) {
         successExit: false,
         turnCount: turns.length,
         clusterSize: 1,
+        ...(await trajectorySignals(sessionId)),
     });
 
     const skillService = getSkillService();

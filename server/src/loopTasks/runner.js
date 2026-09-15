@@ -137,8 +137,14 @@ async function tick({ log = console } = {}) {
             .where(and(eq(schema.loopTaskRuns.taskId, task.id), eq(schema.loopTaskRuns.status, 'running')))
             .limit(1);
         if (active.length > 0) {
+            // 推进 next_run_at，避免 run 卡住时每个 tick 重复 due 刷日志。
+            // 等 run 终态（或被僵尸回收）后，下一个周期再正常触发。
+            let nextAt = now + 60 * 60_000; // 解析失败兜底：1h 后重试
+            try {
+                nextAt = nextRunForTask(task, new Date(now));
+            } catch { /* 保持兜底 */ }
             await db.update(schema.loopTasks)
-                .set({ lastRunAt: now, updatedAt: now })
+                .set({ nextRunAt: nextAt, lastRunAt: now, updatedAt: now })
                 .where(eq(schema.loopTasks.id, task.id));
             log.warn?.(`[loop-task-runner] task "${task.title}" skipped: previous run still active`);
             continue;

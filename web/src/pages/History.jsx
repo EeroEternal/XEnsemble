@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Search, RotateCcw, Bot, Folder, Clock, FileText, ChevronLeft, ChevronRight,
-  ChevronDown, Lightbulb, User, RefreshCw, Loader2, X, ChevronsDown, Wrench, Sparkles, Trash2,
+  ChevronDown, Lightbulb, User, RefreshCw, Loader2, X, ChevronsDown, Wrench, Sparkles, Trash2, Download,
 } from 'lucide-react';
 import { apiFetch, getAccessToken } from '../lib/api';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
@@ -540,6 +540,30 @@ export default function History({ agents, projects, active = true, className = '
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
+  // 0029: 行内 JSONL 导出（同一时刻只允许一个导出进行中）
+  const [exportingId, setExportingId] = useState(null);
+
+  const handleExportTrajectory = useCallback(async (sessionId) => {
+    if (exportingId) return;
+    setExportingId(sessionId);
+    try {
+      const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/trajectory/export`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `trajectory-${sessionId}.jsonl`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      showToast('error', t('sessions:trajectory.load_failed', { defaultValue: 'Failed to load trajectory' }));
+    } finally {
+      setExportingId(null);
+    }
+  }, [exportingId, showToast, t]);
   const requestIdRef = useRef(0);
 
   // Debounce title search (300ms).
@@ -772,6 +796,20 @@ export default function History({ agents, projects, active = true, className = '
                       </div>
                       <ChevronRight className="h-4 w-4 text-zinc-400" />
                     </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleExportTrajectory(s.id); }}
+                    disabled={exportingId != null}
+                    title={t('sessions:trajectory.export_jsonl', { defaultValue: 'Export JSONL' })}
+                    aria-label={t('sessions:trajectory.export_jsonl', { defaultValue: 'Export JSONL' })}
+                    className={`mr-1 shrink-0 rounded-md p-2 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed ${consoleButtonFocusClass}`}
+                  >
+                    {exportingId === s.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
+                    ) : (
+                      <Download className="h-4 w-4" strokeWidth={1.75} />
+                    )}
                   </button>
                   {isExited && (
                     <button

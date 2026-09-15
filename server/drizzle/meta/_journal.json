@@ -204,6 +204,13 @@
       "when": 1789200000000,
       "tag": "0028_llm_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1789380500000,
+      "tag": "0029_session_trajectory",
+      "breakpoints": true
     }
   ]
 }

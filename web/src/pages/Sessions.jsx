@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AgentConsole from '../components/AgentConsole';
 import ChatView from '../components/chat/ChatView';
-import { loadViewPref, saveViewPref, subscribeViewPref } from '../lib/viewPrefs';
+import TrajectoryViewer from '../components/trajectory/TrajectoryViewer';
+import { loadViewPref, subscribeViewPref } from '../lib/viewPrefs';
 import WorkspaceShell from '../components/WorkspaceShell';
 import WorkspacePanel from '../components/WorkspacePanel';
 import RepoImportDialog from '../components/git/RepoImportDialog';
@@ -28,6 +29,7 @@ import DeployPanel from '../components/DeployPanel';
 import {
   TerminalSquare,
   MessagesSquare,
+  Route,
   Play,
   RotateCw,
   Settings2,
@@ -57,6 +59,7 @@ import {
   consoleStructuredDialogFooterClass,
   consoleStructuredDialogBodyClass,
   consoleIconButtonClass,
+  consoleButtonFocusClass,
   bgCanvas,
   textPrimary,
   textSecondary,
@@ -69,6 +72,7 @@ import {
   hoverTextPrimary,
 } from '../lib/consoleTokens';
 import { pathParent, pathJoin } from '../lib/workspaceFileTree';
+import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
 
 const DEFAULT_AGENT_ID = 'kimi-code';
@@ -130,6 +134,9 @@ export default React.forwardRef(function Sessions({
   const [viewMode, setViewMode] = useState(() => loadViewPref());
   // 当用户在偏好设置里切换对话风格时，无需刷新页面即可让工作空间立即生效。
   useEffect(() => subscribeViewPref(() => setViewMode(loadViewPref())), []);
+  // 0029: 会话级 Trajectory 视图开关（临时切换，不写入全局偏好）。
+  const [trajOpen, setTrajOpen] = useState(false);
+  useEffect(() => { setTrajOpen(false); }, [activeSession?.sessionId]);
   const [panelWidth, setPanelWidth] = useState(() => {
     const maxW = typeof window !== 'undefined' ? Math.max(720, window.innerWidth - 240) : 800;
     return Math.min(Math.floor(maxW / 2), maxW);
@@ -1462,7 +1469,35 @@ export default React.forwardRef(function Sessions({
           <>
           {topbarEl && createPortal(
             <>
-              <div className="flex items-center min-w-0 justify-center">
+              <div className="flex items-center min-w-0 justify-center gap-2">
+                {activeSession && !sessionPending && !sessionFailed && (
+                  <div className="flex rounded-md bg-zinc-100 p-0.5 gap-0.5 shrink-0" role="tablist" aria-label={t('sessions:trajectory.view_switch_aria', { defaultValue: 'Agent view' })}>
+                    {[
+                      { v: 'chat', icon: MessagesSquare, label: t('sessions:trajectory.view_chat', { defaultValue: 'Chat' }) },
+                      { v: 'trajectory', icon: Route, label: t('sessions:trajectory.view_trajectory', { defaultValue: 'Trajectory' }) },
+                    ].map(({ v, icon: Icon, label }) => {
+                      const active = v === 'trajectory' ? trajOpen : !trajOpen;
+                      return (
+                        <button
+                          key={v}
+                          type="button"
+                          role="tab"
+                          aria-selected={active}
+                          title={label}
+                          onClick={() => setTrajOpen(v === 'trajectory')}
+                          className={cn(
+                            'h-6 px-2.5 rounded flex items-center gap-1.5 text-[11px] font-medium',
+                            consoleButtonFocusClass,
+                            active ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-800',
+                          )}
+                        >
+                          <Icon className="w-3.5 h-3.5" strokeWidth={1.75} />
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 {activeSession?.projectId && activeProject?.repoProvider && GIT_REPO_PROVIDERS.has(activeProject.repoProvider) && (
                   <BranchSwitcher projectId={activeSession.projectId} project={activeProject} git={gitChanges} disabled />
                 )}
@@ -1555,7 +1590,13 @@ export default React.forwardRef(function Sessions({
             ) : (
 <div ref={panelRowRef} className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden">
               <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                {viewMode === 'chat' ? (
+                {trajOpen ? (
+                  <TrajectoryViewer
+                    key={activeSession.sessionId}
+                    sessionId={activeSession.sessionId}
+                    live={sessionAlive}
+                  />
+                ) : viewMode === 'chat' ? (
                   <ChatView
                     key={activeSession.sessionId}
                     sessionId={activeSession.sessionId}
