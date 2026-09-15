@@ -120,6 +120,6 @@ BYOK 模式不变：用户 Vault → spawn env，不经过 `/api/v1/llm`。仅 G
 **TEMPORARY**——为分析各 agent 组装后的提示词（system prompt / messages 顺序 / 上下文增长）而加，网关消息归一化功能上线后整体移除。默认 **all**（全量采集，零配置生效——部署链路不透传新增环境变量，开关语义落在代码默认值上）。磁盘由总量配额（2GB）+ 保留期（7 天）+ 单请求上限（8MB）兜底；设 `LLM_CAPTURE_MODE=off` 关闭。
 
 - 接入点：`proxy.js` 转发前、opencode alias 改写之前，捕获 agent 原始请求体字节
-- 布局：`$LLM_CAPTURE_DIR/<日期>/<agent>/<sessionId>/t<turn>_<时间>.json`（pretty JSON，meta + 原始 body）
-- 开关与磁盘保护见 `.env.example` 的 `LLM_CAPTURE_*` 段：采样模式、单请求上限、总量配额（删最旧日期目录，当天不删）、保留期清理、ENOSPC 自动停采
+- 布局与格式：`$LLM_CAPTURE_DIR/<agent>/<sessionId>.json`，内容 `{"agent": "...", "messages": [<请求1完整报文>, ...]}`——每会话一个文件，messages 顺序即请求时序，元素为 agent 发给 LLM 的完整请求 JSON（含内置 system prompt）
+- 开关与磁盘保护见 `.env.example` 的 `LLM_CAPTURE_*` 段：采样模式、单请求上限、总量配额（按文件 mtime 从最旧删除，活跃文件跳过）、保留期清理、ENOSPC 自动停采
 - 下线：关 env → 删 `$LLM_CAPTURE_DIR` → 删 `promptCapture.js` 与 proxy.js 接入行

@@ -1,31 +1,34 @@
 /**
  * TEMPORARY: LLM 原始请求采集（prompt capture）。
  *
- * 把 agent 组装后发到网关的完整请求体（内置 system prompt + 全量 messages +
- * tools + 参数）落盘为 pretty JSON，供人工对比各 agent 的提示词组装方式，
- * 为网关侧消息归一化 / 上下文裁剪设计提供输入。网关消息处理功能上线后本
- * 模块整体移除。
+ * 每个会话一个 JSON 文件，累加记录该会话内 agent 发给网关的每一次完整请求
+ * 报文（内置 system prompt + 全量 messages + tools + 参数），供人工对比各
+ * agent 的提示词组装方式，为网关侧消息归一化 / 上下文裁剪设计提供输入。
+ * 文件布局与格式：
+ *
+ *   $LLM_CAPTURE_DIR/<agent>/<sessionId>.json
+ *   {
+ *     "agent": "opencode",
+ *     "messages": [ <请求1完整报文>, <请求2完整报文>, ... ]
+ *   }
+ *
+ * messages 数组顺序即请求时序；元素为请求体原始 JSON（超限 / 解析失败时为
+ * 标记对象，不落原始 body）。网关消息处理功能上线后本模块整体移除。
  *
  * 默认开启（LLM_CAPTURE_MODE 未设置时 = all），零配置生效——部署链路
  * （CI 固定变量清单 / systemd EnvironmentFile 仅首装复制）不会透传新增
- * 环境变量，因此开关语义必须落在代码默认值上。磁盘由采样上限 + 总量配额
- * + 保留期兜底；显式设 LLM_CAPTURE_MODE=off 关闭。
+ * 环境变量，因此开关语义必须落在代码默认值上。显式设 off 关闭。
+ *
+ * 磁盘保护：
+ *   - 采样模式：all（默认，全量请求）/ turns（每会话前 N 个）/ first / off
+ *   - 单请求上限 LLM_CAPTURE_MAX_BYTES：超限只记 oversize 标记元素
+ *   - 总量配额 LLM_CAPTURE_MAX_TOTAL_MB：超限按文件 mtime 从最旧删除
+ *     （近 1 分钟内活跃的会话文件跳过）
+ *   - 保留期 LLM_CAPTURE_RETENTION_DAYS：按文件 mtime 清理
+ *   - 写盘 ENOSPC/EDQUOT → 自动停采直到重启，避免失败重试放大故障
  *
  * 接入点：llm/proxy.js proxyLlmRequest —— opencode alias 改写之前调用，
  * request.body 仍是 agent 发来的原始字节。
- *
- * 布局：
- *   $LLM_CAPTURE_DIR/<YYYY-MM-DD>/<agent>/<sessionId>/t<turn>_<HHmmss>_<mmm>.json
- * 文件内 meta 记来源（agent/session/user/project）、协议、模型、turn、原始
- * 字节数与时间；body 为原始请求 JSON。解析失败 / 超过单请求上限时写元数据
- * 桩（parse_error / oversize），不落 body。
- *
- * 磁盘保护：
- *   - 采样模式：all（默认）/ turns（每会话前 N 个）/ first / off
- *   - 单请求上限 LLM_CAPTURE_MAX_BYTES，超限只写桩
- *   - 总量配额 LLM_CAPTURE_MAX_TOTAL_MB，超限从最旧日期目录删除（当天不删）
- *   - 保留期 LLM_CAPTURE_RETENTION_DAYS，启动 + 定时清理过期日期目录
- *   - 写盘 ENOSPC/EDQUOT → 自动停采直到重启，避免失败重试放大故障
  */
 
 const fs = require('fs');
@@ -34,6 +37,7 @@ const path = require('path');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAINTENANCE_MIN_INTERVAL_MS = 60 * 1000;
+const ACTIVE_FILE_GRACE_MS = 60 * 1000;
 
 function numEnv(name, fallback, { min = 1, integer = true } = {}) {
     const raw = process.env[name];
@@ -58,10 +62,14 @@ function readConfig() {
 
 let cfg = readConfig();
 
-// 会话内请求计数（turn 序号）。first/turns 模式窗口过后即删条目，map 不增长；
-// all 模式超软上限时整体清零——文件名含时间戳，序号重复也不会互相覆盖。
+// 采样判定用：会话内请求计数。first/turns 模式窗口过后即删条目，map 不增长；
+// all 模式超软上限时整体清零（仅影响后续采样判定，不影响已落盘内容）。
 const turnCounters = new Map();
 const TURN_COUNTER_SOFT_CAP = 20000;
+
+// 会话文件为读-改-写累加模型，按会话串行化（并发请求不丢元素、不互相覆盖）。
+const sessionChains = new Map();
+const SESSION_CHAIN_SOFT_CAP = 20000;
 
 // 写盘失败自保护：磁盘满后停采，重启才恢复。
 let disabled = false;
@@ -69,16 +77,6 @@ let lastWriteErrorLogAt = 0;
 
 let lastMaintenanceAt = 0;
 let maintenanceRunning = false;
-
-function pad2(n) { return String(n).padStart(2, '0'); }
-
-function localDateParts(ts) {
-    const d = new Date(ts);
-    return {
-        date: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
-        time: `${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}_${String(d.getMilliseconds()).padStart(3, '0')}`,
-    };
-}
 
 function sanitizePathSegment(value, fallback) {
     const s = String(value || '').replace(/[^A-Za-z0-9._-]/g, '_');
@@ -103,58 +101,45 @@ function shouldCapture(turn) {
     return turn <= cfg.turns;
 }
 
-function buildRecord(claims, pathname, bodyBuffer, bodyModel, turn) {
-    const oversize = bodyBuffer.length > cfg.maxBytes;
-    let parsed = null;
-    let parseError = false;
-    if (!oversize) {
-        try {
-            parsed = JSON.parse(bodyBuffer.toString('utf8'));
-        } catch (_) {
-            parseError = true;
-        }
+/** 请求体 → messages 数组元素。原始 JSON；超限 / 非法 JSON 记标记对象。 */
+function buildElement(bodyBuffer) {
+    if (bodyBuffer.length > cfg.maxBytes) {
+        return { oversize: true, body_bytes: bodyBuffer.length };
     }
-    const now = Date.now();
-    const { date, time } = localDateParts(now);
-    const meta = {
-        agent: claims.aid ?? null,
-        session_id: claims.sid ?? null,
-        user_id: claims.uid ?? null,
-        project_id: claims.pid ?? null,
-        protocol: pathname.endsWith('/messages') ? 'anthropic' : 'openai',
-        path: pathname,
-        model: bodyModel ?? claims.model ?? null,
-        turn,
-        body_bytes: bodyBuffer.length,
-        ts: now,
-        captured_at: new Date(now).toISOString(),
-    };
-    const record = { meta };
-    if (oversize) {
-        record.oversize = true;
-        record.body = null;
-    } else if (parseError) {
-        record.parse_error = true;
-        record.body = null;
-    } else {
-        record.body = parsed;
+    try {
+        return JSON.parse(bodyBuffer.toString('utf8'));
+    } catch (_) {
+        return { parse_error: true, body_bytes: bodyBuffer.length };
     }
-    const fileName = `t${String(turn).padStart(3, '0')}_${time}`
-        + `${oversize ? '_oversize' : ''}${parseError ? '_parse_error' : ''}.json`;
-    const relPath = path.join(
-        date,
-        sanitizePathSegment(meta.agent, 'unknown'),
-        sanitizePathSegment(meta.session_id, 'unknown'),
-        fileName,
-    );
-    return { relPath, record };
 }
 
 async function writeAtomic(absPath, content) {
     await fsp.mkdir(path.dirname(absPath), { recursive: true });
-    const tmp = `${absPath}.tmp`;
+    const tmp = `${absPath}.${process.pid}.tmp`;
     await fsp.writeFile(tmp, content);
     await fsp.rename(tmp, absPath);
+}
+
+/**
+ * 读-改-写累加会话文件。首次触碰从磁盘恢复（进程重启后同一会话继续追加
+ * 而不是覆盖）；文件缺失 / 损坏时从空记录开始。
+ */
+async function appendToSessionFile(claims, element) {
+    const abs = path.join(
+        cfg.dir,
+        sanitizePathSegment(claims.aid, 'unknown'),
+        `${sanitizePathSegment(claims.sid, 'unknown')}.json`,
+    );
+    let record = { agent: claims.aid ?? null, messages: [] };
+    try {
+        const parsed = JSON.parse(await fsp.readFile(abs, 'utf8'));
+        if (parsed && typeof parsed === 'object' && Array.isArray(parsed.messages)) {
+            record.agent = parsed.agent ?? record.agent;
+            record.messages = parsed.messages;
+        }
+    } catch (_) { /* 首次采集或文件损坏 → 从空开始 */ }
+    record.messages.push(element);
+    await writeAtomic(abs, JSON.stringify(record, null, 2));
 }
 
 function onWriteError(err) {
@@ -172,54 +157,49 @@ function onWriteError(err) {
     }
 }
 
-async function dirSize(dir) {
-    let total = 0;
-    const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
-    for (const e of entries) {
-        const p = path.join(dir, e.name);
-        if (e.isDirectory()) {
-            total += await dirSize(p);
-        } else if (e.isFile()) {
-            const st = await fsp.stat(p).catch(() => null);
-            total += st?.size ?? 0;
+async function listCaptureFiles() {
+    const files = [];
+    const agentDirs = await fsp.readdir(cfg.dir, { withFileTypes: true }).catch(() => []);
+    for (const d of agentDirs) {
+        if (!d.isDirectory()) continue;
+        const agentDir = path.join(cfg.dir, d.name);
+        const entries = await fsp.readdir(agentDir, { withFileTypes: true }).catch(() => []);
+        for (const f of entries) {
+            if (!f.isFile() || f.name.endsWith('.tmp')) continue;
+            const st = await fsp.stat(path.join(agentDir, f.name)).catch(() => null);
+            if (st) files.push({ path: path.join(agentDir, f.name), mtime: st.mtimeMs, size: st.size });
         }
     }
-    return total;
+    return files;
 }
 
 /**
- * 保留期 + 总量配额清理。按日期目录整体删除（最旧先删），当天目录永不删。
- * 目录名即日期（YYYY-MM-DD），字典序比较即时间比较。
+ * 保留期 + 总量配额清理。文件粒度按 mtime 判新旧；配额删除时跳过活跃
+ * （近 ACTIVE_FILE_GRACE_MS 内修改过）的会话文件。
  */
 async function runMaintenance() {
-    const dateDirs = (await fsp.readdir(cfg.dir, { withFileTypes: true }).catch(() => []))
-        .filter((e) => e.isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(e.name))
-        .map((e) => e.name)
-        .sort();
-    if (dateDirs.length === 0) return;
+    const files = await listCaptureFiles();
+    if (files.length === 0) return;
     const now = Date.now();
 
     if (cfg.retentionDays > 0) {
-        const cutoff = localDateParts(now - cfg.retentionDays * DAY_MS).date;
-        for (const d of dateDirs) {
-            if (d < cutoff) await fsp.rm(path.join(cfg.dir, d), { recursive: true, force: true });
+        const cutoff = now - cfg.retentionDays * DAY_MS;
+        for (const f of files) {
+            if (f.mtime < cutoff) await fsp.rm(f.path, { force: true });
         }
     }
 
     if (cfg.maxTotalMB > 0) {
-        const today = localDateParts(now).date;
         const quotaBytes = cfg.maxTotalMB * 1024 * 1024;
-        let total = 0;
-        const sizes = [];
-        for (const d of dateDirs) {
-            const s = await dirSize(path.join(cfg.dir, d));
-            sizes.push([d, s]);
-            total += s;
-        }
-        for (const [d, s] of sizes) {
-            if (total <= quotaBytes || d === today) break;
-            await fsp.rm(path.join(cfg.dir, d), { recursive: true, force: true });
-            total -= s;
+        let total = files.reduce((s, f) => s + f.size, 0);
+        if (total > quotaBytes) {
+            const oldest = files.slice().sort((a, b) => a.mtime - b.mtime);
+            for (const f of oldest) {
+                if (total <= quotaBytes) break;
+                if (now - f.mtime < ACTIVE_FILE_GRACE_MS) continue;
+                await fsp.rm(f.path, { force: true });
+                total -= f.size;
+            }
         }
     }
 }
@@ -236,29 +216,25 @@ function scheduleMaintenance() {
 }
 
 /**
- * 采集一次请求。turn 序号与采样判定同步完成（保证按调用顺序编号），磁盘
- * 写入 fire-and-forget，任何失败不影响转发热路径。返回写入 promise（测试
- * 用），未采集时返回 undefined。
+ * 采集一次请求。turn 序号与采样判定同步完成（保证按调用顺序编号），同一
+ * 会话的文件追加按链串行化，磁盘写入失败不影响转发热路径。返回写入
+ * promise（测试用），未采集时返回 undefined。
  *
- * @param {{sid:string, uid?:string, pid?:string, aid?:string, model?:string}} claims
- * @param {string} upstreamPath proxy stripLlmPrefix 后的路径（可含 query）
- * @param {Buffer} bodyBuffer agent 原始请求体
- * @param {string|null} bodyModel 请求体中的 model（proxy 已解析）
+ * @param {{sid:string, uid?:string, pid?:string, aid?:string}} claims
+ * @param {Buffer} bodyBuffer agent 原始请求体（完整报文）
  */
-function capture(claims, upstreamPath, bodyBuffer, bodyModel) {
+function capture(claims, bodyBuffer) {
     if (!cfg.enabled || disabled) return undefined;
     if (!claims?.sid || !Buffer.isBuffer(bodyBuffer) || bodyBuffer.length === 0) return undefined;
     const turn = nextTurn(String(claims.sid));
     if (!shouldCapture(turn)) return undefined;
-    const { relPath, record } = buildRecord(
-        claims,
-        String(upstreamPath || '/').split('?')[0],
-        bodyBuffer,
-        bodyModel ?? null,
-        turn,
-    );
-    const write = writeAtomic(path.join(cfg.dir, relPath), JSON.stringify(record, null, 2))
-        .catch(onWriteError);
+    const element = buildElement(bodyBuffer);
+    const sid = String(claims.sid);
+    const prev = sessionChains.get(sid) || Promise.resolve();
+    const write = prev.catch(() => {}).then(() => appendToSessionFile(claims, element));
+    sessionChains.set(sid, write.catch(() => { }));
+    if (sessionChains.size > SESSION_CHAIN_SOFT_CAP) sessionChains.clear();
+    write.catch(onWriteError);
     scheduleMaintenance();
     return write;
 }
@@ -273,6 +249,7 @@ if (cfg.enabled) {
 function reloadForTest() {
     cfg = readConfig();
     turnCounters.clear();
+    sessionChains.clear();
     disabled = false;
     lastWriteErrorLogAt = 0;
     lastMaintenanceAt = 0;

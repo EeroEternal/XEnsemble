@@ -829,7 +829,7 @@ async function proxyLlmRequest(request, reply) {
     // below mutates it. On by default (LLM_CAPTURE_MODE=all, disk-quota
     // guarded) — see .env.example LLM_CAPTURE_* to tune or disable.
     if (isChatPath) {
-        promptCapture.capture(claims, path, request.body, bodyModel);
+        promptCapture.capture(claims, request.body);
     }
     // opencode 1.18.x /model picker re-splits the candidate id on `/` (see
     // agentModelAlias.js), so we hand it a no-`/`/no-`:` alias in its config
