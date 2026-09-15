@@ -10,6 +10,7 @@ import { extractSkillFromSession } from '../../lib/skillsApi';
 import { useToast } from '../Toast';
 import { consoleButtonFocusClass } from '../../lib/consoleTokens';
 import { cn } from '../../lib/utils';
+import MarkdownView from '../Markdown';
 
 /**
  * TrajectoryViewer (0029) — 全量执行轨迹查看器（DeepSeek harness 风格，明暗双主题）。
@@ -749,7 +750,68 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
 
 // ── 右侧详情 ──────────────────────────────────────────────
 
-function DetailPanel({ entry, round = 0 }) {
+// overview 折叠 section：标题可点击跳转到对应 tab，正文给缩略预览。
+function OverviewSection({ label, onOpen, children }) {
+  return (
+    <section>
+      <button
+        type="button"
+        onClick={onOpen}
+        className={cn('flex items-center gap-1 text-[11px] font-semibold tracking-wider uppercase mb-1.5', T3, 'hover:text-zinc-700 dark:hover:text-zinc-200', consoleButtonFocusClass)}
+      >
+        <span>{label}</span>
+        <span className="text-zinc-400">→</span>
+      </button>
+      <div className="min-w-0">{children}</div>
+    </section>
+  );
+}
+
+// 可折叠 JSON 树：工具参数/结果按层级展开（对齐 DeepSeek harness JsonTree）。
+function JsonTree({ value, name = null }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const isObj = value !== null && typeof value === 'object';
+  if (!isObj) {
+    const isStr = typeof value === 'string';
+    const isNum = typeof value === 'number';
+    const isBool = typeof value === 'boolean';
+    const isNull = value === null;
+    const color = isStr ? 'text-emerald-700 dark:text-emerald-300'
+      : isNum ? 'text-sky-700 dark:text-sky-300'
+        : isBool ? 'text-amber-700 dark:text-amber-300'
+          : isNull ? 'text-zinc-400' : 'text-zinc-700 dark:text-zinc-200';
+    return (
+      <div className="pl-5 font-mono text-[11.5px] leading-relaxed break-all">
+        {name !== null && <span className="text-zinc-500 dark:text-zinc-400">{name}<span className="text-zinc-400">: </span></span>}
+        <span className={color}>{isStr ? `"${value}"` : String(value)}</span>
+      </div>
+    );
+  }
+  const isArr = Array.isArray(value);
+  const pairs = isArr ? value.map((v, i) => [String(i), v]) : Object.entries(value);
+  return (
+    <div className="font-mono text-[11.5px] leading-relaxed">
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className={cn('flex items-center gap-1 text-left hover:text-zinc-900 dark:hover:text-zinc-100', consoleButtonFocusClass)}
+      >
+        <span className="w-3 shrink-0 text-zinc-400">{collapsed ? '▸' : '▾'}</span>
+        {name !== null && <span className="text-zinc-600 dark:text-zinc-300">{name}<span className="text-zinc-400">: </span></span>}
+        <span className="text-zinc-400">{isArr ? '[' : '{'}</span>
+        {collapsed && <span className="text-zinc-400">…{isArr ? `] ${pairs.length}` : `} ${pairs.length}`}</span>}
+      </button>
+      {!collapsed && (
+        <>
+          {pairs.map(([k, v]) => <JsonTree key={k} value={v} name={k} />)}
+          <div className="text-zinc-400">{isArr ? ']' : '}'}</div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
   const { t } = useTranslation('sessions');
   const [tab, setTab] = useState('overview');
   useEffect(() => { setTab('overview'); }, [entry?.id]);
@@ -762,30 +824,98 @@ function DetailPanel({ entry, round = 0 }) {
   const raw = entry.name != null
     ? { name: entry.name, input: entry.payload?.input ?? entry.payload, step: { seq: step.seq, model: step.model, status: step.status, latency_ms: step.latencyMs } }
     : entry.payload;
-  // 预览页：工具参数美化，其余全量文本
-  const fullPreview = entry.kind === 'tool'
-    ? (() => { try { return JSON.stringify(JSON.parse(entry.text), null, 2); } catch { return entry.text; } })()
-    : entry.text;
   const srcLabel = entry.src === 'resp' ? t('trajectory.src_response') : t('trajectory.src_request');
 
-  const tabs = [
-    ['overview', t('trajectory.tab_overview')],
-    ['preview', t('trajectory.tab_preview')],
-    ['raw', t('trajectory.tab_raw')],
-    ['source', t('trajectory.tab_source')],
-  ];
+  // 层级导航：tool 的父消息（同一次调用里发起它的 assistant/thinking）
+  const parentMessage = entry.kind === 'tool'
+    ? entries.find((e) => e.id !== entry.id && e.stepSeq === entry.stepSeq && (e.kind === 'assistant' || e.kind === 'thinking')) || null
+    : null;
+
+  // assistant/user 消息按 markdown 渲染；context/thinking 保留纯文本
+  const isMarkdown = entry.kind === 'assistant' || entry.kind === 'user';
+
+  // 工具调用：参数（tool_use.input）与结果（tool_result/tool.content）
+  const toolInput = (() => {
+    const p = entry.payload;
+    if (p && p.input != null) return p.input;
+    try { return JSON.parse(entry.text); } catch { return null; }
+  })();
+  const toolOutput = (() => {
+    const p = entry.payload;
+    if (p && p.content != null) {
+      if (typeof p.content === 'string') { try { return JSON.parse(p.content); } catch { return p.content; } }
+      return p.content;
+    }
+    return null;
+  })();
+
+  // 动态 tab：tool 有 参数/结果，其余消息走 预览/原始
+  const tabs = entry.kind === 'tool'
+    ? [
+        ['overview', t('trajectory.tab_overview')],
+        ['input', t('trajectory.tab_input', { defaultValue: '参数' })],
+        ['output', t('trajectory.tab_output', { defaultValue: '结果' })],
+        ['raw', t('trajectory.tab_raw')],
+        ['source', t('trajectory.tab_source')],
+      ]
+    : [
+        ['overview', t('trajectory.tab_overview')],
+        ['preview', t('trajectory.tab_preview')],
+        ['raw', t('trajectory.tab_raw')],
+      ];
+
+  const renderedBody = (previewMode) => {
+    if (isMarkdown) {
+      return (
+        <div className={cn('text-[13px]', previewMode && 'max-h-56 overflow-hidden relative')}>
+          <MarkdownView>{entry.text}</MarkdownView>
+        </div>
+      );
+    }
+    return (
+      <pre className={cn('font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap break-words', entry.kind === 'thinking' ? 'italic text-zinc-500' : T1)}>
+        {entry.text || '—'}
+      </pre>
+    );
+  };
+
+  const renderOverviewSections = () => {
+    if (entry.kind === 'tool') {
+      return (
+        <div className="space-y-3">
+          <OverviewSection label={t('trajectory.tab_input', { defaultValue: '参数' })} onOpen={() => setTab('input')}>
+            {toolInput != null
+              ? <JsonTree value={toolInput} />
+              : <p className="text-xs text-zinc-400">{t('trajectory.detail_empty')}</p>}
+          </OverviewSection>
+          {toolOutput != null && (
+            <OverviewSection label={t('trajectory.tab_output', { defaultValue: '结果' })} onOpen={() => setTab('output')}>
+              {typeof toolOutput === 'object'
+                ? <JsonTree value={toolOutput} />
+                : <pre className="font-mono text-[11px] text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap break-words max-h-40 overflow-hidden">{toolOutput}</pre>}
+            </OverviewSection>
+          )}
+        </div>
+      );
+    }
+    return (
+      <OverviewSection label={t('trajectory.tab_preview')} onOpen={() => setTab('preview')}>
+        {renderedBody(true)}
+      </OverviewSection>
+    );
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* 头部：类型 + 所属轮次（DeepSeek 风格「上下文 第 1 轮 · 消息」） */}
+      {/* 头部：类型 + 所属轮次 */}
       <div className={cn('shrink-0 px-4 pt-3 flex items-center gap-2')}>
         <span className={cn('inline-flex items-center gap-1.5 h-5 px-2 rounded-full text-[10px] font-medium border', style.badge)}>
           {entry.label}
         </span>
         {round > 0 && <span className={cn('text-[11px]', T3)}>{t('trajectory.round_label', { n: round })}</span>}
-        <span className={cn('text-[11px]', T3)}>· {t('trajectory.msg_kind')}</span>
+        {entry.kind === 'tool' && entry.name && <span className={cn('text-[11px] font-mono', T3)}>{entry.name}</span>}
       </div>
-      <div className={cn('h-10 shrink-0 flex items-center gap-1 px-3', BORDER)}>
+      <div className={cn('h-10 shrink-0 flex items-center gap-1 px-3 border-b', BORDER)}>
         {tabs.map(([v, label]) => (
           <button
             key={v}
@@ -821,22 +951,32 @@ function DetailPanel({ entry, round = 0 }) {
             {step.error && (
               <div className="rounded-md bg-red-50 border border-red-200 dark:bg-red-500/10 dark:border-red-500/30 p-2.5 font-mono text-[11px] text-red-600 dark:text-red-300 whitespace-pre-wrap break-words">{step.error}</div>
             )}
-            <div>
-              <div className={cn('text-[11px] font-semibold tracking-wider mb-1.5', T3)}>{t('trajectory.field_preview')}</div>
-              {entry.kind === 'tool' ? (
-                <pre className={cn('font-mono text-[11.5px] leading-relaxed rounded-md p-2.5 overflow-x-auto whitespace-pre-wrap break-words border', CARD, 'text-zinc-800', BORDER)}>{preview(fullPreview, 600)}</pre>
-              ) : (
-                <p className={cn('text-[13px] leading-relaxed whitespace-pre-wrap break-words', entry.kind === 'thinking' ? 'italic text-zinc-500' : T1)}>{preview(entry.text, 600) || '—'}</p>
-              )}
-            </div>
+            {parentMessage && (
+              <button
+                type="button"
+                onClick={() => onNavigate?.(parentMessage.id)}
+                className={cn('flex items-center gap-1.5 text-[11px] text-left', T2, 'hover:text-zinc-900 dark:hover:text-zinc-100', consoleButtonFocusClass)}
+              >
+                <span>{t('trajectory.from_assistant', { defaultValue: '来自助手消息' })}</span>
+                <span className="text-zinc-400">·</span>
+                <span className="truncate max-w-[220px]">{preview(parentMessage.text, 40)}</span>
+              </button>
+            )}
+            {renderOverviewSections()}
           </div>
         )}
-        {tab === 'preview' && (
-          entry.kind === 'tool' ? (
-            <pre className={cn('font-mono text-[11.5px] leading-relaxed rounded-md p-3 overflow-auto whitespace-pre-wrap break-words border', CARD, 'text-zinc-800', BORDER)}>{fullPreview}</pre>
-          ) : (
-            <p className={cn('text-[13px] leading-relaxed whitespace-pre-wrap break-words', entry.kind === 'thinking' ? 'italic text-zinc-500' : T1)}>{entry.text || '—'}</p>
-          )
+        {tab === 'preview' && renderedBody(false)}
+        {tab === 'input' && (
+          toolInput != null
+            ? <JsonTree value={toolInput} />
+            : <p className="text-xs text-zinc-400">{t('trajectory.detail_empty')}</p>
+        )}
+        {tab === 'output' && (
+          toolOutput != null
+            ? (typeof toolOutput === 'object'
+                ? <JsonTree value={toolOutput} />
+                : <pre className="font-mono text-[11.5px] text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap break-words">{toolOutput}</pre>)
+            : <p className="text-xs text-zinc-400">{t('trajectory.detail_empty')}</p>
         )}
         {tab === 'raw' && (
           <pre className={cn('font-mono text-[11.5px] leading-relaxed rounded-md p-3 overflow-auto whitespace-pre border', 'bg-zinc-100 text-zinc-800 border-zinc-200')}>{JSON.stringify(raw, null, 2)}</pre>
@@ -1303,7 +1443,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
 
         {/* 右侧详情面板 */}
         <aside className={cn('w-[400px] shrink-0 border-l flex flex-col min-h-0', CARD, BORDER)}>
-          <DetailPanel entry={selected} round={selected ? (roundByEntry.get(selected.id) || 0) : 0} />
+          <DetailPanel entry={selected} round={selected ? (roundByEntry.get(selected.id) || 0) : 0} entries={entries} onNavigate={selectEntry} />
         </aside>
       </div>
     </div>
