@@ -1469,35 +1469,7 @@ export default React.forwardRef(function Sessions({
           <>
           {topbarEl && createPortal(
             <>
-              <div className="flex items-center min-w-0 justify-center gap-2">
-                {activeSession && !sessionPending && !sessionFailed && (
-                  <div className="flex rounded-md bg-zinc-100 p-0.5 gap-0.5 shrink-0" role="tablist" aria-label={t('sessions:trajectory.view_switch_aria', { defaultValue: 'Agent view' })}>
-                    {[
-                      { v: 'chat', icon: MessagesSquare, label: t('sessions:trajectory.view_chat', { defaultValue: 'Chat' }) },
-                      { v: 'trajectory', icon: Route, label: t('sessions:trajectory.view_trajectory', { defaultValue: 'Trajectory' }) },
-                    ].map(({ v, icon: Icon, label }) => {
-                      const active = v === 'trajectory' ? trajOpen : !trajOpen;
-                      return (
-                        <button
-                          key={v}
-                          type="button"
-                          role="tab"
-                          aria-selected={active}
-                          title={label}
-                          onClick={() => setTrajOpen(v === 'trajectory')}
-                          className={cn(
-                            'h-6 px-2.5 rounded flex items-center gap-1.5 text-[11px] font-medium',
-                            consoleButtonFocusClass,
-                            active ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-800',
-                          )}
-                        >
-                          <Icon className="w-3.5 h-3.5" strokeWidth={1.75} />
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+              <div className="flex items-center min-w-0 justify-center">
                 {activeSession?.projectId && activeProject?.repoProvider && GIT_REPO_PROVIDERS.has(activeProject.repoProvider) && (
                   <BranchSwitcher projectId={activeSession.projectId} project={activeProject} git={gitChanges} disabled />
                 )}
@@ -1590,6 +1562,34 @@ export default React.forwardRef(function Sessions({
             ) : (
 <div ref={panelRowRef} className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden">
               <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                {activeSession && !sessionPending && !sessionFailed && (
+                  <div className={cn('shrink-0 h-9 flex items-stretch gap-1 px-2 border-b', 'bg-zinc-50 dark:bg-zinc-950', 'border-zinc-200 dark:border-zinc-800')} role="tablist" aria-label={t('sessions:trajectory.view_switch_aria', { defaultValue: 'Agent view' })}>
+                    {[
+                      { v: 'chat', label: t('sessions:trajectory.view_chat', { defaultValue: 'Chat' }) },
+                      { v: 'trajectory', label: t('sessions:trajectory.view_trajectory', { defaultValue: 'Trajectory' }) },
+                    ].map(({ v, label }) => {
+                      const active = v === 'trajectory' ? trajOpen : !trajOpen;
+                      return (
+                        <button
+                          key={v}
+                          type="button"
+                          role="tab"
+                          aria-selected={active}
+                          onClick={() => setTrajOpen(v === 'trajectory')}
+                          className={cn(
+                            'px-3 text-[13px] border-b-2 -mb-px flex items-center',
+                            consoleButtonFocusClass,
+                            active
+                              ? 'border-zinc-900 dark:border-white text-zinc-900 dark:text-white font-medium'
+                              : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:text-zinc-500 dark:hover:text-zinc-300',
+                          )}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 {trajOpen ? (
                   <TrajectoryViewer
                     key={activeSession.sessionId}

@@ -7,7 +7,6 @@ import {
 import { apiFetch, getAccessToken, getWsUrl } from '../../lib/api';
 import { extractSkillFromSession } from '../../lib/skillsApi';
 import { useToast } from '../Toast';
-import SelectMenu from '../SelectMenu';
 import { consoleButtonFocusClass } from '../../lib/consoleTokens';
 import { cn } from '../../lib/utils';
 
@@ -22,7 +21,8 @@ import { cn } from '../../lib/utils';
 
 const LIMIT = 100;
 const MINIMUM_DRAG_PX = 3;
-const MINIMUM_ZOOM_UNITS = 4;
+const MINIMUM_ZOOM_UNITS = 4;      // sequence 模式最小缩放（4 条记录）
+const MINIMUM_ZOOM_MS = 20;        // duration 模式最小缩放（20ms）
 
 // 明暗双主题表面色
 const SURFACE = 'bg-zinc-50 dark:bg-zinc-950';
@@ -140,6 +140,7 @@ function buildEntries(steps, t) {
   const entries = [];
   let cursor = 0;
   let systemSeen = false;
+  let src = 'req'; // 当前记录来源：'req'=请求上下文 / 'resp'=模型响应
 
   const push = (kind, label, text, payload, step, name) => {
     entries.push({
@@ -150,6 +151,7 @@ function buildEntries(steps, t) {
       stepSeq: step.seq,
       step,
       ts: step.ts,
+      src, // 'req'=请求上下文 / 'resp'=模型响应（来源页展示）
     });
   };
 
@@ -175,6 +177,7 @@ function buildEntries(steps, t) {
     const base = (Number(step.msgCount) || 0) - req.messages.length;
     const msgs = req.messages;
     const errored = step.status === 'error';
+    src = 'req';
 
     for (let i = 0; i < msgs.length; i += 1) {
       if (base + i < cursor) continue;
@@ -215,10 +218,20 @@ function buildEntries(steps, t) {
     if ((Number(step.msgCount) || 0) > cursor) cursor = Number(step.msgCount);
 
     // 该次调用的响应 → 助手文本 + 思考 + 工具调用
+    src = 'resp';
     for (const b of respBlocks(step.response)) {
       if (b.type === 'text' && b.text) push(errored ? 'error' : 'assistant', t('trajectory.role_assistant'), b.text, b, step);
       else if (b.type === 'thinking' && b.thinking) push('thinking', t('trajectory.role_thinking'), b.thinking, b, step);
       else if (b.type === 'tool_use') push('tool', t('trajectory.role_tool'), JSON.stringify(b.input ?? {}), b, step, b.name);
+    }
+  }
+
+  // 每步的 tool_use 数量挂到该步首个助手/思考条目（调用折叠时显示计数）
+  for (const s of steps) {
+    const n = respBlocks(s.response).filter((b) => b && b.type === 'tool_use').length;
+    if (n > 0) {
+      const e = entries.find((en) => en.stepSeq === s.seq && (en.kind === 'assistant' || en.kind === 'thinking'));
+      if (e) e.toolCount = n;
     }
   }
   return entries;
@@ -265,6 +278,70 @@ function buildSequenceTimeline(entries) {
   return { spans, boundaries, start: 0, end: entries.length };
 }
 
+/**
+ * DeepSeek duration 投影：span 按真实时间定位/定宽。
+ * - 输入泳道：user/system/context 为请求时刻的瞬时点
+ * - 模型泳道：每次模型调用 [start, start+latency]
+ * - 工具泳道：tool_use 执行窗口 = 调用结束 → 下一次调用开始（均分）
+ */
+function buildDurationTimeline(entries, steps) {
+  const spans = [];
+  const boundaries = [];
+  if (!steps.length) return { spans, boundaries, start: 0, end: 1 };
+  const t0 = steps[0].ts || 0;
+  let t1 = t0;
+  for (const s of steps) t1 = Math.max(t1, (s.ts || 0) + (s.latencyMs || 0));
+  const span = Math.max(t1 - t0, 1);
+  const pos = (t) => (t - t0) / span * 100;
+
+  const stepMeta = new Map();
+  for (let i = 0; i < steps.length; i += 1) {
+    const s = steps[i];
+    const start = s.ts || t0;
+    const end = start + (s.latencyMs || 0);
+    const nextStart = i + 1 < steps.length ? (steps[i + 1].ts || end) : null;
+    stepMeta.set(s.seq, { start, end, nextStart });
+  }
+
+  const byStep = new Map();
+  for (const e of entries) {
+    if (!byStep.has(e.stepSeq)) byStep.set(e.stepSeq, []);
+    byStep.get(e.stepSeq).push(e);
+  }
+
+  for (const s of steps) {
+    const meta = stepMeta.get(s.seq);
+    const list = byStep.get(s.seq) || [];
+
+    for (const e of list) {
+      if (e.kind === 'user' || e.kind === 'system' || e.kind === 'context') {
+        spans.push({ entryId: e.id, kind: spanKind(e), lane: 0, left: pos(meta.start), width: 0, dur: 0 });
+      }
+    }
+    if (list.some((e) => e.kind === 'user')) boundaries.push(pos(meta.start));
+
+    const modelEntry = list.find((e) => e.kind === 'assistant' || e.kind === 'thinking' || e.kind === 'error');
+    if (modelEntry) {
+      spans.push({
+        entryId: modelEntry.id, kind: s.status === 'error' ? 'error' : 'message',
+        lane: 1, left: pos(meta.start), width: pos(meta.end) - pos(meta.start), dur: meta.end - meta.start,
+      });
+    }
+
+    const calls = list.filter((e) => e.kind === 'tool' && e.name != null);
+    if (calls.length) {
+      const wEnd = meta.nextStart != null ? meta.nextStart : meta.end;
+      const window = Math.max(wEnd - meta.end, 0);
+      const per = window / calls.length;
+      calls.forEach((e, j) => {
+        const left = meta.end + per * j;
+        spans.push({ entryId: e.id, kind: 'tool', lane: 2, left: pos(left), width: pos(left + per) - pos(left), dur: per });
+      });
+    }
+  }
+  return { spans, boundaries, start: t0, end: t1, isMs: true };
+}
+
 function orderedRange(left, right) {
   return left <= right ? { start: left, end: right } : { start: right, end: left };
 }
@@ -279,7 +356,7 @@ function centeredRange(center, width, minimum, maximum) {
   return { start, end: start + w };
 }
 
-function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordFocus }) {
+function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordFocus, minZoom }) {
   const { t } = useTranslation('sessions');
   const [draft, setDraft] = useState(null);
   const [viewport, setViewport] = useState(null);
@@ -289,6 +366,7 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
   const rootRef = useRef(null);
   const trackRef = useRef(null);
   const fullDuration = Math.max(1, model.end - model.start);
+  const effectiveMinZoom = Math.min(minZoom, fullDuration);
 
   const viewportDuration = Math.min(fullDuration, Math.max(1, (viewport?.end ?? 0) - (viewport?.start ?? 0)));
   const domainStart = viewport === null
@@ -296,7 +374,7 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
     : Math.min(Math.max(viewport.start, model.start), model.end - viewportDuration);
   const domainDuration = viewport === null ? fullDuration : viewportDuration;
   const domainRef = useRef(null);
-  domainRef.current = { domainStart, domainDuration, fullDuration, modelStart: model.start, modelEnd: model.end };
+  domainRef.current = { domainStart, domainDuration, fullDuration, modelStart: model.start, modelEnd: model.end, effectiveMinZoom };
 
   // 滚轮缩放（锚点缩放；缩到全域即复位 viewport）
   useEffect(() => {
@@ -311,7 +389,7 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
       const anchorFraction = clampFraction((event.clientX - rect.left) / Math.max(1, rect.width));
       const nextDuration = Math.min(
         d.fullDuration,
-        Math.max(Math.min(MINIMUM_ZOOM_UNITS, d.fullDuration), d.domainDuration * Math.exp(event.deltaY * 0.0015)),
+        Math.max(d.effectiveMinZoom, d.domainDuration * Math.exp(event.deltaY * 0.0015)),
       );
       if (nextDuration >= d.fullDuration * 0.999) {
         setViewport(null);
@@ -558,7 +636,7 @@ function Timeline({ model, selectedId, range, onRangeChange, onSelect, onRecordF
 
 // ── 右侧详情 ──────────────────────────────────────────────
 
-function DetailPanel({ entry }) {
+function DetailPanel({ entry, round = 0 }) {
   const { t } = useTranslation('sessions');
   const [tab, setTab] = useState('overview');
   useEffect(() => { setTab('overview'); }, [entry?.id]);
@@ -571,14 +649,31 @@ function DetailPanel({ entry }) {
   const raw = entry.name != null
     ? { name: entry.name, input: entry.payload?.input ?? entry.payload, step: { seq: step.seq, model: step.model, status: step.status, latency_ms: step.latencyMs } }
     : entry.payload;
+  // 预览页：工具参数美化，其余全量文本
+  const fullPreview = entry.kind === 'tool'
+    ? (() => { try { return JSON.stringify(JSON.parse(entry.text), null, 2); } catch { return entry.text; } })()
+    : entry.text;
+  const srcLabel = entry.src === 'resp' ? t('trajectory.src_response') : t('trajectory.src_request');
+
+  const tabs = [
+    ['overview', t('trajectory.tab_overview')],
+    ['preview', t('trajectory.tab_preview')],
+    ['raw', t('trajectory.tab_raw')],
+    ['source', t('trajectory.tab_source')],
+  ];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className={cn('h-11 shrink-0 border-b flex items-center gap-1 px-3', BORDER)}>
-        {[
-          ['overview', t('trajectory.tab_overview')],
-          ['raw', t('trajectory.tab_raw')],
-        ].map(([v, label]) => (
+      {/* 头部：类型 + 所属轮次（DeepSeek 风格「上下文 第 1 轮 · 消息」） */}
+      <div className={cn('shrink-0 px-4 pt-3 flex items-center gap-2')}>
+        <span className={cn('inline-flex items-center gap-1.5 h-5 px-2 rounded-full text-[10px] font-medium border', style.badge)}>
+          {entry.label}
+        </span>
+        {round > 0 && <span className={cn('text-[11px]', T3)}>{t('trajectory.round_label', { n: round })}</span>}
+        <span className={cn('text-[11px]', T3)}>· {t('trajectory.msg_kind')}</span>
+      </div>
+      <div className={cn('h-10 shrink-0 flex items-center gap-1 px-3', BORDER)}>
+        {tabs.map(([v, label]) => (
           <button
             key={v}
             type="button"
@@ -588,12 +683,9 @@ function DetailPanel({ entry }) {
             {label}
           </button>
         ))}
-        <span className={cn('ml-auto inline-flex items-center gap-1.5 h-5 px-2 rounded-full text-[10px] font-medium border', style.badge)}>
-          {entry.label}
-        </span>
       </div>
       <div className="flex-1 overflow-y-auto p-4">
-        {tab === 'overview' ? (
+        {tab === 'overview' && (
           <div className="space-y-4 text-xs">
             <div className="grid grid-cols-[64px_1fr] gap-x-3 gap-y-2.5">
               <span className={T2}>{t('trajectory.field_type')}</span>
@@ -619,14 +711,52 @@ function DetailPanel({ entry }) {
             <div>
               <div className={cn('text-[11px] font-semibold tracking-wider mb-1.5', T3)}>{t('trajectory.field_preview')}</div>
               {entry.kind === 'tool' ? (
-                <pre className={cn('font-mono text-[11.5px] leading-relaxed rounded-md p-2.5 overflow-x-auto whitespace-pre-wrap break-words border', CARD, 'text-zinc-800 dark:text-zinc-200', BORDER)}>{entry.text}</pre>
+                <pre className={cn('font-mono text-[11.5px] leading-relaxed rounded-md p-2.5 overflow-x-auto whitespace-pre-wrap break-words border', CARD, 'text-zinc-800 dark:text-zinc-200', BORDER)}>{preview(fullPreview, 600)}</pre>
               ) : (
-                <p className={cn('text-[13px] leading-relaxed whitespace-pre-wrap break-words', entry.kind === 'thinking' ? 'italic text-zinc-500 dark:text-zinc-400' : T1)}>{entry.text || '—'}</p>
+                <p className={cn('text-[13px] leading-relaxed whitespace-pre-wrap break-words', entry.kind === 'thinking' ? 'italic text-zinc-500 dark:text-zinc-400' : T1)}>{preview(entry.text, 600) || '—'}</p>
               )}
             </div>
           </div>
-        ) : (
+        )}
+        {tab === 'preview' && (
+          entry.kind === 'tool' ? (
+            <pre className={cn('font-mono text-[11.5px] leading-relaxed rounded-md p-3 overflow-auto whitespace-pre-wrap break-words border', CARD, 'text-zinc-800 dark:text-zinc-200', BORDER)}>{fullPreview}</pre>
+          ) : (
+            <p className={cn('text-[13px] leading-relaxed whitespace-pre-wrap break-words', entry.kind === 'thinking' ? 'italic text-zinc-500 dark:text-zinc-400' : T1)}>{entry.text || '—'}</p>
+          )
+        )}
+        {tab === 'raw' && (
           <pre className={cn('font-mono text-[11.5px] leading-relaxed rounded-md p-3 overflow-auto whitespace-pre border', 'bg-zinc-100 text-zinc-800 border-zinc-200 dark:bg-zinc-900 dark:text-zinc-200 dark:border-zinc-800')}>{JSON.stringify(raw, null, 2)}</pre>
+        )}
+        {tab === 'source' && (
+          <div className="grid grid-cols-[72px_1fr] gap-x-3 gap-y-2.5 text-xs">
+            <span className={T2}>{t('trajectory.field_payload')}</span>
+            <span className={T1}>{srcLabel}</span>
+            <span className={T2}>{t('trajectory.field_call')}</span>
+            <span className={cn(T1, 'font-mono')}>#{step.seq}</span>
+            <span className={T2}>{t('trajectory.field_model')}</span>
+            <span className={cn(T1, 'font-mono')}>{step.model || '—'}</span>
+            <span className={T2}>{t('trajectory.field_agent')}</span>
+            <span className={cn(T1, 'font-mono')}>{step.agentId || '—'}</span>
+            {entry.kind === 'context' && entry.name && (
+              <>
+                <span className={T2}>{t('trajectory.field_tag')}</span>
+                <span className={cn(T1, 'font-mono')}>&lt;{entry.name}&gt;</span>
+              </>
+            )}
+            <span className={T2}>{t('trajectory.field_time')}</span>
+            <span className={cn(T1, 'font-mono')}>{entry.ts ? new Date(entry.ts).toLocaleString() : '—'}</span>
+            <span className={T2}>{t('trajectory.field_status')}</span>
+            <span className={step.status === 'error' ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}>
+              {step.status === 'error' ? t('trajectory.status_error') : t('trajectory.status_ok')}
+            </span>
+            {usage && (
+              <>
+                <span className={T2}>tokens</span>
+                <span className={cn(T1, 'font-mono')}>{usage.prompt_tokens} / {usage.completion_tokens} · {usage.total_tokens}</span>
+              </>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -645,11 +775,15 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   const [error, setError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [range, setRange] = useState(null);
-  const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [exporting, setExporting] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [follow, setFollow] = useState(true);
+  // DeepSeek toolbar 开关：时长投影 / 轮次折叠 / 调用折叠
+  const [durationOn, setDurationOn] = useState(false);
+  const [turnsCollapsed, setTurnsCollapsed] = useState(false);
+  const [groupOverrides, setGroupOverrides] = useState({});
+  const [callsCollapsed, setCallsCollapsed] = useState(false);
   const afterSeqRef = useRef(0);
   const loadingMoreRef = useRef(false);
   const listRef = useRef(null);
@@ -764,28 +898,29 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
 
   const entries = useMemo(() => buildEntries(steps, t), [steps, t]);
   const seqModel = useMemo(() => buildSequenceTimeline(entries), [entries]);
+  const durationModel = useMemo(() => buildDurationTimeline(entries, steps), [entries, steps]);
+  const model = durationOn ? durationModel : seqModel;
 
   const visibleEntries = useMemo(() => {
     const q = query.trim().toLowerCase();
     return entries.filter((e) => {
-      if (filter === 'error' && e.step.status !== 'error') return false;
-      if (filter === 'tool' && !(e.kind === 'tool')) return false;
+      if (callsCollapsed && e.kind === 'tool') return false;
       if (q && !(`${e.text} ${e.name || ''}`.toLowerCase().includes(q))) return false;
       return true;
     });
-  }, [entries, filter, query]);
+  }, [entries, callsCollapsed, query]);
 
-  // 选区聚焦：span 与选区相交的条目保持高亮，其余在列表中变暗
+  // 选区聚焦：span 与选区相交的条目保持高亮，其余在列表中变暗（用当前激活投影）
   const focusIds = useMemo(() => {
     if (range === null) return null;
     const set = new Set();
-    for (const sp of seqModel.spans) {
+    for (const sp of model.spans) {
       if (sp.start <= range.end && sp.end >= range.start) set.add(sp.entryId);
     }
     return set;
-  }, [range, seqModel]);
+  }, [range, model]);
 
-  // 轮次分组：以用户条目为界
+  // 轮次分组：以用户条目为界；轮次可整体折叠（DeepSeek turns 开关）
   const groups = useMemo(() => {
     const out = [];
     let idx = 0;
@@ -800,7 +935,25 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
     return out;
   }, [visibleEntries]);
 
+  const groupExpanded = (round) => groupOverrides[round] ?? !turnsCollapsed;
+  const toggleGroup = (round) => setGroupOverrides((o) => ({ ...o, [round]: !(o[round] ?? !turnsCollapsed) }));
+  const toggleAllGroups = () => {
+    setTurnsCollapsed((c) => !c);
+    setGroupOverrides({});
+  };
+
   const selected = useMemo(() => entries.find((e) => e.id === selectedId) || null, [entries, selectedId]);
+
+  // 选中条目所属轮次（概述页头部展示）
+  const roundByEntry = useMemo(() => {
+    const map = new Map();
+    let idx = 0;
+    for (const e of entries) {
+      if (e.kind === 'user') idx += 1;
+      map.set(e.id, idx);
+    }
+    return map;
+  }, [entries]);
 
   // follow：新条目到达自动选中最后一条
   const lastId = entries.length ? entries[entries.length - 1].id : null;
@@ -857,33 +1010,42 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
 
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', SURFACE, T1)}>
-      {/* 指标栏 */}
+      {/* 指标栏：三个指标即可点击开关（对齐 DeepSeek toolbar） */}
       <div className={cn('shrink-0 border-b px-3 py-2', BORDER)}>
         <div className="flex items-center gap-4">
-          <span className={cn('flex items-center gap-1.5 text-xs', T2)}>
+          <button
+            type="button"
+            aria-pressed={durationOn}
+            title={durationOn ? t('trajectory.use_equal_width') : t('trajectory.use_actual_duration')}
+            onClick={() => setDurationOn((p) => !p)}
+            className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5', consoleButtonFocusClass, durationOn ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100 dark:hover:bg-zinc-900')}
+          >
             <Clock className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-500" strokeWidth={1.75} />
             {t('trajectory.metric_duration')} <b className={cn(T1, 'font-mono')}>{(totalLatency / 1000).toFixed(1)}s</b>
-          </span>
-          <span className={cn('flex items-center gap-1.5 text-xs', T2)}>
+          </button>
+          <button
+            type="button"
+            aria-pressed={turnsCollapsed}
+            title={turnsCollapsed ? t('trajectory.expand_turns') : t('trajectory.collapse_turns')}
+            onClick={toggleAllGroups}
+            className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5', consoleButtonFocusClass, turnsCollapsed ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100 dark:hover:bg-zinc-900')}
+          >
             <Layers className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-500" strokeWidth={1.75} />
             {t('trajectory.metric_rounds')} <b className={cn(T1, 'font-mono')}>{rounds}</b>
-          </span>
-          <span className={cn('flex items-center gap-1.5 text-xs', T2)}>
+            <span className="text-[10px] text-zinc-400">{turnsCollapsed ? '⊞' : '⊟'}</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={callsCollapsed}
+            title={callsCollapsed ? t('trajectory.expand_calls') : t('trajectory.collapse_calls')}
+            onClick={() => setCallsCollapsed((p) => !p)}
+            className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5', consoleButtonFocusClass, callsCollapsed ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100 dark:hover:bg-zinc-900')}
+          >
             <Zap className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-500" strokeWidth={1.75} />
             {t('trajectory.metric_calls')} <b className={cn(T1, 'font-mono')}>{steps.length}</b>
-          </span>
+            <span className="text-[10px] text-zinc-400">{callsCollapsed ? '⊞' : '⊟'}</span>
+          </button>
           <div className="flex-1" />
-          <div className="w-40">
-            <SelectMenu
-              value={filter}
-              onChange={setFilter}
-              options={[
-                { value: 'all', label: t('trajectory.filter_all') },
-                { value: 'error', label: t('trajectory.filter_errors') },
-                { value: 'tool', label: t('trajectory.filter_tools') },
-              ]}
-            />
-          </div>
           <div className={cn('flex items-center gap-1.5 w-44 h-8 px-2 rounded-md border bg-white dark:bg-zinc-900 focus-within:border-zinc-500 dark:focus-within:border-zinc-500', 'border-zinc-300 dark:border-zinc-700')}>
             <Search className="w-3.5 h-3.5 text-zinc-400 shrink-0" strokeWidth={1.75} />
             <input
@@ -916,12 +1078,13 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
 
       {/* 轨迹时间线 */}
       <Timeline
-        model={seqModel}
+        model={model}
         selectedId={selectedId}
         range={range}
         onRangeChange={setRange}
         onSelect={(id) => selectEntry(id)}
         onRecordFocus={(id) => selectEntry(id, { scroll: true })}
+        minZoom={durationOn ? MINIMUM_ZOOM_MS : MINIMUM_ZOOM_UNITS}
       />
 
       {/* 主体：消息级列表 + 详情 */}
@@ -932,15 +1095,25 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
               <Loader2 className="w-5 h-5 text-zinc-400 animate-spin" strokeWidth={1.5} />
             </div>
           )}
-          {groups.map((g, gi) => (
-            <div key={gi}>
-              {g.round > 0 && (
-                <div className={cn('sticky top-0 z-10 flex items-center gap-2 px-3 h-8 backdrop-blur border-b', 'bg-zinc-100/95 dark:bg-zinc-900/95', 'border-zinc-200 dark:border-zinc-800/80')}>
-                  <span className={cn('text-[11px]', T3)}>{t('trajectory.round_label', { n: g.round })}</span>
-                  <span className="text-xs text-sky-700 dark:text-sky-300 truncate min-w-0">{preview(g.title, 60)}</span>
-                </div>
-              )}
-              {g.entries.map((e) => {
+          {groups.map((g, gi) => {
+            const expandable = g.round > 0;
+            const expanded = !expandable || groupExpanded(g.round);
+            return (
+              <div key={gi}>
+                {g.round > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => expandable && toggleGroup(g.round)}
+                    className={cn('sticky top-0 z-10 w-full flex items-center gap-2 px-3 h-8 backdrop-blur border-b text-left', 'bg-zinc-100/95 dark:bg-zinc-900/95', 'border-zinc-200 dark:border-zinc-800/80', consoleButtonFocusClass, expandable && 'cursor-pointer')}
+                  >
+                    <span className={cn('text-[11px]', T3)}>{t('trajectory.round_label', { n: g.round })}</span>
+                    <span className="text-xs text-sky-700 dark:text-sky-300 truncate min-w-0">{preview(g.title, 60)}</span>
+                    {expandable && !expanded && (
+                      <span className={cn('ml-auto text-[10px] shrink-0', T3)}>{t('trajectory.hidden_count', { count: g.entries.length })}</span>
+                    )}
+                  </button>
+                )}
+                {expanded && g.entries.map((e) => {
                 const style = KIND_STYLES[e.kind] || KIND_STYLES.assistant;
                 const Icon = style.icon;
                 const dimmed = range !== null && focusIds !== null && !focusIds.has(e.id);
@@ -968,12 +1141,18 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
                         {preview(e.text, e.kind === 'tool' ? 120 : 200)}
                       </span>
                     </span>
+                    {callsCollapsed && e.toolCount > 0 && (
+                      <span className="shrink-0 inline-flex items-center h-4 px-1.5 rounded bg-violet-100 dark:bg-violet-500/15 text-[10px] text-violet-700 dark:text-violet-300 font-mono">
+                        ⚙ {e.toolCount}
+                      </span>
+                    )}
                     {e.step.status === 'error' && <XCircle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" strokeWidth={2} />}
                   </button>
                 );
               })}
-            </div>
-          ))}
+                </div>
+              );
+            })}
           {hasMore && (
             <button
               type="button"
@@ -995,7 +1174,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
 
         {/* 右侧详情面板 */}
         <aside className={cn('w-[400px] shrink-0 border-l flex flex-col min-h-0', CARD, BORDER)}>
-          <DetailPanel entry={selected} />
+          <DetailPanel entry={selected} round={selected ? (roundByEntry.get(selected.id) || 0) : 0} />
         </aside>
       </div>
     </div>
