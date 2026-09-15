@@ -11,6 +11,8 @@
   "commit_message": "Commit message",
   "push": "Push",
   "pull": "Pull",
+  "sync": "Sync",
+  "sync_title": "Local and remote have diverged (↑{{ahead}} ↓{{behind}}). Rebase local commits onto the remote.",
   "fetch": "Fetch",
   "branch": "Branch",
   "merge": "Merge",

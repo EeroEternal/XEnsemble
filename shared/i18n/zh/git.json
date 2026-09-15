@@ -11,6 +11,8 @@
   "commit_message": "提交信息",
   "push": "推送",
   "pull": "拉取",
+  "sync": "同步",
+  "sync_title": "本地与远端已分叉（↑{{ahead}} ↓{{behind}}）。将本地提交变基到远端。",
   "fetch": "获取",
   "branch": "分支",
   "merge": "Merge",

@@ -198,6 +198,12 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
   const gitUnstagedFiles = gitChanges?.unstagedFiles || [];
   const gitHasChanges = gitStagedFiles.length + gitUnstagedFiles.length > 0;
   const branch = gitChanges?.branch || '';
+  // 分叉态（diverged）：本地有未推送提交、远端也有本地没有的提交。
+  // 典型成因：rebase-merge / FF-merge 后远端重写了源分支（旧提交被 rebase 成新 hash）。
+  // 此时 push 必然被 non-fast-forward 拒绝，主操作应引导为 Sync（pull --rebase）而非 Push。
+  const gitAhead = gitChanges?.ahead || 0;
+  const gitBehind = gitChanges?.behind || 0;
+  const gitIsDiverged = gitAhead > 0 && gitBehind > 0;
   const isLocalGit = !provider || provider === 'none' || provider === 'local_git';
   const conflictFiles = (gitChanges?.conflicts || []).filter((f) => !resolvedPaths.has(f.path));
 
@@ -719,6 +725,22 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                 )}
                 {t('git:commit')}
               </button>
+            ) : gitIsDiverged ? (
+              <button
+                type="button"
+                onClick={handlePull}
+                disabled={pulling || gitChanges?.operation === 'pull'}
+                title={t('git:sync_title', { ahead: gitAhead, behind: gitBehind, defaultValue: `Local and remote have diverged (↑${gitAhead} ↓${gitBehind}). Rebase local commits onto the remote.` })}
+                className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`}
+              >
+                {pulling || gitChanges?.operation === 'pull' ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+                {t('git:sync')}
+                <span className="text-[10px] tabular-nums">↑{gitAhead} ↓{gitBehind}</span>
+              </button>
             ) : gitChanges?.ahead > 0 ? (
               <button
                 type="button"
@@ -833,6 +855,7 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                     const collapsed = collapsedRepos.has(repo.id);
                     const tree = buildTree(repo.files, repo.subPath);
                     const hasFiles = repo.count > 0;
+                    const repoIsDiverged = (repo.ahead || 0) > 0 && (repo.behind || 0) > 0;
                     return (
                       <div key={repo.id} className="border-b border-zinc-200">
                         <div className="flex items-center gap-1.5 px-2 py-1.5 bg-zinc-100/80 sticky top-0 z-10 border-b border-zinc-200">
@@ -875,6 +898,22 @@ export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile
                                   <GitCommit className="h-3.5 w-3.5" />
                                 )}
                                 {t('git:commit')}
+                              </button>
+                            ) : repoIsDiverged ? (
+                              <button
+                                type="button"
+                                onClick={() => pullRepo(repo)}
+                                disabled={pullingRepo === repo.id || gitChanges?.operation === 'pull'}
+                                title={t('git:sync_title', { ahead: repo.ahead, behind: repo.behind, defaultValue: `Local and remote have diverged (↑${repo.ahead} ↓${repo.behind}). Rebase local commits onto the remote.` })}
+                                className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-40 disabled:pointer-events-none ${consoleButtonFocusClass}`}
+                              >
+                                {pullingRepo === repo.id || gitChanges?.operation === 'pull' ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="h-3.5 w-3.5" />
+                                )}
+                                {t('git:sync')}
+                                <span className="text-[10px] tabular-nums">↑{repo.ahead} ↓{repo.behind}</span>
                               </button>
                             ) : repo.ahead > 0 ? (
                               <button
