@@ -27,8 +27,8 @@ function formatTtl(expiresAt) {
     : i18next.t('deploy:preview.minutes', { m });
 }
 
-/** Deployed app preview (start/stop + embed). */
-export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo }) {
+/** Deployed app preview (start/stop + embed). mode='preview' 时详情文案用预览词汇。 */
+export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo, mode = 'deploy', onRestartPreview }) {
   const { t } = useTranslation();
   const preview = usePreview(projectId, true, sessionId);
   const { status, previewUrl, isBusy, resolveEmbedUrl, openPreview } = preview;
@@ -118,8 +118,21 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo 
             title={showDetails ? t('deploy:preview.hide_details') : t('deploy:preview.show_details')}
           >
             {showDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            {t('deploy:preview.details')}
+            {t(mode === 'preview' ? 'deploy:preview.details_preview' : 'deploy:preview.details')}
           </button>
+          {onRestartPreview && (
+            <button
+              type="button"
+              onClick={onRestartPreview}
+              // 蓝描边 = 轻量操作（与顶栏「快速预览」蓝色实心同族、次一档）：改代码后
+              // 重启预览是预览流程的高频动作，放标题栏最右侧触手可及，不必先停再开。
+              className="ml-1 flex items-center gap-1 h-6 px-2 text-[11px] font-medium rounded-md border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:pointer-events-none shrink-0"
+              title={t('deploy:preview.refresh_dev_hint')}
+            >
+              <RotateCw className="w-3 h-3" />
+              {t('deploy:preview.refresh_dev')}
+            </button>
+          )}
         </div>
       )}
 
@@ -169,7 +182,7 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo 
             )}
             {elapsedMs != null && (
               <div>
-                <span className="text-zinc-500">{t('deploy:preview.elapsed')}：</span>
+                <span className="text-zinc-500">{t(mode === 'preview' ? 'deploy:preview.elapsed_preview' : 'deploy:preview.elapsed')}：</span>
                 <span className="text-zinc-800">{t('deploy:preview.seconds', { s: (elapsedMs / 1000).toFixed(1) })}</span>
               </div>
             )}
