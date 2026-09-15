@@ -289,7 +289,7 @@ async function createAgentSession({
 
         // ensureKimiConfig is best-effort.
         try {
-            const { ensureKimiConfig } = require('./kimiConfigBootstrap');
+            const { ensureKimiConfig } = require('../workspace/kimiConfigBootstrap');
             await ensureKimiConfig({
                 runtime,
                 runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
@@ -323,7 +323,7 @@ async function createAgentSession({
             // a custom API key" confirmation prompt that blocks --continue.
             if (agentMeta.id === 'claude-code' && resolved.env.ANTHROPIC_API_KEY) {
                 try {
-                    const { ensureClaudeApiKeyApproved } = require('./claudeConfigBootstrap');
+                    const { ensureClaudeApiKeyApproved } = require('../workspace/claudeConfigBootstrap');
                     await ensureClaudeApiKeyApproved({
                         runtime,
                         runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
@@ -348,7 +348,7 @@ async function createAgentSession({
         // Runs AFTER user config files and state dir env so gateway config can override.
         if (authMode === 'gateway') {
             try {
-                const { ensureGatewayConfig } = require('./ensureGatewayConfig');
+                const { ensureGatewayConfig } = require('../workspace/ensureGatewayConfig');
                 const { resolveAgentGatewayModelTargets } = require('../agents/agentEnv');
                 const { targets: modelTargets, defaultTarget } = await resolveAgentGatewayModelTargets(agentMeta.id);
                 await ensureGatewayConfig({
