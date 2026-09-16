@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Plus, Pencil, Play, Pause, Trash2, Loader2, RefreshCw, History as HistoryIcon, CheckCircle, Clock, ExternalLink,
+  Target, Activity, FileText, ListChecks,
 } from 'lucide-react';
 
 import Button from '../components/Button';
@@ -18,7 +19,9 @@ import {
   consoleAdminPageClass,
   consoleAdminTableScrollClass,
   consoleAdminTableShellClass,
+  consoleButtonFocusClass,
   consoleIconButtonClass,
+  consoleSectionLabelClass,
   consoleStructuredDialogPanelClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
@@ -80,6 +83,15 @@ const emptyForm = {
 
 const SCHEDULE_PRESETS = ['daily', 'weekly', 'weekdays', 'every', 'at', 'cron'];
 const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // 显示顺序：一..日（cron 0=周日）
+
+// 任务模板（对齐 zCode 定时任务模板）：一键把 title/prompt/执行计划填进创建弹窗。
+// 文案与 prompt 在 i18n（loopTasks:templates.<id>），此处只保留调度形状。
+const TASK_TEMPLATES = [
+  { id: 'standup', icon: Target, kind: 'weekdays', time: '09:00' },
+  { id: 'risk_scan', icon: Activity, kind: 'daily', time: '10:00' },
+  { id: 'release_notes', icon: FileText, kind: 'weekly', weekdays: [5], time: '16:00' },
+  { id: 'doc_sync', icon: ListChecks, kind: 'weekly', weekdays: [3], time: '15:00' },
+];
 
 function timeToCronMMHH(time) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(time || '').trim());
@@ -201,6 +213,21 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
 
   const openCreate = () => {
     setForm({ ...emptyForm, timezone: loadTimezonePref() });
+    setEditing(null);
+    setDialogMode('create');
+  };
+
+  // 从模板创建：预填 title/prompt/执行计划，工作空间与 Agent 仍由用户选择
+  const openTemplate = (tpl) => {
+    setForm({
+      ...emptyForm,
+      title: t(`loopTasks:templates.${tpl.id}.title`),
+      prompt: t(`loopTasks:templates.${tpl.id}.prompt`),
+      kind: tpl.kind,
+      time: tpl.time,
+      weekdays: tpl.weekdays ? [...tpl.weekdays] : [...emptyForm.weekdays],
+      timezone: loadTimezonePref(),
+    });
     setEditing(null);
     setDialogMode('create');
   };
@@ -374,6 +401,35 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
             <Plus className="w-4 h-4" />
             {t('loopTasks:new_task')}
           </Button>
+        </div>
+      </div>
+
+      {/* 任务模板：一键套用预设（对齐 zCode 定时任务模板） */}
+      <div>
+        <p className={`${consoleSectionLabelClass} mb-2`}>{t('loopTasks:templates.label')}</p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {TASK_TEMPLATES.map((tpl) => {
+            const Icon = tpl.icon;
+            return (
+              <button
+                key={tpl.id}
+                type="button"
+                onClick={() => openTemplate(tpl)}
+                className={`bg-white border border-zinc-200 rounded-lg shadow-sm p-4 text-left transition-colors hover:border-zinc-300 hover:shadow ${consoleButtonFocusClass}`}
+              >
+                <span className="flex items-center gap-2 text-sm font-medium text-zinc-900">
+                  <Icon className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden="true" />
+                  <span className="truncate">{t(`loopTasks:templates.${tpl.id}.title`)}</span>
+                </span>
+                <span className="mt-1.5 block text-xs leading-relaxed text-zinc-500 line-clamp-2">
+                  {t(`loopTasks:templates.${tpl.id}.desc`)}
+                </span>
+                <span className="mt-2 block text-xs text-zinc-400">
+                  {t(`loopTasks:templates.${tpl.id}.schedule`)}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 

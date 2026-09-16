@@ -4,6 +4,33 @@
   "count": "{{count}} tasks",
   "empty": "No loop tasks yet. Create one to let the agent work on a schedule.",
   "new_task": "New Task",
+  "templates": {
+    "label": "Task templates",
+    "standup": {
+      "title": "Standup digest",
+      "desc": "Summarize commits, module changes, CI status and pending work since the last workday, distilled into a standup digest of at most 6 bullets. Read-only.",
+      "prompt": "Summarize project progress since the last workday as a standup digest:\n1. Use git log to review all commits since the last workday and group changes by module;\n2. Check CI status and the latest test run, flagging failures;\n3. List pending work and blockers (from TODO markers and unfinished branches).\nOutput at most 6 bullets, one sentence each, referencing related commits or issues. Read-only analysis — do not modify any code or configuration.",
+      "schedule": "Workdays 09:00"
+    },
+    "risk_scan": {
+      "title": "Risk scan",
+      "desc": "Review the last 24 hours of changes for high-risk issues — runtime errors, data loss, permission bypasses, resource leaks, cross-platform compatibility — with locations and fixes.",
+      "prompt": "Run a risk scan over the last 24 hours of changes:\n1. Use git log/diff to collect changes from the last 24 hours (adds, edits, deletions, and config changes);\n2. Identify high-risk issues: runtime errors, data loss, permission bypasses, resource leaks, and cross-platform compatibility problems;\n3. For each finding give: file path and line, severity (high/medium/low), root cause, and a fix suggestion.\nIf nothing was found, state clearly that no high-risk changes were detected. Read-only analysis — do not modify code.",
+      "schedule": "Daily 10:00"
+    },
+    "release_notes": {
+      "title": "Release notes",
+      "desc": "Collect this week's merged PRs and commits, grouped into features, fixes, UX and engineering improvements, drafting both team and user-facing notes.",
+      "prompt": "Draft this week's release notes:\n1. Use git log to collect this week's merged PRs and commits (diff against the previous release tag if tags exist);\n2. Group them into Features / Fixes / UX improvements / Engineering improvements;\n3. Produce two drafts: a detailed team version (with PR/commit references) and a concise user-facing version (no internal details).\nRead-only analysis — do not modify code.",
+      "schedule": "Fridays 16:00"
+    },
+    "doc_sync": {
+      "title": "Doc sync check",
+      "desc": "Compare the last 7 days of code, config and API changes against the docs, listing high-confidence discrepancies with file paths and update suggestions.",
+      "prompt": "Run a documentation sync check:\n1. Collect code, config, and API changes from the last 7 days (git log/diff);\n2. Compare them against README, the docs/ directory, and key interface comments to verify docs still match actual behavior;\n3. List high-confidence discrepancies where behavior changed but docs were not updated, each with: changed file path, doc location to update, and a concrete update suggestion.\nRead-only analysis — do not modify code or docs.",
+      "schedule": "Wednesdays 15:00"
+    }
+  },
   "field": {
     "title": "Title",
     "title_placeholder": "e.g. Nightly dependency check",
