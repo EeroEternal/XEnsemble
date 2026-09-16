@@ -137,24 +137,11 @@ export default React.forwardRef(function Sessions({
   useEffect(() => { setTrajOpen(false); }, [activeSession?.sessionId]);
   const [panelWidth, setPanelWidth] = useState(() => {
     const maxW = typeof window !== 'undefined' ? Math.max(720, window.innerWidth - 240) : 800;
-    // 优先恢复用户上次拖拽的宽度；无记录才回退到容器对半分。
-    try {
-      const raw = window.localStorage.getItem('xensemble.workspace.panelWidth');
-      const parsed = raw !== null ? Number.parseInt(raw, 10) : NaN;
-      if (!Number.isNaN(parsed) && parsed > 0) {
-        return Math.min(Math.max(parsed, 420), maxW);
-      }
-    } catch { /* ignore */ }
     return Math.min(Math.floor(maxW / 2), maxW);
   });
   // 拖拽调整宽度时禁用 width 过渡，避免每次 setPanelWidth 都触发 150ms 动画导致拖拽滞后
   const [panelDragging, setPanelDragging] = useState(false);
   const panelRowRef = useRef(null);
-  // tap-to-close 延迟 timer（让位于双击复位）
-  const panelCloseTimerRef = useRef(null);
-  useEffect(() => () => {
-    if (panelCloseTimerRef.current) clearTimeout(panelCloseTimerRef.current);
-  }, []);
   // 拖拽期间禁用面板容器指针事件：DeployPanel 的预览是 iframe，会吞掉 mousemove/mouseup，
   // 导致拖拽冻结或面板跟着 iframe 内部行为乱跑；pointer-events:none 让事件穿透到父窗口。
   const panelContainerRef = useRef(null);
@@ -162,12 +149,6 @@ export default React.forwardRef(function Sessions({
 
   // Measure actual container width for true 1:1 ratio (sidebar width varies)
   useLayoutEffect(() => {
-    // 已有持久化宽度（用户拖过）时不重置为对半分；无记录才做 1:1 测量。
-    let hasStoredWidth = false;
-    try {
-      hasStoredWidth = window.localStorage.getItem('xensemble.workspace.panelWidth') !== null;
-    } catch { /* ignore */ }
-    if (hasStoredWidth) return undefined;
     const measure = () => {
       if (panelRowRef.current) {
         const w = panelRowRef.current.offsetWidth;
@@ -378,11 +359,6 @@ export default React.forwardRef(function Sessions({
     const startW = panelWidth;
     let moved = false;
     const maxW = Math.max(720, window.innerWidth - 240);
-    // 双击的第二下按下会取消待触发的 tap-to-close，避免"双击复位"误关面板。
-    if (panelCloseTimerRef.current) {
-      clearTimeout(panelCloseTimerRef.current);
-      panelCloseTimerRef.current = null;
-    }
     // 按下即禁用面板容器指针事件：DeployPanel/浏览器预览是 iframe，会吞掉 mousemove/mouseup，
     // 导致拖拽冻结或面板跟着 iframe 乱跑；pointer-events:none 让事件穿透到父窗口。
     if (panelContainerRef.current) panelContainerRef.current.style.pointerEvents = 'none';
@@ -414,35 +390,14 @@ export default React.forwardRef(function Sessions({
       document.body.style.userSelect = '';
       setPanelDragging(false);
       if (panelContainerRef.current) panelContainerRef.current.style.pointerEvents = '';
-      if (moved) {
-        // 持久化拖拽结果，刷新后保留（初始 useLayoutEffect 也不再把宽度重置为对半分）
-        try {
-          window.localStorage.setItem('xensemble.workspace.panelWidth', String(latestNext));
-        } catch { /* ignore */ }
-      } else {
-        // A click without dragging toggles the panel closed.
-        // 延迟触发以让位于双击复位：双击的第二下 mousedown 已在上面取消本 timer。
-        panelCloseTimerRef.current = setTimeout(() => {
-          panelCloseTimerRef.current = null;
-          setPanelOpen(false);
-        }, 250);
-      }
+      // A click without dragging toggles the panel closed.
+      if (!moved) setPanelOpen(false);
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
   }, [panelWidth]);
-
-  // 双击 sash 复位为容器对半分，并清除持久化记录（回到默认行为）。
-  const resetPanelWidth = useCallback(() => {
-    const maxW = Math.max(720, window.innerWidth - 240);
-    const rowW = panelRowRef.current?.offsetWidth || maxW;
-    setPanelWidth(Math.min(Math.max(Math.floor(rowW / 2), 420), maxW));
-    try {
-      window.localStorage.removeItem('xensemble.workspace.panelWidth');
-    } catch { /* ignore */ }
-  }, []);
 
   const getAgentLabel = useCallback(
     (agentId) => agents.find((a) => a.id === agentId)?.name || agentId,
@@ -1708,19 +1663,18 @@ export default React.forwardRef(function Sessions({
                   />
                 )}
               </div>
-                <div
-                  ref={panelContainerRef}
-                  className="flex min-h-0 shrink-0 overflow-hidden"
-                  style={{
-                    width: panelOpen ? panelWidth + 6 : 0,
-                    transition: panelDragging ? 'none' : 'width 150ms ease-out',
-                  }}
-                >
+              <div
+                ref={panelContainerRef}
+                className="flex min-h-0 shrink-0 overflow-hidden"
+                style={{
+                  width: panelOpen ? panelWidth + 6 : 0,
+                  transition: panelDragging ? 'none' : 'width 150ms ease-out',
+                }}
+              >
                 <div
                   onMouseDown={startPanelResize}
-                  onDoubleClick={resetPanelWidth}
                   className="relative w-1.5 shrink-0 cursor-col-resize"
-                  title={t('workspace:action.click_to_hide_drag_to_resize', { defaultValue: 'Click to hide · drag to resize · double-click to reset' })}
+                  title={t('workspace:action.click_to_hide_drag_to_resize', { defaultValue: 'Click to hide · drag to resize' })}
                 >
                   {/* 业界 sash 模式：热区 6px 透明，可见线仅 1px（hover/拖拽高亮）——可见宽条会有双线割裂感 */}
                   <span

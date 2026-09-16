@@ -82,17 +82,6 @@ Agent 控制台、Settings 弹窗、Registry 等 authenticated 页面均属 Cons
 
 实现：`UsersAdmin` 打开 Create 时 `agent_ids` 初始化为全部 Agent ID；Agent 列表晚于弹窗到达时补填一次（用户已手动改动则不覆盖）。
 
-## 可拖拽分隔条（Sash）
-
-组件 `web/src/components/Sash.jsx` + `web/src/hooks/usePanelResize.js`，用于布局边界（侧边栏、文件树、工作区面板）的宽度拖拽，业界 sash 模式：
-
-- **热区 6px 透明，可见线仅 1px**（`w-1.5` 容器 + 居中 `w-px` 线）；hover/拖拽/键盘聚焦高亮 `bg-zinc-900`，基线可见线 `bg-zinc-200`（`alwaysVisible`）或透明。可见宽条会有双线割裂感，sash 所在边界**不再加** `border-r`。
-- 颜色过渡 `duration-150`；宽度过渡仅在非拖拽态启用（拖拽时 `transition: none`）。
-- iframe 吞事件双保险：`setPointerCapture` + 拖拽期 `pointer-events: none`（`guardRef`）。
-- 键盘（`role="separator"`，无 focus ring）：←/→ ±16px，Shift ±64px，Home/End 到 min/max，Enter 等价双击复位。
-- **双击复位**默认宽度；宽度持久化 localStorage（`xensemble.sidebar.width`、`xensemble.workspace.treeWidth`、`xensemble.workspace.panelWidth`）。
-- 按下未位移松开视为 tap（延迟 250ms，双击的第二下按下取消），用于「点击隐藏面板」类交互，避免与双击复位冲突。
-
 ## 弹窗（ConsoleDialog）
 
 所有 Console 弹窗统一 `ConsoleDialogBackdrop` + `ConsoleDialogPanel`（或等价样式）。**禁止**让弹窗撑满页面壳层宽度。

@@ -50,7 +50,6 @@ describe('WorkspacePanel', () => {
 
   beforeEach(() => {
     sessionStorage.clear();
-    localStorage.clear();
   });
 
   it('renders empty state when no file is open', async () => {
@@ -172,32 +171,5 @@ describe('WorkspacePanel', () => {
     await waitFor(() => {
       expect(screen.getAllByText('Terminal').length).toBeGreaterThan(0);
     });
-  });
-
-  it('renders resizable tree column at default width with a sash', async () => {
-    renderPanel(<WorkspacePanel {...defaultProps} />);
-    await waitFor(() => {
-      expect(screen.getByTestId('workspace-panel')).toBeInTheDocument();
-    });
-    const sash = screen.getByRole('separator');
-    expect(sash).toBeInTheDocument();
-    expect(sash).toHaveAttribute('aria-valuemin', '120');
-    expect(sash).toHaveAttribute('aria-valuemax', '480');
-  });
-
-  it('restores persisted tree width from localStorage', async () => {
-    localStorage.setItem('xensemble.workspace.treeWidth', '300');
-    renderPanel(<WorkspacePanel {...defaultProps} />);
-    const sash = await screen.findByRole('separator');
-    expect(sash).toHaveAttribute('aria-valuenow', '300');
-  });
-
-  it('resets tree width to default on sash double-click', async () => {
-    localStorage.setItem('xensemble.workspace.treeWidth', '400');
-    renderPanel(<WorkspacePanel {...defaultProps} />);
-    const sash = await screen.findByRole('separator');
-    fireEvent.doubleClick(sash);
-    expect(sash).toHaveAttribute('aria-valuenow', '176');
-    expect(localStorage.getItem('xensemble.workspace.treeWidth')).toBe('176');
   });
 });
