@@ -2,8 +2,25 @@
   "title": "Observability",
   "tabs": {
     "quota": "Quota",
+    "my_usage": "My usage",
     "usage": "Usage",
     "routing_analytics": "Routing Analysis"
+  },
+  "my_usage": {
+    "title": "Token usage",
+    "total_tokens": "Total tokens",
+    "requests": "Requests",
+    "prompt_tokens": "Input",
+    "completion_tokens": "Output",
+    "cache_hit_rate": "Hit rate",
+    "trend": "Daily trend",
+    "by_project": "By workspace",
+    "project": "Workspace",
+    "period_7d": "Last 7 days",
+    "period_30d": "Last 30 days",
+    "vs_prev": "{{pct}}% vs previous period",
+    "no_data": "No usage data yet",
+    "deleted_project": "Deleted workspace"
   },
   "routing": {
     "title": "Routing Analysis",

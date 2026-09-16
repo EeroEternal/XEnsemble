@@ -2,6 +2,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ObservabilityTabSidebar, { resolveObservabilitySection } from '../components/ObservabilityTabSidebar';
 import QuotaSettingsPanel from '../components/settings/QuotaSettingsPanel';
+import MyUsagePanel from '../components/usage/MyUsagePanel';
 import PageHeader from '../components/PageHeader';
 import UsageAdmin from './UsageAdmin';
 import RoutingAnalytics from './RoutingAnalytics';
@@ -13,6 +14,14 @@ function ObservabilityContent({ section }) {
   const { t } = useTranslation();
   if (section === 'usage') return <UsageAdmin />;
   if (section === 'routing-analytics') return <RoutingAnalytics />;
+  if (section === 'my-usage') {
+    return (
+      <>
+        <PageHeader title={t('observability:tabs.my_usage')} />
+        <MyUsagePanel />
+      </>
+    );
+  }
   return (
     <>
       <PageHeader title={t('observability:tabs.quota')} />
