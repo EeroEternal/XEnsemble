@@ -223,6 +223,59 @@ function composeGatewayModelTarget(provider, model) {
     return trimmedProvider ? `${trimmedProvider}/${trimmedModel}` : trimmedModel;
 }
 
+// claude-code 2.1.236 起 ANTHROPIC_MODEL 会钉死模型（/model 选择被忽略），
+// 需改用 ANTHROPIC_DEFAULT_MODEL 作为起始模型；旧版本只认 ANTHROPIC_MODEL。
+const CLAUDE_CODE_MODEL_PIN_MIN_VERSION = [2, 1, 236];
+
+function parseSemver(version) {
+    const m = String(version || '').match(/(\d+)\.(\d+)\.(\d+)/);
+    if (!m) return null;
+    return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+function semverAtLeast(version, min) {
+    const parts = parseSemver(version);
+    if (!parts) return false;
+    for (let i = 0; i < 3; i += 1) {
+        if (parts[i] > min[i]) return true;
+        if (parts[i] < min[i]) return false;
+    }
+    return true;
+}
+
+/** 按 claude-code 版本决定用 ANTHROPIC_MODEL 还是 ANTHROPIC_DEFAULT_MODEL 承载网关模型。 */
+function applyClaudeCodeModelEnv(env, target, version) {
+    const out = { ...env };
+    if (version && semverAtLeast(version, CLAUDE_CODE_MODEL_PIN_MIN_VERSION)) {
+        delete out.ANTHROPIC_MODEL;
+        out.ANTHROPIC_DEFAULT_MODEL = target;
+    } else {
+        out.ANTHROPIC_MODEL = target;
+        delete out.ANTHROPIC_DEFAULT_MODEL;
+    }
+    return out;
+}
+
+/**
+ * 探测沙箱内 claude-code 实际版本并按版本修正模型 env。
+ * 需在 runtime 就绪后调用；探测失败时保持现状（旧版本语义，ANTHROPIC_MODEL）。
+ */
+async function resolveClaudeCodeModelEnv(agentId, env, runtime, { runtimeRef, cwd, warn } = {}) {
+    if (agentId !== 'claude-code' || !env) return env;
+    if (!runtime?.exec?.exec) return env;
+    const target = env.ANTHROPIC_MODEL || env.ANTHROPIC_DEFAULT_MODEL || '';
+    if (!target) return env;
+    try {
+        const probe = await runtime.exec.exec('claude', ['--version'], {}, { runtimeRef, cwd: cwd || '/' });
+        const version = String(probe?.stdout || probe?.stderr || '').match(/\d+\.\d+\.\d+/)?.[0] || '';
+        if (!version) return env;
+        return applyClaudeCodeModelEnv(env, target, version);
+    } catch (err) {
+        warn?.(`claude-code version probe failed: ${err?.message || err}`);
+        return env;
+    }
+}
+
 async function applyAgentGatewayModel(agentId, env) {
     const cfg = await agentGatewayConfig.getForAgent(agentId);
     const model = agentGatewayConfig.primaryModel(cfg);
@@ -236,11 +289,9 @@ async function applyAgentGatewayModel(agentId, env) {
         out.HERMES_MODEL = target;
     }
     if (CLAUDE_CODE_AGENT_IDS.has(agentId)) {
-        // claude-code >= 2.1.236: ANTHROPIC_MODEL pins the model, so a /model
-        // pick is silently ignored. ANTHROPIC_DEFAULT_MODEL sets the starting
-        // model while still letting /model override and persist it.
-        delete out.ANTHROPIC_MODEL;
-        out.ANTHROPIC_DEFAULT_MODEL = target;
+        // 版本未知（resolveSpawnEnv 阶段 runtime 尚未就绪），先按旧版本语义保留
+        // ANTHROPIC_MODEL；spawn 前 createAgentSession 会探测实际版本并按需切换到
+        // ANTHROPIC_DEFAULT_MODEL（claude-code >= 2.1.236 会钉死 ANTHROPIC_MODEL）。
         // Enable gateway /v1/models discovery so /model lists the configured
         // gateway models. The LLM proxy returns an Anthropic-compatible format
         // that passes claude-code's validation.
@@ -384,8 +435,9 @@ async function buildGatewaySpawnEnv(agentId, envRequired, { draftModel, draftPro
         for (const key of GATEWAY_MODEL_ENV_KEYS) env[key] = target;
         if (agentId === 'hermes') env.HERMES_MODEL = target;
         if (CLAUDE_CODE_AGENT_IDS.has(agentId)) {
-            delete env.ANTHROPIC_MODEL;
-            env.ANTHROPIC_DEFAULT_MODEL = target;
+            // 预览阶段无 runtime，无法探测版本；按旧版本语义保留 ANTHROPIC_MODEL，
+            // 实际 spawn 前会由 resolveClaudeCodeModelEnv 按版本修正。
+            env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = '1';
         }
     }
     env = applySpawnDefaults({ ...platform, ...env }, effectiveRequired);
@@ -636,6 +688,8 @@ module.exports = {
     applyOpencodeGatewayEnv,
     toOpencodeModelAlias,
     resolveAgentGatewayModelTargets,
+    applyClaudeCodeModelEnv,
+    resolveClaudeCodeModelEnv,
     computeEffectiveRequired,
     isAgentKeysReady,
     findMissing,

@@ -154,7 +154,7 @@ async function createAgentSession({
         });
     }
 
-    const { resolveSpawnEnv, GATEWAY_MANAGED_ENV_KEYS } = require('../agents/agentEnv');
+    const { resolveSpawnEnv, GATEWAY_MANAGED_ENV_KEYS, resolveClaudeCodeModelEnv } = require('../agents/agentEnv');
     const customEnvInput = customEnv && typeof customEnv === 'object' ? { ...customEnv } : {};
     if (authMode === 'gateway' && customEnvInput) {
         for (const key of Object.keys(customEnvInput)) {
@@ -245,6 +245,16 @@ async function createAgentSession({
             log.error({ err, sessionId }, '[sessions] async provisioning: ensureProjectRuntime failed');
             await markSessionFailed(sessionId, err instanceof RuntimeError ? err.message : (err.message || 'Failed to prepare project runtime'));
             return;
+        }
+
+        // claude-code 模型 env 需按实际版本选择：>= 2.1.236 用 ANTHROPIC_DEFAULT_MODEL
+        // （ANTHROPIC_MODEL 会钉死模型），旧版本用 ANTHROPIC_MODEL。runtime 已就绪，探测一次。
+        if (agentMeta.id === 'claude-code') {
+            resolved.env = await resolveClaudeCodeModelEnv(agentMeta.id, resolved.env, runtime, {
+                runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
+                cwd: workspacePath,
+                warn: (msg) => log.warn(msg),
+            });
         }
 
         // Backfill built-in git if create-time initRepo failed (e.g. BoxLite).
