@@ -1568,12 +1568,21 @@ function detectStack(workspacePath) {
         const result = emptyStack('monorepo', ['subprojects']);
         result.startCmd = subs.find((x) => x.startCmd)?.startCmd || null;
         result.buildCmd = subs.find((x) => x.buildCmd)?.buildCmd || null;
-        const installs = subs.map((x) => x.installCmd).filter(Boolean);
-        result.installCmd = installs.length ? installs.join(' && ') : null;
+        result.installCmd = joinSubInstallCmds(subs);
         result.subProjects = subs;
         return result;
     }
     return emptyStack('unknown', ['fallback']);
+}
+
+// 拼接多子项目的安装命令：每个子命令独立子 shell，避免 `cd` 状态串味。
+// 子项目 installCmd 形如 `cd frontend && pnpm install`——裸 join(' && ') 会得到
+// `cd backend && … && cd frontend && …`，第二个 cd 相对 backend/ 解析 → can't cd
+// （沙箱实测）。子 shell 包裹后每个 cd 都从 workspace 根起算。
+function joinSubInstallCmds(subs) {
+    const installs = subs.map((x) => String(x.installCmd || '').trim()).filter(Boolean);
+    if (!installs.length) return null;
+    return installs.map((c) => `( ${c} )`).join(' && ');
 }
 
 // 聚合：现有探测结果缺 startCmd/buildCmd 时，用一层子目录枚举补齐（不覆盖已有值）。
@@ -1583,10 +1592,7 @@ function augmentWithSubProjects(result, dir) {
         if (subs.length) {
             if (!result.startCmd) result.startCmd = subs.find((x) => x.startCmd)?.startCmd || null;
             if (!result.buildCmd) result.buildCmd = subs.find((x) => x.buildCmd)?.buildCmd || null;
-            if (!result.installCmd) {
-                const installs = subs.map((x) => x.installCmd).filter(Boolean);
-                if (installs.length) result.installCmd = installs.join(' && ');
-            }
+            if (!result.installCmd) result.installCmd = joinSubInstallCmds(subs);
             result.subProjects = subs;
             result.confidence = [...(result.confidence || []), 'subprojects'];
         }

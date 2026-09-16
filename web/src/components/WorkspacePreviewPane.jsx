@@ -214,7 +214,9 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo,
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-zinc-400 px-6 text-center">
             <Monitor className="h-10 w-10" />
-            <p className="text-sm">{embedError || preview.pollError || t('deploy:preview.empty')}</p>
+            {/* 空态文案按模式区分：预览 tab 说「预览启动后在此查看应用」，部署 tab 说
+                「部署预览后在此查看应用」——此前预览 tab 也显示部署用词，误导用户。 */}
+            <p className="text-sm">{embedError || preview.pollError || t(mode === 'preview' ? 'deploy:preview.empty_preview_tab' : 'deploy:preview.empty')}</p>
           </div>
         )}
       </div>

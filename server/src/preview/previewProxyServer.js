@@ -60,6 +60,32 @@ const isBackendApiPath = (p) => {
     if (/^\/api(\/|$)/i.test(p) || /^\/ws(\/|$)/i.test(p)) return true;
     return apiPrefixes.some((pre) => p === pre || p.startsWith(pre + '/'));
 };
+// 非标准 API 前缀的通用兜底（静态模式）：请求路径不是真实静态文件、且 Accept 明确要
+// JSON（axios/fetch 默认 "application/json, text/plain, */*"）→ 判为 API 调用转发后端/mock。
+// 被预览应用常把 API 基址写成非 /api 的绝对前缀（实测 gpustack 的 /v2/users/me、
+// /v2/menus/mine、/version），静态代理原先一律按静态路径处理 → SPA fallback 吐 HTML →
+// 前端 response.json() 解析失败 → 整页白屏。按 Accept 判别与应用无关，不必猜前缀；
+// 浏览器整页导航带 text/html，仍走 SPA fallback，两者不冲突。
+function isApiLikeRequest(req) {
+    const accept = String(req.headers.accept || '');
+    return accept.includes('application/json') && !accept.includes('text/html');
+}
+// 解析请求路径对应的真实静态文件（不存在返回 null）：/ → index.html，目录 → 其 index.html。
+function resolveStaticFile(urlPath) {
+    let p = urlPath === '/' ? '/index.html' : urlPath;
+    let file;
+    try { file = path.resolve(distDir, '.' + decodeURIComponent(p)); } catch { return null; }
+    if (file !== distDir && !file.startsWith(distDir + path.sep)) return null;
+    try {
+        const st = fs.statSync(file);
+        if (st.isFile()) return file;
+        if (st.isDirectory()) {
+            const idx = path.join(file, 'index.html');
+            if (fs.existsSync(idx)) return idx;
+        }
+    } catch { /* not exists */ }
+    return null;
+}
 const MIME = {
     '.html': 'text/html; charset=utf-8',
     '.js': 'application/javascript; charset=utf-8',
@@ -107,11 +133,19 @@ function serveStatic(req, res) {
                 return fs.createReadStream(p).pipe(res);
             }
             if (!err && st.isDirectory()) return send(path.join(p, 'index.html'));
-            // SPA history fallback
+            // SPA history fallback（深链导航，如 /preview/<id>/models）：
+            // 必须与 / 走同一份改写后的 HTML。此前直接 createReadStream 原样吐
+            // dist/index.html，绕过了 rewriteHtml —— 页面里是应用原始的绝对资源路径
+            // （/js/umi.js、/css/umi.css）且无 <base>/路由 shim → 资源与客户端路由全错
+            // （实测深链白屏）。改写失败才回退原样输出（至少能出页面）。
             const idx = path.join(distDir, 'index.html');
             if (spaFallback && fs.existsSync(idx)) {
                 res.writeHead(200, { 'Content-Type': MIME['.html'] });
-                return fs.createReadStream(idx).pipe(res);
+                try {
+                    return res.end(rewriteHtml(fs.readFileSync(idx, 'utf8')));
+                } catch {
+                    return fs.createReadStream(idx).pipe(res);
+                }
             }
             res.writeHead(404); res.end('Not found');
         });
@@ -214,7 +248,10 @@ const ROUTE_SHIM_SCRIPT = `<script>
       if (abs.host === pageHost) return u; // 同源不动
       if (abs.protocol !== 'http:' && abs.protocol !== 'https:') return u;
       if (!xeIsLoopback(abs.hostname)) return u; // 只改写 loopback（烘焙的沙箱内地址）
-      return BASE.replace(/\/$/, '') + '/__backend' + abs.pathname + abs.search;
+      // 注意：本行在模板字符串内，正则的反斜杠必须双写（\\/ → 输出 \/）。
+      // 单写 \/ 会被 JS 字符串转义吞成 /，输出 //$/ 这种非法正则 → 整段 shim 语法错误
+      // → 前缀剥离/诊断/fetch 改写全部失效 → Router 读到 /preview/<id>/ 匹配不到路由 → 白屏。
+      return BASE.replace(/\\/$/, '') + '/__backend' + abs.pathname + abs.search;
     } catch (e) { return u; }
   }
   // 同源请求才加令牌头（外部第三方 API 加自定义头会触发 CORS 预检，可能破坏其请求）
@@ -677,6 +714,28 @@ const server = http.createServer((req, res) => {
         });
         req.pipe(proxy);
     } else {
+        // 静态模式分流：真实文件直出；不存在的路径按 Accept 判别——
+        // 要 JSON 的是应用 API 调用（非标准前缀如 /v2、/version）→ 转发后端/mock；
+        // 要 HTML 的是深链导航 → SPA fallback。只按前缀猜会漏掉任意自定义前缀。
+        const realFile = resolveStaticFile(urlPath);
+        if (!realFile && backendPort && isApiLikeRequest(req)) {
+            const proxy = http.request({
+                host: '127.0.0.1',
+                port: Number(backendPort),
+                path: req.url,
+                method: req.method,
+                headers: sameOriginHeaders(req.headers, Number(backendPort)),
+            }, (pRes) => {
+                res.writeHead(pRes.statusCode, stripFrameBlockingHeaders(pRes.headers));
+                pRes.pipe(res);
+            });
+            proxy.on('error', () => {
+                if (!res.headersSent) { res.writeHead(502); }
+                res.end('Backend unavailable');
+            });
+            req.pipe(proxy);
+            return;
+        }
         serveStatic(req, res);
     }
 });
