@@ -119,7 +119,7 @@ export default function AgentsAdmin() {
               <col className="w-1/4" />
               <col className="w-48" />
             </colgroup>
-            <thead>
+            <thead className="sticky top-0 z-10">
               <tr className={consoleTableHeadRowClass}>
                 <th className={consoleTableHeadCellClass}>{t('agents:field.name')}</th>
                 <th className={consoleTableHeadCellClass}>{t('agents:field.provider')}</th>

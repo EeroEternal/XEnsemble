@@ -255,7 +255,7 @@ export default function UsersAdmin() {
       <div className={consoleTableShellClass}>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm whitespace-nowrap">
-            <thead className="border-b border-zinc-200 bg-white">
+            <thead className="sticky top-0 z-10">
               <tr>
                 <th className={consoleTableHeadCellClass}>{t('users:field.username')}</th>
                 <th className={consoleTableHeadCellClass}>{t('users:field.status')}</th>

@@ -447,7 +447,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
               <col className="w-28" />
               <col className="w-14" />
             </colgroup>
-            <thead>
+            <thead className="sticky top-0 z-10">
               <tr className={consoleTableHeadRowClass}>
                 <th className={consoleTableHeadCellClass}>{t('loopTasks:field.title')}</th>
                 <th className={consoleTableHeadCellClass}>{t('loopTasks:field.workspace')}</th>

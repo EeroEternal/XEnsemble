@@ -300,7 +300,7 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
               <col className="w-1/6" />
               <col className="w-40" />
             </colgroup>
-            <thead>
+            <thead className="sticky top-0 z-10">
               <tr className={consoleTableHeadRowClass}>
                 <th className={consoleTableHeadCellClass}>{t('skills:field_title', { defaultValue: 'Title' })}</th>
                 <th className={consoleTableHeadCellClass}>{t('skills:field_status', { defaultValue: 'Status' })}</th>

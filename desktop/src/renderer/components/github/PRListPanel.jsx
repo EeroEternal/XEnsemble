@@ -58,7 +58,7 @@ export default function PRListPanel({ projectId }) {
           </div>
         ) : (
           <table className={`w-full text-left ${consoleTableShellClass}`}>
-            <thead className={consoleTableHeadRowClass}>
+            <thead className="sticky top-0 z-10">
               <tr>
                 <th className={consoleTableHeadCellDenseClass}>#</th>
                 <th className={consoleTableHeadCellDenseClass}>Title</th>

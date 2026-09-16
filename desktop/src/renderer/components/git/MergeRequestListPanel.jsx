@@ -161,7 +161,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
         ) : (
           <div className="rounded-xl bg-white shadow-sm border border-[#E8EAED] overflow-hidden">
             <table className={`w-full text-left ${consoleTableShellClass}`}>
-              <thead className={consoleTableHeadRowClass}>
+              <thead className="sticky top-0 z-10">
                 <tr>
                   <th className={consoleTableHeadCellDenseClass}>#</th>
                   <th className={consoleTableHeadCellDenseClass}>Title</th>

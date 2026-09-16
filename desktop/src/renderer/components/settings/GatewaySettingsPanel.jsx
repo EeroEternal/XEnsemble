@@ -898,7 +898,7 @@ export default function GatewaySettingsPanel() {
                   <col style={{ width: '6.5rem' }} />
                   <col style={{ width: '6.75rem' }} />
                 </colgroup>
-                <thead>
+                <thead className="sticky top-0 z-10">
                   <tr className={consoleTableHeadRowClass}>
                     <th className={consoleTableHeadCellClass}>Name</th>
                     <th className={consoleTableHeadCellClass}>Status</th>

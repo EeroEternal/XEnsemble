@@ -1003,7 +1003,7 @@ export default function GatewaySettingsPanel() {
                   <col className="w-1/5" />
                   <col className="w-48" />
                 </colgroup>
-                <thead>
+                <thead className="sticky top-0 z-10">
                   <tr className={consoleTableHeadRowClass}>
                     <th className={consoleTableHeadCellClass}>{t('gateway:table.name')}</th>
                     <th className={consoleTableHeadCellClass}>{t('gateway:table.endpoint')}</th>

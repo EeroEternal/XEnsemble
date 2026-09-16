@@ -590,7 +590,7 @@ export function CustomImagesContent() {
             <col className="w-1/6" />
             <col className="w-48" />
           </colgroup>
-          <thead>
+          <thead className="sticky top-0 z-10">
             <tr className={consoleTableHeadRowClass}>
               <th className={consoleTableHeadCellClass}>{t('images:table.name')}</th>
               <th className={consoleTableHeadCellClass}>{t('images:table.status')}</th>

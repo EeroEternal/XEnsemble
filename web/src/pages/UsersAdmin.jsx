@@ -273,7 +273,7 @@ export default function UsersAdmin() {
               <col className="w-1/6" />
               <col className="w-48" />
             </colgroup>
-            <thead>
+            <thead className="sticky top-0 z-10">
               <tr className={consoleTableHeadRowClass}>
                 <th className={consoleTableHeadCellClass}>{t('users:field.user')}</th>
                 <th className={consoleTableHeadCellClass}>{t('users:field.status')}</th>
