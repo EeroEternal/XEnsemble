@@ -440,12 +440,13 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
         <div className={consoleAdminTableScrollClass}>
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
-              <col className="w-[22%]" />
-              <col className="w-[16%]" />
-              <col className="w-[14%]" />
+              <col className="w-[18%]" />
               <col className="w-[12%]" />
-              <col className="w-[12%]" />
-              <col className="w-[12%]" />
+              <col className="w-[11%]" />
+              <col className="w-[13%]" />
+              <col className="w-[11%]" />
+              <col className="w-[11%]" />
+              <col className="w-[11%]" />
               <col className="w-28" />
               <col className="w-14" />
             </colgroup>
@@ -453,6 +454,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
               <tr className={consoleTableHeadRowClass}>
                 <th className={consoleTableHeadCellClass}>{t('loopTasks:field.title')}</th>
                 <th className={consoleTableHeadCellClass}>{t('loopTasks:field.workspace')}</th>
+                <th className={consoleTableHeadCellClass}>{t('loopTasks:field.agent')}</th>
                 <th className={consoleTableHeadCellClass}>{t('loopTasks:field.schedule')}</th>
                 <th className={consoleTableHeadCellClass}>{t('common:table.status', { defaultValue: 'Status' })}</th>
                 <th className={consoleTableHeadCellClass}>{t('loopTasks:run.last_run')}</th>
@@ -476,6 +478,11 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                     </td>
                     <td className={consoleTableBodyCellClass}>
                       <span className="text-zinc-700 truncate block" title={projectName(task.projectId)}>{projectName(task.projectId)}</span>
+                    </td>
+                    <td className={consoleTableBodyCellClass}>
+                      <span className="text-zinc-700 truncate block" title={task.agentId}>
+                        {agents.find((a) => a.id === task.agentId)?.name || task.agentId || '—'}
+                      </span>
                     </td>
                     <td className={consoleTableBodyCellClass}>
                       <span className="text-zinc-700 truncate block" title={task.cronExpr}>
@@ -680,7 +687,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
 
       {runsOpenFor && (
         <ConsoleDialogShell onClose={() => setRunsOpenFor(null)}>
-          <div className={`${consoleStructuredDialogPanelClass} w-[760px] max-w-[calc(100vw-2rem)]`}>
+          <div className={`${consoleStructuredDialogPanelClass} max-w-[calc(100vw-2rem)] ${runDetailTab === 'trajectory' ? 'w-[1100px]' : 'w-[760px]'}`}>
             <ConsoleStructuredDialogHeader
               title={`${t('loopTasks:run.history')} · ${runsOpenFor.title}`}
               subtitle={projectName(runsOpenFor.projectId)}
