@@ -114,10 +114,9 @@ export default function UserUsageDialog({ userId, days = 30, onClose }) {
                 {t('users:usage.recent_requests')}
               </p>
               <div className="overflow-hidden rounded-lg border border-zinc-200">
-                <div className="max-h-64 overflow-y-auto">
                 <table className="w-full border-collapse text-left text-xs">
-                  <thead className="sticky top-0 z-10 console-table-head-sticky">
-                    <tr className="bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-400">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-400">
                       <th className="px-3 py-2 font-medium">{t('users:usage.time')}</th>
                       <th className="px-3 py-2 font-medium">{t('users:usage.model')}</th>
                       <th className="px-3 py-2 font-medium">{t('users:usage.project')}</th>
@@ -143,7 +142,6 @@ export default function UserUsageDialog({ userId, days = 30, onClose }) {
                     ))}
                   </tbody>
                 </table>
-                </div>
               </div>
             </div>
           </div>

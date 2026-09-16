@@ -3,6 +3,7 @@ import { ExternalLink, Loader2, RefreshCw, Search } from 'lucide-react';
 import { openExternal } from '../../lib/githubApi.js';
 import * as gitApi from '../../lib/gitApi.js';
 import {
+  consoleTableShellClass,
   consoleTableHeadRowClass,
   consoleTableHeadCellDenseClass,
   consoleTableBodyDivideClass,
@@ -158,9 +159,9 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
             {mergeRequests.length === 0 ? `No ${label.toLowerCase()} yet.` : 'No results match your filter.'}
           </div>
         ) : (
-          <div className="rounded-xl bg-white shadow-sm border border-[#E8EAED]">
-            <table className="w-full text-left">
-              <thead className="sticky top-0 z-10 console-table-head-sticky">
+          <div className="rounded-xl bg-white shadow-sm border border-[#E8EAED] overflow-hidden">
+            <table className={`w-full text-left ${consoleTableShellClass}`}>
+              <thead className="sticky top-0 z-10">
                 <tr>
                   <th className={consoleTableHeadCellDenseClass}>#</th>
                   <th className={consoleTableHeadCellDenseClass}>Title</th>

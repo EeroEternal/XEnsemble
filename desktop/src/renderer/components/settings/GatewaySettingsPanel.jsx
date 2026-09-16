@@ -892,14 +892,13 @@ export default function GatewaySettingsPanel() {
             <p className="text-sm text-[#5F6368]">No providers yet.</p>
           ) : (
             <div className={consoleTableShellClass}>
-              <div className="max-h-96 overflow-y-auto">
               <table className="w-full border-collapse text-left">
                 <colgroup>
                   <col />
                   <col style={{ width: '6.5rem' }} />
                   <col style={{ width: '6.75rem' }} />
                 </colgroup>
-                <thead className="sticky top-0 z-10 console-table-head-sticky">
+                <thead className="sticky top-0 z-10">
                   <tr className={consoleTableHeadRowClass}>
                     <th className={consoleTableHeadCellClass}>Name</th>
                     <th className={consoleTableHeadCellClass}>Status</th>
@@ -968,7 +967,6 @@ export default function GatewaySettingsPanel() {
                   })}
                 </tbody>
               </table>
-              </div>
             </div>
           )}
         </div>

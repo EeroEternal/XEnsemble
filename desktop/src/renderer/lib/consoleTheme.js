@@ -117,9 +117,7 @@ export const consoleTableShellClass =
 export const consoleAdminTableShellClass =
   `${consoleTableShellClass} flex min-h-0 flex-1 flex-col`;
 
-/** 表头行不再画 border：border-collapse:collapse 下 tr 边框不随 sticky 表头滚动，
- *  分隔线由 .console-table-head-sticky th 的内阴影绘制（见 index.css） */
-export const consoleTableHeadRowClass = `${bgTertiary}`;
+export const consoleTableHeadRowClass = `${bgTertiary} border-b ${borderHairline}`;
 
 export const consoleTableBodyDivideClass = `divide-y ${divideHairline}`;
 
