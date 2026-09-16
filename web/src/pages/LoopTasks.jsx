@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Plus, Pencil, Play, Pause, Trash2, Loader2, RefreshCw, History as HistoryIcon, CheckCircle, Clock,
-  Target, Activity, FileText, ListChecks,
+  Target, Activity, FileText, MoonStar,
 } from 'lucide-react';
 
 import Button from '../components/Button';
@@ -90,7 +90,7 @@ const TASK_TEMPLATES = [
   { id: 'standup', icon: Target, kind: 'weekdays', time: '09:00' },
   { id: 'risk_scan', icon: Activity, kind: 'daily', time: '10:00' },
   { id: 'release_notes', icon: FileText, kind: 'weekly', weekdays: [5], time: '16:00' },
-  { id: 'doc_sync', icon: ListChecks, kind: 'weekly', weekdays: [3], time: '15:00' },
+  { id: 'nightly_cleanup', icon: MoonStar, kind: 'daily', time: '03:00' },
 ];
 
 function timeToCronMMHH(time) {
