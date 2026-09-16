@@ -34,6 +34,7 @@ Login 等公开页、终端 Chat 区可有独立密度；**勿**把 Marketing �
 | 弹窗 | `web/src/components/ConsoleDialog.jsx`（含 `ConsoleStructuredDialog*`） |
 | 下拉 | `web/src/components/SelectMenu.jsx`、`MultiSelectMenu.jsx` |
 | Toast | `web/src/components/Toast.jsx` |
+| 可拖拽分隔条（sash） | `web/src/components/Sash.jsx`、`web/src/hooks/usePanelResize.js` |
 | 完整 UI 细则 | **`docs/Designs.md`** |
 
 ## 核心原则（ParaRouter Console）

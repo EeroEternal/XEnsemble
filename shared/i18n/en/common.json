@@ -44,7 +44,8 @@
     "logout": "Log out",
     "saving": "Saving…",
     "select_all": "Select all",
-    "collapse_sidebar": "Collapse sidebar"
+    "collapse_sidebar": "Collapse sidebar",
+    "drag_to_resize": "Drag to resize · double-click to reset"
   },
   "state": {
     "loading": "Loading…",

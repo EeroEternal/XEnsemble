@@ -20,6 +20,8 @@ import { consoleDropdownPanelClass, consoleMenuDropdownZClass } from '@/lib/cons
 import { buttonClass } from '@/lib/buttonStyles';
 import { pathBasename, pathJoin } from '@/lib/workspaceFileTree';
 import { useTranslation } from 'react-i18next';
+import Sash from './Sash';
+import { usePanelResize } from '@/hooks/usePanelResize';
 
 const DiffViewer = lazy(() => import('./DiffViewer'));
 
@@ -129,6 +131,25 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   const [newHereBasePath, setNewHereBasePath] = useState(null);
   const renameInputRef = useRef(null);
   const panelRootRef = useRef(null);
+  const panelBodyRef = useRef(null);
+
+  // 文件树列宽可拖拽（业界 sash 模式），宽度持久化，双击复位到默认 176（原 w-44）。
+  const {
+    width: treeWidth,
+    startResize: startTreeResize,
+    dragging: treeResizing,
+    reset: resetTreeWidth,
+    nudge: nudgeTreeWidth,
+  } = usePanelResize({
+    storageKey: 'xensemble.workspace.treeWidth',
+    defaultWidth: 176,
+    min: 120,
+    max: 480,
+    guardRef: panelBodyRef,
+  });
+  const treeResizeTitle = t('common:action.drag_to_resize', {
+    defaultValue: 'Drag to resize · double-click to reset',
+  });
 
   useEffect(() => {
     setSelectedMR(null);
@@ -520,7 +541,12 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
             <FolderPlus className="h-3.5 w-3.5" />
           </button>
           <button
-            title={sidebarOpen ? t('workspace:action.collapse_all') : t('workspace:action.expand_all')}
+            title={sidebarOpen
+              ? t('workspace:action.collapse_file_tree', { defaultValue: 'Collapse file tree' })
+              : t('workspace:action.expand_file_tree', { defaultValue: 'Expand file tree' })}
+            aria-label={sidebarOpen
+              ? t('workspace:action.collapse_file_tree', { defaultValue: 'Collapse file tree' })
+              : t('workspace:action.expand_file_tree', { defaultValue: 'Expand file tree' })}
             onClick={() => setSidebarOpen((open) => !open)}
             className={`p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 ${consoleButtonFocusClass}`}>
             {sidebarOpen ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelLeft className="h-3.5 w-3.5" />}
@@ -577,16 +603,30 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
         document.body,
       )}
 
-      <div className="flex-1 min-h-0 flex">
+      <div ref={panelBodyRef} className="flex-1 min-h-0 flex">
         {mainTab === 'files' && (
           <>
             {sidebarOpen && (
-              <div className="w-44 shrink-0 border-r border-zinc-200 bg-zinc-100 flex flex-col min-h-0">
+              <div
+                className="shrink-0 bg-zinc-100 flex flex-col min-h-0"
+                style={{ width: treeWidth, transition: treeResizing ? 'none' : undefined }}
+              >
                 <div className="flex-1 min-h-0 overflow-y-auto px-2 py-1">
                   <WorkspaceFileTree lazy projectId={projectId} sessionId={sessionId} onFetchDir={onFetchDir}
                     selectedPath={activePath} onOpenFile={handleOpenFile}
                     refreshTrigger={refreshTrigger} onContextMenu={handleContextMenu} />
                 </div>
+                <Sash
+                  onStartResize={startTreeResize}
+                  onReset={resetTreeWidth}
+                  onNudge={nudgeTreeWidth}
+                  dragging={treeResizing}
+                  width={treeWidth}
+                  min={120}
+                  max={480}
+                  alwaysVisible
+                  title={treeResizeTitle}
+                />
               </div>
             )}
             <div className="flex-1 min-w-0 flex flex-col min-h-0">

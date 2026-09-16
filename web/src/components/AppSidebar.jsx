@@ -28,6 +28,8 @@ import {
 } from '../lib/sidebarPrefs';
 import BrandMark from './BrandMark';
 import RowActionsMenu from './RowActionsMenu';
+import Sash from './Sash';
+import { usePanelResize } from '../hooks/usePanelResize';
 import {
   textPrimary,
   textSecondary,
@@ -300,6 +302,23 @@ export default function AppSidebar({
     }
   }, []);
 
+  // 侧边栏宽度可拖拽（业界 sash 模式），宽度持久化，双击复位到默认 272。
+  const {
+    width: sidebarWidth,
+    startResize: startSidebarResize,
+    dragging: sidebarResizing,
+    reset: resetSidebarWidth,
+    nudge: nudgeSidebarWidth,
+  } = usePanelResize({
+    storageKey: 'xensemble.sidebar.width',
+    defaultWidth: 272,
+    min: 200,
+    max: 420,
+  });
+  const sidebarResizeTitle = t('common:action.drag_to_resize', {
+    defaultValue: 'Drag to resize · double-click to reset',
+  });
+
   const [customImageMap, setCustomImageMap] = useState({});
 
   useEffect(() => {
@@ -535,8 +554,10 @@ export default function AppSidebar({
   }
 
   return (
-    <aside className={`h-full w-[272px] ${bgSecondary} border-r border-zinc-200 flex flex-col flex-shrink-0 select-none`}>
-      {/* 头部：logo + 折叠（侧栏内部不用横线分组，靠间距；仅保留列分隔竖线） */}
+    <aside
+      className={`h-full ${bgSecondary} flex flex-col flex-shrink-0 select-none`}
+      style={{ width: sidebarWidth, transition: sidebarResizing ? 'none' : 'width 150ms ease-out' }}
+    >
       <div className="shrink-0 h-12 px-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <BrandMark className="h-7 w-7 shrink-0" iconClassName="h-3.5 w-3.5" />
@@ -686,6 +707,17 @@ export default function AppSidebar({
           onLogout={onLogout}
         />
       </div>
+      <Sash
+        onStartResize={startSidebarResize}
+        onReset={resetSidebarWidth}
+        onNudge={nudgeSidebarWidth}
+        dragging={sidebarResizing}
+        width={sidebarWidth}
+        min={200}
+        max={420}
+        alwaysVisible
+        title={sidebarResizeTitle}
+      />
     </aside>
   );
 }
