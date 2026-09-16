@@ -10,15 +10,25 @@ import SelectMenu from '../SelectMenu';
 export default function QuotaSettingsPanel() {
   const { t } = useTranslation();
   const [me, setMe] = useState(null);
+  const [meLoading, setMeLoading] = useState(true);
   const [usageDays, setUsageDays] = useState('7');
   const [usage, setUsage] = useState(null);
   const [usageLoading, setUsageLoading] = useState(true);
 
   useEffect(() => {
-
+    let cancelled = false;
     apiFetch('/api/v1/auth/me')
-      .then((res) => res.json())
-      .then((data) => setMe(data));
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled) {
+          // 非 200 / 空体 / 缺 quotas（如预览后端与令牌用户不一致）都视为
+          // 加载失败，展示失败态而不是永久停在 loading。
+          setMe(data && data.quotas ? data : null);
+          setMeLoading(false);
+        }
+      })
+      .catch(() => { if (!cancelled) setMeLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -32,8 +42,11 @@ export default function QuotaSettingsPanel() {
     return () => { cancelled = true; };
   }, [usageDays]);
 
-  if (!me?.quotas) {
+  if (meLoading) {
     return <p className="text-sm text-zinc-400">{t('settings:quota.loading')}</p>;
+  }
+  if (!me?.quotas) {
+    return <p className="text-sm text-zinc-400">{t('settings:quota.load_failed')}</p>;
   }
 
   const q = me.quotas;

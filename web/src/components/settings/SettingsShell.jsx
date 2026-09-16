@@ -6,7 +6,6 @@ import { consoleAdminPageClass } from '../../lib/consoleTokens';
 import GeneralSettingsPanel from './GeneralSettingsPanel';
 import GitHubSettingsPanel from './GitHubSettingsPanel';
 import GitProvidersSettingsPanel from './GitProvidersSettingsPanel';
-import QuotaSettingsPanel from './QuotaSettingsPanel';
 import PreferencesPanel from './PreferencesPanel';
 
 const SECTION_TITLES = {
@@ -15,7 +14,6 @@ const SECTION_TITLES = {
   git: 'Git',
   'git-providers': 'Git',
   github: 'Git',
-  quota: 'Quota',
 };
 
 export default function SettingsShell({ section = 'general' }) {
@@ -30,7 +28,6 @@ export default function SettingsShell({ section = 'general' }) {
   else if (section === 'git') panel = <GitProvidersSettingsPanel />;
   else if (section === 'git-providers' && isAdmin) panel = <GitProvidersSettingsPanel />;
   else if (section === 'github' && !isAdmin) panel = <GitHubSettingsPanel />;
-  else if (section === 'quota') panel = <QuotaSettingsPanel />;
 
   return (
     <div className={consoleAdminPageClass}>

@@ -9,6 +9,7 @@
     "github": "GitHub",
     "git_providers": "Git Providers",
     "quota": "Quota",
+    "skills": "Skills",
     "gateway": "Gateway",
     "language": "Language"
   },
@@ -42,7 +43,8 @@
     "previews": "Concurrent previews",
     "unlimited": "Unlimited",
     "resource_tier": "Resource tier",
-    "loading": "Loading quota information…"
+    "loading": "Loading quota information…",
+    "load_failed": "Unable to load quota information."
   },
   "usage": {
     "title": "Token Usage",

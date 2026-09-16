@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useContext } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft } from 'lucide-react';
@@ -12,7 +12,7 @@ import AgentsAdmin from './pages/AgentsAdmin';
 import ImagesManager from './pages/ImagesManager';
 import UsersAdmin from './pages/UsersAdmin';
 import GatewayAdmin from './pages/GatewayAdmin';
-import UsageAdmin from './pages/UsageAdmin';
+import ObservabilityPage from './pages/Observability';
 import AppSidebar from './components/AppSidebar';
 import BrandMark from './components/BrandMark';
 import ConfirmDialog from './components/ConfirmDialog';
@@ -74,17 +74,18 @@ function AuthenticatedLayout({
   const isTrajectory = location.pathname === '/trajectory';
   const isMySkills = location.pathname === '/skills';
   const isSkillsMarket = location.pathname === '/skills/market';
+  const isSkillsManager = isMySkills || isSkillsMarket;
   const isLoopTasks = location.pathname === '/loop-tasks';
   const isAgentsAdmin = location.pathname === '/admin/agents';
   const isUsersAdmin = location.pathname === '/admin/users';
   const isGatewayAdmin = location.pathname === '/admin/gateway';
-  const isUsageAdmin = location.pathname === '/admin/usage';
+  const isObservabilityPage = location.pathname === '/observability';
   const isImagesAdmin = location.pathname === '/admin/images';
   const isCustomImages = location.pathname === '/custom-images';
   const isImagesManager = isCustomImages || isImagesAdmin;
   const isSettingsPage = location.pathname === '/settings';
 
-  const isSettingsRoute = isAgentsAdmin || isUsersAdmin || isGatewayAdmin || isUsageAdmin || isImagesManager || isSettingsPage;
+  const isSettingsRoute = isAgentsAdmin || isUsersAdmin || isGatewayAdmin || isObservabilityPage || isImagesManager || isSkillsManager || isSettingsPage;
 
   const offRouteClass = 'pointer-events-none invisible absolute inset-0 z-0 [&_*]:pointer-events-none';
 
@@ -116,8 +117,8 @@ function AuthenticatedLayout({
         onRequestDeleteSession={(session, ws, action) => sessionsRef.current?.requestDeleteSession?.(session, ws, action)}
         user={user}
         onOpenSettings={() => navigate('/settings')}
+        onOpenObservability={() => navigate('/observability')}
         onLogout={logout}
-        onOpenSkills={() => navigate('/skills')}
         onOpenLoopTasks={() => navigate('/loop-tasks')}
       />
       )}
@@ -207,26 +208,12 @@ function AuthenticatedLayout({
           )}
           aria-hidden={!isTrajectory}
         />
-        <MySkills
-          className={cn(
-            'flex h-full min-h-0 flex-1 flex-col',
-            isMySkills ? 'relative z-20' : offRouteClass,
-          )}
-          aria-hidden={!isMySkills}
-        />
         <LoopTasks
           className={cn(
             'flex h-full min-h-0 flex-1 flex-col',
             isLoopTasks ? 'relative z-20' : offRouteClass,
           )}
           aria-hidden={!isLoopTasks}
-        />
-        <SkillsMarket
-          className={cn(
-            'flex h-full min-h-0 flex-1 flex-col',
-            isSkillsMarket ? 'relative z-20' : offRouteClass,
-          )}
-          aria-hidden={!isSkillsMarket}
         />
         {user?.role === 'admin' && isAgentsAdmin && (
             <div
@@ -267,17 +254,14 @@ function AuthenticatedLayout({
               </div>
             </div>
         )}
-        {user?.role === 'admin' && isUsageAdmin && (
+        {isObservabilityPage && (
             <div
               className={cn(
                 'flex min-h-0 flex-1 flex-row overflow-hidden',
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab="usage" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
-              <div className={cn('flex min-h-0 flex-1 flex-col overflow-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
-                <UsageAdmin />
-              </div>
+              <ObservabilityPage user={user} onLogout={logout} />
             </div>
         )}
         {isImagesManager && (
@@ -291,6 +275,25 @@ function AuthenticatedLayout({
               <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
                 <ImagesManager />
               </div>
+            </div>
+        )}
+        {isSkillsManager && (
+            <div
+              className={cn(
+                'flex min-h-0 flex-1 flex-row overflow-hidden',
+                launchPanelOpen ? offRouteClass : 'relative z-10',
+              )}
+            >
+              <SettingsTabSidebar activeTab="skills" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
+              {isMySkills ? (
+                <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
+                  <MySkills />
+                </div>
+              ) : (
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <SkillsMarket />
+                </div>
+              )}
             </div>
         )}
         {isSettingsPage && (
@@ -311,6 +314,16 @@ function AuthenticatedLayout({
       <ConfirmDialog />
     </div>
   );
+}
+
+/** /admin/usage → /observability?section=usage，保留 ?user= 深链参数。 */
+function UsageRedirect() {
+  const { user } = useContext(AuthContext);
+  const location = useLocation();
+  if (user?.role !== 'admin') return <Navigate to="/sessions" replace />;
+  const params = new URLSearchParams(location.search);
+  params.set('section', 'usage');
+  return <Navigate to={`/observability?${params.toString()}`} replace />;
 }
 
 function App() {
@@ -462,6 +475,7 @@ function App() {
               <Route path="/skills/market" element={null} />
               <Route path="/loop-tasks" element={null} />
               <Route path="/settings" element={null} />
+              <Route path="/observability" element={null} />
               <Route
                 path="/custom-images"
                 element={user?.role === 'admin' ? null : <Navigate to="/sessions" replace />}
@@ -481,7 +495,7 @@ function App() {
               />
               <Route
                 path="/admin/usage"
-                element={user?.role === 'admin' ? null : <Navigate to="/sessions" replace />}
+                element={<UsageRedirect />}
               />
               <Route
                 path="/admin/images"

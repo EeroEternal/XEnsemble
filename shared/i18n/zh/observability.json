@@ -1,0 +1,29 @@
+{
+  "title": "观测",
+  "tabs": {
+    "quota": "配额",
+    "usage": "用量统计",
+    "routing_analytics": "路由分析"
+  },
+  "routing": {
+    "title": "路由分析",
+    "subtitle": "基于请求难度评分（D ∈ [0,1]）的智能路由与成本节省分析",
+    "analyzed_queries": "分析请求数",
+    "analyzed_queries_sub": "经难度评分分析的请求",
+    "complexity_breakdown": "复杂度分布",
+    "tier_high_short": "高",
+    "tier_medium_short": "中",
+    "tier_low_short": "低",
+    "high_reasoning_sub": "{{pct}}% 复杂推理与代码",
+    "model_tier_routing": "模型梯度路由",
+    "pro_model_short": "Pro",
+    "flash_model_short": "Flash",
+    "dynamic_dispatch": "按难度动态调度",
+    "estimated_savings": "预估节省成本",
+    "total_spend": "总花费：{{amount}}",
+    "spectrum_title": "复杂度光谱与信号分布",
+    "legend_high": "高复杂度",
+    "legend_medium": "中复杂度",
+    "legend_low": "低复杂度"
+  }
+}

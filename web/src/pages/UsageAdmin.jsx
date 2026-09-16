@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp, Loader2, RefreshCw, Search } from 'lucide-react';
 
@@ -36,7 +36,6 @@ function avatarClass(userId = '') {
 
 export default function UsageAdmin() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [days, setDays] = useState('30');
@@ -69,14 +68,24 @@ export default function UsageAdmin() {
     fetchData();
   }, [fetchData]);
 
-  // 深链：/admin/usage?user=<id> → 打开对应弹窗
+  // 深链：?user=<id> → 打开对应弹窗。清理参数时保留其余参数
+  // （section 等），页面仍停留在当前观测 tab。
   useEffect(() => {
     const uid = searchParams.get('user');
     if (uid) {
       setDialogUserId(uid);
-      setSearchParams({}, { replace: true });
+      const next = new URLSearchParams(searchParams);
+      next.delete('user');
+      setSearchParams(next, { replace: true });
     }
   }, [searchParams, setSearchParams]);
+
+  const closeUserDialog = () => {
+    setDialogUserId(null);
+    const next = new URLSearchParams(searchParams);
+    next.delete('user');
+    setSearchParams(next, { replace: true });
+  };
 
   const items = summary?.items || [];
   const platformTotal = summary?.totalTokens ?? 0;
@@ -321,7 +330,7 @@ export default function UsageAdmin() {
       )}
 
       {dialogUserId && (
-        <UserUsageDialog userId={dialogUserId} days={Number(days)} onClose={() => { setDialogUserId(null); navigate('/admin/usage', { replace: true }); }} />
+        <UserUsageDialog userId={dialogUserId} days={Number(days)} onClose={closeUserDialog} />
       )}
     </div>
   );

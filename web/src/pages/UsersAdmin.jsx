@@ -313,7 +313,7 @@ export default function UsersAdmin() {
                   <td className={consoleTableBodyCellClass}>
                     <button
                       type="button"
-                      onClick={() => navigate(`/admin/usage?user=${user.id}`)}
+                      onClick={() => navigate(`/observability?section=usage&user=${user.id}`)}
                       className="font-mono text-xs tabular-nums text-zinc-700 hover:text-blue-600 hover:underline"
                       title={formatTokensFull(user.usage_7d_total_tokens || 0)}
                     >

@@ -14,13 +14,12 @@ import {
   PanelLeft,
   List,
   ListTodo,
-  Sparkles,
+  Activity,
   Square,
 } from 'lucide-react';
-import { apiFetch, getAccessToken } from '../lib/api';
+import { apiFetch } from '../lib/api';
 import { useToast } from './Toast';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
-import { getDraftsUnreadCount, markDraftsSeen } from '../lib/skillsApi';
 import {
   loadSidebarPrefs,
   isPinnedSession,
@@ -60,7 +59,7 @@ function sortSessions(list, prefs) {
   });
 }
 
-export function SidebarAccountMenu({ user, onOpenSettings, onLogout, collapsed = false }) {
+export function SidebarAccountMenu({ user, onOpenSettings, onOpenObservability, onLogout, collapsed = false }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [menuRect, setMenuRect] = useState(null);
@@ -147,6 +146,20 @@ export function SidebarAccountMenu({ user, onOpenSettings, onLogout, collapsed =
           {t('settings:title')}
         </button>
       )}
+      {onOpenObservability && (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            close();
+            onOpenObservability?.();
+          }}
+          className={menuItemClass}
+        >
+          <Activity className="w-3.5 h-3.5 shrink-0" />
+          {t('observability:title')}
+        </button>
+      )}
       <button
         type="button"
         role="menuitem"
@@ -211,9 +224,9 @@ export default function AppSidebar({
   onRequestDeleteSession,
   user,
   onOpenSettings,
+  onOpenObservability,
   onLogout,
   onOpenHistory,
-  onOpenSkills,
   onOpenLoopTasks,
   minimal = false,
 }) {
@@ -235,62 +248,6 @@ export default function AppSidebar({
   const [renameValue, setRenameValue] = useState('');
   const [renaming, setRenaming] = useState(false);
   const renameInputRef = useRef(null);
-
-  // P3: auto draft 未读徽章（SSE skill_draft_created 实时 +1，进 Skills 页清零）
-  const [skillsUnread, setSkillsUnread] = useState(0);
-  const skillsUnreadRef = useRef(0);
-
-  useEffect(() => {
-    let active = true;
-    getDraftsUnreadCount()
-      .then((n) => {
-        if (!active) return;
-        skillsUnreadRef.current = n;
-        setSkillsUnread(n);
-      })
-      .catch(() => {});
-    return () => { active = false; };
-  }, []);
-
-  useEffect(() => {
-    if (typeof EventSource === 'undefined') return;
-    let es = null;
-    let closed = false;
-    let reconnectTimer = null;
-    const base = import.meta.env.VITE_API_BASE_URL
-      || (typeof window !== 'undefined' ? window.location.origin : '');
-    const connect = () => {
-      const token = getAccessToken();
-      es = new EventSource(`${base}/api/v1/events?access_token=${encodeURIComponent(token || '')}`);
-      es.addEventListener('message', (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          if (data.type === 'skill_draft_created') {
-            skillsUnreadRef.current += 1;
-            setSkillsUnread(skillsUnreadRef.current);
-          }
-        } catch { /* ignore invalid data */ }
-      });
-      es.addEventListener('error', () => {
-        es?.close();
-        if (closed) return;
-        reconnectTimer = setTimeout(connect, 3000);
-      });
-    };
-    connect();
-    return () => {
-      closed = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      es?.close();
-    };
-  }, []);
-
-  const handleOpenSkills = useCallback(() => {
-    skillsUnreadRef.current = 0;
-    setSkillsUnread(0);
-    markDraftsSeen().catch(() => {});
-    onOpenSkills?.();
-  }, [onOpenSkills]);
 
   useEffect(() => {
     if (renamingId && renameInputRef.current) {
@@ -525,6 +482,7 @@ export default function AppSidebar({
           <SidebarAccountMenu
             user={user}
             onOpenSettings={onOpenSettings}
+            onOpenObservability={onOpenObservability}
             onLogout={onLogout}
           />
         </div>
@@ -567,6 +525,7 @@ export default function AppSidebar({
           <SidebarAccountMenu
             user={user}
             onOpenSettings={onOpenSettings}
+            onOpenObservability={onOpenObservability}
             onLogout={onLogout}
             collapsed
           />
@@ -649,26 +608,6 @@ export default function AppSidebar({
               {t('sessions:history.view_all', { defaultValue: 'View all history' })}
             </button>
           )}
-          {onOpenSkills && (
-            <button
-              type="button"
-              onClick={handleOpenSkills}
-              className={`${sidebarNavItemClass}`}
-            >
-              <Sparkles className="w-4 h-4 shrink-0" strokeWidth={1.75} />
-              <span className="min-w-0 flex-1 truncate text-left">
-                {t('skills:title', { defaultValue: 'Skills' })}
-              </span>
-              {skillsUnread > 0 && (
-                <span
-                  className="shrink-0 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-red-600 text-white text-[10px] font-medium"
-                  title={t('skills:unread_drafts', { count: skillsUnread })}
-                >
-                  {skillsUnread > 99 ? '99+' : skillsUnread}
-                </span>
-              )}
-            </button>
-          )}
           {onOpenLoopTasks && (
             <button
               type="button"
@@ -743,6 +682,7 @@ export default function AppSidebar({
         <SidebarAccountMenu
           user={user}
           onOpenSettings={onOpenSettings}
+          onOpenObservability={onOpenObservability}
           onLogout={onLogout}
         />
       </div>

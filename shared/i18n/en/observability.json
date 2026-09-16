@@ -1,0 +1,29 @@
+{
+  "title": "Observability",
+  "tabs": {
+    "quota": "Quota",
+    "usage": "Usage",
+    "routing_analytics": "Routing Analysis"
+  },
+  "routing": {
+    "title": "Routing Analysis",
+    "subtitle": "Request difficulty scoring (D ∈ [0,1]) and cost-saving model routing",
+    "analyzed_queries": "Analyzed queries",
+    "analyzed_queries_sub": "Requests scored by difficulty",
+    "complexity_breakdown": "Complexity breakdown",
+    "tier_high_short": "High",
+    "tier_medium_short": "Medium",
+    "tier_low_short": "Low",
+    "high_reasoning_sub": "{{pct}}% complex reasoning & code",
+    "model_tier_routing": "Model tier routing",
+    "pro_model_short": "Pro",
+    "flash_model_short": "Flash",
+    "dynamic_dispatch": "Dynamic dispatch by difficulty",
+    "estimated_savings": "Estimated savings",
+    "total_spend": "Total spend: {{amount}}",
+    "spectrum_title": "Complexity spectrum & signal distribution",
+    "legend_high": "High complexity",
+    "legend_medium": "Medium complexity",
+    "legend_low": "Low complexity"
+  }
+}

@@ -42,7 +42,7 @@ describe('i18n', () => {
   });
 
   it('has all expected namespaces', () => {
-    const ns = ['common', 'auth', 'sessions', 'agents', 'users', 'settings', 'gateway', 'workspace', 'git', 'images', 'deploy', 'errors'];
+    const ns = ['common', 'auth', 'sessions', 'agents', 'users', 'settings', 'gateway', 'workspace', 'git', 'images', 'deploy', 'errors', 'skills', 'observability'];
     for (const n of ns) {
       const testKey = `${n}:title`;
       const result = i18n.t(testKey);

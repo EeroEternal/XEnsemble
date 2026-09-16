@@ -9,6 +9,7 @@
     "github": "GitHub",
     "git_providers": "Git 提供商",
     "quota": "配额",
+    "skills": "Skills",
     "gateway": "网关",
     "language": "语言"
   },
@@ -42,7 +43,8 @@
     "previews": "并发预览",
     "unlimited": "不限",
     "resource_tier": "资源等级",
-    "loading": "正在加载配额信息…"
+    "loading": "正在加载配额信息…",
+    "load_failed": "配额信息加载失败。"
   },
   "usage": {
     "title": "Token 用量",
