@@ -27,6 +27,7 @@ const { recordEvent } = require('../events/recordEvent');
 const { computeNextRunAt } = require('./cron');
 const { createAgentSession } = require('../session/createAgentSession');
 const transcriptStore = require('../runtime/TranscriptStore');
+const trajectory = require('../llm/trajectory');
 
 const TIMEOUT_MS = Number(process.env.LOOP_TASK_TIMEOUT_MS) || 30 * 60_000;
 const SPAWN_WAIT_MS = Number(process.env.LOOP_TASK_SPAWN_WAIT_MS) || 5 * 60_000;
@@ -53,6 +54,7 @@ function sleep(ms) {
 }
 
 const TERMINAL_TAIL_BYTES = 8192;
+const RESULT_MAX_CHARS = 16 * 1024;
 
 function stripAnsi(text) {
     return String(text || '')
@@ -79,6 +81,27 @@ function captureTerminalTail(sessionId) {
     } catch {
         return null;
     }
+}
+
+/**
+ * 成功 run 的输出物：提取最终回复（业界定时 Agent 标配）。
+ * 优先取轨迹里最后一条带文本的模型响应（对话式 headless CLI 的最终答复），
+ * 回退终端尾部。null = 会话没有任何文本产出。
+ */
+async function extractRunResult(sessionId) {
+    try {
+        const steps = await trajectory.getAllSteps(sessionId);
+        for (let i = steps.length - 1; i >= 0; i -= 1) {
+            const content = steps[i]?.response?.content;
+            if (!Array.isArray(content)) continue;
+            const text = content
+                .filter((b) => b?.type === 'text' && typeof b.text === 'string' && b.text.trim())
+                .map((b) => b.text.trim())
+                .join('\n\n');
+            if (text) return text.slice(0, RESULT_MAX_CHARS);
+        }
+    } catch { /* 轨迹不可用 → 回退终端 */ }
+    return captureTerminalTail(sessionId);
 }
 
 /**
@@ -170,15 +193,22 @@ async function executeRun(task, run, log = console) {
 
         // 失败/超时：把 agent 终端输出末尾落进 run.error，否则 CLI 级报错（exit 1）
         // 只在终端里（轨迹、exitCode 都没有），事后无法定位失败原因。
+        // 成功：提取最终回复落 run.result（业界定时 Agent 的输出物一等公民）。
         let storedError = error || null;
-        if (status !== 'succeeded' && sessionId) {
-            const tail = captureTerminalTail(sessionId);
-            if (tail) storedError = `${error || status}\n\n${tail}`;
+        let storedResult = null;
+        if (sessionId) {
+            if (status === 'succeeded') {
+                storedResult = await extractRunResult(sessionId);
+            } else {
+                const tail = captureTerminalTail(sessionId);
+                if (tail) storedError = `${error || status}\n\n${tail}`;
+            }
         }
 
         await updateRun(runId, {
             status,
             error: storedError,
+            result: storedResult,
             sessionId,
             agentId: task.agentId || null,
             finishedAt: Date.now(),

@@ -90,12 +90,16 @@
     "no_runs": "No runs yet.",
     "logs": "Execution log",
     "rounds": "{{count}} rounds",
-    "tab_detail": "Details",
-    "tab_trajectory": "Trajectory",
-    "no_session": "No session was created for this run.",
+    "view_trajectory": "View full trajectory",
+    "result": "Result",
     "error": "Error",
     "duration": "Duration",
     "started": "Started"
+  },
+  "run_detail": {
+    "back_to_tasks": "Back to tasks",
+    "not_found": "Run not found or expired.",
+    "no_session": "No session was created for this run."
   },
   "action": {
     "run_now": "Run now",

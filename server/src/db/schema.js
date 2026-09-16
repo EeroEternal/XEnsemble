@@ -620,6 +620,8 @@ const loopTaskRuns = pgTable('loop_task_runs', {
   agentId: text('agent_id'),
   rounds: integer('rounds'),
   logs: jsonb('logs'),
+  // 成功 run 的最终回复（业界定时 Agent 标配：exit code 定成败，结果文本一等公民）
+  result: text('result'),
   error: text('error'),
   startedAt: bigint('started_at', { mode: 'number' }),
   finishedAt: bigint('finished_at', { mode: 'number' }),

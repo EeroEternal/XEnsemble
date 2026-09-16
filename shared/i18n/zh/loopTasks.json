@@ -90,12 +90,16 @@
     "no_runs": "还没有执行记录。",
     "logs": "执行日志",
     "rounds": "{{count}} 轮",
-    "tab_detail": "详情",
-    "tab_trajectory": "轨迹",
-    "no_session": "该次执行未创建会话（可能创建失败）。",
+    "view_trajectory": "查看完整轨迹",
+    "result": "运行结果",
     "error": "错误",
     "duration": "时长",
     "started": "开始"
+  },
+  "run_detail": {
+    "back_to_tasks": "返回任务列表",
+    "not_found": "执行记录不存在或已被清理。",
+    "no_session": "该次执行未创建会话。"
   },
   "action": {
     "run_now": "立即执行",

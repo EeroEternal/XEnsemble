@@ -8,6 +8,7 @@ import History from './pages/History';
 import SkillsMarket from './pages/SkillsMarket';
 import MySkills from './pages/MySkills';
 import LoopTasks from './pages/LoopTasks';
+import LoopRunDetail from './pages/LoopRunDetail';
 import AgentsAdmin from './pages/AgentsAdmin';
 import ImagesManager from './pages/ImagesManager';
 import UsersAdmin from './pages/UsersAdmin';
@@ -76,6 +77,7 @@ function AuthenticatedLayout({
   const isSkillsMarket = location.pathname === '/skills/market';
   const isSkillsManager = isMySkills || isSkillsMarket;
   const isLoopTasks = location.pathname === '/loop-tasks';
+  const isLoopRunDetail = /^\/loop-tasks\/[^/]+\/runs\/[^/]+$/.test(location.pathname);
   const isAgentsAdmin = location.pathname === '/admin/agents';
   const isUsersAdmin = location.pathname === '/admin/users';
   const isGatewayAdmin = location.pathname === '/admin/gateway';
@@ -215,6 +217,9 @@ function AuthenticatedLayout({
           )}
           aria-hidden={!isLoopTasks}
         />
+        {isLoopRunDetail && (
+          <LoopRunDetail className="flex h-full min-h-0 flex-1 flex-col relative z-20" />
+        )}
         {user?.role === 'admin' && isAgentsAdmin && (
             <div
               className={cn(
@@ -474,6 +479,7 @@ function App() {
               <Route path="/skills" element={null} />
               <Route path="/skills/market" element={null} />
               <Route path="/loop-tasks" element={null} />
+              <Route path="/loop-tasks/:taskId/runs/:runId" element={null} />
               <Route path="/settings" element={null} />
               <Route path="/observability" element={null} />
               <Route

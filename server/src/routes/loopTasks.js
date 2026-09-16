@@ -102,6 +102,7 @@ function serializeRun(row) {
         agentId: row.agentId ?? null,
         rounds: row.rounds ?? null,
         logs: Array.isArray(row.logs) ? row.logs.slice(-200) : [],
+        result: row.result ?? null,
         error: row.error ?? null,
         startedAt: row.startedAt ?? null,
         finishedAt: row.finishedAt ?? null,
