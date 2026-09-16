@@ -1,0 +1,113 @@
+const { describe, it, before, after, beforeEach } = require('node:test');
+const assert = require('node:assert/strict');
+const { eq } = require('drizzle-orm');
+const { bootstrapTestDb } = require('../../test/db');
+
+const SESSION_ID = 'sess_sticky';
+const TEST_AGENT_ID = 'sticky-test-agent';
+
+let ctx;
+let db;
+let schema;
+let getSticky;
+let touchSticky;
+let recordStickyFailure;
+
+describe('session route sticky (postgres)', { concurrency: false, timeout: 60000 }, () => {
+    before(async () => {
+        ctx = await bootstrapTestDb(['./sticky'], __dirname);
+        ({ db, schema } = ctx);
+        ({ getSticky, touchSticky, recordStickyFailure } = ctx.reloaded['./sticky']);
+
+        const users = await db.select().from(schema.users).limit(1);
+        let userId;
+        if (users.length > 0) {
+            userId = users[0].id;
+        } else {
+            userId = 'usr_sticky_test';
+            await db.insert(schema.users).values({
+                id: userId,
+                username: 'sticky_test',
+                passwordHash: 'hash',
+                role: 'admin',
+                status: 'active',
+                createdAt: Date.now(),
+            });
+        }
+
+        const agentRows = await db.select().from(schema.agents).where(eq(schema.agents.id, TEST_AGENT_ID));
+        if (agentRows.length === 0) {
+            await db.insert(schema.agents).values({
+                id: TEST_AGENT_ID,
+                name: 'Sticky Test',
+                cmd: 'sticky-test',
+                args: '[]',
+                envRequired: '[]',
+            });
+        }
+
+        await db.delete(schema.sessions).where(eq(schema.sessions.id, SESSION_ID));
+        await db.insert(schema.sessions).values({
+            id: SESSION_ID,
+            userId,
+            agentId: TEST_AGENT_ID,
+            cwd: '/tmp',
+            status: 'running',
+            createdAt: Date.now(),
+        });
+    });
+
+    after(async () => {
+        if (ctx) await ctx.teardown();
+    });
+
+    beforeEach(async () => {
+        await db.delete(schema.sessionRouteSticky).where(eq(schema.sessionRouteSticky.sessionId, SESSION_ID));
+    });
+
+    it('getSticky returns null when no row exists', async () => {
+        assert.equal(await getSticky(SESSION_ID), null);
+    });
+
+    it('touchSticky upserts and getSticky returns model/provider', async () => {
+        await touchSticky(SESSION_ID, { chosenModel: 'deepseek-chat', chosenProvider: 'deepseek' });
+        const sticky = await getSticky(SESSION_ID);
+        assert.ok(sticky);
+        assert.equal(sticky.chosenModel, 'deepseek-chat');
+        assert.equal(sticky.chosenProvider, 'deepseek');
+        assert.equal(sticky.failCount, 0);
+        assert.ok(sticky.expiresAt > Date.now());
+    });
+
+    it('getSticky returns null when expiresAt is in the past', async () => {
+        await touchSticky(SESSION_ID, { chosenModel: 'deepseek-chat', chosenProvider: 'deepseek' });
+        await db
+            .update(schema.sessionRouteSticky)
+            .set({ expiresAt: Date.now() - 1000 })
+            .where(eq(schema.sessionRouteSticky.sessionId, SESSION_ID));
+        assert.equal(await getSticky(SESSION_ID), null);
+    });
+
+    it('recordStickyFailure twice deletes the row and returns released', async () => {
+        await touchSticky(SESSION_ID, { chosenModel: 'kimi-k2.5', chosenProvider: 'moonshot' });
+        const first = await recordStickyFailure(SESSION_ID);
+        assert.equal(first.failCount, 1);
+        assert.equal(first.released, false);
+
+        const second = await recordStickyFailure(SESSION_ID);
+        assert.equal(second.failCount, 2);
+        assert.equal(second.released, true);
+
+        const rows = await db
+            .select()
+            .from(schema.sessionRouteSticky)
+            .where(eq(schema.sessionRouteSticky.sessionId, SESSION_ID));
+        assert.equal(rows.length, 0);
+        assert.equal(await getSticky(SESSION_ID), null);
+    });
+
+    it('recordStickyFailure is a noop when no row exists', async () => {
+        const result = await recordStickyFailure(SESSION_ID);
+        assert.deepEqual(result, { failCount: 0, released: false });
+    });
+});
