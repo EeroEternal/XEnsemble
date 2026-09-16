@@ -1246,7 +1246,12 @@ async function runPlatformInstall({ runtimeRef, workspacePath, hostWorkspacePath
                 try {
                     const dir = path.join(hostWorkspacePath, sub);
                     if (fs.existsSync(path.join(dir, 'package.json'))) return pmCmd(detectHostPm(dir));
-                } catch { /* ignore */ }
+                } catch (e) {
+                    // 不要静默：此处曾吞掉 detectHostPm 的 TypeError（该函数一度只在
+                    // detectStack 的 _internal 里，顶层解构为 undefined），导致每个子包
+                    // 都返回 null、逐包安装整体跳过且日志只显示 "0 command(s)"，极难定位。
+                    log(`platform install: cannot resolve install cmd for "${sub}": ${e.message?.slice(0, 160)}`);
+                }
                 return null;
             };
             // 补装并行化：各子包 install 互相独立（无 workspace 依赖），串行实测
@@ -4802,4 +4807,4 @@ function registerAutoDeployRoutes(fastify, { getProjectForUser }) {
     });
 }
 
-module.exports = { registerAutoDeployRoutes, runAutoTwoStageDeploy, detectProjectType, startLiveDevServer, startViteAggregateProxy, getGuestFreePort, runPlatformInstall, loadVerifyState, saveVerifyState };
+module.exports = { registerAutoDeployRoutes, runAutoTwoStageDeploy, detectProjectType, startLiveDevServer, startViteAggregateProxy, getGuestFreePort, runPlatformInstall, loadVerifyState, saveVerifyState, repairHostWorkspaceOwnership, configureGuestMirrors };

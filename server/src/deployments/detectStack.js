@@ -1709,6 +1709,12 @@ module.exports = {
     detectSystemDeps,
     detectStartCandidates,
     normalizeCmdForCompare,
+    // twoStage 的逐子包安装要用（见文件末注释：twoStage 需要的助手一律顶层导出）。
+    // 此前只在下方 _internal 里，顶层解构得到 undefined，调用抛 TypeError 又被空
+    // catch 吞掉 → subInstallCmd 恒返回 null → 多仓库项目（无根 package.json）逐子包
+    // 安装一条命令都不跑（日志 "0 command(s)"），依赖永远缺失（实测 pnpm 未装 →
+    // 构建 pnpm: not found exit 127）。_internal 里保留一份供测试解构。
+    detectPackageManager,
     // Internal helpers exposed for tests.
     _internal: {
         detectPackageManager,

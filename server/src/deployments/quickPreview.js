@@ -149,6 +149,23 @@ async function runQuickPreviewInner({ project, userId, projectId, sessionId, rep
     const wsPath = ready.workspacePath;
     const hostPath = ready.hostWorkspacePath || wsPath;
 
+    // 宿主目录属主修正（必须在任何沙箱写入之前）：server 以 root 创建项目/worktree，
+    // 目录属 root:root(755)；而 virtiofs 由 blink-server（administrator, uid 1000）
+    // 导出，沙箱内写入以 1000 落盘 → 对 root 属主目录无写权限 → mock 工厂/依赖安装/
+    // 前端构建全部 write failed → 预览失败（实测 6/6 相关：有部署记录的项目目录属 1000
+    // 可写，无部署记录的属 0:0 不可写）。部署路径（twoStage）一直有此修正，快速预览漏了，
+    // 表现为「新建项目直接点预览必失败，先跑一次完整部署才正常」。
+    // 传基础目录：函数内部会级联修复 <base>.wt/* 下所有 worktree（当前会话 runtime 就在
+    // 其中）。不传 hostPath——boxlite 下 hostWorkspacePath 可能为 undefined，此时它会回退
+    // 成 guest 路径 /workspace，chown 会打偏。函数自带 try/catch，失败仅告警不阻塞。
+    try {
+        const { repairHostWorkspaceOwnership } = require('./twoStage');
+        const workspace = require('../workspace');
+        repairHostWorkspaceOwnership(workspace.projectDir(userId, projectId));
+    } catch (e) {
+        quickLog(`repair workspace ownership failed (non-fatal): ${e.message}`);
+    }
+
     // 阶段 A：理解项目（LLM 单次分析；部署过的项目直接命中 plan 缓存零 LLM）
     report({ stage: 'A', message: '分析项目结构（快速）' });
     const { detectProjectType } = require('./twoStage');
@@ -184,6 +201,19 @@ async function runQuickPreviewInner({ project, userId, projectId, sessionId, rep
     // dev server 大多能在缺 env 下启动，mock 模式不依赖真实后端；真跑不起来时阶段 B 报错。
     if (missingEnv.length) {
         quickLog(`plan has ${missingEnv.length} configFiles with templates (env may be missing; dev preview tolerates it)`);
+    }
+
+    // 沙箱环境前置（镜像源 + pnpm 预装）：runPlatformInstall 的文档化前置条件
+    // （见 twoStage configureGuestMirrors 注释），部署路径一直调用，快速预览漏了。
+    // 后果：镜像只带 corepack 不带 pnpm 二进制，而 pnpm-lock.yaml 项目的 install/build
+    // 都用 `pnpm ...` → 秒失败 `sh: 1: pnpm: not found`（exit 127）→ 依赖缺失 → 构建失败
+    // → 预览失败。该函数幂等（pnpm 已装则跳过），同时铺 npm/pnpm/pip 镜像源加速安装。
+    // 必须无条件执行：依赖缓存命中时 node_modules 虽在，但 `pnpm run build` 仍要 pnpm 二进制。
+    try {
+        const { configureGuestMirrors } = require('./twoStage');
+        await configureGuestMirrors(ref, wsPath, (m) => quickLog(String(m).slice(0, 160)));
+    } catch (e) {
+        quickLog(`configure guest mirrors failed (non-fatal): ${e.message}`);
     }
 
     // 依赖：lock hash 缓存判定，stale 才装
@@ -491,6 +521,45 @@ async function attemptLiveDevServer({ ref, wsPath, hostPath, detected: detectedI
 // → 根无 package.json → ENOENT（frontend+backend 多仓库布局实测）。
 // 这里复用 previewProxyServer 静态模式：注入 <base>/路由 shim、HTML 绝对路径改写为相对、
 // /api 与 /ws 转发到 mock。构建耗时高于 live 预览，属"能预览"优先的取舍。
+// 静态构建产物复用判断（P0 提速）：产物是纯构建输出，与预览实例无关——base 前缀与路由
+// shim 都由 previewProxyServer.rewriteHtml 在 serve 时注入（见 previewProxyServer.js
+// rewriteHtml），构建产物里不含 /preview/<id>/，所以同一份 dist 可跨多次预览复用。
+// 判据用 mtime：沙箱内 /workspace 不是 git 仓库（.git 指针指向宿主路径，git status 报
+// not a repository），拿不到 git 状态，只能比文件时间。find 扫 workspace 找"新于
+// dist/index.html"的源文件，命中即视为需要重建。
+// 保守原则：index.html 缺失、探测超时/异常、输出不可解析 → 一律返回 fresh=false 去构建。
+// 宁可多构建一次，也绝不 serve 陈旧产物（陈旧产物 = 用户改了代码但预览不变，比慢更难查）。
+// mtime 方案的已知局限：保留原 mtime 的还原（如 tar -p / rsync --times）不会触发重建。
+async function isStaticBuildFresh({ runtimeRef, workspacePath, distAbs }) {
+    const runtime = getRuntime();
+    // prune 掉依赖/产物/元数据目录（这些不是构建输入，且 node_modules 有 1.6G，不 prune 会扫很久）；
+    // 排除 *.log/*.md/*.tmp —— 文档与日志不是构建输入，改 README 不该触发 137s 重建。
+    // 依赖存储目录（.pnpm-store/.yarn/.npm）也 prune：pnpm install 会往里写，但其变化不代表
+    // 构建输入变了——真正的依赖变更信号是 lockfile，而 lockfile 在扫描范围内没被排除。
+    const FIND = `find . `
+        + `-type d \\( -name node_modules -o -name .git -o -name dist -o -name build -o -name .next `
+        + `-o -name .nuxt -o -name .output -o -name .cache -o -name .turbo -o -name .parcel-cache `
+        + `-o -name coverage -o -name .venv -o -name venv -o -name __pycache__ `
+        + `-o -name .pnpm-store -o -name .pnpm -o -name .yarn -o -name .npm `
+        + `-o -name .xensemble -o -name .agents \\) -prune `
+        + `-o -type f ! -name '*.log' ! -name '*.md' ! -name '*.tmp' `
+        + `-newer ${JSON.stringify(distAbs + '/index.html')} -print -quit 2>/dev/null`;
+    try {
+        const r = await runtime.exec.exec('sh', ['-c',
+            `[ -f ${JSON.stringify(distAbs + '/index.html')} ] || { echo "XE_NO_INDEX"; exit 0; }; `
+            + `NEWER=$(${FIND}); `
+            + `if [ -n "$NEWER" ]; then echo "XE_CHANGED:$NEWER"; else echo "XE_FRESH:$(stat -c %y ${JSON.stringify(distAbs + '/index.html')} 2>/dev/null)"; fi`,
+        ], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 60000 });
+        const out = String(r.stdout || '').trim();
+        if (out.startsWith('XE_FRESH:')) return { fresh: true, builtAt: out.slice('XE_FRESH:'.length).trim() };
+        if (out.startsWith('XE_CHANGED:')) return { fresh: false, reason: `changed: ${out.slice('XE_CHANGED:'.length).trim().slice(0, 120)}` };
+        if (out.startsWith('XE_NO_INDEX')) return { fresh: false, reason: 'no index.html' };
+        return { fresh: false, reason: `unexpected probe output: ${out.slice(0, 120)}` };
+    } catch (e) {
+        return { fresh: false, reason: `probe failed: ${e.message?.slice(0, 120)}` };
+    }
+}
+
 async function startStaticQuickServe({ runtimeRef, workspacePath, detected, base, mockPort, onLog }) {
     const runtime = getRuntime();
     // 构建命令：优先检测结果（如 `cd frontend && pnpm run build`）；缺失时从子项目里
@@ -502,29 +571,49 @@ async function startStaticQuickServe({ runtimeRef, workspacePath, detected, base
     }
     if (!buildCmd) return { ok: false, reason: '项目没有可用的构建命令（无 build 脚本），无法静态预览' };
 
-    onLog(`static fallback: building (${buildCmd.slice(0, 120)})`);
-    const PRE = 'export PATH="/usr/local/bin:$PATH"; export CI=true; export NODE_OPTIONS="--max-old-space-size=3072"; ';
-    let buildLog = '';
-    try {
-        const r = await runtime.exec.exec('sh', ['-c', `${PRE}${buildCmd}`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 900000 });
-        buildLog = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
-        if (Number(r.exitCode) !== 0) {
-            return { ok: false, reason: `构建失败（exit ${r.exitCode}）：${buildLog.slice(-400)}` };
-        }
-    } catch (e) {
-        return { ok: false, reason: `构建执行失败：${e.message}` };
-    }
-    onLog('static fallback: build done, probing dist');
+    // 找构建产物（与 twoStage.ensureFrontendServed 同一批常见位置）。探测提到构建之前：
+    // 复用判断需要先知道 dist 在哪。
+    const probeDist = async () => {
+        try {
+            const probe = await runtime.exec.exec('sh', ['-c',
+                'ls -d web/dist frontend/dist client/dist apps/web/dist apps/client/dist dist 2>/dev/null | head -1'],
+                {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
+            return String(probe.stdout || '').trim();
+        } catch { return ''; }
+    };
 
-    // 找构建产物（与 twoStage.ensureFrontendServed 同一批常见位置）。
-    let dist = '';
-    try {
-        const probe = await runtime.exec.exec('sh', ['-c',
-            'ls -d web/dist frontend/dist client/dist apps/web/dist apps/client/dist dist 2>/dev/null | head -1'],
-            {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 });
-        dist = String(probe.stdout || '').trim();
-    } catch { /* keep '' */ }
-    if (!dist) return { ok: false, reason: '构建完成但未找到产物目录（frontend/dist、web/dist、dist 等）' };
+    // 产物复用：产物存在且无源文件比它新 → 跳过构建直接 serve。命中场景是「停预览后再启动」
+    // 与反复调预览（代码没变却每次重跑全量构建，实测 137s，占静态预览总耗时 98%）。
+    let dist = await probeDist();
+    let reused = false;
+    if (dist) {
+        const distAbsChk = dist.startsWith('/') ? dist : `${workspacePath}/${dist}`;
+        const chk = await isStaticBuildFresh({ runtimeRef, workspacePath, distAbs: distAbsChk });
+        if (chk.fresh) {
+            reused = true;
+            onLog(`static fallback: reusing existing build (${dist}, built ${chk.builtAt}), skipping build`);
+        } else {
+            onLog(`static fallback: rebuild needed (${chk.reason})`);
+        }
+    }
+
+    if (!reused) {
+        onLog(`static fallback: building (${buildCmd.slice(0, 120)})`);
+        const PRE = 'export PATH="/usr/local/bin:$PATH"; export CI=true; export NODE_OPTIONS="--max-old-space-size=3072"; ';
+        let buildLog = '';
+        try {
+            const r = await runtime.exec.exec('sh', ['-c', `${PRE}${buildCmd}`], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 900000 });
+            buildLog = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
+            if (Number(r.exitCode) !== 0) {
+                return { ok: false, reason: `构建失败（exit ${r.exitCode}）：${buildLog.slice(-400)}` };
+            }
+        } catch (e) {
+            return { ok: false, reason: `构建执行失败：${e.message}` };
+        }
+        onLog('static fallback: build done, probing dist');
+        dist = await probeDist();
+    }
+    if (!dist) return { ok: false, reason: '未找到产物目录（frontend/dist、web/dist、dist 等）' };
 
     const distAbs = dist.startsWith('/') ? dist : `${workspacePath}/${dist}`;
     const listenPort = (await getGuestFreePortCompat(runtimeRef)) || 0;
