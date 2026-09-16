@@ -28,15 +28,15 @@ function formatTtl(expiresAt) {
 }
 
 /** Deployed app preview (start/stop + embed). mode='preview' 时详情文案用预览词汇。 */
-export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo, initialDeployment, mode = 'deploy', onRestartPreview }) {
+export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo, mode = 'deploy', onRestartPreview }) {
   const { t } = useTranslation();
-  // initialDeployment：部署/预览流水线 SSE result 里的 { deploymentId, previewUrl }——
-  // 作为种子立即渲染 iframe，不依赖首次轮询（该次请求一旦失败/返回空，旧实现会
-  // 永久显示空占位符，只能手动刷新页面恢复）。keepRunningOnEmpty 让后续轮询的
-  // 偶发空结果不抹掉运行中的种子。
+  // pollWhenIdle：部署/预览刚完成时持续重试拉取部署记录，直到拿到 running 记录才
+  // 渲染 iframe（首次请求失败 → 旧实现永久空白，只能手动刷新）。keepRunningOnEmpty：
+  // 运行中偶发轮询空结果不抹成占位符。iframe 不做"成功即渲染"——首帧请求打进未就绪
+  // 的预览链路会 Bad Request（实测），轮询确认的时序与"刷新后正常"一致。
   const preview = usePreview(projectId, true, sessionId, {
-    seedDeployment: initialDeployment || null,
-    keepRunningOnEmpty: Boolean(initialDeployment),
+    pollWhenIdle: true,
+    keepRunningOnEmpty: true,
   });
   const { status, previewUrl, isBusy, resolveEmbedUrl, openPreview } = preview;
   const { showToast } = useToast();
@@ -198,7 +198,7 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo,
       )}
 
       <div className="flex-1 min-h-0 bg-zinc-100">
-        {embedLoading || isBusy ? (
+        {embedLoading || isBusy || preview.idlePolling ? (
           <div className="flex h-full items-center justify-center gap-2 text-zinc-400">
             <Loader2 className="h-4 w-4 animate-spin" />
             <span className="text-sm">{isBusy ? t('deploy:preview.deploying') : t('deploy:preview.loading')}</span>

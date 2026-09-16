@@ -60,35 +60,19 @@ export function usePreview(projectId, token, sessionId, opts = {}) {
   const { showToast } = useToast();
   const { t } = useTranslation();
   const lastFailedToastRef = useRef(null);
-  // 种子部署（可选）：快速预览/部署完成时 SSE result 已携带 previewUrl + deploymentId，
-  // 直接以它渲染预览，不等首次轮询。此前预览 pane 挂载后只 fetch 一次，一旦该次请求
-  // 失败或返回空（无重试：4s 轮询仅在已有活跃部署时启动）→ 永久显示空占位符，
-  // 而右上角实例靠 onSuccess 的额外刷新能拿到记录——表现为"预览 tab 空白、右上角
-  // 却能打开预览"，手动刷新页面才恢复。
-  const [deployment, setDeployment] = useState(opts.seedDeployment || null);
+  const [deployment, setDeployment] = useState(null);
   const [loading, setLoading] = useState(false);
   const [pollError, setPollError] = useState('');
   const previewWindowRef = useRef(null);
   const hasActiveDeployment = deployment && (deployment.status === 'running' || deployment.status === 'building' || deployment.status === 'pending');
 
-  // 切 project/session 时清空旧 deployment/loading，避免右上角残留旧 session 的"部署中"
-  // 转圈。注意必须跳过首次挂载：带种子的实例（预览 pane）初始值就是 SSE result，
-  // 挂载即清空会把种子抹掉、退回"等首次轮询"的旧行为。
-  const sessionKeyRef = useRef(null);
+  // 切 project/session 时清空旧 deployment/loading，避免右上角残留旧 session 的"部署中"转圈
   useEffect(() => {
-    const key = `${projectId || ''}|${sessionId || ''}`;
-    if (sessionKeyRef.current === null) {
-      sessionKeyRef.current = key;
-      return undefined;
-    }
-    if (sessionKeyRef.current === key) return undefined;
-    sessionKeyRef.current = key;
     lastFailedToastRef.current = null;
     closePreviewWindow(previewWindowRef);
     setDeployment(null);
     setPollError('');
     setLoading(false);
-    return undefined;
   }, [projectId, sessionId]);
 
   useEffect(() => () => closePreviewWindow(previewWindowRef), []);
@@ -109,8 +93,8 @@ export function usePreview(projectId, token, sessionId, opts = {}) {
         const mine = sessionId ? list.filter((d) => d.session_id === sessionId) : list;
         const next = pickActiveDeployment(mine);
         if (prev && next && prev.id === next.id && prev.status === next.status && prev.public_url === next.public_url) return prev;
-        // 带种子的实例：某次轮询偶发返回空（网络抖动/后端瞬时错误）时不把运行中的
-        // 种子抹成空占位——等下次轮询纠正即可（真实 stopped/failed 终态仍会正常覆盖）。
+        // 预览 pane（keepRunningOnEmpty）：某次轮询偶发返回空（网络抖动/后端瞬时错误）
+        // 时不把运行中的部署抹成空占位——等下次轮询纠正即可（真实 stopped/failed 终态仍会正常覆盖）。
         if (!next && prev && opts.keepRunningOnEmpty && prev.status === 'running' && prev.public_url) return prev;
         return next;
       });
@@ -133,6 +117,37 @@ export function usePreview(projectId, token, sessionId, opts = {}) {
     const id = setInterval(loadDeployments, 4000);
     return () => clearInterval(id);
   }, [loadDeployments, hasActiveDeployment]);
+
+  // pollWhenIdle（预览 pane）：部署/预览刚完成时，"首次 fetch 一锤子买卖"是空白 tab
+  // 的根因——该次请求一旦失败/返回空，旧实现无任何重试（4s 轮询仅在已有活跃部署时
+  // 启动），只能整页刷新。这里在尚无活跃部署期间持续重试（2.5s × 40 ≈ 100s），
+  // 拿到部署记录即停（后续由上方 4s 轮询接管）。iframe 只在轮询真实拿到 running
+  // 记录后才渲染——曾试验用 SSE result 直接种 iframe"成功即渲染"，结果首帧请求
+  // 打进尚未就绪的预览链路（网关/隧道/聚合代理），用户看到 Bad Request；轮询确认
+  // 的时序与"刷新后正常"的经验路径一致，可靠。
+  const [idlePolling, setIdlePolling] = useState(false);
+  useEffect(() => {
+    if (hasActiveDeployment) {
+      setIdlePolling(false);
+      return undefined;
+    }
+    if (!opts.pollWhenIdle || !projectId || !token) return undefined;
+    let tries = 0;
+    setIdlePolling(true);
+    const id = setInterval(() => {
+      tries += 1;
+      if (tries > 40) {
+        clearInterval(id);
+        setIdlePolling(false);
+        return;
+      }
+      loadDeployments();
+    }, 2500);
+    return () => {
+      clearInterval(id);
+      setIdlePolling(false);
+    };
+  }, [hasActiveDeployment, opts.pollWhenIdle, projectId, token, loadDeployments]);
 
   const deployPreview = async () => {
     setLoading(true);
@@ -235,6 +250,7 @@ export function usePreview(projectId, token, sessionId, opts = {}) {
     previewUrl,
     isBusy,
     pollError,
+    idlePolling,
     loadDeployments,
     deployPreview,
     stopPreview,
