@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  Plus, Pencil, Play, Pause, Trash2, Loader2, RefreshCw, History as HistoryIcon, CheckCircle, Clock, ExternalLink,
+  Plus, Pencil, Play, Pause, Trash2, Loader2, RefreshCw, History as HistoryIcon, CheckCircle, Clock,
   Target, Activity, FileText, ListChecks,
 } from 'lucide-react';
+import TrajectoryViewer from '../components/trajectory/TrajectoryViewer';
 
 import Button from '../components/Button';
 import Input, { FormLabel, Textarea } from '../components/Input';
@@ -162,7 +162,6 @@ function scheduleToForm(task) {
 export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden }) {
   const { t } = useTranslation();
   const { showToast } = useToast();
-  const navigate = useNavigate();
 
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -180,6 +179,10 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
   const [runs, setRuns] = useState([]);
   const [runsLoading, setRunsLoading] = useState(false);
   const [selectedRun, setSelectedRun] = useState(null);
+  const [runDetailTab, setRunDetailTab] = useState('detail'); // 'detail' | 'trajectory'
+
+  // 切换 run 时回到「详情」页签
+  useEffect(() => { setRunDetailTab('detail'); }, [selectedRun?.id]);
 
   const fetchProjects = useCallback(() => {
     apiFetch('/api/v1/projects')
@@ -723,69 +726,87 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                             {run.rounds != null && (
                               <span>{t('loopTasks:run.rounds', { count: run.rounds })}</span>
                             )}
-                            {run.sessionId && (
-                              <span
-                                role="button" tabIndex={0}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  navigate('/sessions', { state: { openLoopSession: { sessionId: run.sessionId, agentId: run.agentId, projectId: runsOpenFor.projectId, projectName: projectName(runsOpenFor.projectId) } } });
-                                }}
-                                onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); navigate('/sessions', { state: { openLoopSession: { sessionId: run.sessionId, agentId: run.agentId, projectId: runsOpenFor.projectId, projectName: projectName(runsOpenFor.projectId) } } }); } }}
-                                className="shrink-0 inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 hover:underline"
-                              >
-                                <ExternalLink className="h-3 w-3" />
-                                {t('loopTasks:run.open_session')}
-                              </span>
-                            )}
                           </span>
                         </button>
                       );
                     })}
                   </div>
                   {/* 右：选中 run 的详情 */}
-                  <div className="flex-1 min-w-0 overflow-y-auto console-scroll-hidden">
+                  <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
                     {selectedRun ? (
-                      <div className="rounded-lg border border-zinc-200 bg-zinc-50/70 p-3">
-                        {/* 摘要行：开始时刻 · 时长 · 轮次 —— Actions/Vercel run 详情的通用头部 */}
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-500 mb-2 tabular-nums">
-                          {selectedRun.startedAt && (
-                            <span>
-                              <span className="text-zinc-400">{t('loopTasks:run.started')} </span>
-                              {fmtClock(selectedRun.startedAt)}
-                            </span>
-                          )}
-                          {(() => {
-                            const dur = fmtDuration((selectedRun.finishedAt ?? (selectedRun.status === 'running' ? Date.now() : NaN)) - selectedRun.startedAt);
-                            return dur ? (
-                              <span>
-                                <span className="text-zinc-400">{t('loopTasks:run.duration')} </span>
-                                {dur}
-                              </span>
-                            ) : null;
-                          })()}
-                          {selectedRun.rounds != null && (
-                            <span>{t('loopTasks:run.rounds', { count: selectedRun.rounds })}</span>
-                          )}
-                        </div>
-                        {selectedRun.error && (
-                          <p className="text-xs text-red-700 mb-2 break-words">
-                            <span className="font-semibold">{t('loopTasks:run.error')}: </span>
-                            {selectedRun.error}
-                          </p>
-                        )}
-                        <div className="space-y-1">
-                          {(selectedRun.logs || []).map((entry, i) => (
-                            <div key={i} className="flex items-baseline gap-2 text-xs font-mono">
-                              <span className="shrink-0 text-zinc-400 tabular-nums">{fmtClock(entry.ts) ?? `#${entry.round}`}</span>
-                              <span className="shrink-0 text-zinc-700 font-semibold">{entry.action}</span>
-                              <span className="min-w-0 flex-1 break-all text-zinc-500">{entry.summary}</span>
-                            </div>
+                      <>
+                        {/* 详情 / 轨迹 页签 */}
+                        <div className="shrink-0 flex items-center border-b border-zinc-200 mb-2" role="tablist">
+                          {[
+                            { v: 'detail', label: t('loopTasks:run.tab_detail') },
+                            { v: 'trajectory', label: t('loopTasks:run.tab_trajectory') },
+                          ].map(({ v, label }) => (
+                            <button
+                              key={v}
+                              type="button"
+                              role="tab"
+                              aria-selected={runDetailTab === v}
+                              onClick={() => setRunDetailTab(v)}
+                              className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px ${consoleButtonFocusClass} ${
+                                runDetailTab === v ? 'border-zinc-900 text-zinc-900' : 'border-transparent text-zinc-500 hover:text-zinc-900'
+                              }`}
+                            >
+                              {label}
+                            </button>
                           ))}
-                          {(selectedRun.logs || []).length === 0 && !selectedRun.error && (
-                            <p className="text-xs text-zinc-400">{selectedRun.status === 'running' ? '…' : '—'}</p>
-                          )}
                         </div>
-                      </div>
+                        {runDetailTab === 'trajectory' ? (
+                          selectedRun.sessionId ? (
+                            <TrajectoryViewer key={selectedRun.sessionId} sessionId={selectedRun.sessionId} live={false} />
+                          ) : (
+                            <p className="text-xs text-zinc-400 py-8 text-center">{t('loopTasks:run.no_session')}</p>
+                          )
+                        ) : (
+                          <div className="flex-1 min-h-0 overflow-y-auto console-scroll-hidden">
+                            <div className="rounded-lg border border-zinc-200 bg-zinc-50/70 p-3">
+                              {/* 摘要行：开始时刻 · 时长 · 轮次 —— Actions/Vercel run 详情的通用头部 */}
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-500 mb-2 tabular-nums">
+                                {selectedRun.startedAt && (
+                                  <span>
+                                    <span className="text-zinc-400">{t('loopTasks:run.started')} </span>
+                                    {fmtClock(selectedRun.startedAt)}
+                                  </span>
+                                )}
+                                {(() => {
+                                  const dur = fmtDuration((selectedRun.finishedAt ?? (selectedRun.status === 'running' ? Date.now() : NaN)) - selectedRun.startedAt);
+                                  return dur ? (
+                                    <span>
+                                      <span className="text-zinc-400">{t('loopTasks:run.duration')} </span>
+                                      {dur}
+                                    </span>
+                                  ) : null;
+                                })()}
+                                {selectedRun.rounds != null && (
+                                  <span>{t('loopTasks:run.rounds', { count: selectedRun.rounds })}</span>
+                                )}
+                              </div>
+                              {selectedRun.error && (
+                                <p className="text-xs text-red-700 mb-2 break-words whitespace-pre-wrap font-mono">
+                                  <span className="font-semibold">{t('loopTasks:run.error')}: </span>
+                                  {selectedRun.error}
+                                </p>
+                              )}
+                              <div className="space-y-1">
+                                {(selectedRun.logs || []).map((entry, i) => (
+                                  <div key={i} className="flex items-baseline gap-2 text-xs font-mono">
+                                    <span className="shrink-0 text-zinc-400 tabular-nums">{fmtClock(entry.ts) ?? `#${entry.round}`}</span>
+                                    <span className="shrink-0 text-zinc-700 font-semibold">{entry.action}</span>
+                                    <span className="min-w-0 flex-1 break-all text-zinc-500">{entry.summary}</span>
+                                  </div>
+                                ))}
+                                {(selectedRun.logs || []).length === 0 && !selectedRun.error && (
+                                  <p className="text-xs text-zinc-400">{selectedRun.status === 'running' ? '…' : '—'}</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </>
                     ) : (
                       <div className="h-full flex items-center justify-center text-xs text-zinc-400">
                         {t('loopTasks:run.select_hint', { defaultValue: '← 选择一条执行记录查看详情' })}

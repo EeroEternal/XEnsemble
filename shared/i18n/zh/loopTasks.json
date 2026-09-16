@@ -90,7 +90,9 @@
     "no_runs": "还没有执行记录。",
     "logs": "执行日志",
     "rounds": "{{count}} 轮",
-    "open_session": "打开会话",
+    "tab_detail": "详情",
+    "tab_trajectory": "轨迹",
+    "no_session": "该次执行未创建会话（可能创建失败）。",
     "error": "错误",
     "duration": "时长",
     "started": "开始"

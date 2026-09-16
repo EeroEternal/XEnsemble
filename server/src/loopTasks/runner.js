@@ -26,6 +26,7 @@ const { broadcastSse } = require('../session/sseManager');
 const { recordEvent } = require('../events/recordEvent');
 const { computeNextRunAt } = require('./cron');
 const { createAgentSession } = require('../session/createAgentSession');
+const transcriptStore = require('../runtime/TranscriptStore');
 
 const TIMEOUT_MS = Number(process.env.LOOP_TASK_TIMEOUT_MS) || 30 * 60_000;
 const SPAWN_WAIT_MS = Number(process.env.LOOP_TASK_SPAWN_WAIT_MS) || 5 * 60_000;
@@ -49,6 +50,35 @@ async function updateRun(runId, patch) {
 
 function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
+}
+
+const TERMINAL_TAIL_BYTES = 8192;
+
+function stripAnsi(text) {
+    return String(text || '')
+        .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+        .replace(/\x1b\][^\x07]*\x07/g, '')
+        .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n');
+}
+
+/** 失败/超时时提取会话终端输出末尾（CLI stderr/stdout），用于落 run.error。 */
+function captureTerminalTail(sessionId) {
+    try {
+        const live = sessionManager.getSession(sessionId);
+        const ref = live?.transcriptRef;
+        if (!ref) return null;
+        const { frames } = transcriptStore.readTail(ref, TERMINAL_TAIL_BYTES);
+        let text = '';
+        for (const f of frames) {
+            if (f.kind === 'out' && typeof f.data === 'string') text += f.data;
+        }
+        const clean = stripAnsi(text).trim().slice(-TERMINAL_TAIL_BYTES).trim();
+        return clean || null;
+    } catch {
+        return null;
+    }
 }
 
 /**
@@ -137,9 +167,18 @@ async function executeRun(task, run, log = console) {
         settled = true;
         if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
         try { offExit?.(); } catch { /* ignore */ }
+
+        // 失败/超时：把 agent 终端输出末尾落进 run.error，否则 CLI 级报错（exit 1）
+        // 只在终端里（轨迹、exitCode 都没有），事后无法定位失败原因。
+        let storedError = error || null;
+        if (status !== 'succeeded' && sessionId) {
+            const tail = captureTerminalTail(sessionId);
+            if (tail) storedError = `${error || status}\n\n${tail}`;
+        }
+
         await updateRun(runId, {
             status,
-            error: error || null,
+            error: storedError,
             sessionId,
             agentId: task.agentId || null,
             finishedAt: Date.now(),
