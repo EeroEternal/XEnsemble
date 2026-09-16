@@ -102,51 +102,8 @@ function AuthenticatedLayout({
   }, [setActiveSession, agents, navigate, location.pathname]);
 
   return (
-    <div className={`h-full flex flex-col ${bgCanvas}`}>
-      {/* Full-width top bar (above the sidebar). */}
-      <div
-        className="shrink-0 h-12 border-b border-zinc-200 bg-surface flex items-center px-4 gap-3 relative z-30"
-      >
-        <BrandMark className="h-7 w-7 shrink-0" iconClassName="h-3.5 w-3.5" />
-        <div className="flex flex-col shrink-0 leading-tight">
-          <span className="text-sm font-bold text-zinc-900">AgentHarness</span>
-          <span className="text-[10px] text-zinc-400 font-medium -mt-0.5 flex justify-between">
-            <span>Yuma</span>
-            <span>Engineering</span>
-          </span>
-        </div>
-        {isSettingsRoute ? (
-          <div className="flex-1 min-w-0 flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => navigate('/sessions')}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 ${consoleButtonFocusClass}`}
-              title={t('sessions:action.back_to_workspaces')}
-            >
-              <ArrowLeft className="w-3.5 h-3.5" strokeWidth={1.75} />
-              {t('sessions:action.back_to_workspaces')}
-            </button>
-          </div>
-        ) : (
-          <>
-            {/* Workspace switcher lives in the global top bar (all routes), so
-                /trajectory, /skills etc. never lose access to the active workspace.
-                Session-specific controls (branch/restart/preview) portal into
-                #xe-topbar-dynamic below and only render on /sessions. */}
-            <WorkspaceSwitcher
-              projects={projects}
-              activeWorkspaceId={activeWorkspaceId}
-              sessions={sessions}
-              onSelect={switchWorkspace}
-              onCreate={() => { setLaunchPanelOpen(true); sessionsRef.current?.openLaunchModal?.('workspace'); }}
-              onDelete={(ws) => sessionsRef.current?.requestDeleteWorkspace?.(ws)}
-            />
-            <div id="xe-topbar-dynamic" className="flex-1 min-w-0 flex items-center justify-between gap-3" />
-          </>
-        )}
-      </div>
-
-      <div className="flex flex-1 min-h-0">
+    <div className={`h-full flex ${bgCanvas}`}>
+      {/* 侧边栏独占全高列（分隔线贯穿到顶），logo 与折叠按钮锚在侧栏头部（Claude.ai/Notion 模式）。 */}
       {!isSettingsRoute && (
       <AppSidebar
         agents={agents}
@@ -164,9 +121,54 @@ function AuthenticatedLayout({
         onOpenLoopTasks={() => navigate('/loop-tasks')}
       />
       )}
-      <main
-        className={`relative flex h-full min-h-0 flex-1 flex-col min-w-0 overflow-hidden ${bgCanvas}`}
-      >
+      {/* 右列：内容区顶栏 + 页面。设置路由下侧栏隐藏，logo 回到顶栏。 */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        <div
+          className="shrink-0 h-12 border-b border-zinc-200 bg-surface flex items-center px-4 gap-3 relative z-30"
+        >
+          {isSettingsRoute ? (
+            <>
+              <BrandMark className="h-7 w-7 shrink-0" iconClassName="h-3.5 w-3.5" />
+              <div className="flex flex-col shrink-0 leading-tight">
+                <span className="text-sm font-bold text-zinc-900">AgentHarness</span>
+                <span className="text-[10px] text-zinc-400 font-medium -mt-0.5 flex justify-between">
+                  <span>Yuma</span>
+                  <span>Engineering</span>
+                </span>
+              </div>
+              <div className="flex-1 min-w-0 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => navigate('/sessions')}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 ${consoleButtonFocusClass}`}
+                  title={t('sessions:action.back_to_workspaces')}
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" strokeWidth={1.75} />
+                  {t('sessions:action.back_to_workspaces')}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Workspace switcher lives in the content top bar (all routes), so
+                  /trajectory, /skills etc. never lose access to the active workspace.
+                  Session-specific controls (branch/restart/preview) portal into
+                  #xe-topbar-dynamic below and only render on /sessions. */}
+              <WorkspaceSwitcher
+                projects={projects}
+                activeWorkspaceId={activeWorkspaceId}
+                sessions={sessions}
+                onSelect={switchWorkspace}
+                onCreate={() => { setLaunchPanelOpen(true); sessionsRef.current?.openLaunchModal?.('workspace'); }}
+                onDelete={(ws) => sessionsRef.current?.requestDeleteWorkspace?.(ws)}
+              />
+              <div id="xe-topbar-dynamic" className="flex-1 min-w-0 flex items-center justify-between gap-3" />
+            </>
+          )}
+        </div>
+        <main
+          className={`relative flex min-h-0 flex-1 flex-col min-w-0 overflow-hidden ${bgCanvas}`}
+        >
         <Sessions
           ref={sessionsRef}
           token={token}

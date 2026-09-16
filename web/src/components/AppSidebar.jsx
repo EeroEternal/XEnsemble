@@ -229,6 +229,7 @@ export default function AppSidebar({
   const [sessionListExpanded, setSessionListExpanded] = useState(false);
   const [exitedExpanded, setExitedExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchVisible, setSearchVisible] = useState(false);
   const { showToast } = useToast();
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState('');
@@ -502,9 +503,23 @@ export default function AppSidebar({
   const sidebarNavItemClass =
     `flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-zinc-700 ${hoverBgTertiary} ${transitionBase}`;
 
+  // 二级页面导航（Skills / 循环任务）：比主动作轻一档（非加粗、12.5px）
+  const sidebarSubNavClass =
+    `flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[12.5px] text-zinc-500 ${hoverBgTertiary} ${transitionBase}`;
+
   if (minimal) {
     return (
       <aside className={`h-full w-[272px] ${bgSecondary} border-r border-zinc-200 flex flex-col flex-shrink-0 select-none`}>
+        <div className="shrink-0 h-12 px-3 flex items-center">
+          <BrandMark className="h-7 w-7 shrink-0" iconClassName="h-3.5 w-3.5" />
+          <div className="flex flex-col leading-tight min-w-0 ml-2">
+            <span className="text-sm font-bold text-zinc-900 truncate">AgentHarness</span>
+            <span className="text-[10px] text-zinc-400 font-medium -mt-0.5 flex justify-between">
+              <span>Yuma</span>
+              <span>Engineering</span>
+            </span>
+          </div>
+        </div>
         <div className="flex-1 min-h-0" />
         <div className="shrink-0 border-t border-zinc-200 px-2 py-2">
           <SidebarAccountMenu
@@ -523,14 +538,16 @@ export default function AppSidebar({
         className={`h-full w-14 ${bgSecondary} border-r border-zinc-200 flex flex-col flex-shrink-0 select-none`}
         data-testid="app-sidebar-collapsed"
       >
-        <div className="shrink-0 flex flex-col items-center gap-1 px-1.5 pt-3 pb-2 border-b border-zinc-200">
-          <BrandMark className="h-8 w-8" iconClassName="h-4 w-4" />
+        <div className="shrink-0 h-12 flex items-center justify-center">
+          <BrandMark className="h-7 w-7" iconClassName="h-3.5 w-3.5" />
+        </div>
+        <div className="shrink-0 flex flex-col items-center gap-1 px-1.5 py-2">
           <button
             type="button"
             title={t('common:action.expand_sidebar', { defaultValue: 'Expand sidebar' })}
             aria-label={t('common:action.expand_sidebar', { defaultValue: 'Expand sidebar' })}
             onClick={() => setSidebarCollapsed(false)}
-            className={`mt-1 p-2 rounded-lg ${textPlaceholder} hover:text-zinc-900 ${hoverBgTertiary} ${transitionBase} ${consoleButtonFocusClass}`}
+            className={`p-2 rounded-lg ${textPlaceholder} hover:text-zinc-900 ${hoverBgTertiary} ${transitionBase} ${consoleButtonFocusClass}`}
           >
             <PanelLeft className="w-4 h-4" strokeWidth={1.75} />
           </button>
@@ -560,46 +577,75 @@ export default function AppSidebar({
 
   return (
     <aside className={`h-full w-[272px] ${bgSecondary} border-r border-zinc-200 flex flex-col flex-shrink-0 select-none`}>
-      <div className="shrink-0 px-3 pt-3 pb-2 border-b border-zinc-200">
-        <div className="flex items-center justify-between px-0.5 mb-2">
-          <h3 className="text-xs font-medium text-zinc-400">{t('sessions:title')}</h3>
-          <button
-            type="button"
-            title={t('common:action.collapse_sidebar', { defaultValue: 'Collapse sidebar' })}
-            aria-label={t('common:action.collapse_sidebar', { defaultValue: 'Collapse sidebar' })}
-            onClick={() => setSidebarCollapsed(true)}
-            className={`p-1.5 rounded-md ${textPlaceholder} hover:text-zinc-900 ${hoverBgTertiary} ${transitionBase} ${consoleButtonFocusClass}`}
-          >
-            <PanelLeftClose className="w-4 h-4" strokeWidth={1.75} />
-          </button>
+      {/* 头部：logo + 折叠（侧栏内部不用横线分组，靠间距；仅保留列分隔竖线） */}
+      <div className="shrink-0 h-12 px-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <BrandMark className="h-7 w-7 shrink-0" iconClassName="h-3.5 w-3.5" />
+          <div className="flex flex-col leading-tight min-w-0">
+            <span className="text-sm font-bold text-zinc-900 truncate">AgentHarness</span>
+            <span className="text-[10px] text-zinc-400 font-medium -mt-0.5 flex justify-between">
+              <span>Yuma</span>
+              <span>Engineering</span>
+            </span>
+          </div>
         </div>
-        <div className="space-y-0.5">
+        <button
+          type="button"
+          title={t('common:action.collapse_sidebar', { defaultValue: 'Collapse sidebar' })}
+          aria-label={t('common:action.collapse_sidebar', { defaultValue: 'Collapse sidebar' })}
+          onClick={() => setSidebarCollapsed(true)}
+          className={`p-2 rounded-lg ${textPlaceholder} hover:text-zinc-900 ${hoverBgTertiary} ${transitionBase} ${consoleButtonFocusClass}`}
+        >
+          <PanelLeftClose className="w-4 h-4" strokeWidth={1.75} />
+        </button>
+      </div>
+      <div className="shrink-0 px-3 pt-2 pb-1">
+        {/* 主动作行：新建会话（全宽独立行） */}
+        <div className="flex items-center mb-2">
           <button
             type="button"
             disabled={!onNewSession}
             onClick={onNewSession}
-            className={`${sidebarNavItemClass} disabled:opacity-40`}
+            className={`flex flex-1 min-w-0 items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-zinc-900 bg-zinc-900/[0.04] ring-1 ring-zinc-200 ${hoverBgTertiary} ${transitionBase} disabled:opacity-40`}
           >
             <PenSquare className="w-4 h-4 shrink-0" strokeWidth={1.75} />
-            {t('sessions:new_session')}
+            <span className="flex-1 min-w-0 truncate text-left">{t('sessions:new_session')}</span>
           </button>
-          <label className={`${sidebarNavItemClass} cursor-text`}>
-            <Search className="w-4 h-4 shrink-0 text-zinc-400" strokeWidth={1.75} />
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={t('sessions:search')}
-              className="min-w-0 flex-1 bg-transparent text-[13px] text-zinc-700 placeholder:text-zinc-400 outline-none"
-            />
-          </label>
+        </div>
+        <div className={searchQuery.trim() ? 'mb-2' : ''}>
+          {searchVisible || searchQuery.trim() ? (
+            <label className={`${sidebarNavItemClass} cursor-text`}>
+              <Search className="w-4 h-4 shrink-0 text-zinc-400" strokeWidth={1.75} />
+              <input
+                autoFocus
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onBlur={() => { if (!searchQuery.trim()) setSearchVisible(false); }}
+                placeholder={t('sessions:search')}
+                className="min-w-0 flex-1 bg-transparent text-[13px] text-zinc-700 placeholder:text-zinc-400 outline-none"
+              />
+            </label>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSearchVisible(true)}
+              className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[12.5px] text-zinc-400 ${hoverBgTertiary} ${transitionBase} ${consoleButtonFocusClass}`}
+            >
+              <Search className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
+              {t('sessions:search')}
+            </button>
+          )}
+        </div>
+        {/* 二级页面导航：轻一档，与主动作分区 */}
+        <div className="space-y-0.5">
           {onOpenHistory && (
             <button
               type="button"
               onClick={onOpenHistory}
-              className={`${sidebarNavItemClass}`}
+              className={`${sidebarSubNavClass}`}
             >
-              <List className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+              <List className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
               {t('sessions:history.view_all', { defaultValue: 'View all history' })}
             </button>
           )}
