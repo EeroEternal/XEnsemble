@@ -232,6 +232,13 @@
       "when": 1789480000000,
       "tag": "0032_llm_usage_cached_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1789542877284,
+      "tag": "0033_intelligent_routing",
+      "breakpoints": true
     }
   ]
 }

@@ -584,6 +584,45 @@ const llmUsage = pgTable('llm_usage', {
   createdIdx: index('idx_llm_usage_created').on(table.createdAt),
 }));
 
+// STICKY_TTL_MS = 10 * 60 * 1000 — 文档用，TTL 逻辑在 sticky.js
+const sessionRouteSticky = pgTable('session_route_sticky', {
+  sessionId: text('session_id').primaryKey().references(() => sessions.id, { onDelete: 'cascade' }),
+  chosenModel: text('chosen_model').notNull(),
+  chosenProvider: text('chosen_provider').notNull(),
+  failCount: integer('fail_count').notNull().default(0),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+});
+
+const routingDecisions = pgTable('routing_decisions', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  sessionId: text('session_id').references(() => sessions.id, { onDelete: 'cascade' }),
+  userId: text('user_id'),
+  agentId: text('agent_id'),
+  projectId: text('project_id'),
+  seq: integer('seq').notNull(),
+  reevaluated: boolean('reevaluated').notNull().default(false),
+  trigger: text('trigger').notNull(),
+  demand: jsonb('demand'),
+  stickyModel: text('sticky_model'),
+  stickyProvider: text('sticky_provider'),
+  candidates: jsonb('candidates'),
+  chosenModel: text('chosen_model'),
+  chosenProvider: text('chosen_provider'),
+  costEstimate: jsonb('cost_estimate'),
+  promptTokens: integer('prompt_tokens'),
+  cachedTokens: integer('cached_tokens'),
+  completionTokens: integer('completion_tokens'),
+  latencyMs: integer('latency_ms'),
+  statusCode: integer('status_code'),
+  error: text('error'),
+}, (table) => ({
+  sessionSeq: unique('uq_routing_decisions_session_seq').on(table.sessionId, table.seq),
+  userCreatedIdx: index('idx_routing_decisions_user_created').on(table.userId, table.createdAt),
+  createdIdx: index('idx_routing_decisions_created').on(table.createdAt),
+}));
+
 const loopTasks = pgTable('loop_tasks', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id),
@@ -670,4 +709,6 @@ module.exports = {
   loopTasks,
   loopTaskRuns,
   llmUsage,
+  sessionRouteSticky,
+  routingDecisions,
 };
