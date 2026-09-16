@@ -20,9 +20,10 @@
  *   glm-agent      zai -p "<prompt>"                       headless 模式，工具默认自动批准
  *   github-copilot copilot -p "<prompt>"                   one-shot 模式（审批为
  *                  --allow-tool 粒度，无全局跳过 flag——写操作类任务可能受限）
- *   openclaw       openclaw agent --local --message "<prompt>"  单次 Agent turn，
- *                  --local 走本地嵌入式运行时（跳过 Gateway daemon）；
- *                  更严格的临时 CI 变体为 `openclaw agent exec`
+ *   openclaw       openclaw agent --local --agent main --message "<prompt>"
+ *                  单次 Agent turn，--local 走本地嵌入式运行时（跳过 Gateway
+ *                  daemon）；agent 子命令必须带会话选择器（--agent/--session-key/
+ *                  --session-id/--to），否则 CLI 报错退出
  *
  * 注：以上均经各 CLI 官方文档核对（2026-09）。
  */
@@ -74,8 +75,11 @@ const TASK_RUN_MODES = {
         autoApproveArgs: [], // 审批为 --allow-tool 粒度，无全局 flag
     },
     'openclaw': {
-        // --local 强制本地嵌入式运行时（跳过 Gateway daemon），适配沙箱一次性执行
-        args: (prompt) => ['agent', '--local', '--message', prompt],
+        // --local 强制本地嵌入式运行时（跳过 Gateway daemon），适配沙箱一次性执行。
+        // openclaw agent 必须指定会话选择器（--to/--session-key/--session-id/--agent），
+        // 否则 CLI 直接报 "Pass --to ... to choose a session" 退出（exit 1）。
+        // 无 agents.list 配置时默认 agent id 为 main，故用 --agent main 走默认 agent。
+        args: (prompt) => ['agent', '--local', '--agent', 'main', '--message', prompt],
         autoApproveArgs: [], // 权限走 OpenClaw 自身沙箱/白名单配置
     },
 };
