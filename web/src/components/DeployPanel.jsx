@@ -24,6 +24,12 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
     // 两个 tab 各挂一个本组件实例，流程阶段按模式拆分——预览不照搬部署的
     // build/check/fix 阶段（跳过生产化，serve 里含自愈）。
     const isPreview = mode === 'preview';
+    // 按 mode 过滤本 tab 认领的部署 kind：deploy tab 认 deploy（完整部署）、preview tab 认
+    // dev（快速预览）。必须在组件作用域声明：下方「确认轮询」「恢复轮询」两个 effect 也
+    // 引用它——此前误声明在挂载恢复 effect 的 IIFE 内，轮询回调运行时抛 ReferenceError
+    // （被各自 try/catch 吞掉，完全无感知）→ SSE 断开后 tab 永远无法轮询到终态/进度，
+    // 表现为预览完成但 tab 卡在进度或空态，而右上角独立轮询正常、可打开预览。
+    const myKinds = isPreview ? ['dev'] : ['deploy'];
     const deploySteps = isPreview ? [
         { id: 'analyze', label: t('deploy:steps_preview.analyze'), icon: Search },
         { id: 'prepare', label: t('deploy:steps_preview.prepare'), icon: Package },
@@ -317,9 +323,7 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 if (cancelled || requestedRef.current) return;
                 const list = Array.isArray(data) ? data : (data?.deployments || []);
                 // 部署与 session 强绑定：只查该 session 的部署记录。
-                // kind 按 mode 过滤：deploy tab 认 deploy（完整部署）、preview tab 认
-                // dev（快速预览）——两个 tab 各自恢复自己的流程，互不串台。
-                const myKinds = isPreview ? ['dev'] : ['deploy'];
+                // kind 过滤用组件作用域的 myKinds（deploy tab 认 deploy、preview tab 认 dev）。
                 const deployRows = list
                     .filter((d) => myKinds.includes(d.kind) && (!sessionId || d.session_id === sessionId))
                     .sort((a, b) => b.created_at - a.created_at);
