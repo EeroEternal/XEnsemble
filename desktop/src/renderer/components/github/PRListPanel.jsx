@@ -3,7 +3,7 @@ import { ExternalLink, Loader2, RefreshCw } from 'lucide-react';
 import { usePullRequests } from '../../hooks/usePullRequests';
 import { openExternal } from '../../lib/githubApi.js';
 import {
-  consoleTableShellClass,
+  consoleAdminTableShellClass,
   consoleTableHeadRowClass,
   consoleTableHeadCellDenseClass,
   consoleTableBodyDivideClass,
@@ -51,14 +51,15 @@ export default function PRListPanel({ projectId }) {
           )}
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className={consoleAdminTableShellClass}>
+        <div className="min-h-0 flex-1 overflow-auto">
         {pullRequests.length === 0 ? (
           <div className={`m-3 p-4 text-center text-xs ${textPlaceholder} ${consoleEmptyStateClass}`}>
             No pull requests yet.
           </div>
         ) : (
-          <table className={`w-full text-left ${consoleTableShellClass}`}>
-            <thead className="sticky top-0 z-10">
+          <table className="w-full text-left">
+            <thead className="sticky top-0 z-10 console-table-head-sticky">
               <tr>
                 <th className={consoleTableHeadCellDenseClass}>#</th>
                 <th className={consoleTableHeadCellDenseClass}>Title</th>
@@ -128,6 +129,7 @@ export default function PRListPanel({ projectId }) {
             </tbody>
           </table>
         )}
+        </div>
       </div>
     </div>
   );

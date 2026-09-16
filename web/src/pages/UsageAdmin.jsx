@@ -218,7 +218,7 @@ export default function UsageAdmin() {
                     <col className="w-1/6" />
                     <col className="w-12" />
                   </colgroup>
-                  <thead className="sticky top-0 z-10">
+                  <thead className="sticky top-0 z-10 console-table-head-sticky">
                     <tr className={consoleTableHeadRowClass}>
                       <th className={consoleTableHeadCellClass}>#</th>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.user')}</th>
@@ -293,7 +293,7 @@ export default function UsageAdmin() {
             <div className={consoleAdminTableShellClass}>
               <div className={`${consoleAdminTableScrollClass} max-h-64`}>
                 <table className="w-full table-fixed border-collapse text-left text-sm">
-                  <thead className="sticky top-0 z-10">
+                  <thead className="sticky top-0 z-10 console-table-head-sticky">
                     <tr className={consoleTableHeadRowClass}>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.agent')}</th>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.requests')}</th>

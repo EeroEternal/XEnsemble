@@ -432,7 +432,7 @@ export default function AgentsAdmin() {
       <div className={consoleTableShellClass}>
         <div className="overflow-auto max-h-[calc(100vh-200px)]">
           <table className="w-full text-left text-sm">
-            <thead className="sticky top-0 z-10">
+            <thead className="sticky top-0 z-10 console-table-head-sticky">
               <tr>
                 <th className={consoleTableHeadCellClass}>{t('agents:field.name')}</th>
                 <th className={consoleTableHeadCellClass}>{t('common:table.status', { defaultValue: 'Status' })}</th>

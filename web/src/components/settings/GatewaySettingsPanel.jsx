@@ -995,6 +995,7 @@ export default function GatewaySettingsPanel() {
             </p>
           ) : (
             <div className={consoleTableShellClass}>
+              <div className="max-h-96 overflow-y-auto">
               <table className="w-full table-fixed border-collapse text-left text-sm">
                 <colgroup>
                   <col className="w-1/5" />
@@ -1003,7 +1004,7 @@ export default function GatewaySettingsPanel() {
                   <col className="w-1/5" />
                   <col className="w-48" />
                 </colgroup>
-                <thead className="sticky top-0 z-10">
+                <thead className="sticky top-0 z-10 console-table-head-sticky">
                   <tr className={consoleTableHeadRowClass}>
                     <th className={consoleTableHeadCellClass}>{t('gateway:table.name')}</th>
                     <th className={consoleTableHeadCellClass}>{t('gateway:table.endpoint')}</th>
@@ -1087,6 +1088,7 @@ export default function GatewaySettingsPanel() {
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </div>
