@@ -43,7 +43,7 @@ async function planRoute({ claims, body, lastUsage, boundProviderIds, portraits 
         reevaluate: trig.reevaluate,
         logicalModel,
     });
-    return { signals, demand, trig, chosen, candidates };
+    return { signals, demand, trig, chosen, candidates, sticky };
 }
 
 module.exports = { planRoute };

@@ -18,6 +18,11 @@ const { toOpencodeModelAlias } = require('../agents/agentModelAlias');
 const { extractUsage } = require('./usageExtractor');
 const promptCapture = require('./promptCapture');
 const { t } = require('../i18n');
+const { planRoute } = require('./router');
+const { applyChosenModel } = require('./router/execute');
+const { insertDecision, patchDecisionUsage } = require('./router/decisions');
+const { touchSticky, recordStickyFailure } = require('./router/sticky');
+const { fetchModelPortraits } = require('./modelPortraits');
 
 const LLM_PROXY_PREFIX = '/api/v1/llm';
 
@@ -817,26 +822,54 @@ async function proxyLlmRequest(request, reply) {
     // really selected — this is the value UniGateway routes on.
     let bodyModel = null;
     let userPrompt = null;
+    let parsedChatBody = null;
     if (Buffer.isBuffer(request.body) && request.body.length > 0) {
         try {
-            const parsed = JSON.parse(request.body.toString('utf8'));
-            bodyModel = parsed.model || null;
+            parsedChatBody = JSON.parse(request.body.toString('utf8'));
+            bodyModel = parsedChatBody.model || null;
         } catch { /* non-JSON body */ }
         userPrompt = extractUserMessage(request.body);
     }
     // TEMPORARY prompt capture: dump the agent's raw request body (assembled
-    // system prompt + full message array) BEFORE the opencode alias rewrite
-    // below mutates it. On by default (LLM_CAPTURE_MODE=all, disk-quota
+    // system prompt + full message array) BEFORE routing / opencode rewrite
+    // mutates it. On by default (LLM_CAPTURE_MODE=all, disk-quota
     // guarded) — see .env.example LLM_CAPTURE_* to tune or disable.
     if (isChatPath) {
         promptCapture.capture(claims, request.body);
+    }
+    // planRoute must run before trajectory.recordRequest so collectSignals
+    // still sees the previous turn's messages as prev.
+    let routePlan = null;
+    if (isChatPath && parsedChatBody) {
+        try {
+            const portraits = fetchModelPortraits();
+            const gwCfg = await agentGatewayConfig.getForAgent(claims.aid);
+            const provider = (gwCfg?.provider ?? '').trim();
+            const boundProviderIds = provider ? [provider] : [];
+            routePlan = await planRoute({
+                claims,
+                body: parsedChatBody,
+                lastUsage: null,
+                boundProviderIds,
+                portraits,
+            });
+            applyChosenModel(parsedChatBody, {
+                chosenProvider: routePlan.chosen.chosenProvider,
+                chosenModel: routePlan.chosen.chosenModel,
+            });
+            request.body = Buffer.from(JSON.stringify(parsedChatBody), 'utf8');
+            bodyModel = parsedChatBody.model;
+        } catch (err) {
+            request.log.warn({ err: err?.message }, '[llm-proxy] intelligent routing skipped');
+            routePlan = null;
+        }
     }
     // opencode 1.18.x /model picker re-splits the candidate id on `/` (see
     // agentModelAlias.js), so we hand it a no-`/`/no-`:` alias in its config
     // and the proxy's /v1/models catalog. UniGateway, however, matches the
     // real upstream model id (its model_mapping and MODELS catalog are
     // keyed on the real openrouter name). Rewrite the request body's
-    // top-level `model` from alias -> real for opencode before forwarding,
+    // top-level `model` from alias -> real for opencode AFTER applyChosenModel,
     // so the gateway routes on the real name without polluting its model
     // catalog with alias entries.
     if (claims.aid === 'opencode' && bodyModel && Buffer.isBuffer(request.body)) {
@@ -908,6 +941,77 @@ async function proxyLlmRequest(request, reply) {
             }
         } catch (_) { /* never block the proxy hot path */ }
     }
+    if (trajSeq != null && routePlan) {
+        try {
+            const { trig, chosen, candidates, sticky } = routePlan;
+            const chosenCand = (candidates || []).find((c) => c.provider_id === chosen.chosenProvider);
+            await insertDecision({
+                sessionId: claims.sid,
+                userId: claims.uid,
+                agentId: claims.aid,
+                projectId: claims.pid || null,
+                seq: trajSeq,
+                reevaluated: !!trig.reevaluate,
+                trigger: trig.trigger,
+                demand: null,
+                stickyModel: sticky?.chosenModel || null,
+                stickyProvider: sticky?.chosenProvider || null,
+                candidates,
+                chosenModel: chosen.chosenModel,
+                chosenProvider: chosen.chosenProvider,
+                costEstimate: chosenCand?.cost_estimate ?? null,
+                createdAt: Date.now(),
+            });
+        } catch (err) {
+            request.log.warn({ err: err?.message }, '[llm-proxy] routing decision insert skipped');
+        }
+    }
+    let routeFailureRecorded = false;
+    const recordRouteSuccess = (usage) => {
+        try {
+            const chosen = routePlan?.chosen;
+            if (chosen?.chosenModel && claims.sid) {
+                void touchSticky(claims.sid, {
+                    chosenModel: chosen.chosenModel,
+                    chosenProvider: chosen.chosenProvider || '',
+                }).catch((err) => request.log.warn({ err: err?.message }, '[llm-proxy] touchSticky skipped'));
+            }
+            if (trajSeq != null) {
+                void patchDecisionUsage({
+                    sessionId: claims.sid,
+                    seq: trajSeq,
+                    promptTokens: usage?.promptTokens ?? null,
+                    cachedTokens: usage?.cachedTokens ?? null,
+                    completionTokens: usage?.completionTokens ?? null,
+                    latencyMs: Date.now() - started,
+                    statusCode: 200,
+                }).catch((err) => request.log.warn({ err: err?.message }, '[llm-proxy] patchDecisionUsage skipped'));
+            }
+        } catch (err) {
+            request.log.warn({ err: err?.message }, '[llm-proxy] routing success bookkeeping skipped');
+        }
+    };
+    const recordRouteFailure = ({ statusCode, error }) => {
+        if (routeFailureRecorded) return;
+        routeFailureRecorded = true;
+        try {
+            if (claims.sid) {
+                void recordStickyFailure(claims.sid)
+                    .catch((err) => request.log.warn({ err: err?.message }, '[llm-proxy] recordStickyFailure skipped'));
+            }
+            if (trajSeq != null) {
+                void patchDecisionUsage({
+                    sessionId: claims.sid,
+                    seq: trajSeq,
+                    latencyMs: Date.now() - started,
+                    statusCode,
+                    error: error ? String(error).slice(0, 500) : null,
+                }).catch((err) => request.log.warn({ err: err?.message }, '[llm-proxy] patchDecisionUsage skipped'));
+            }
+        } catch (err) {
+            request.log.warn({ err: err?.message }, '[llm-proxy] routing failure bookkeeping skipped');
+        }
+    };
     const onResponseBody = (bodyBuffer, contentType) => {
         if (!isChatPath) return;
         // 200-status SSE streams can still carry the gateway failure as an
@@ -924,13 +1028,15 @@ async function proxyLlmRequest(request, reply) {
                 latencyMs: Date.now() - started,
             });
             recordLlmErrorEvent(claims.sid, 'upstream', sseErrorText);
+            recordRouteFailure({ statusCode: 200, error: sseErrorText });
             return;
         }
         // Token 用量计量（0028）：usage 只在成功响应上出现，这里直接落库
         // （fire-and-forget）。不能放 finally——流式响应的 usage 尾块在
         // onEnd 时才到达，可能晚于 finally 执行。失败只打日志，不影响主流程。
+        let usage = null;
         try {
-            const usage = extractUsage(bodyBuffer, contentType);
+            usage = extractUsage(bodyBuffer, contentType);
             if (usage) {
                 void db.insert(schema.llmUsage).values({
                     userId: claims.uid,
@@ -948,6 +1054,7 @@ async function proxyLlmRequest(request, reply) {
                 }).catch((e) => request.log.warn(e, '[llm-proxy] failed to persist usage'));
             }
         } catch (_) { /* usage 提取失败不影响主流程 */ }
+        recordRouteSuccess(usage);
         const assistantText = extractAssistantMessage(bodyBuffer, contentType);
         if (assistantText) {
             void chatTranscript.append(claims.sid, {
@@ -1015,6 +1122,7 @@ async function proxyLlmRequest(request, reply) {
                     latencyMs: Date.now() - started,
                     errorText: upstreamErrorText || null,
                 });
+                recordRouteFailure({ statusCode: errStatusCode, error: upstreamErrorText || `upstream ${errStatusCode}` });
             },
         });
     } catch (err) {
@@ -1056,15 +1164,20 @@ async function proxyLlmRequest(request, reply) {
         // error, connection reset) — mark the row as failed so the trajectory
         // shows the gap instead of silently dropping the step.
         if (isChatPath && trajSeq != null && !trajDone) {
+            const failError = forwardError
+                ? String(forwardError.message || forwardError)
+                : `upstream ${forwardResult?.statusCode ?? 'unknown'}`;
             trajectory.recordFailure({
                 sessionId: claims.sid,
                 seq: trajSeq,
                 agentId: claims.aid,
                 model: bodyModel || claims.model || null,
-                error: forwardError
-                    ? String(forwardError.message || forwardError)
-                    : `upstream ${forwardResult?.statusCode ?? 'unknown'}`,
+                error: failError,
                 latencyMs: Date.now() - started,
+            });
+            recordRouteFailure({
+                statusCode: forwardError ? 502 : (forwardResult?.statusCode ?? 0),
+                error: failError,
             });
         }
     }
