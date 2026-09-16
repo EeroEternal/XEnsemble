@@ -32,5 +32,9 @@
   "tui_wait_cancel": "取消（Esc）",
   "tui_wait_open_terminal": "去终端处理",
   "tui_wait_open_terminal_title": "切换到 Agent（终端）视图处理",
-  "llm_error_label": "模型调用失败"
+  "llm_error_label": "模型调用失败",
+  "load_older": "加载更早的消息",
+  "history_top": "已到会话开头",
+  "long_truncated": "这条消息非常长，仅显示开头部分。",
+  "long_expand": "展开完整消息"
 }

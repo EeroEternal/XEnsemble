@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Loader2, SendHorizonal, Square, User, Sparkles, Wrench, ChevronRight, Copy, Check, AlertCircle, Info, X,
+  Loader2, SendHorizonal, Square, User, Sparkles, Wrench, ChevronRight, ChevronUp, Copy, Check, AlertCircle, Info, X,
   HelpCircle, TerminalSquare, AlertTriangle,
 } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
@@ -26,6 +26,19 @@ const THINKING_IDLE_TIMEOUT_MS = 60000;
 // spinners that can look prompt-like.
 const TUI_PROMPT_QUIET_MS = 2500;
 
+// History paging: the server keeps the latest MAX_EVENTS_PER_SESSION (500)
+// events per session; this view fetches them HISTORY_PAGE_SIZE at a time via
+// cursor pagination (?before_seq=) so a long qwen session renders one small
+// page on mount instead of hundreds of Markdown-heavy bubbles at once.
+// 500 / 50 = at most 10 「加载更早」 page-backs from newest to oldest.
+const HISTORY_PAGE_SIZE = 50;
+// Assistant replies above this many chars render truncated with an expand
+// button: a single multi-hundred-KB reply pushed through the markdown /
+// highlight / katex pipeline can stall the tab on its own, and pagination
+// only reduces message count — not the render cost of one giant message.
+// Display-only: server-side data stays intact.
+const LONG_MESSAGE_CHARS = 65536;
+
 // Shared style for the TUI-prompt banner action buttons.
 const TUI_PROMPT_ACTION_BTN = 'inline-flex h-7 items-center gap-1 rounded-md border border-amber-300 bg-white px-2.5 text-[11.5px] font-medium text-amber-900 hover:bg-amber-100';
 
@@ -49,6 +62,10 @@ export default function ChatView({ sessionId, onSessionEnd }) {
   const [connected, setConnected] = useState(false);
   const [ended, setEnded] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  // 游标分页：true = 更早的历史已取完（某一页不足 PAGE_SIZE 或为空）；
+  // loadingOlder = 「加载更早」请求进行中（按钮转 spinner 防重复点击）。
+  const [historyExhausted, setHistoryExhausted] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const wsRef = useRef(null);
@@ -85,16 +102,53 @@ export default function ChatView({ sessionId, onSessionEnd }) {
     });
   }, []);
 
-  const loadHistory = useCallback(async () => {
+  // Fetch one page of history. beforeSeq=null → newest page; otherwise the
+  // page immediately older than the given seq (server cursor pagination).
+  // Returns the fetched messages (oldest→newest) so the caller can detect
+  // exhaustion: a short page means nothing older is left. Missed WS events
+  // after a reconnect are backfilled by re-fetching the newest page and
+  // deduping by seq in mergeHistory.
+  const loadHistory = useCallback(async (beforeSeq = null) => {
     try {
-      const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/chat`);
-      if (!res.ok) return;
+      const params = new URLSearchParams({ limit: String(HISTORY_PAGE_SIZE) });
+      if (beforeSeq != null) params.set('before_seq', String(beforeSeq));
+      const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/chat?${params.toString()}`);
+      if (!res.ok) return [];
       const data = await res.json();
-      mergeHistory(data.messages || []);
-    } catch (_) { /* ignore */ } finally {
+      const incoming = data.messages || [];
+      mergeHistory(incoming);
+      return incoming;
+    } catch (_) {
+      return [];
+    } finally {
       setLoadingHistory(false);
     }
   }, [sessionId, mergeHistory]);
+
+  // 「加载更早」：向前翻一页历史。Prepend 会改变列表高度，先记录滚动位置，
+  // 渲染完成后恢复——否则用户正在看的内容会被顶走 / 跳回底部。
+  const handleLoadOlder = useCallback(async () => {
+    if (loadingOlder || loadingHistory) return;
+    let oldestSeq = null;
+    for (const m of messages) {
+      if (m?.seq != null && (oldestSeq == null || m.seq < oldestSeq)) oldestSeq = m.seq;
+    }
+    if (oldestSeq == null) return;
+    const prevTop = listRef.current?.scrollTop ?? 0;
+    const prevHeight = listRef.current?.scrollHeight ?? 0;
+    setLoadingOlder(true);
+    try {
+      const older = await loadHistory(oldestSeq);
+      // 不足一页（含空页）⇒ 更早的没有更多了
+      if (older.length < HISTORY_PAGE_SIZE) setHistoryExhausted(true);
+      requestAnimationFrame(() => {
+        const el = listRef.current;
+        if (el) el.scrollTop = el.scrollHeight - prevHeight + prevTop;
+      });
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [loadingOlder, loadingHistory, messages, loadHistory]);
 
   // Connect WS, then stream chat events. On reconnect, re-fetch history to
   // backfill anything emitted while we disconnected.
@@ -279,10 +333,19 @@ export default function ChatView({ sessionId, onSessionEnd }) {
   }, []);
   useEffect(() => { runPromptScanRef.current = runPromptScan; }, [runPromptScan]);
 
-  // Auto-scroll to bottom on new messages.
+  // Auto-scroll to bottom on new messages — but NOT when an older page was
+  // just prepended (first seq moved backward): that would yank the viewport
+  // away from the freshly loaded history. handleLoadOlder restores the exact
+  // scroll offset itself.
+  const prevFirstSeqRef = useRef(null);
   useEffect(() => {
     const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    const firstSeq = messages.find((m) => m?.seq != null)?.seq ?? null;
+    const prevFirst = prevFirstSeqRef.current;
+    prevFirstSeqRef.current = firstSeq;
+    if (prevFirst != null && firstSeq != null && firstSeq < prevFirst) return;
+    el.scrollTop = el.scrollHeight;
   }, [messages, loadingHistory]);
 
   // Track the message list's scroll geometry so the custom scrollbar thumb
@@ -320,6 +383,15 @@ export default function ChatView({ sessionId, onSessionEnd }) {
     setSending(true);
     setTimeout(() => setSending(false), 300);
   }, [input]);
+
+  // Stable identity for the callbacks handed to memoized list items: `send`
+  // closes over `input` and changes on every keystroke, which would defeat
+  // ChatItem memoization (all items re-render per keystroke). Dispatch through
+  // a ref so the prop identity never changes while always calling the latest
+  // closure. `sendKeys` is already stable (deps []).
+  const sendRef = useRef(send);
+  useEffect(() => { sendRef.current = send; });
+  const sendMessage = useCallback((...args) => sendRef.current(...args), []);
 
   const stop = useCallback(() => {
     // Two ESC presses — matches the agent-view terminal's "Esc twice to abort
@@ -486,8 +558,27 @@ export default function ChatView({ sessionId, onSessionEnd }) {
           </div>
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-4 pb-2">
+            {/* 历史翻页：未到开头时显示「加载更早」；到顶后显示起始标记 */}
+            {!historyExhausted && renderedItems.length > 0 && (
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={handleLoadOlder}
+                  disabled={loadingOlder}
+                  className={`inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 px-3 text-[11.5px] text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-50 disabled:pointer-events-none ${consoleButtonFocusClass}`}
+                >
+                  {loadingOlder ? <Loader2 className="h-3 w-3 animate-spin" /> : <ChevronUp className="h-3 w-3" />}
+                  {t('chat:load_older', { defaultValue: 'Load earlier messages' })}
+                </button>
+              </div>
+            )}
+            {historyExhausted && renderedItems.length > 0 && (
+              <div className="text-center text-[11px] text-zinc-400">
+                {t('chat:history_top', { defaultValue: 'Beginning of conversation' })}
+              </div>
+            )}
             {renderedItems.map((item, idx) => (
-              <ChatItem key={idx} item={item} onKeys={sendKeys} onText={send} />
+              <ChatItem key={itemKey(item, idx)} item={item} onKeys={sendKeys} onText={sendMessage} />
             ))}
             {isThinking && (
               <div className="flex justify-start pr-2 sm:pr-12" role="status" aria-live="polite">
@@ -687,13 +778,33 @@ export default function ChatView({ sessionId, onSessionEnd }) {
   );
 }
 
-function ChatItem({ item, onKeys, onText }) {
+// Stable React key for a rendered list item: prefer the result's seq so a
+// tool card keeps its key across the call→result grouping transition.
+function itemKey(item, idx) {
+  const seq = item.result?.seq ?? item.message?.seq ?? item.call?.seq;
+  return seq != null ? `s${seq}` : `i${idx}`;
+}
+
+const ChatItem = memo(function ChatItem({ item, onKeys, onText }) {
   if (item.kind === 'message') return <ChatBubble message={item.message} />;
   if (item.kind === 'error') return <ErrorBubble message={item.message} />;
   if (item.kind === 'tool_call') return <ToolItem call={item.call} result={null} onKeys={onKeys} onText={onText} />;
   if (item.kind === 'tool_result') return <ToolItem call={null} result={item.result} onKeys={onKeys} onText={onText} />;
   return <ToolItem call={item.call} result={item.result} onKeys={onKeys} onText={onText} />;
-}
+}, (a, b) => (
+  // Identity-based bail-out: renderedItems rebuilds the wrapper objects on
+  // every messages change, but the underlying message objects keep stable
+  // identity (mergeHistory appends without cloning), so an unchanged bubble /
+  // tool card compares equal and skips re-render entirely. This is what makes
+  // the 1s nowTick tick and per-keystroke input updates cheap on long pages.
+  a.item === b.item
+  || (a.item.kind === b.item.kind
+    && a.item.message === b.item.message
+    && a.item.call === b.item.call
+    && a.item.result === b.item.result
+    && a.onKeys === b.onKeys
+    && a.onText === b.onText)
+));
 
 /**
  * A tool entry that may be an agent-question prompt (AskUserQuestion-style):
@@ -721,7 +832,7 @@ function ToolItem({ call, result, onKeys, onText }) {
  * TUI's one-picker-at-a-time flow. Once the matching tool_result arrives the
  * card switches to an answered, read-only state.
  */
-function QuestionCard({ result, questions, onKeys, onText }) {
+const QuestionCard = memo(function QuestionCard({ result, questions, onKeys, onText }) {
   const { t } = useTranslation();
   // Submitted answers, one slot per question: option index (single-select),
   // Set of indices (multi-select, after submit) or text (free-text).
@@ -955,7 +1066,7 @@ function QuestionCard({ result, questions, onKeys, onText }) {
       </div>
     </div>
   );
-}
+});
 
 /**
  * LLM failure event (the proxy records one when the upstream rejects the
@@ -980,10 +1091,16 @@ function ErrorBubble({ message }) {
   );
 }
 
-function ChatBubble({ message }) {
+const ChatBubble = memo(function ChatBubble({ message }) {
   const { t } = useTranslation();
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
+  // 超长消息展示兜底：默认只渲染开头 LONG_MESSAGE_CHARS 字符（纯展示层截断，
+  // 服务端数据完整），点「展开完整消息」再渲染全文——单条几百 KB 的回复一次
+  // 性走 markdown/高亮管线可独自卡死页面，翻页只减条数不减单条渲染量。
+  const [expanded, setExpanded] = useState(false);
+  const contentTruncated = !expanded && message.content.length > LONG_MESSAGE_CHARS;
+  const shownContent = contentTruncated ? message.content.slice(0, LONG_MESSAGE_CHARS) : message.content;
 
   const copyContent = async () => {
     if (!message.content) return;
@@ -1023,12 +1140,24 @@ function ChatBubble({ message }) {
         </div>
         {isUser ? (
           <pre className={`whitespace-pre-wrap break-words font-sans text-[13.5px] leading-relaxed bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-zinc-800`}>
-            {message.content}
+            {shownContent}
           </pre>
         ) : (
           <MarkdownView className="text-[13.5px]">
-            {message.content}
+            {shownContent}
           </MarkdownView>
+        )}
+        {contentTruncated && (
+          <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+            <span>{t('chat:long_truncated', { defaultValue: 'Very long message — showing the first part only.' })}</span>
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              className={`inline-flex h-6 items-center rounded-md border border-zinc-200 px-2 text-[11px] text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 ${consoleButtonFocusClass}`}
+            >
+              {t('chat:long_expand', { defaultValue: 'Show full message' })}
+            </button>
+          </div>
         )}
         <button
           type="button"
@@ -1042,11 +1171,17 @@ function ChatBubble({ message }) {
       </div>
     </div>
   );
-}
+});
 
-function ToolCard({ call, result }) {
+const ToolCard = memo(function ToolCard({ call, result }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  // 工具结果超长同样只渲染开头（数据完整）：结果常是整个文件的 dump，
+  // 展开卡片后一次性塞进 <pre> 也会卡。点「展开」后才渲染全文。
+  const [resultExpanded, setResultExpanded] = useState(false);
+  const resultText = result?.content ? String(result.content) : '';
+  const resultTruncated = !resultExpanded && resultText.length > LONG_MESSAGE_CHARS;
+  const shownResult = resultTruncated ? resultText.slice(0, LONG_MESSAGE_CHARS) : resultText;
   const name = call?.tool || result?.tool || t('chat:tool_unknown', { defaultValue: 'Tool' });
   const hasDetail = Boolean(call?.content) || Boolean(result?.content);
   // Tool cards stay in the gray box (they're structured diagnostics, not chat)
@@ -1086,8 +1221,17 @@ function ToolCard({ call, result }) {
                   {t('chat:tool_result_label', { defaultValue: 'Result' })}
                 </div>
                 <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-zinc-100 p-2 font-mono text-[12px] text-zinc-700">
-                  {result.content}
+                  {shownResult}
                 </pre>
+                {resultTruncated && (
+                  <button
+                    type="button"
+                    onClick={() => setResultExpanded(true)}
+                    className={`mt-1 inline-flex h-6 items-center rounded-md border border-zinc-200 px-2 text-[11px] text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 ${consoleButtonFocusClass}`}
+                  >
+                    {t('chat:long_expand', { defaultValue: 'Show full message' })}
+                  </button>
+                )}
               </div>
             ) : null}
           </div>
@@ -1095,7 +1239,7 @@ function ToolCard({ call, result }) {
       </div>
     </div>
   );
-}
+});
 
 // Pretty-print tool-call arguments JSON when possible.
 function formatArgs(raw) {

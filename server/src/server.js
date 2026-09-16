@@ -1245,9 +1245,19 @@ fastify.get('/api/v1/sessions/:sessionId/chat', { preValidation: [fastify.authen
         .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
     if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
 
+    // 游标分页（可选，对话视图「加载更早」用）：
+    //   ?before_seq=<seq> —— 取该 seq 之前（更早）的一页
+    //   ?limit=<n>        —— 页大小，上限 MAX_EVENTS_PER_SESSION
+    // 不带参数返回全部保留历史（最新 500 条），兼容旧客户端 / Desktop。
+    const q = request.query || {};
+    const beforeSeqRaw = Number.parseInt(q.before_seq, 10);
+    const limitRaw = Number.parseInt(q.limit, 10);
     return {
         session_id: sessionId,
-        messages: await chatTranscript.getHistory(sessionId),
+        messages: await chatTranscript.getHistory(sessionId, {
+            beforeSeq: Number.isFinite(beforeSeqRaw) && beforeSeqRaw > 0 ? beforeSeqRaw : undefined,
+            limit: Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined,
+        }),
     };
 });
 

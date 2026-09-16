@@ -32,5 +32,9 @@
   "tui_wait_cancel": "Cancel (Esc)",
   "tui_wait_open_terminal": "Handle in terminal",
   "tui_wait_open_terminal_title": "Switch to the Agent (terminal) view",
-  "llm_error_label": "LLM request failed"
+  "llm_error_label": "LLM request failed",
+  "load_older": "Load earlier messages",
+  "history_top": "Beginning of conversation",
+  "long_truncated": "Very long message — showing the first part only.",
+  "long_expand": "Show full message"
 }
