@@ -189,6 +189,11 @@ function samePrefix(messages, prev) {
     }
 }
 
+function getPrevMessages(sessionId) {
+    const prev = prevMessages.get(sessionId);
+    return Array.isArray(prev) ? prev : null;
+}
+
 function capDeep(v, cap, depth) {
     const d = depth || 0;
     if (typeof v === 'string') {
@@ -710,4 +715,6 @@ module.exports = {
     capRequestRecord,
     isSyntheticBypassCall,
     isSyntheticUserMessage,
+    samePrefix,
+    getPrevMessages,
 };

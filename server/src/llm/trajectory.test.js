@@ -246,3 +246,15 @@ test('unmatched rows (failure without request) keep replay going', () => {
     assert.equal(lines[1].request.messages.length, 1);
     assert.ok(!lines[1].replay_gap);
 });
+
+test('samePrefix: equal prefix is true, rewrite is false', () => {
+    const { samePrefix } = require('./trajectory');
+    const prev = [{ role: 'user', content: 'a' }];
+    assert.equal(samePrefix([{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }], prev), true);
+    assert.equal(samePrefix([{ role: 'user', content: 'compressed' }], prev), false);
+});
+
+test('getPrevMessages returns what rememberPrev stored via record path', () => {
+    const t = require('./trajectory');
+    assert.equal(t.getPrevMessages('sess_none'), null);
+});
