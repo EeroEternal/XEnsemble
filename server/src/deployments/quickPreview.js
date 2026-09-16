@@ -344,7 +344,62 @@ async function runQuickPreviewInner({ project, userId, projectId, sessionId, rep
         expiresAt: now + PREVIEW_TTL_MS, updatedAt: now,
     }).where(eq(schema.deployments.id, deployRef.id));
     const previewToken = await issuePreviewToken(deployRef.id);
+    // ── 就绪自检（根治"已完成但 iframe 显示 Bad Request"）──
+    // 此前的就绪判定全是弱信号：waitForVmPort 只验证"端口在监听/任意 HTTP 响应"
+    // （404/5xx 都算通过），聚合代理就绪判定放宽为"任意 3 位状态码"。旧前端要等
+    // 轮询 + 人工刷新才加载 iframe，延迟掩盖了"成功宣告 ≠ 链路真正可服务"的竞态；
+    // 前端改为成功即渲染（SSE 种子）后，首帧请求直接吃到链路未就绪的 400。
+    // 这里用与浏览器 iframe 完全相同的公网路径（网关→隧道→聚合代理→dev server）
+    // 自检，未就绪重试——确保 SSE result 发出时页面真的能打开。
+    const readiness = await probePreviewReady(tunnel.publicUrl, previewToken, tunnel.browserPort);
+    if (readiness !== 'ready') {
+        quickLog(`preview chain not verified ready (${readiness}) after probe window; proceeding anyway`);
+    }
     return { ok: true, previewUrl: tunnel.publicUrl, deploymentId: deployRef.id, previewToken, elapsedMs: Date.now() - startedAt };
+}
+
+// 就绪自检：优先走公网完整链路（与 iframe 同路径，含 nginx/网关/token 校验），
+// 公网地址本机不可达时退化为直探隧道入口（隧道→聚合代理→dev server）。
+// 非致命：超时也放行（保持旧可用性），只是打日志。
+async function probePreviewReady(publicUrl, previewToken, browserPort, { attempts = 8, intervalMs = 1000 } = {}) {
+    const withToken = `${publicUrl}${publicUrl.includes('?') ? '&' : '?'}preview_token=${encodeURIComponent(previewToken)}`;
+    const snippet = async (res) => {
+        try {
+            const text = (await res.text()).replace(/\s+/g, ' ').trim().slice(0, 120);
+            return text ? ` body="${text}"` : '';
+        } catch { return ''; }
+    };
+    let publicUnreachable = false;
+    for (let i = 0; i < attempts; i++) {
+        // 公网完整链路判定（与浏览器 iframe 同路径，含 nginx/网关/token 校验）。
+        // 关键：只要收到了 HTTP 响应，就以它为准——非 2xx（400/401/502…）说明浏览器
+        // 也会吃到同样的错误，绝不能用"隧道入口正常"来顶替，否则成功宣告后 iframe
+        // 依旧 Bad Request。
+        try {
+            const res = await fetch(withToken, { signal: AbortSignal.timeout(4000), redirect: 'follow' });
+            if (res.ok) {
+                quickLog(`preview chain ready via public url (attempt ${i + 1})`);
+                return 'ready';
+            }
+            quickLog(`preview probe #${i + 1}: public chain status=${res.status}${await snippet(res)}`);
+        } catch (e) {
+            // 只有"网络层不可达"（DNS 解析失败/本机无路由/防火墙拒绝——常见于公网域名
+            // 仅在外部可解析的部署形态）才允许退化用隧道入口判定链路本身是否就绪。
+            publicUnreachable = true;
+            try {
+                const res = await fetch(`http://127.0.0.1:${browserPort}/`, { signal: AbortSignal.timeout(4000) });
+                if (res.ok) {
+                    quickLog(`preview chain ready via tunnel entry (public url unreachable from host: ${e.message}); public path not verified`);
+                    return 'ready';
+                }
+                quickLog(`preview probe #${i + 1}: tunnel entry status=${res.status}`);
+            } catch (e2) {
+                quickLog(`preview probe #${i + 1}: not ready (public: ${e.message}; tunnel: ${e2.message})`);
+            }
+        }
+        await new Promise((r) => setTimeout(r, intervalMs));
+    }
+    return publicUnreachable ? 'public-unreachable' : 'timeout';
 }
 
 async function getGuestFreePortCompat(ref) {
