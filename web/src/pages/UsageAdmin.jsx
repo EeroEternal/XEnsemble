@@ -126,7 +126,6 @@ export default function UsageAdmin() {
     <div className={consoleAdminPageClass}>
       <PageHeader
         title={t('users:usage.title')}
-        description={t('users:usage.subtitle', { defaultValue: 'Platform LLM token consumption overview and per-user ranking' })}
         actions={(
           <div className="flex items-center gap-2">
             <SelectMenu
@@ -192,7 +191,7 @@ export default function UsageAdmin() {
           </section>
 
           {/* 用户排行 */}
-          <section className="flex min-h-0 flex-1 flex-col">
+          <section className="flex min-h-48 flex-1 flex-col">
             <div className="mb-2 flex items-center justify-between gap-3">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.ranking')}</h2>
               <div className="relative w-56">
@@ -289,10 +288,10 @@ export default function UsageAdmin() {
           </section>
 
           {/* Agent 分布（含缓存命中率） */}
-          <section>
+          <section className="shrink-0">
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.by_agent')}</h2>
             <div className={consoleAdminTableShellClass}>
-              <div className={consoleAdminTableScrollClass}>
+              <div className={`${consoleAdminTableScrollClass} max-h-64`}>
                 <table className="w-full table-fixed border-collapse text-left text-sm">
                   <thead className="sticky top-0 z-10">
                     <tr className={consoleTableHeadRowClass}>

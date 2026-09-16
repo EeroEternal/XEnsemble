@@ -44,8 +44,7 @@ export default function ObservabilityPage({ user, onLogout }) {
       />
       <div
         className={cn(
-          'flex min-h-0 flex-1 flex-col',
-          section === 'usage' ? 'overflow-hidden' : 'overflow-auto console-scroll-hidden',
+          'flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden',
           APP_SHELL_PAD_CLASS,
           APP_SHELL_MAIN_PY_CLASS,
         )}

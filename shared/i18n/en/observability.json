@@ -7,7 +7,6 @@
   },
   "routing": {
     "title": "Routing Analysis",
-    "subtitle": "Request difficulty scoring (D ∈ [0,1]) and cost-saving model routing",
     "analyzed_queries": "Analyzed queries",
     "analyzed_queries_sub": "Requests scored by difficulty",
     "complexity_breakdown": "Complexity breakdown",

@@ -71,7 +71,6 @@
   "count": "{{count}} 个用户",
   "usage": {
     "title": "用量统计",
-    "subtitle": "平台 LLM Token 消耗总览与用户排行",
     "total_tokens": "总 Token",
     "requests": "请求数",
     "prompt": "输入",
@@ -88,7 +87,7 @@
     "recent_requests": "最近请求",
     "by_model": "按模型",
     "by_project": "按项目",
-    "by_agent": "按 Agent",
+    "by_agent": "Agent 使用量",
     "agent": "Agent",
     "cached_tokens": "缓存命中",
     "cache_hit_rate": "命中率",

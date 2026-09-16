@@ -7,7 +7,6 @@
   },
   "routing": {
     "title": "路由分析",
-    "subtitle": "基于请求难度评分（D ∈ [0,1]）的智能路由与成本节省分析",
     "analyzed_queries": "分析请求数",
     "analyzed_queries_sub": "经难度评分分析的请求",
     "complexity_breakdown": "复杂度分布",
