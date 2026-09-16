@@ -56,21 +56,39 @@ function closePreviewWindow(winRef) {
   if (winRef) winRef.current = null;
 }
 
-export function usePreview(projectId, token, sessionId) {
+export function usePreview(projectId, token, sessionId, opts = {}) {
   const { showToast } = useToast();
   const { t } = useTranslation();
   const lastFailedToastRef = useRef(null);
-  const [deployment, setDeployment] = useState(null);
+  // 种子部署（可选）：快速预览/部署完成时 SSE result 已携带 previewUrl + deploymentId，
+  // 直接以它渲染预览，不等首次轮询。此前预览 pane 挂载后只 fetch 一次，一旦该次请求
+  // 失败或返回空（无重试：4s 轮询仅在已有活跃部署时启动）→ 永久显示空占位符，
+  // 而右上角实例靠 onSuccess 的额外刷新能拿到记录——表现为"预览 tab 空白、右上角
+  // 却能打开预览"，手动刷新页面才恢复。
+  const [deployment, setDeployment] = useState(opts.seedDeployment || null);
   const [loading, setLoading] = useState(false);
+  const [pollError, setPollError] = useState('');
   const previewWindowRef = useRef(null);
   const hasActiveDeployment = deployment && (deployment.status === 'running' || deployment.status === 'building' || deployment.status === 'pending');
 
+  // 切 project/session 时清空旧 deployment/loading，避免右上角残留旧 session 的"部署中"
+  // 转圈。注意必须跳过首次挂载：带种子的实例（预览 pane）初始值就是 SSE result，
+  // 挂载即清空会把种子抹掉、退回"等首次轮询"的旧行为。
+  const sessionKeyRef = useRef(null);
   useEffect(() => {
+    const key = `${projectId || ''}|${sessionId || ''}`;
+    if (sessionKeyRef.current === null) {
+      sessionKeyRef.current = key;
+      return undefined;
+    }
+    if (sessionKeyRef.current === key) return undefined;
+    sessionKeyRef.current = key;
     lastFailedToastRef.current = null;
     closePreviewWindow(previewWindowRef);
-    // 切 session 时清空旧 deployment/loading，避免右上角残留旧 session 的"部署中"转圈
     setDeployment(null);
+    setPollError('');
     setLoading(false);
+    return undefined;
   }, [projectId, sessionId]);
 
   useEffect(() => () => closePreviewWindow(previewWindowRef), []);
@@ -83,6 +101,7 @@ export function usePreview(projectId, token, sessionId) {
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t('deploy:error.load_preview_failed'));
+      setPollError('');
       setDeployment((prev) => {
         const list = Array.isArray(data) ? data : (data?.deployments || []);
         // 只关心当前 session 的 deployment：同 project 多 session 并发部署时，
@@ -90,12 +109,17 @@ export function usePreview(projectId, token, sessionId) {
         const mine = sessionId ? list.filter((d) => d.session_id === sessionId) : list;
         const next = pickActiveDeployment(mine);
         if (prev && next && prev.id === next.id && prev.status === next.status && prev.public_url === next.public_url) return prev;
+        // 带种子的实例：某次轮询偶发返回空（网络抖动/后端瞬时错误）时不把运行中的
+        // 种子抹成空占位——等下次轮询纠正即可（真实 stopped/failed 终态仍会正常覆盖）。
+        if (!next && prev && opts.keepRunningOnEmpty && prev.status === 'running' && prev.public_url) return prev;
         return next;
       });
     } catch (e) {
-      // Polling errors stay silent; action failures toast in their handlers.
+      // 轮询失败不再完全静默：pollError 会显示在预览 pane 的占位符里，便于定位
+      // "tab 空白"的真实原因（右上角仍不弹 toast）。
+      setPollError(e?.message || t('deploy:error.load_preview_failed'));
     }
-  }, [projectId, sessionId, token]);
+  }, [projectId, sessionId, token, opts.keepRunningOnEmpty, t]);
 
   // Initial fetch on mount / project / session change
   useEffect(() => {
@@ -210,6 +234,7 @@ export function usePreview(projectId, token, sessionId) {
     loading,
     previewUrl,
     isBusy,
+    pollError,
     loadDeployments,
     deployPreview,
     stopPreview,

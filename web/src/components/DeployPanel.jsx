@@ -344,8 +344,9 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                     const last = deployRows[0];
                     if (last.status === 'running') {
                         setRunState('success');
-                        // 恢复部署耗时（updated_at - created_at = 部署总时长），否则成功态里"本次部署用时"不显示
-                        setResult({ ok: true, deploymentId: last.id, elapsedMs: (last.updated_at - last.created_at) || 0 });
+                        // 恢复部署耗时（updated_at - created_at = 部署总时长），否则成功态里"本次部署用时"不显示；
+                        // previewUrl 作为 pane 种子，刷新恢复后立即渲染 iframe（不等首次轮询）
+                        setResult({ ok: true, deploymentId: last.id, previewUrl: last.public_url, elapsedMs: (last.updated_at - last.created_at) || 0 });
                     }
                     else if (last.status === 'failed') { setRunState('failed'); setResult({ ok: false, error: last.stage_message || '上次部署失败', stage: last.stage }); }
                     else if (last.status === 'stopped') {
@@ -377,7 +378,7 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                     // runStateRef 守卫：SSE result 已接管（success）时不重复触发
                     if (runStateRef.current === 'running') {
                         setRunState('success');
-                        setResult({ ok: true, deploymentId: row.id, elapsedMs: (row.updated_at - row.created_at) || 0 });
+                        setResult({ ok: true, deploymentId: row.id, previewUrl: row.public_url, elapsedMs: (row.updated_at - row.created_at) || 0 });
                         jumpTimerRef.current = setTimeout(() => onSuccess?.({ ok: true, deploymentId: row.id }), 800);
                     }
                     setRecoveredId(null);
@@ -433,6 +434,14 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                         projectId={projectId}
                         sessionId={sessionId}
                         deployInfo={result}
+                        // 种子：SSE result / 恢复记录已携带 deploymentId + 预览 URL，
+                        // 直接喂给 pane 立即渲染 iframe——不再依赖 pane 首次轮询
+                        //（失败即空占位，曾导致"预览完成但 tab 空白、刷新才恢复"）。
+                        initialDeployment={result?.previewUrl && result?.deploymentId ? {
+                            id: result.deploymentId,
+                            status: 'running',
+                            public_url: result.previewUrl,
+                        } : null}
                         mode={isPreview ? 'preview' : 'deploy'}
                         onRestartPreview={isPreview ? () => {
                             // 重新预览：重跑快速流水线（改代码后无需先停止再启动）。

@@ -28,9 +28,16 @@ function formatTtl(expiresAt) {
 }
 
 /** Deployed app preview (start/stop + embed). mode='preview' 时详情文案用预览词汇。 */
-export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo, mode = 'deploy', onRestartPreview }) {
+export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo, initialDeployment, mode = 'deploy', onRestartPreview }) {
   const { t } = useTranslation();
-  const preview = usePreview(projectId, true, sessionId);
+  // initialDeployment：部署/预览流水线 SSE result 里的 { deploymentId, previewUrl }——
+  // 作为种子立即渲染 iframe，不依赖首次轮询（该次请求一旦失败/返回空，旧实现会
+  // 永久显示空占位符，只能手动刷新页面恢复）。keepRunningOnEmpty 让后续轮询的
+  // 偶发空结果不抹掉运行中的种子。
+  const preview = usePreview(projectId, true, sessionId, {
+    seedDeployment: initialDeployment || null,
+    keepRunningOnEmpty: Boolean(initialDeployment),
+  });
   const { status, previewUrl, isBusy, resolveEmbedUrl, openPreview } = preview;
   const { showToast } = useToast();
   const [embedUrl, setEmbedUrl] = useState(null);
@@ -207,7 +214,7 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo,
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-zinc-400 px-6 text-center">
             <Monitor className="h-10 w-10" />
-            <p className="text-sm">{embedError || t('deploy:preview.empty')}</p>
+            <p className="text-sm">{embedError || preview.pollError || t('deploy:preview.empty')}</p>
           </div>
         )}
       </div>
