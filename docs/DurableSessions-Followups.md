@@ -116,13 +116,22 @@ renders it as typed text.
   - `replyOscColor` additionally refuses to answer while not live — belt and
     braces for reply bytes that already entered xterm's parse queue.
 
-**Why not answer historical probes.** A late reply is useless to the asker (its
-probe window is over) but actively harmful as stdin noise; the cost of not
-answering is only that the TUI falls back to its default (dark) rendering.
-`COLORFGBG` spawn env remains the intended path for that
-(`desktop/docs/terminal-theme-server-requirements.md`). Fresh sessions attach
-before the agent boots, so their startup probe still arrives live and is still
-answered.
+**Why not answer historical probes.** The cost of not answering is only that the
+TUI falls back to its default (dark) rendering; `COLORFGBG` spawn env remains the
+intended path for that (`desktop/docs/terminal-theme-server-requirements.md`).
+Fresh sessions attach before the agent boots, so their startup probe still
+arrives live and is still answered.
+
+**Open question — live replies (inference, not yet reproduced).** The same
+mechanism could also bite for *live* probes: the reply travels
+browser → WS → server → PTY, so it can arrive after the asking TUI's probe window
+closed, and a late reply is indistinguishable from typed input. The replay path
+above is code-verified; this live-path harm has **not** been reproduced end to
+end. If junk still appears after this fix ships (i.e. the probes arrived live),
+the options are: stop answering probes entirely and rely on `COLORFGBG`, answer
+only for an allowlist of agents, or answer at ingest time (before the render
+batching) to shrink the window. Which one is needed should be decided by
+measurement, not by this paragraph.
 
 Client/server skew is fail-safe: a client talking to an older server that never
 sends `replay-done` simply never answers probes (theme-follow silently off)
@@ -132,7 +141,9 @@ instead of typing replies into the foreground TUI.
 `desktop/src/renderer/lib/terminalQueries.test.js` (node --test) and the
 `replay-done` ordering assertions in `server/src/session/terminalBridge.test.js`.
 Interactive verification against a real TUI still depends on real-agent boxlite
-e2e (see §3).
+e2e (see §3). To tell the two mechanisms apart in the field: ship this fix and
+switch sessions repeatedly — if the junk is gone, replay was the whole story; if
+it comes back, the live path above is real and one of its mitigations is needed.
 
 ## 6. State-dir isolation for agents that hardcode `$HOME` **[open]**
 

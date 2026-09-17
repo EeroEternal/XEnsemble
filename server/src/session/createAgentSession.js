@@ -31,22 +31,10 @@ const { ensureSessionStateDir, prepareHomeRedirect } = require('./stateDir');
 const { resolveRuntimeProvider } = require('../config/runtimeProvider');
 const { injectForSession: injectSkillsForSession, isEnabled: skillInjectEnabled } = require('../skills/skillInjector');
 const { getTaskRunArgs, getTaskRunRemoveArgs, isTaskRunSupported } = require('../agents/taskRunModes');
+const { assembleSpawnArgs } = require('./assembleSpawnArgs');
 const { registerSessionLifecycle } = require('./resumeSession');
 
 const runtime = getRuntime();
-
-/**
- * 组装 agent spawn 参数。
- * droid 一次性模式特例：BYOK 注入的 `--model`（spawnArgs.append）必须落在 exec
- * 子命令之后、prompt 之前——置于 exec 之前会被顶层解析劫持、跳过 exec 分发，
- * 进程落入交互 TUI（无人值守挂死到超时；droid 0.221 实测复现）。
- */
-function assembleSpawnArgs({ agentId, prepend, stateArgs, baseArgs, append, taskArgs }) {
-    if (taskArgs && agentId === 'droid' && append.length > 0) {
-        return [...prepend, ...stateArgs, ...baseArgs, ...taskArgs.slice(0, -1), ...append, taskArgs[taskArgs.length - 1]];
-    }
-    return [...prepend, ...stateArgs, ...baseArgs, ...append, ...(taskArgs || [])];
-}
 
 // —— 以下助手自 server.js 原样搬移（唯一使用方就是会话创建流程）——
 
