@@ -3,7 +3,7 @@ import { apiFetch } from './api';
 // 支持无人值守一次性执行的 Agent（与 server/src/agents/taskRunModes.js 保持一致）
 export const TASK_RUN_AGENTS = [
   'claude-code', 'codebuddy', 'qwen-code', 'cline', 'droid', 'hermes',
-  'kimi-code', 'opencode', 'glm-agent', 'github-copilot', 'cursor', 'openclaw',
+  'kimi-code', 'opencode', 'glm-agent', 'pi', 'github-copilot', 'cursor', 'openclaw',
 ];
 
 /**

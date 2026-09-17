@@ -43,6 +43,7 @@ export default function GeneralSettingsPanel() {
           max_sessions: Number(quota.max_sessions),
           max_previews: Number(quota.max_previews),
           max_runtimes: Number(quota.max_runtimes ?? 1),
+          max_custom_images: Number(quota.max_custom_images ?? 10),
           resource_tier: quota.resource_tier,
         },
       }),
@@ -172,6 +173,26 @@ export default function GeneralSettingsPanel() {
               <ReadOnlyField
                 label={t('settings:quota.previews')}
                 value={String(quota.max_previews ?? '')}
+              />
+            )}
+            {isEdit ? (
+              <div className="flex items-center justify-between gap-4 min-h-[38px]">
+                <span className="text-xs text-zinc-500 shrink-0">{t('settings:quota.images')}</span>
+                <Input
+                  type="number"
+                  min={0}
+                  value={draftQuota.max_custom_images ?? 10}
+                  onChange={(e) => editMode.setDraft({
+                    ...draft,
+                    default_user_quota: { ...draftQuota, max_custom_images: e.target.value },
+                  })}
+                  className="w-24"
+                />
+              </div>
+            ) : (
+              <ReadOnlyField
+                label={t('settings:quota.images')}
+                value={String(quota.max_custom_images ?? '')}
               />
             )}
           </div>

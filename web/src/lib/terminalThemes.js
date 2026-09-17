@@ -1,7 +1,7 @@
 /** Terminal theme presets — https://terminalcolors.com/ */
 
 export const XTERM_MINIMUM_CONTRAST_RATIO = 7;
-export const DEFAULT_TERMINAL_THEME_ID = 'nord';
+export const DEFAULT_TERMINAL_THEME_ID = 'github-dark';
 
 function buildDarkGrayRamp(stops) {
   const colors = new Array(240);

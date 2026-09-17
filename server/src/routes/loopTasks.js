@@ -15,7 +15,7 @@
  */
 
 const crypto = require('crypto');
-const { and, desc, eq } = require('drizzle-orm');
+const { and, desc, eq, inArray } = require('drizzle-orm');
 const { db } = require('../db');
 const schema = require('../db/schema');
 const { sendPublicError } = require('../http/publicError');
@@ -62,7 +62,17 @@ function scheduleDescription(task, locale) {
     }
 }
 
-function serializeTask(row, locale = 'en') {
+// 任务列表内联展示的最近 run 摘要上限：表格只显示一行，完整内容看执行历史
+const LAST_RUN_SUMMARY_MAX_CHARS = 200;
+
+/** 最近 run 摘要：压成单行并截断（表格单元格只放一行文本） */
+function summarizeRunText(text) {
+    const s = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!s) return null;
+    return s.length > LAST_RUN_SUMMARY_MAX_CHARS ? `${s.slice(0, LAST_RUN_SUMMARY_MAX_CHARS)}…` : s;
+}
+
+function serializeTask(row, locale = 'en', lastRun = null) {
     let desc = scheduleDescription(row, locale);
     // 工作日感知任务：描述补充日历语义（节假日跳过 / 调休补班照跑）
     if (desc && row.holidayAware === true && (row.scheduleKind || 'cron') === 'cron') {
@@ -87,6 +97,14 @@ function serializeTask(row, locale = 'en') {
         scheduleDescription: desc,
         nextRunAt: row.nextRunAt ?? null,
         lastRunAt: row.lastRunAt ?? null,
+        // 最近一次 run 概要（列表直接可见成败，不必进历史弹窗；完整内容仍走 /runs）
+        lastRun: lastRun ? {
+            status: lastRun.status,
+            startedAt: lastRun.startedAt ?? null,
+            finishedAt: lastRun.finishedAt ?? null,
+            result: summarizeRunText(lastRun.result),
+            error: summarizeRunText(lastRun.error),
+        } : null,
         createdAt: row.createdAt ?? null,
         updatedAt: row.updatedAt ?? null,
     };
@@ -102,6 +120,7 @@ function serializeRun(row) {
         agentId: row.agentId ?? null,
         rounds: row.rounds ?? null,
         logs: Array.isArray(row.logs) ? row.logs.slice(-200) : [],
+        result: row.result ?? null,
         error: row.error ?? null,
         startedAt: row.startedAt ?? null,
         finishedAt: row.finishedAt ?? null,
@@ -208,7 +227,25 @@ function registerLoopTaskRoutes(fastify) {
         const rows = await db.select().from(schema.loopTasks)
             .where(eq(schema.loopTasks.userId, request.user.id))
             .orderBy(desc(schema.loopTasks.createdAt));
-        return { tasks: rows.map((row) => serializeTask(row, locale)) };
+
+        // 每个任务取最近一条 run（DISTINCT ON + started_at 排序），列表内联展示成败
+        const taskIds = rows.map((row) => row.id);
+        let lastRuns = [];
+        if (taskIds.length > 0) {
+            lastRuns = await db.selectDistinctOn([schema.loopTaskRuns.taskId], {
+                taskId: schema.loopTaskRuns.taskId,
+                status: schema.loopTaskRuns.status,
+                result: schema.loopTaskRuns.result,
+                error: schema.loopTaskRuns.error,
+                startedAt: schema.loopTaskRuns.startedAt,
+                finishedAt: schema.loopTaskRuns.finishedAt,
+            })
+                .from(schema.loopTaskRuns)
+                .where(inArray(schema.loopTaskRuns.taskId, taskIds))
+                .orderBy(schema.loopTaskRuns.taskId, desc(schema.loopTaskRuns.startedAt));
+        }
+        const lastRunByTask = new Map(lastRuns.map((run) => [run.taskId, run]));
+        return { tasks: rows.map((row) => serializeTask(row, locale, lastRunByTask.get(row.id) || null)) };
     });
 
     // 调度实时预览（弹窗输入防抖调用）：三种类型的人类可读描述或行内错误

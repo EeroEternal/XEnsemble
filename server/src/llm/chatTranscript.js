@@ -16,7 +16,12 @@
  * resumed session after a restart keeps numbering (and avoids PK conflicts).
  */
 
-const MAX_EVENTS_PER_SESSION = 1000;
+/**
+ * 每 session 保留的最大事件条数（内存 buffer 与 DB 历史读取共用）。
+ * 超出后丢最旧、保留最新——对话视图按 HISTORY_PAGE_SIZE=50/页游标翻页，
+ * 500 条 ≈ 10 页完整历史，足够回溯且控制首屏/传输体积。
+ */
+const MAX_EVENTS_PER_SESSION = 500;
 
 const buffers = new Map(); // sessionId -> { events: [], subscribers: Set<fn>, nextSeq, seeded }
 
@@ -133,26 +138,53 @@ function subscribe(sessionId, cb) {
 }
 
 /**
- * Full history for a session (oldest first), read from PostgreSQL so it
+ * Normalize optional history-read options.
+ * limit: page size, clamped to [1, MAX_EVENTS_PER_SESSION]; default = full cap.
+ * beforeSeq: cursor — only return events with seq < beforeSeq (older pages).
+ */
+function normalizeHistoryOpts(opts = {}) {
+    const limitRaw = Number(opts.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0
+        ? Math.min(Math.floor(limitRaw), MAX_EVENTS_PER_SESSION)
+        : MAX_EVENTS_PER_SESSION;
+    const beforeRaw = Number(opts.beforeSeq);
+    const beforeSeq = Number.isFinite(beforeRaw) && beforeRaw > 0 ? Math.floor(beforeRaw) : null;
+    return { limit, beforeSeq };
+}
+
+/**
+ * History for a session (oldest first), read from PostgreSQL so it
  * survives restarts. Falls back to the in-memory buffer if the DB is
  * unreachable.
  *
- * 只读最近 MAX_EVENTS_PER_SESSION 条（最新），仍按 seq 升序输出——
- * 超长会话应看到「最近」的对话而非最早的开场白。内存 buffer 兜底
- * 路径（buf.events 超限时 splice 丢最旧）本身即保留最新，语义一致。
+ * 只读最近 limit 条（默认 = MAX_EVENTS_PER_SESSION，即全部保留历史），
+ * 仍按 seq 升序输出——超长会话应看到「最近」的对话而非最早的开场白。
+ * 内存 buffer 兕底路径（buf.events 超限时 splice 丢最旧）本身即保留最新，
+ * 语义一致。
+ *
+ * 游标分页：传 { beforeSeq } 时只返回该 seq 之前（更早）的一页，
+ * 供对话视图「加载更早」向前翻页；不传则返回最新一页全量。
  */
-async function getHistory(sessionId) {
+async function getHistory(sessionId, opts = {}) {
+    const { limit, beforeSeq } = normalizeHistoryOpts(opts);
     try {
         const { db } = require('../db/index');
         const schema = require('../db/schema');
-        const { eq, asc, desc } = require('drizzle-orm');
-        // 子查询先按 seq DESC 取最新 MAX_EVENTS_PER_SESSION 条
+        const { and, eq, asc, desc, lt } = require('drizzle-orm');
+        // 过滤条件：本会话；游标模式下再限定 seq < beforeSeq（更早一页）
+        const conds = beforeSeq != null
+            ? and(
+                eq(schema.sessionChatMessages.sessionId, sessionId),
+                lt(schema.sessionChatMessages.seq, beforeSeq),
+            )
+            : eq(schema.sessionChatMessages.sessionId, sessionId);
+        // 子查询先按 seq DESC 取最新 limit 条
         const sub = db
             .select({ seq: schema.sessionChatMessages.seq })
             .from(schema.sessionChatMessages)
-            .where(eq(schema.sessionChatMessages.sessionId, sessionId))
+            .where(conds)
             .orderBy(desc(schema.sessionChatMessages.seq))
-            .limit(MAX_EVENTS_PER_SESSION)
+            .limit(limit)
             .as('sub');
         // 外层再按 seq ASC 输出，保证调用方拿到的是 旧→新 顺序。
         // 关键：JOIN 必须同时带 sessionId，否则会把其他会话里相同 seq 的消息
@@ -173,8 +205,13 @@ async function getHistory(sessionId) {
             .orderBy(asc(schema.sessionChatMessages.seq));
         return rows.map(entryFromRow);
     } catch (_) {
+        // DB unreachable — same newest-`limit` semantics against the in-memory
+        // buffer: filter by cursor, keep the latest `limit` events.
         const buf = buffers.get(sessionId);
-        return buf ? buf.events.slice() : [];
+        if (!buf) return [];
+        let events = buf.events;
+        if (beforeSeq != null) events = events.filter((e) => e.seq < beforeSeq);
+        return events.slice(-limit);
     }
 }
 

@@ -88,10 +88,37 @@ test('getHistory returns newest MAX_EVENTS_PER_SESSION in ascending seq order', 
         });
     }
     const h = await chatTranscript.getHistory(sid);
-    assert.equal(h.length, 1000);
-    assert.equal(h[0].content, 'msg11');      // 1010 条取最新 1000 条 = msg11..msg1010
-    assert.equal(h[999].content, 'msg1010');
+    assert.equal(h.length, 500);
+    assert.equal(h[0].content, 'msg511');      // 1010 条取最新 500 条 = msg511..msg1010
+    assert.equal(h[499].content, 'msg1010');
     for (let i = 1; i < h.length; i += 1) {
         assert.ok(h[i].seq > h[i - 1].seq, 'not ascending seq');
     }
+});
+
+test('getHistory cursor pagination: limit + beforeSeq pages backward', async () => {
+    const sid = await makeSession();
+    for (let seq = 1; seq <= 10; seq += 1) {
+        await db.insert(schema.sessionChatMessages).values({
+            sessionId: sid,
+            seq,
+            ts: 1000 + seq,
+            role: 'user',
+            content: `msg${seq}`,
+        });
+    }
+    // 第一页：最新 4 条，升序
+    const page1 = await chatTranscript.getHistory(sid, { limit: 4 });
+    assert.deepEqual(page1.map((m) => m.seq), [7, 8, 9, 10]);
+    // 第二页：before_seq = 第一页最早 seq，取更早的 4 条
+    const page2 = await chatTranscript.getHistory(sid, { limit: 4, beforeSeq: page1[0].seq });
+    assert.deepEqual(page2.map((m) => m.seq), [3, 4, 5, 6]);
+    // 第三页：只剩 2 条，不足一页（调用方据此判断「已到开头」）
+    const page3 = await chatTranscript.getHistory(sid, { limit: 4, beforeSeq: page2[0].seq });
+    assert.deepEqual(page3.map((m) => m.seq), [1, 2]);
+    // limit 超过 MAX_EVENTS_PER_SESSION 时被夹到上限；非法值回退默认（全量）
+    const all = await chatTranscript.getHistory(sid, { limit: 99999 });
+    assert.equal(all.length, 10);
+    const badLimit = await chatTranscript.getHistory(sid, { limit: -5 });
+    assert.equal(badLimit.length, 10);
 });

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useContext } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft } from 'lucide-react';
@@ -8,11 +8,12 @@ import History from './pages/History';
 import SkillsMarket from './pages/SkillsMarket';
 import MySkills from './pages/MySkills';
 import LoopTasks from './pages/LoopTasks';
+import LoopRunDetail from './pages/LoopRunDetail';
 import AgentsAdmin from './pages/AgentsAdmin';
 import ImagesManager from './pages/ImagesManager';
 import UsersAdmin from './pages/UsersAdmin';
 import GatewayAdmin from './pages/GatewayAdmin';
-import UsageAdmin from './pages/UsageAdmin';
+import ObservabilityPage from './pages/Observability';
 import AppSidebar from './components/AppSidebar';
 import BrandMark from './components/BrandMark';
 import ConfirmDialog from './components/ConfirmDialog';
@@ -74,17 +75,19 @@ function AuthenticatedLayout({
   const isTrajectory = location.pathname === '/trajectory';
   const isMySkills = location.pathname === '/skills';
   const isSkillsMarket = location.pathname === '/skills/market';
+  const isSkillsManager = isMySkills || isSkillsMarket;
   const isLoopTasks = location.pathname === '/loop-tasks';
+  const isLoopRunDetail = /^\/loop-tasks\/[^/]+\/runs\/[^/]+$/.test(location.pathname);
   const isAgentsAdmin = location.pathname === '/admin/agents';
   const isUsersAdmin = location.pathname === '/admin/users';
   const isGatewayAdmin = location.pathname === '/admin/gateway';
-  const isUsageAdmin = location.pathname === '/admin/usage';
+  const isObservabilityPage = location.pathname === '/observability';
   const isImagesAdmin = location.pathname === '/admin/images';
   const isCustomImages = location.pathname === '/custom-images';
   const isImagesManager = isCustomImages || isImagesAdmin;
   const isSettingsPage = location.pathname === '/settings';
 
-  const isSettingsRoute = isAgentsAdmin || isUsersAdmin || isGatewayAdmin || isUsageAdmin || isImagesManager || isSettingsPage;
+  const isSettingsRoute = isAgentsAdmin || isUsersAdmin || isGatewayAdmin || isObservabilityPage || isImagesManager || isSkillsManager || isSettingsPage;
 
   const offRouteClass = 'pointer-events-none invisible absolute inset-0 z-0 [&_*]:pointer-events-none';
 
@@ -102,51 +105,8 @@ function AuthenticatedLayout({
   }, [setActiveSession, agents, navigate, location.pathname]);
 
   return (
-    <div className={`h-full flex flex-col ${bgCanvas}`}>
-      {/* Full-width top bar (above the sidebar). */}
-      <div
-        className="shrink-0 h-12 border-b border-zinc-200 bg-surface flex items-center px-4 gap-3 relative z-30"
-      >
-        <BrandMark className="h-7 w-7 shrink-0" iconClassName="h-3.5 w-3.5" />
-        <div className="flex flex-col shrink-0 leading-tight">
-          <span className="text-sm font-bold text-zinc-900">AgentHarness</span>
-          <span className="text-[10px] text-zinc-400 font-medium -mt-0.5 flex justify-between">
-            <span>Yuma</span>
-            <span>Engineering</span>
-          </span>
-        </div>
-        {isSettingsRoute ? (
-          <div className="flex-1 min-w-0 flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => navigate('/sessions')}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 ${consoleButtonFocusClass}`}
-              title={t('sessions:action.back_to_workspaces')}
-            >
-              <ArrowLeft className="w-3.5 h-3.5" strokeWidth={1.75} />
-              {t('sessions:action.back_to_workspaces')}
-            </button>
-          </div>
-        ) : (
-          <>
-            {/* Workspace switcher lives in the global top bar (all routes), so
-                /trajectory, /skills etc. never lose access to the active workspace.
-                Session-specific controls (branch/restart/preview) portal into
-                #xe-topbar-dynamic below and only render on /sessions. */}
-            <WorkspaceSwitcher
-              projects={projects}
-              activeWorkspaceId={activeWorkspaceId}
-              sessions={sessions}
-              onSelect={switchWorkspace}
-              onCreate={() => { setLaunchPanelOpen(true); sessionsRef.current?.openLaunchModal?.('workspace'); }}
-              onDelete={(ws) => sessionsRef.current?.requestDeleteWorkspace?.(ws)}
-            />
-            <div id="xe-topbar-dynamic" className="flex-1 min-w-0 flex items-center justify-between gap-3" />
-          </>
-        )}
-      </div>
-
-      <div className="flex flex-1 min-h-0">
+    <div className={`h-full flex ${bgCanvas}`}>
+      {/* 侧边栏独占全高列（分隔线贯穿到顶），logo 与折叠按钮锚在侧栏头部（Claude.ai/Notion 模式）。 */}
       {!isSettingsRoute && (
       <AppSidebar
         agents={agents}
@@ -159,14 +119,59 @@ function AuthenticatedLayout({
         onRequestDeleteSession={(session, ws, action) => sessionsRef.current?.requestDeleteSession?.(session, ws, action)}
         user={user}
         onOpenSettings={() => navigate('/settings')}
+        onOpenObservability={() => navigate('/observability')}
         onLogout={logout}
-        onOpenSkills={() => navigate('/skills')}
         onOpenLoopTasks={() => navigate('/loop-tasks')}
       />
       )}
-      <main
-        className={`relative flex h-full min-h-0 flex-1 flex-col min-w-0 overflow-hidden ${bgCanvas}`}
-      >
+      {/* 右列：内容区顶栏 + 页面。设置路由下侧栏隐藏，logo 回到顶栏。 */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        <div
+          className="shrink-0 h-12 border-b border-zinc-200 bg-surface flex items-center px-4 gap-3 relative z-30"
+        >
+          {isSettingsRoute ? (
+            <>
+              <BrandMark className="h-7 w-7 shrink-0" iconClassName="h-3.5 w-3.5" />
+              <div className="flex flex-col shrink-0 leading-tight">
+                <span className="text-sm font-bold text-zinc-900">AgentHarness</span>
+                <span className="text-[10px] text-zinc-400 font-medium -mt-0.5 flex justify-between">
+                  <span>Yuma</span>
+                  <span>Engineering</span>
+                </span>
+              </div>
+              <div className="flex-1 min-w-0 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => navigate('/sessions')}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 ${consoleButtonFocusClass}`}
+                  title={t('sessions:action.back_to_workspaces')}
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" strokeWidth={1.75} />
+                  {t('sessions:action.back_to_workspaces')}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Workspace switcher lives in the content top bar (all routes), so
+                  /trajectory, /skills etc. never lose access to the active workspace.
+                  Session-specific controls (branch/restart/preview) portal into
+                  #xe-topbar-dynamic below and only render on /sessions. */}
+              <WorkspaceSwitcher
+                projects={projects}
+                activeWorkspaceId={activeWorkspaceId}
+                sessions={sessions}
+                onSelect={switchWorkspace}
+                onCreate={() => { setLaunchPanelOpen(true); sessionsRef.current?.openLaunchModal?.('workspace'); }}
+                onDelete={(ws) => sessionsRef.current?.requestDeleteWorkspace?.(ws)}
+              />
+              <div id="xe-topbar-dynamic" className="flex-1 min-w-0 flex items-center justify-between gap-3" />
+            </>
+          )}
+        </div>
+        <main
+          className={`relative flex min-h-0 flex-1 flex-col min-w-0 overflow-hidden ${bgCanvas}`}
+        >
         <Sessions
           ref={sessionsRef}
           token={token}
@@ -205,13 +210,6 @@ function AuthenticatedLayout({
           )}
           aria-hidden={!isTrajectory}
         />
-        <MySkills
-          className={cn(
-            'flex h-full min-h-0 flex-1 flex-col',
-            isMySkills ? 'relative z-20' : offRouteClass,
-          )}
-          aria-hidden={!isMySkills}
-        />
         <LoopTasks
           className={cn(
             'flex h-full min-h-0 flex-1 flex-col',
@@ -219,13 +217,9 @@ function AuthenticatedLayout({
           )}
           aria-hidden={!isLoopTasks}
         />
-        <SkillsMarket
-          className={cn(
-            'flex h-full min-h-0 flex-1 flex-col',
-            isSkillsMarket ? 'relative z-20' : offRouteClass,
-          )}
-          aria-hidden={!isSkillsMarket}
-        />
+        {isLoopRunDetail && (
+          <LoopRunDetail className="flex h-full min-h-0 flex-1 flex-col relative z-20" />
+        )}
         {user?.role === 'admin' && isAgentsAdmin && (
             <div
               className={cn(
@@ -265,17 +259,14 @@ function AuthenticatedLayout({
               </div>
             </div>
         )}
-        {user?.role === 'admin' && isUsageAdmin && (
+        {isObservabilityPage && (
             <div
               className={cn(
                 'flex min-h-0 flex-1 flex-row overflow-hidden',
                 launchPanelOpen ? offRouteClass : 'relative z-10',
               )}
             >
-              <SettingsTabSidebar activeTab="usage" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
-              <div className={cn('flex min-h-0 flex-1 flex-col overflow-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
-                <UsageAdmin />
-              </div>
+              <ObservabilityPage user={user} onLogout={logout} />
             </div>
         )}
         {isImagesManager && (
@@ -289,6 +280,25 @@ function AuthenticatedLayout({
               <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
                 <ImagesManager />
               </div>
+            </div>
+        )}
+        {isSkillsManager && (
+            <div
+              className={cn(
+                'flex min-h-0 flex-1 flex-row overflow-hidden',
+                launchPanelOpen ? offRouteClass : 'relative z-10',
+              )}
+            >
+              <SettingsTabSidebar activeTab="skills" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
+              {isMySkills ? (
+                <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
+                  <MySkills />
+                </div>
+              ) : (
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <SkillsMarket />
+                </div>
+              )}
             </div>
         )}
         {isSettingsPage && (
@@ -309,6 +319,16 @@ function AuthenticatedLayout({
       <ConfirmDialog />
     </div>
   );
+}
+
+/** /admin/usage → /observability?section=usage，保留 ?user= 深链参数。 */
+function UsageRedirect() {
+  const { user } = useContext(AuthContext);
+  const location = useLocation();
+  if (user?.role !== 'admin') return <Navigate to="/sessions" replace />;
+  const params = new URLSearchParams(location.search);
+  params.set('section', 'usage');
+  return <Navigate to={`/observability?${params.toString()}`} replace />;
 }
 
 function App() {
@@ -459,7 +479,9 @@ function App() {
               <Route path="/skills" element={null} />
               <Route path="/skills/market" element={null} />
               <Route path="/loop-tasks" element={null} />
+              <Route path="/loop-tasks/:taskId/runs/:runId" element={null} />
               <Route path="/settings" element={null} />
+              <Route path="/observability" element={null} />
               <Route
                 path="/custom-images"
                 element={user?.role === 'admin' ? null : <Navigate to="/sessions" replace />}
@@ -479,7 +501,7 @@ function App() {
               />
               <Route
                 path="/admin/usage"
-                element={user?.role === 'admin' ? null : <Navigate to="/sessions" replace />}
+                element={<UsageRedirect />}
               />
               <Route
                 path="/admin/images"

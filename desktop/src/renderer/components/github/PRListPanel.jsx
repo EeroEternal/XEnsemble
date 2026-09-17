@@ -3,9 +3,10 @@ import { ExternalLink, Loader2, RefreshCw } from 'lucide-react';
 import { usePullRequests } from '../../hooks/usePullRequests';
 import { openExternal } from '../../lib/githubApi.js';
 import {
-  consoleTableShellClass,
+  consoleAdminTableShellClass,
   consoleTableHeadRowClass,
   consoleTableHeadCellDenseClass,
+  consoleTableHeadBandClass,
   consoleTableBodyDivideClass,
   consoleTableBodyRowClass,
   consoleTableBodyCellDenseClass,
@@ -51,14 +52,24 @@ export default function PRListPanel({ projectId }) {
           )}
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className={consoleAdminTableShellClass}>
         {pullRequests.length === 0 ? (
           <div className={`m-3 p-4 text-center text-xs ${textPlaceholder} ${consoleEmptyStateClass}`}>
             No pull requests yet.
           </div>
         ) : (
-          <table className={`w-full text-left ${consoleTableShellClass}`}>
-            <thead className={consoleTableHeadRowClass}>
+          <>
+          <div className={consoleTableHeadBandClass}>
+          <table className="w-full table-fixed text-left">
+            <colgroup>
+              <col className="w-10" />
+              <col />
+              <col className="w-24" />
+              <col className="w-56" />
+              <col className="w-28" />
+              <col className="w-16" />
+            </colgroup>
+            <thead>
               <tr>
                 <th className={consoleTableHeadCellDenseClass}>#</th>
                 <th className={consoleTableHeadCellDenseClass}>Title</th>
@@ -68,6 +79,18 @@ export default function PRListPanel({ projectId }) {
                 <th className={consoleTableHeadCellDenseClass}>Actions</th>
               </tr>
             </thead>
+          </table>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+          <table className="w-full table-fixed text-left">
+            <colgroup>
+              <col className="w-10" />
+              <col />
+              <col className="w-24" />
+              <col className="w-56" />
+              <col className="w-28" />
+              <col className="w-16" />
+            </colgroup>
             <tbody className={consoleTableBodyDivideClass}>
               {pullRequests.map((pr) => (
                 <tr key={pr.id} className={consoleTableBodyRowClass}>
@@ -127,6 +150,8 @@ export default function PRListPanel({ projectId }) {
               ))}
             </tbody>
           </table>
+          </div>
+          </>
         )}
       </div>
     </div>

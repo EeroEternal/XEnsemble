@@ -15,6 +15,7 @@ import {
   consoleDialogMdClass,
   consoleAdminPageClass,
   consoleAdminTableScrollClass,
+  consoleTableHeadBandClass,
   consoleAdminTableShellClass,
   consoleIconButtonClass,
   consoleSectionLabelClass,
@@ -36,6 +37,7 @@ const emptyForm = {
   max_projects: 5,
   max_sessions: 20,
   max_previews: 1,
+  max_custom_images: 10,
   resource_tier: 'basic',
 };
 
@@ -101,6 +103,7 @@ export default function UsersAdmin() {
         max_projects: detail.quotas?.max_projects ?? 5,
         max_sessions: detail.quotas?.max_sessions ?? 2,
         max_previews: detail.quotas?.max_previews ?? 1,
+        max_custom_images: detail.quotas?.max_custom_images ?? 10,
         resource_tier: detail.quotas?.resource_tier ?? 'basic',
       });
       setResetPassword('');
@@ -136,6 +139,7 @@ export default function UsersAdmin() {
               max_projects: Number(form.max_projects),
               max_sessions: Number(form.max_sessions),
               max_previews: Number(form.max_previews),
+              max_custom_images: Number(form.max_custom_images),
               resource_tier: form.resource_tier,
             },
           }),
@@ -162,6 +166,7 @@ export default function UsersAdmin() {
             max_projects: Number(form.max_projects),
             max_sessions: Number(form.max_sessions),
             max_previews: Number(form.max_previews),
+            max_custom_images: Number(form.max_custom_images),
             resource_tier: form.resource_tier,
           }),
         });
@@ -263,7 +268,7 @@ export default function UsersAdmin() {
       </div>
 
       <div className={consoleAdminTableShellClass}>
-        <div className={consoleAdminTableScrollClass}>
+        <div className={consoleTableHeadBandClass}>
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
               <col className="w-1/6" />
@@ -283,6 +288,18 @@ export default function UsersAdmin() {
                 <th className={consoleTableHeadCellClass}>{t('common:table.actions')}</th>
               </tr>
             </thead>
+          </table>
+        </div>
+        <div className={consoleAdminTableScrollClass}>
+          <table className="w-full table-fixed border-collapse text-left text-sm">
+            <colgroup>
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-48" />
+            </colgroup>
             <tbody className="divide-y divide-zinc-100">
               {loading ? (
                 <tr>
@@ -313,7 +330,7 @@ export default function UsersAdmin() {
                   <td className={consoleTableBodyCellClass}>
                     <button
                       type="button"
-                      onClick={() => navigate(`/admin/usage?user=${user.id}`)}
+                      onClick={() => navigate(`/observability?section=usage&user=${user.id}`)}
                       className="font-mono text-xs tabular-nums text-zinc-700 hover:text-blue-600 hover:underline"
                       title={formatTokensFull(user.usage_7d_total_tokens || 0)}
                     >
@@ -438,6 +455,16 @@ export default function UsersAdmin() {
                         min={0}
                         value={form.max_previews}
                         onChange={(e) => setForm({ ...form, max_previews: e.target.value })}
+                        className="h-8 py-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-zinc-500">{t('users:field.max_custom_images', { defaultValue: 'Images' })}</label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={form.max_custom_images}
+                        onChange={(e) => setForm({ ...form, max_custom_images: e.target.value })}
                         className="h-8 py-1"
                       />
                     </div>

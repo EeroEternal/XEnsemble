@@ -17,17 +17,23 @@ function OptionRow({ opt, isSelected, onPick }) {
         type="button"
         role="option"
         aria-selected={isSelected}
+        title={opt.title || undefined}
         onClick={() => onPick(opt.value)}
         className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${
+          opt.emphasis ? 'border-t border-zinc-100 font-medium' : ''
+        } ${
           isSelected
             ? 'bg-zinc-100 text-zinc-900'
-            : 'text-zinc-700 hover:bg-zinc-50'
+            : opt.emphasis ? 'text-zinc-900 hover:bg-zinc-50' : 'text-zinc-700 hover:bg-zinc-50'
         }`}
       >
         <span className="w-4 shrink-0 flex items-center justify-center">
           {isSelected && <Check className="w-3.5 h-3.5 text-zinc-900" strokeWidth={2.5} />}
         </span>
-        <span className="whitespace-nowrap">{opt.label}</span>
+        <span className="min-w-0 flex-1 whitespace-nowrap">{opt.label}</span>
+        {opt.badgeIcon && (
+          <span className="ml-2 shrink-0 flex items-center text-zinc-400">{opt.badgeIcon}</span>
+        )}
       </button>
     </li>
   );
@@ -137,7 +143,9 @@ export default function SelectMenu({
 
   const filteredOptions = useMemo(() => {
     if (!normalizedQuery) return options;
-    return options.filter((opt) => opt.label.toLowerCase().includes(normalizedQuery));
+    return options.filter((opt) => `${opt.label} ${opt.title || ''}`
+      .toLowerCase()
+      .includes(normalizedQuery));
   }, [options, normalizedQuery]);
 
   const { recentOptions, otherOptions } = useMemo(() => {
@@ -271,10 +279,15 @@ export default function SelectMenu({
           )}
         >
           <span
-            className={`block truncate ${selected ? 'text-zinc-900' : 'text-zinc-400'}`}
-            title={selected?.label ?? effectivePlaceholder ?? undefined}
+            className="flex min-w-0 items-center gap-1.5"
+            title={selected?.title ?? selected?.label ?? effectivePlaceholder ?? undefined}
           >
-            {selected?.label ?? effectivePlaceholder}
+            <span className={`min-w-0 truncate ${selected ? 'text-zinc-900' : 'text-zinc-400'}`}>
+              {selected?.label ?? effectivePlaceholder}
+            </span>
+            {selected?.badgeIcon && (
+              <span className="shrink-0 flex items-center text-zinc-400">{selected.badgeIcon}</span>
+            )}
           </span>
           <ChevronDown
             className={`absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none transition-transform ${open ? 'rotate-180' : ''}`}

@@ -97,13 +97,13 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo,
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="workspace-preview-pane">
       {status === 'running' && (
-        <div className="flex items-center gap-2 border-b border-[#E8EAED] px-3 py-1.5 shrink-0">
-          <Monitor className="h-3.5 w-3.5 shrink-0 text-[#5F6368]" />
-          <span className="truncate text-xs text-[#5F6368] font-mono">
+        <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-1.5 shrink-0">
+          <Monitor className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+          <span className="truncate text-xs text-zinc-500 font-mono">
             {previewUrl}
           </span>
           {isLive && (
-            <span className="shrink-0 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600">
+            <span className="shrink-0 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300">
               {t('deploy:preview.live')}
             </span>
           )}
@@ -133,7 +133,7 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo,
               onClick={onRestartPreview}
               // 蓝描边 = 轻量操作（与顶栏「快速预览」蓝色实心同族、次一档）：改代码后
               // 重启预览是预览流程的高频动作，放标题栏最右侧触手可及，不必先停再开。
-              className="ml-1 flex items-center gap-1 h-6 px-2 text-[11px] font-medium rounded-md border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:pointer-events-none shrink-0"
+              className="ml-1 flex items-center gap-1 h-6 px-2 text-[11px] font-medium rounded-md border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/15 dark:text-blue-300 dark:hover:bg-blue-500/25 disabled:opacity-50 disabled:pointer-events-none shrink-0"
               title={t('deploy:preview.refresh_dev_hint')}
             >
               <RotateCw className="w-3 h-3" />
@@ -144,7 +144,7 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo,
       )}
 
       {showDetails && (
-        <div className="shrink-0 border-b border-[#E8EAED] bg-[#FAFBFC] px-4 py-3 space-y-2 text-xs">
+        <div className="shrink-0 border-b border-zinc-200 bg-zinc-50 px-4 py-3 space-y-2 text-xs">
           <div className="flex items-center gap-2">
             {status === 'running' ? (
               <>
@@ -165,7 +165,7 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo,
               <button
                 type="button"
                 onClick={copyUrl}
-                className={`p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-[#E8EAED] shrink-0 ${consoleButtonFocusClass}`}
+                className={`p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200 shrink-0 ${consoleButtonFocusClass}`}
                 title={t('deploy:preview.copy_url')}
               >
                 {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
@@ -173,7 +173,7 @@ export default function WorkspacePreviewPane({ projectId, sessionId, deployInfo,
               <button
                 type="button"
                 onClick={openPreview}
-                className={`p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-[#E8EAED] shrink-0 ${consoleButtonFocusClass}`}
+                className={`p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200 shrink-0 ${consoleButtonFocusClass}`}
                 title={t('deploy:preview.open_new_window')}
               >
                 <ExternalLink className="w-3.5 h-3.5" />

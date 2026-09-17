@@ -16,6 +16,7 @@ import errorsEn from '../../shared/i18n/en/errors.json';
 import chatEn from '../../shared/i18n/en/chat.json';
 import skillsEn from '../../shared/i18n/en/skills.json';
 import loopTasksEn from '../../shared/i18n/en/loopTasks.json';
+import observabilityEn from '../../shared/i18n/en/observability.json';
 
 import commonZh from '../../shared/i18n/zh/common.json';
 import authZh from '../../shared/i18n/zh/auth.json';
@@ -32,6 +33,7 @@ import errorsZh from '../../shared/i18n/zh/errors.json';
 import chatZh from '../../shared/i18n/zh/chat.json';
 import skillsZh from '../../shared/i18n/zh/skills.json';
 import loopTasksZh from '../../shared/i18n/zh/loopTasks.json';
+import observabilityZh from '../../shared/i18n/zh/observability.json';
 
 const savedLocale = (() => {
   try { return localStorage.getItem('xe_locale') || 'en'; } catch { return 'en'; }
@@ -57,6 +59,7 @@ i18next
         chat: chatEn,
         skills: skillsEn,
         loopTasks: loopTasksEn,
+        observability: observabilityEn,
       },
       zh: {
         common: commonZh,
@@ -74,6 +77,7 @@ i18next
         chat: chatZh,
         skills: skillsZh,
         loopTasks: loopTasksZh,
+        observability: observabilityZh,
       },
     },
     lng: savedLocale,

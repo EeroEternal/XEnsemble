@@ -23,7 +23,7 @@ function getThemeById(id) {
 }
 
 function getCatalogDefaultId() {
-    return loadCatalog().default_id || 'nord';
+    return loadCatalog().default_id || 'github-dark';
 }
 
 function getThemeSpawnEnv(themeId) {
@@ -50,14 +50,14 @@ function resolveEffectiveTerminalThemeId({
     warn,
 } = {}) {
     const catalog = loadCatalog();
-    const fallbackId = platformDefaultId || catalog.default_id || 'nord';
+    const fallbackId = platformDefaultId || catalog.default_id || 'github-dark';
 
     const orderedIds = [
         requestThemeId,
         userThemeId,
         platformDefaultId,
         catalog.default_id,
-        'nord',
+        'github-dark',
     ].filter(Boolean);
 
     const preferredId = requestThemeId || userThemeId || null;
@@ -81,7 +81,7 @@ function resolveEffectiveTerminalThemeId({
     const firstEnabled = catalog.themes.find(
         (t) => t.enabled && !disabledIds.includes(t.id),
     );
-    const resolved = firstEnabled?.id || 'nord';
+    const resolved = firstEnabled?.id || 'github-dark';
     if (preferredId && preferredId !== resolved && warn) {
         warn(`Terminal theme "${preferredId}" is invalid or disabled; using "${resolved}".`);
     }

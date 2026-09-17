@@ -7,6 +7,13 @@ const { readScrollback } = require('../runtime/LocalScrollbackBuffer');
 // 重放永远不会撑爆客户端、不会触发二次自愈循环。
 const DELTA_REPLAY_MAX_BYTES = Number(process.env.TRANSCRIPT_DELTA_REPLAY_MAX_BYTES) || 4 * 1024 * 1024;
 
+// 消息类型（WS / SSE 共用）：
+//   ready        —— 鉴权/会话就绪
+//   output       —— PTY 输出（{ data, seq }）
+//   replay-done  —— 转录重放结束，其后 output 均为实时输出；客户端据此决定
+//                   是否回送 OSC 10/11 颜色查询应答（重放阶段不得回送）
+//   exit / error —— 会话结束 / 订阅失败
+
 function normalizeCursor(after) {
     const value = Number(after);
     return Number.isInteger(value) && value >= 0 ? value : 0;
@@ -256,6 +263,11 @@ async function subscribeTerminal(sessionId, send, options = {}) {
             // Legacy in-memory history fallback for live sessions before the transcript store was populated.
             maybeSend({ type: 'output', data: session.history });
         }
+        // 重放结束标记（必须早于 drainPendingLive 发出的实时帧）。客户端据此
+        // 区分「历史重放」与「实时输出」：只有实时输出里的 OSC 10/11 颜色
+        // 探测才允许回送应答。否则重放的历史探测会被再次应答，而提问的 TUI
+        // 早已不再等待 —— 应答就变成打进前台 TUI stdin 的按键。
+        maybeSend({ type: 'replay-done' });
         replaying = false;
         replayComplete = true;
         drainPendingLive();
@@ -335,6 +347,7 @@ async function subscribeTerminal(sessionId, send, options = {}) {
         // tracking still ends the chat view when the agent stops.
         replaying = false;
         replayComplete = true;
+        maybeSend({ type: 'replay-done' });
         drainPendingLive();
         return { ok: true, cleanup, handle };
     }

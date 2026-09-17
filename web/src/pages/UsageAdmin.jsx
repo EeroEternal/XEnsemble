@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp, Loader2, RefreshCw, Search } from 'lucide-react';
 
@@ -10,6 +10,7 @@ import MiniBarChart from '../components/usage/MiniBarChart';
 import {
   consoleAdminPageClass,
   consoleAdminTableScrollClass,
+  consoleTableHeadBandClass,
   consoleAdminTableShellClass,
   consoleIconButtonClass,
   consoleTableBodyCellClass,
@@ -36,7 +37,6 @@ function avatarClass(userId = '') {
 
 export default function UsageAdmin() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [days, setDays] = useState('30');
@@ -69,14 +69,24 @@ export default function UsageAdmin() {
     fetchData();
   }, [fetchData]);
 
-  // 深链：/admin/usage?user=<id> → 打开对应弹窗
+  // 深链：?user=<id> → 打开对应弹窗。清理参数时保留其余参数
+  // （section 等），页面仍停留在当前观测 tab。
   useEffect(() => {
     const uid = searchParams.get('user');
     if (uid) {
       setDialogUserId(uid);
-      setSearchParams({}, { replace: true });
+      const next = new URLSearchParams(searchParams);
+      next.delete('user');
+      setSearchParams(next, { replace: true });
     }
   }, [searchParams, setSearchParams]);
+
+  const closeUserDialog = () => {
+    setDialogUserId(null);
+    const next = new URLSearchParams(searchParams);
+    next.delete('user');
+    setSearchParams(next, { replace: true });
+  };
 
   const items = summary?.items || [];
   const platformTotal = summary?.totalTokens ?? 0;
@@ -117,7 +127,6 @@ export default function UsageAdmin() {
     <div className={consoleAdminPageClass}>
       <PageHeader
         title={t('users:usage.title')}
-        description={t('users:usage.subtitle', { defaultValue: 'Platform LLM token consumption overview and per-user ranking' })}
         actions={(
           <div className="flex items-center gap-2">
             <SelectMenu
@@ -183,7 +192,7 @@ export default function UsageAdmin() {
           </section>
 
           {/* 用户排行 */}
-          <section className="flex min-h-0 flex-1 flex-col">
+          <section className="flex min-h-48 flex-1 flex-col">
             <div className="mb-2 flex items-center justify-between gap-3">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.ranking')}</h2>
               <div className="relative w-56">
@@ -197,6 +206,34 @@ export default function UsageAdmin() {
               </div>
             </div>
             <div className={consoleAdminTableShellClass}>
+              <div className={consoleTableHeadBandClass}>
+                <table className="w-full table-fixed border-collapse text-left text-sm">
+                  <colgroup>
+                    <col className="w-10" />
+                    <col className="w-1/5" />
+                    <col className="w-1/7" />
+                    <col className="w-1/7" />
+                    <col className="w-1/7" />
+                    <col className="w-1/7" />
+                    <col className="w-1/7" />
+                    <col className="w-1/6" />
+                    <col className="w-12" />
+                  </colgroup>
+                  <thead>
+                    <tr className={consoleTableHeadRowClass}>
+                      <th className={consoleTableHeadCellClass}>#</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.user')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.requests')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.prompt')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.completion')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.total_tokens')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.cache_hit_rate')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.share')}</th>
+                      <th className={consoleTableHeadCellClass} />
+                    </tr>
+                  </thead>
+                </table>
+              </div>
               <div className={consoleAdminTableScrollClass}>
                 <table className="w-full table-fixed border-collapse text-left text-sm">
                   <colgroup>
@@ -210,19 +247,6 @@ export default function UsageAdmin() {
                     <col className="w-1/6" />
                     <col className="w-12" />
                   </colgroup>
-                  <thead className="sticky top-0 z-10">
-                    <tr className={consoleTableHeadRowClass}>
-                      <th className={consoleTableHeadCellClass}>#</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.user')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.requests')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.prompt')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.completion')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.total_tokens')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.cache_hit_rate')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.share')}</th>
-                      <th className={consoleTableHeadCellClass} />
-                    </tr>
-                  </thead>
                   <tbody className="divide-y divide-zinc-100">
                     {visibleRows.length === 0 ? (
                       <tr>
@@ -280,12 +304,20 @@ export default function UsageAdmin() {
           </section>
 
           {/* Agent 分布（含缓存命中率） */}
-          <section>
+          <section className="shrink-0">
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.by_agent')}</h2>
             <div className={consoleAdminTableShellClass}>
-              <div className={consoleAdminTableScrollClass}>
+              <div className={consoleTableHeadBandClass}>
                 <table className="w-full table-fixed border-collapse text-left text-sm">
-                  <thead className="sticky top-0 z-10">
+                  <colgroup>
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                  </colgroup>
+                  <thead>
                     <tr className={consoleTableHeadRowClass}>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.agent')}</th>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.requests')}</th>
@@ -295,6 +327,18 @@ export default function UsageAdmin() {
                       <th className={consoleTableHeadCellClass}>{t('users:usage.total_tokens')}</th>
                     </tr>
                   </thead>
+                </table>
+              </div>
+              <div className={`${consoleAdminTableScrollClass} max-h-64`}>
+                <table className="w-full table-fixed border-collapse text-left text-sm">
+                  <colgroup>
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                  </colgroup>
                   <tbody className="divide-y divide-zinc-100">
                     {(overview?.byAgent || []).length === 0 ? (
                       <tr>
@@ -321,7 +365,7 @@ export default function UsageAdmin() {
       )}
 
       {dialogUserId && (
-        <UserUsageDialog userId={dialogUserId} days={Number(days)} onClose={() => { setDialogUserId(null); navigate('/admin/usage', { replace: true }); }} />
+        <UserUsageDialog userId={dialogUserId} days={Number(days)} onClose={closeUserDialog} />
       )}
     </div>
   );
@@ -350,13 +394,13 @@ function Row({ user, idx, share, expanded, expandable, onToggle, onOpenDialog, t
             </div>
           </div>
         </td>
-        <td className={`${consoleTableBodyCellClass} font-mono text-xs tabular-nums`}>{formatTokensFull(user.requests)}</td>
-        <td className={`${consoleTableBodyCellClass} font-mono text-xs tabular-nums text-zinc-500`}>{formatTokens(user.promptTokens)}</td>
-        <td className={`${consoleTableBodyCellClass} font-mono text-xs tabular-nums text-zinc-500`}>{formatTokens(user.completionTokens)}</td>
-        <td className={`${consoleTableBodyCellClass} font-mono text-xs font-semibold tabular-nums text-zinc-900`}>
+        <td className={`${consoleTableBodyCellClass} font-mono tabular-nums`}>{formatTokensFull(user.requests)}</td>
+        <td className={`${consoleTableBodyCellClass} font-mono tabular-nums text-zinc-500`}>{formatTokens(user.promptTokens)}</td>
+        <td className={`${consoleTableBodyCellClass} font-mono tabular-nums text-zinc-500`}>{formatTokens(user.completionTokens)}</td>
+        <td className={`${consoleTableBodyCellClass} font-mono font-semibold tabular-nums text-zinc-900`}>
           {formatTokens(user.totalTokens)}
         </td>
-        <td className={`${consoleTableBodyCellClass} font-mono text-xs tabular-nums text-zinc-500`}>
+        <td className={`${consoleTableBodyCellClass} font-mono tabular-nums text-zinc-500`}>
           {user.cacheHitRate != null ? `${Math.round(user.cacheHitRate * 100)}%` : '—'}
         </td>
         <td className={consoleTableBodyCellClass}>

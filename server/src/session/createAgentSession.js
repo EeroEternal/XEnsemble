@@ -31,6 +31,7 @@ const { ensureSessionStateDir, prepareHomeRedirect } = require('./stateDir');
 const { resolveRuntimeProvider } = require('../config/runtimeProvider');
 const { injectForSession: injectSkillsForSession, isEnabled: skillInjectEnabled } = require('../skills/skillInjector');
 const { getTaskRunArgs, getTaskRunRemoveArgs, isTaskRunSupported } = require('../agents/taskRunModes');
+const { assembleSpawnArgs } = require('./assembleSpawnArgs');
 const { registerSessionLifecycle } = require('./resumeSession');
 
 const runtime = getRuntime();
@@ -185,6 +186,12 @@ async function createAgentSession({
         resolved.env = { ...resolved.env, ...byokConfig.env };
         byokConfigFiles = byokConfig.configFiles || [];
     }
+    // opencode TUI follows the embedded xterm theme (gateway mode has no BYOK
+    // config generation, so bootstrap the theme file here for both modes).
+    if (agentMeta.id === 'opencode' && !byokConfigFiles.some((f) => f.path === '/root/.config/opencode/tui.json')) {
+        const { opencodeThemeConfigFile } = require('../agents/byokFields');
+        byokConfigFiles = [...byokConfigFiles, opencodeThemeConfigFile()];
+    }
 
     // Validate config files BEFORE creating the session so we can reject
     // invalid JSON without leaving an orphaned session row.
@@ -232,10 +239,41 @@ async function createAgentSession({
         let workspacePath;
         let runtimeId;
 
+        // Inline recipe from the launch dialog: the image may still be queued or
+        // building, so wait for it before creating the sandbox. Abort the wait as
+        // soon as the session is cancelled so we neither poll nor provision.
+        let resolvedImageRef = customImageRef;
+        if (!resolvedImageRef && customImageId) {
+            try {
+                const { waitForReadyImageRef } = require('../runtime/CustomImageService');
+                resolvedImageRef = await waitForReadyImageRef(customImageId, userId, {
+                    shouldContinue: () => isSessionStillPending(sessionId),
+                    role: user.role || null,
+                });
+            } catch (err) {
+                if (err && err.cancelled) {
+                    log.info({ sessionId }, '[sessions] session cancelled while waiting for custom image build');
+                    return;
+                }
+                log.error({ err, sessionId }, '[sessions] custom image build failed');
+                await markSessionFailed(
+                    sessionId,
+                    err instanceof RuntimeError ? err.message : (err.message || 'Custom image build failed'),
+                );
+                return;
+            }
+        }
+
+        // Guard: the user may have cancelled the session while the image built.
+        if (!(await isSessionStillPending(sessionId))) {
+            log.info({ sessionId }, '[sessions] session cancelled before runtime prepare');
+            return;
+        }
+
         try {
             ready = await ensureProjectRuntime(project, {
                 agentId: agentMeta.id,
-                ...(customImageRef ? { image: customImageRef } : {}),
+                ...(resolvedImageRef ? { image: resolvedImageRef } : {}),
                 ...(customImageId ? { customImageId: customImageId } : {}),
                 agentVmResources: dbAgents[0]?.vmResources || null,
             });
@@ -472,7 +510,14 @@ async function createAgentSession({
                 : agentMeta.args;
             handle = await runtime.exec.spawn(
                 agentMeta.cmd,
-                [...spawnArgs.prepend, ...stateArgs, ...baseAgentArgs, ...spawnArgs.append, ...(taskRunArgs || [])],
+                assembleSpawnArgs({
+                    agentId: agentMeta.id,
+                    prepend: spawnArgs.prepend,
+                    stateArgs,
+                    baseArgs: baseAgentArgs,
+                    append: spawnArgs.append,
+                    taskArgs: taskRunArgs || [],
+                }),
                 resolved.env,
                 spawnOpts,
             );
@@ -488,6 +533,7 @@ async function createAgentSession({
                         agentId: agentMeta.id,
                         runtimeId: ready.runtime.id,
                         forceRecreate: true,
+                        ...(resolvedImageRef ? { image: resolvedImageRef } : {}),
                     });
                     workspacePath = ready.workspacePath;
                     spawnOpts.cwd = workspacePath;
@@ -524,7 +570,14 @@ async function createAgentSession({
                         : agentMeta.args;
                     handle = await runtime.exec.spawn(
                         agentMeta.cmd,
-                        [...retrySpawnArgs.prepend, ...retryStateArgs, ...retryBaseAgentArgs, ...retrySpawnArgs.append, ...(retryTaskRunArgs || [])],
+                        assembleSpawnArgs({
+                            agentId: agentMeta.id,
+                            prepend: retrySpawnArgs.prepend,
+                            stateArgs: retryStateArgs,
+                            baseArgs: retryBaseAgentArgs,
+                            append: retrySpawnArgs.append,
+                            taskArgs: retryTaskRunArgs || [],
+                        }),
                         resolved.env,
                         spawnOpts,
                     );

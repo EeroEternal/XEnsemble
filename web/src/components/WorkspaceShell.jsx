@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css';
 
 import { getAccessToken, getWorkspaceShellWsUrl, refreshAccessToken } from '../lib/api';
 import { useTerminalTheme } from '../hooks/useTerminalTheme.jsx';
+import { XTERM_MINIMUM_CONTRAST_RATIO } from '../lib/terminalThemes.js';
 import {
   createTerminalReconnectState,
   isTerminalAuthFailure,
@@ -127,6 +128,8 @@ const WorkspaceShell = forwardRef(function WorkspaceShell({ projectId, sessionId
       cursorBlink: true,
       cursorStyle: 'bar',
       drawBoldTextInBrightColors: true,
+      // 与 AgentConsole 一致：自动提升低对比度配色
+      minimumContrastRatio: XTERM_MINIMUM_CONTRAST_RATIO,
       theme: {
         ...themeRef.current,
         // 与 AgentConsole 一致：中性半透明灰滚动条（xterm 6 自绘滚动条）

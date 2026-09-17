@@ -12,7 +12,10 @@ import {
   dropFullRepaintPrefix,
   FULL_REPAINT_DROP_MIN_KEEP_BYTES,
 } from '../lib/terminalFrameDrop';
+import { stripTerminalQueries } from '../lib/terminalQueries';
+import { shouldNotifyTuiTheme } from '../lib/terminalThemeNotify';
 import { useTerminalTheme } from '../hooks/useTerminalTheme.jsx';
+import { XTERM_MINIMUM_CONTRAST_RATIO } from '../lib/terminalThemes.js';
 import { Loader2 } from 'lucide-react';
 import {
   createTerminalReconnectState,
@@ -117,6 +120,19 @@ function getCachedSeq(sessionId) {
   } catch { return 0; }
 }
 
+// 把 xterm 主题色（#RGB / #RRGGBB / #RRGGBBAA）展开成 OSC 10/11 应答所需的
+// rgb:RRRR/GGGG/BBBB（16 位通道）。无法解析时返回 null。
+function expandHexColor16(hex) {
+  const m = /^#([0-9a-f]{3,8})$/i.exec(String(hex || '').trim());
+  if (!m) return null;
+  let h = m[1];
+  if (h.length === 3 || h.length === 4) h = h.slice(0, 3).split('').map((c) => c + c).join('');
+  if (h.length !== 6 && h.length !== 8) return null;
+  if (h.length === 8) h = h.slice(0, 6);
+  const to16 = (v) => (v * 257).toString(16).padStart(4, '0');
+  return `${to16(parseInt(h.slice(0, 2), 16))}/${to16(parseInt(h.slice(2, 4), 16))}/${to16(parseInt(h.slice(4, 6), 16))}`;
+}
+
 function setCachedSeq(sessionId, seq) {
   try {
     if (seq != null && seq > 0) sessionStorage.setItem(`xe_term_seq_${sessionId}`, String(seq));
@@ -149,6 +165,10 @@ function AgentConsole({
     scrollbarSliderHoverBackground: 'rgba(113, 113, 122, 0.6)',
     scrollbarSliderActiveBackground: 'rgba(113, 113, 122, 0.75)',
   };
+  // 终端主题热切换时 Terminal 实例不会重建（就地更新 options.theme），
+  // OSC 10/11 应答需要读到最新配色，用 ref 跟踪。
+  const xtermThemeRef = useRef(xtermTheme);
+  xtermThemeRef.current = xtermTheme;
 
   const hostRef = useRef(null);
   const overlayRef = useRef(null);
@@ -165,6 +185,10 @@ function AgentConsole({
   const resyncRef = useRef(false);
 
   const replayDoneRef = useRef(true);
+  // 是否处于「实时输出」阶段：服务端完成转录重放后会发 `replay-done`。
+  // 重放阶段（含重放数据仍在解析队列里的时间窗）不回送终端查询的回包，
+  // 否则历史探测会被再次应答，把回包当作按键打进前台 TUI 的 stdin。
+  const liveOutputRef = useRef(false);
   const shouldConnect = sessionLive;
   const shouldReplayIdle = sessionWakeable && !sessionLive;
   // eslint-disable-next-line no-unused-vars
@@ -218,6 +242,9 @@ function AgentConsole({
       cursorBlink: true,
       cursorStyle: 'bar',
       drawBoldTextInBrightColors: true,
+      // 自动提升低对比度配色（如 kimi-code 的暗灰辅助文字），
+      // 常量与终端主题一同定义，见 terminalThemes.js
+      minimumContrastRatio: XTERM_MINIMUM_CONTRAST_RATIO,
       theme: xtermTheme,
     });
 
@@ -260,8 +287,75 @@ function AgentConsole({
      document.body.removeChild(textarea);
    }
  } catch (_) {}
- return true;
- });
+  return true;
+  });
+    // 默认前景/背景色查询（OSC 10/11，如 opencode "system" 主题探测宿主
+    // 底色决定浅/深灰阶）：xterm.js 不代答，不回应时 TUI 探测失败会按深色
+    // 假设渲染。这里用当前 xterm 主题的默认色应答，使 agent 主题跟随
+    // Web 终端的浅/深模式。仅应答 "?" 查询；设色指令交回默认处理。
+    const replyOscColor = (ident, data) => {
+      // 只应答实时输出里的探测；重放阶段的历史探测已从字节流剔除（见
+      // stripTerminalQueries），这里是兜底 —— 重放数据可能已进入解析队列。
+      if (!liveOutputRef.current) return true;
+      if (String(data).trim() !== '?') return false;
+      const theme = xtermThemeRef.current || {};
+      const source = ident === 10 ? theme.foreground : ident === 11 ? theme.background : theme.cursor;
+      const hex = expandHexColor16(source);
+      if (!hex) return true;
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'input', data: `\x1b]${ident};rgb:${hex}\x1b\\` }));
+      }
+      return true;
+    };
+    terminal.parser.registerOscHandler(10, (data) => replyOscColor(10, data));
+    terminal.parser.registerOscHandler(11, (data) => replyOscColor(11, data));
+    // 光标色查询（OSC 12）：opencode 探测调色板时一并询问
+    terminal.parser.registerOscHandler(12, (data) => replyOscColor(12, data));
+    // 调色板查询（OSC 4）：opencode "system" 主题启动时会先发 "4;0;?" 探测
+    // 终端是否支持 OSC 应答，再逐色询问 256 色；任何一个都无应答则整个
+    // system 主题被弃用、回退到默认深色画布（浅色终端下面板全部发暗）。
+    // 按 xterm 主题 ANSI 16 色 + extendedAnsi（232-255 灰阶）+ 标准 6x6x6
+    // 方块补全应答。仅应答 "index;?" 查询；设色指令交回默认处理。
+    const XTERM_ANSI16_KEYS = [
+      'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
+      'brightBlack', 'brightRed', 'brightGreen', 'brightYellow',
+      'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite',
+    ];
+    const xtermColor256Hex = (index, theme) => {
+      if (!theme || !(index >= 0 && index <= 255)) return null;
+      if (index < 16) return theme[XTERM_ANSI16_KEYS[index]] || null;
+      const extended = Array.isArray(theme.extendedAnsi) ? theme.extendedAnsi[index - 16] : undefined;
+      if (extended) return extended;
+      if (index < 232) {
+        const i = index - 16;
+        return '#' + [Math.floor(i / 36), Math.floor(i / 6) % 6, i % 6]
+          .map((v) => (Math.round((v * 255) / 5)).toString(16).padStart(2, '0'))
+          .join('');
+      }
+      const v = 8 + (index - 232) * 10;
+      const h = v.toString(16).padStart(2, '0');
+      return `#${h}${h}${h}`;
+    };
+    const replyOscPalette = (data) => {
+      // 与 OSC 10/11/12 同理：只应答实时输出里的探测，重放的历史查询已从
+      // 字节流剔除（见 stripTerminalQueries），这里兜底。
+      if (!liveOutputRef.current) return false;
+      const theme = xtermThemeRef.current || {};
+      const parts = String(data).split(';');
+      let replied = false;
+      for (let i = 0; i + 1 < parts.length; i += 2) {
+        if (String(parts[i + 1]).trim() !== '?') continue;
+        const idx = parseInt(parts[i], 10);
+        const hex = expandHexColor16(xtermColor256Hex(idx, theme));
+        if (!hex) continue;
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'input', data: `\x1b]4;${idx};rgb:${hex}\x1b\\` }));
+        }
+        replied = true;
+      }
+      return replied;
+    };
+    terminal.parser.registerOscHandler(4, replyOscPalette);
     try { fitAddon.fit(); } catch (_) {}
     // Re-fit after flex layout settles; the first fit() may run when
     // the host element has partial width (before layout completes).
@@ -527,6 +621,7 @@ function AgentConsole({
           let authenticated = false;
           let replayDone = false;
           replayDoneRef.current = false;
+          liveOutputRef.current = false;
           let writeBuffer = '';
           let pendingSeq = null;
           // 裁剪日志只打一次（每个连接），避免高频裁剪刷屏。
@@ -886,9 +981,17 @@ function AgentConsole({
               scheduleResizeResends();
               return;
             }
+            if (msg.type === 'replay-done') {
+              // 转录重放结束：其后到达的输出才是实时输出，OSC 10/11 探测
+              // 恢复正常应答（重放阶段的探测在上面的分支里已被剔除）。
+              liveOutputRef.current = true;
+              return;
+            }
             if (msg.type === 'output') {
               if (msg.seq != null) pendingSeq = msg.seq;
-              writeBuffer += msg.data;
+              // 重放阶段的终端查询不交给 xterm：解析器会再次触发回包，
+              // 而提问的 TUI 已不再等待 → 回包变成打进它 stdin 的按键。
+              writeBuffer += liveOutputRef.current ? msg.data : stripTerminalQueries(msg.data);
               // 积压封顶自愈：渲染跟不上时 writeBuffer 无界增长会把主线程
               // 拖死（页面冻结的触发层）。超限即放弃这批已失步的数据——
               // 置 resync 标记并断开，重连走 after=0 锚点重放（服务端有界，
@@ -1000,7 +1103,27 @@ function AgentConsole({
     const terminal = terminalRef.current;
     if (!terminal) return;
     try { terminal.options.theme = xtermTheme; } catch (_) { /* ignore */ }
-  }, [xtermTheme]);
+    // 同步通知 PTY 内的全屏 TUI（opencode "system" 主题等）宿主底色已变：
+    // 1) 主动上报新 OSC 10/11 默认色 → 内置模拟器更新 themeOscBackground；
+    // 2) Kitty 式深浅模式通知（CSI ? 997;n）→ 触发清空调色板缓存并重新
+    //    探测（重发 OSC 4/10/11 查询，由上方处理器用新主题应答），
+    //    system 主题随即按新底色重新生成，TUI 即时换色，无需重启。
+    const theme = xtermThemeRef.current || {};
+    const fg = expandHexColor16(theme.foreground);
+    const bg = expandHexColor16(theme.background);
+    const notify = [fg && `\x1b]10;rgb:${fg}\x1b\\`, bg && `\x1b]11;rgb:${bg}\x1b\\`]
+      .filter(Boolean).join('');
+    const mode = preset?.appearance === 'light' ? 1 : 2;
+    const payload = `${notify}\x1b[?997;${mode}n`;
+    // 只在「同一会话 + payload 真的变了」时发送：本 effect 的依赖 xtermTheme 是
+    // 每次 render 新建的对象，而切会话会因 key={sessionId} 重新挂载 —— 不加门槛
+    // 就会每次切换/重连都把 payload 灌进前台 TUI 的 stdin，表现为被自动输入
+    // `10;rgb:…11;rgb:…997;2n`（详见 lib/terminalThemeNotify.js）。
+    if (!shouldNotifyTuiTheme(sessionId, payload)) return;
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'input', data: payload }));
+    }
+  }, [xtermTheme, preset?.appearance]);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-transparent">

@@ -24,11 +24,11 @@
       "prompt": "Draft this week's release notes:\n1. Use git log to collect this week's merged PRs and commits (diff against the previous release tag if tags exist);\n2. Group them into Features / Fixes / UX improvements / Engineering improvements;\n3. Produce two drafts: a detailed team version (with PR/commit references) and a concise user-facing version (no internal details).\nRead-only analysis — do not modify code.",
       "schedule": "Fridays 16:00"
     },
-    "doc_sync": {
-      "title": "Doc sync check",
-      "desc": "Compare the last 7 days of code, config and API changes against the docs, listing high-confidence discrepancies with file paths and update suggestions.",
-      "prompt": "Run a documentation sync check:\n1. Collect code, config, and API changes from the last 7 days (git log/diff);\n2. Compare them against README, the docs/ directory, and key interface comments to verify docs still match actual behavior;\n3. List high-confidence discrepancies where behavior changed but docs were not updated, each with: changed file path, doc location to update, and a concrete update suggestion.\nRead-only analysis — do not modify code or docs.",
-      "schedule": "Wednesdays 15:00"
+    "nightly_cleanup": {
+      "title": "Nightly code cleanup",
+      "desc": "Nightly sweep of the codebase for code-quality issues — dead code, duplication, redundant comments, security holes. Fixes high-confidence, low-risk items and commits, leaving a morning digest.",
+      "prompt": "Nightly code cleanup (unattended):\n1. Survey the codebase in this workspace (use git log to spot recent hotspots) against the quality bar: dead code and unused exports, duplicated logic, naming and structure issues, overly long functions, missing error handling, stale TODO/FIXMEs, redundant or misleading comments, and obvious security holes (hardcoded secrets, injection risks, leaked resources).\n2. Only fix high-confidence, low-risk issues: keep each change small and revertible; run the project's lint/tests after changes; revert immediately if tests fail.\n3. Commit in small groups by issue type (commit messages explain motivation and scope); do NOT push; do not touch unrelated files; no large-scale refactors.\n4. Finish with a morning digest: fixed items (with commits) and items needing human review (with file paths and reasons).",
+      "schedule": "Nightly 03:00"
     }
   },
   "field": {
@@ -90,10 +90,16 @@
     "no_runs": "No runs yet.",
     "logs": "Execution log",
     "rounds": "{{count}} rounds",
-    "open_session": "Open session",
+    "view_trajectory": "View full trajectory",
+    "result": "Result",
     "error": "Error",
     "duration": "Duration",
     "started": "Started"
+  },
+  "run_detail": {
+    "back_to_tasks": "Back to tasks",
+    "not_found": "Run not found or expired.",
+    "no_session": "No session was created for this run."
   },
   "action": {
     "run_now": "Run now",

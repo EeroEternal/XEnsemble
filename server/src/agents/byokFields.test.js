@@ -203,7 +203,7 @@ test('generateByokConfig opencode: generates JSON with npm and name from provide
         provider: 'my-deepseek',
     });
     assert.deepEqual(env, {});
-    assert.equal(configFiles.length, 1);
+    assert.equal(configFiles.length, 2);
     assert.equal(configFiles[0].path, '/root/.config/opencode/opencode.json');
     const parsed = JSON.parse(configFiles[0].content);
     assert.equal(parsed.autoupdate, false);
@@ -213,6 +213,10 @@ test('generateByokConfig opencode: generates JSON with npm and name from provide
     assert.equal(parsed.provider['my-deepseek'].options.apiKey, 'sk-ds');
     assert.equal(parsed.provider['my-deepseek'].options.baseURL, 'https://api.deepseek.com');
     assert.ok(parsed.provider['my-deepseek'].models['deepseek-chat']);
+    // Second file selects opencode's adaptive "system" theme so the TUI
+    // follows the embedded terminal's light/dark appearance.
+    assert.equal(configFiles[1].path, '/root/.config/opencode/tui.json');
+    assert.equal(JSON.parse(configFiles[1].content).theme, 'system');
 });
 
 // ── generateByokConfig: droid ──

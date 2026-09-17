@@ -6,10 +6,15 @@ function getBaseImage() {
     || 'xensemble/box-base:bookworm';
 }
 
-function renderInstallSteps(selection) {
-  const installList = selectionToInstallList(selection).sort(
-    (a, b) => a.component_id.localeCompare(b.component_id),
-  );
+function renderInstallSteps(selection, { skipAgentInstall = false } = {}) {
+  let installList = selectionToInstallList(selection);
+  if (skipAgentInstall) {
+    // The agent CLI is already baked into the parent image (the active agent
+    // image); reinstalling it here would duplicate minutes of build time and
+    // break layer reuse across recipes that share the same agent.
+    installList = installList.filter((item) => !item.component_id.startsWith('agent:'));
+  }
+  installList.sort((a, b) => a.component_id.localeCompare(b.component_id));
 
   const steps = [];
 
@@ -51,9 +56,9 @@ function pipIndexUrl() {
     || 'https://pypi.tuna.tsinghua.edu.cn/simple';
 }
 
-function renderDockerfile(selection) {
-  const baseImage = getBaseImage();
-  const installSteps = renderInstallSteps(selection);
+function renderDockerfile(selection, { baseImage: baseImageOverride, skipAgentInstall = false } = {}) {
+  const baseImage = baseImageOverride?.trim() || getBaseImage();
+  const installSteps = renderInstallSteps(selection, { skipAgentInstall });
 
   return `# syntax=docker/dockerfile:1.7
 ARG BASE_IMAGE=${baseImage}
@@ -74,9 +79,9 @@ WORKDIR /workspace
 `;
 }
 
-function renderBuildContext(selection) {
-  const dockerfile = renderDockerfile(selection);
-  return { dockerfile, baseImage: getBaseImage() };
+function renderBuildContext(selection, opts = {}) {
+  const dockerfile = renderDockerfile(selection, opts);
+  return { dockerfile, baseImage: opts.baseImage?.trim() || getBaseImage() };
 }
 
 module.exports = {

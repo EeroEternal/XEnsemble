@@ -117,6 +117,15 @@ const DEFAULT_AGENTS = [
                         },
                     },
                 }, null, 2),
+            }, {
+                path: '/root/.config/opencode/tui.json',
+                format: 'json',
+                label: 'tui.json',
+                description: 'OpenCode TUI 配置（主题等；默认自动注入 system 主题以匹配终端背景）',
+                example: JSON.stringify({
+                    $schema: 'https://opencode.ai/tui.json',
+                    theme: 'system',
+                }, null, 2),
             }],
         },
     },

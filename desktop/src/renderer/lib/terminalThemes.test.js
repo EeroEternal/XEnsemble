@@ -35,9 +35,9 @@ describe('terminalThemes', () => {
     assert.ok(ids.includes('catppuccin-mocha'));
   });
 
-  it('defaults to nord', () => {
+  it('defaults to github-dark', () => {
     assert.strictEqual(getDefaultTerminalThemeId(), DEFAULT_TERMINAL_THEME_ID);
-    assert.strictEqual(getDefaultTerminalThemeId(), 'nord');
+    assert.strictEqual(getDefaultTerminalThemeId(), 'github-dark');
   });
 
   it('exports minimum contrast ratio', () => {
@@ -58,7 +58,7 @@ describe('terminalThemes', () => {
   }
 
   it('falls back unknown ids to default preset', () => {
-    assert.strictEqual(getTerminalTheme('unknown').id, 'nord');
+    assert.strictEqual(getTerminalTheme('unknown').id, 'github-dark');
   });
 
   it('merges server catalog with local palettes', () => {

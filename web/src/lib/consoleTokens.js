@@ -50,13 +50,18 @@ export const consoleAdminPageClass = 'flex h-full min-h-0 w-full flex-col gap-6'
 export const consoleToolPageClass =
   'flex h-full min-h-0 w-full flex-col bg-zinc-50 text-zinc-900';
 
-export const consoleAdminTableScrollClass = 'min-h-0 flex-1 overflow-auto';
+/** 表体唯一滚动层：滚动条只出现在这里（表体旁），不经过表头 */
+export const consoleAdminTableScrollClass = 'min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]';
 
 export const consoleTableShellClass =
   'bg-surface border border-zinc-200 rounded-xl overflow-hidden shadow-sm';
 
 export const consoleAdminTableShellClass =
   `${consoleTableShellClass} flex min-h-0 flex-1 flex-col`;
+
+/** 表头带：独立于滚动区，天然固定不滚；声明与表体滚动层相同的 gutter，
+ *  保证双表列宽严格对齐（槽位等宽、但表头带无溢出故不显示滚动条） */
+export const consoleTableHeadBandClass = 'shrink-0 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]';
 
 export const consoleTableHeadRowClass = 'bg-zinc-50 border-b border-zinc-200';
 

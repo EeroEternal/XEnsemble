@@ -16,11 +16,22 @@ const DEFAULTS = {
         max_sessions: DEFAULT_QUOTA.maxSessions,
         max_previews: DEFAULT_QUOTA.maxPreviews,
         max_runtimes: DEFAULT_QUOTA.maxRuntimes,
+        max_custom_images: DEFAULT_QUOTA.maxCustomImages,
         resource_tier: DEFAULT_QUOTA.resourceTier,
     },
     session_ttl_hours: 24,
-    default_terminal_theme_id: 'nord',
+    default_terminal_theme_id: 'github-dark',
     disabled_terminal_theme_ids: [],
+    // 自定义镜像（环境配方）的平台级限额与 GC。
+    // 用户可见的镜像数量配额在 default_user_quota.max_custom_images（设置 →
+    // 默认用户配置 / 观测 → 配额），此处只保留平台级参数。
+    custom_image_limits: {
+        max_env_images_per_user: 50,
+        max_components_per_recipe: 6,
+        max_disk_gb: 20,
+        gc_idle_days: Number(process.env.CUSTOM_IMAGE_GC_IDLE_DAYS) || 30,
+        gc_grace_hours: Number(process.env.CUSTOM_IMAGE_GC_GRACE_HOURS) || 24,
+    },
     // preview 部署时数据库模式：
     //   local （默认）— 在沙箱内起 DB 并本地化 host（隔离、可复现、不碰生产库）；
     //   remote        — 保留 app 配置的远端 host（显式 opt-in，需注意可达性/凭据/数据风险）。
@@ -56,7 +67,14 @@ async function getAll() {
     const out = { ...DEFAULTS };
     for (const row of rows) {
         try {
-            out[row.key] = JSON.parse(row.value);
+            const parsed = JSON.parse(row.value);
+            // Object-valued settings are merged over DEFAULTS so fields added
+            // after the value was persisted still have a concrete default.
+            out[row.key] = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                && DEFAULTS[row.key] && typeof DEFAULTS[row.key] === 'object'
+                && !Array.isArray(DEFAULTS[row.key]))
+                ? { ...DEFAULTS[row.key], ...parsed }
+                : parsed;
         } catch {
             out[row.key] = row.value;
         }
@@ -75,6 +93,7 @@ async function updateAll(updates) {
         'default_terminal_theme_id',
         'disabled_terminal_theme_ids',
         'preview_db_mode',
+        'custom_image_limits',
     ];
     if (updates.llm_auth_mode !== undefined && !['gateway', 'byok'].includes(updates.llm_auth_mode)) {
         throw Object.assign(new Error('Invalid llm_auth_mode'), { statusCode: 400 });
@@ -100,7 +119,14 @@ async function getRegistrationMode() {
 }
 
 async function getDefaultUserQuota() {
-    return (await get('default_user_quota')) || DEFAULTS.default_user_quota;
+    // Merge over DEFAULTS so installs that persisted the object before a field
+    // was introduced still surface a concrete value (e.g. max_custom_images).
+    return { ...DEFAULTS.default_user_quota, ...((await get('default_user_quota')) || {}) };
+}
+
+async function getCustomImageLimits() {
+    const stored = await get('custom_image_limits');
+    return { ...DEFAULTS.custom_image_limits, ...(stored || {}) };
 }
 
 async function getLlmAuthMode() {
@@ -117,6 +143,7 @@ async function seedDefaults(dbConn = db) {
         ['default_terminal_theme_id', DEFAULTS.default_terminal_theme_id],
         ['disabled_terminal_theme_ids', DEFAULTS.disabled_terminal_theme_ids],
         ['preview_db_mode', DEFAULTS.preview_db_mode],
+        ['custom_image_limits', DEFAULTS.custom_image_limits],
     ];
     for (const [key, value] of entries) {
         await dbConn.insert(schema.platformSettings).values({
@@ -136,5 +163,6 @@ module.exports = {
     getLlmAuthMode,
     getRegistrationMode,
     getDefaultUserQuota,
+    getCustomImageLimits,
     seedDefaults,
 };

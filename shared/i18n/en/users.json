@@ -41,7 +41,8 @@
     "max_projects": "Max workspaces",
     "max_sessions": "Max sessions",
     "max_previews": "Max previews",
-    "resource_tier": "Resource tier"
+    "resource_tier": "Resource tier",
+    "max_custom_images": "Images"
   },
   "role": {
     "admin": "Admin",
@@ -71,7 +72,6 @@
   "count": "{{count}} users",
   "usage": {
     "title": "Usage",
-    "subtitle": "Platform LLM token consumption overview and per-user ranking",
     "total_tokens": "Total tokens",
     "requests": "Requests",
     "prompt": "Input",
@@ -88,7 +88,7 @@
     "recent_requests": "Recent requests",
     "by_model": "By model",
     "by_project": "By workspace",
-    "by_agent": "By agent",
+    "by_agent": "Agent usage",
     "agent": "Agent",
     "cached_tokens": "Cached tokens",
     "cache_hit_rate": "Hit rate",

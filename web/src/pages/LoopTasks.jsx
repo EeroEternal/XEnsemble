@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  Plus, Pencil, Play, Pause, Trash2, Loader2, RefreshCw, History as HistoryIcon, CheckCircle, Clock, ExternalLink,
-  Target, Activity, FileText, ListChecks,
+  Plus, Pencil, Play, Pause, Trash2, Loader2, RefreshCw, History as HistoryIcon, CheckCircle, Clock,
+  Target, Activity, FileText, MoonStar,
 } from 'lucide-react';
 
 import Button from '../components/Button';
@@ -18,6 +18,7 @@ import { useToast } from '../components/Toast';
 import {
   consoleAdminPageClass,
   consoleAdminTableScrollClass,
+  consoleTableHeadBandClass,
   consoleAdminTableShellClass,
   consoleButtonFocusClass,
   consoleIconButtonClass,
@@ -90,7 +91,7 @@ const TASK_TEMPLATES = [
   { id: 'standup', icon: Target, kind: 'weekdays', time: '09:00' },
   { id: 'risk_scan', icon: Activity, kind: 'daily', time: '10:00' },
   { id: 'release_notes', icon: FileText, kind: 'weekly', weekdays: [5], time: '16:00' },
-  { id: 'doc_sync', icon: ListChecks, kind: 'weekly', weekdays: [3], time: '15:00' },
+  { id: 'nightly_cleanup', icon: MoonStar, kind: 'daily', time: '03:00' },
 ];
 
 function timeToCronMMHH(time) {
@@ -335,6 +336,12 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
     await act(() => deleteLoopTask(task.id), t('loopTasks:toast.deleted'));
   };
 
+  const openRuns = (task) => {
+    setSelectedRun(null);
+    setRuns([]);
+    setRunsOpenFor(task);
+  };
+
   // 执行历史：打开时拉取；有 running run 时 5s 轮询（runsRef 避免闭包过期）
   const runsRef = useRef([]);
   const fetchRuns = useCallback((taskId) => {
@@ -415,7 +422,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                 key={tpl.id}
                 type="button"
                 onClick={() => openTemplate(tpl)}
-                className={`bg-white border border-zinc-200 rounded-lg shadow-sm p-4 text-left transition-colors hover:border-zinc-300 hover:shadow ${consoleButtonFocusClass}`}
+                className={`bg-surface border border-zinc-200 rounded-lg shadow-sm p-4 text-left transition-colors hover:border-zinc-300 hover:shadow ${consoleButtonFocusClass}`}
               >
                 <span className="flex items-center gap-2 text-sm font-medium text-zinc-900">
                   <Icon className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden="true" />
@@ -434,15 +441,16 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
       </div>
 
       <div className={consoleAdminTableShellClass}>
-        <div className={consoleAdminTableScrollClass}>
+        <div className={consoleTableHeadBandClass}>
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
-              <col className="w-[22%]" />
-              <col className="w-[16%]" />
-              <col className="w-[14%]" />
+              <col className="w-[18%]" />
               <col className="w-[12%]" />
-              <col className="w-[12%]" />
-              <col className="w-[12%]" />
+              <col className="w-[11%]" />
+              <col className="w-[13%]" />
+              <col className="w-[11%]" />
+              <col className="w-[11%]" />
+              <col className="w-[11%]" />
               <col className="w-28" />
               <col className="w-14" />
             </colgroup>
@@ -450,6 +458,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
               <tr className={consoleTableHeadRowClass}>
                 <th className={consoleTableHeadCellClass}>{t('loopTasks:field.title')}</th>
                 <th className={consoleTableHeadCellClass}>{t('loopTasks:field.workspace')}</th>
+                <th className={consoleTableHeadCellClass}>{t('loopTasks:field.agent')}</th>
                 <th className={consoleTableHeadCellClass}>{t('loopTasks:field.schedule')}</th>
                 <th className={consoleTableHeadCellClass}>{t('common:table.status', { defaultValue: 'Status' })}</th>
                 <th className={consoleTableHeadCellClass}>{t('loopTasks:run.last_run')}</th>
@@ -458,6 +467,21 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                 <th className={consoleTableHeadCellClass}>{t('common:table.actions')}</th>
               </tr>
             </thead>
+          </table>
+        </div>
+        <div className={consoleAdminTableScrollClass}>
+          <table className="w-full table-fixed border-collapse text-left text-sm">
+            <colgroup>
+              <col className="w-[18%]" />
+              <col className="w-[12%]" />
+              <col className="w-[11%]" />
+              <col className="w-[13%]" />
+              <col className="w-[11%]" />
+              <col className="w-[11%]" />
+              <col className="w-[11%]" />
+              <col className="w-28" />
+              <col className="w-14" />
+            </colgroup>
             <tbody className="divide-y divide-zinc-100">
               {loading ? (
                 <tr><td colSpan={8} className={`${consoleTableBodyCellClass} text-zinc-400`}>{t('common:state.loading')}</td></tr>
@@ -465,6 +489,8 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                 <tr><td colSpan={8} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>{t('loopTasks:empty')}</td></tr>
               ) : tasks.map((task) => {
                 const meta = TASK_STATUS_META[task.status] || TASK_STATUS_META.paused;
+                const runMeta = task.lastRun ? (RUN_STATUS_META[task.lastRun.status] || RUN_STATUS_META.failed) : null;
+                const lastRunSnippet = task.lastRun?.error || task.lastRun?.result || null;
                 return (
                   <tr key={task.id} className="hover:bg-zinc-50/50">
                     <td className={consoleTableBodyCellClass}>
@@ -475,6 +501,11 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                       <span className="text-zinc-700 truncate block" title={projectName(task.projectId)}>{projectName(task.projectId)}</span>
                     </td>
                     <td className={consoleTableBodyCellClass}>
+                      <span className="text-zinc-700 truncate block" title={task.agentId}>
+                        {agents.find((a) => a.id === task.agentId)?.name || task.agentId || '—'}
+                      </span>
+                    </td>
+                    <td className={consoleTableBodyCellClass}>
                       <span className="text-zinc-700 truncate block" title={task.cronExpr}>
                         {task.scheduleDescription || task.cronExpr}
                       </span>
@@ -483,9 +514,33 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                       <StatusBadge tone={meta.tone} icon={meta.icon} label={t(`loopTasks:status.${task.status}`, { defaultValue: task.status })} />
                     </td>
                     <td className={consoleTableBodyCellClass}>
-                      <span className="text-xs text-zinc-500" title={task.lastRunAt ? new Date(task.lastRunAt).toLocaleString() : ''}>
-                        {task.lastRunAt ? formatRelativeTime(task.lastRunAt) : t('loopTasks:run.never')}
-                      </span>
+                      {/* 上次执行概要：状态徽标 + 结果/错误一行摘要，点击直达执行历史 */}
+                      {task.lastRunAt ? (
+                        <button
+                          type="button"
+                          onClick={() => openRuns(task)}
+                          className={`block w-full text-left ${consoleButtonFocusClass}`}
+                          title={lastRunSnippet || t('loopTasks:run.history')}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            {runMeta && (
+                              <StatusBadge
+                                tone={runMeta.tone}
+                                spinning={runMeta.spinning}
+                                label={t(`loopTasks:run.status_${task.lastRun.status}`, { defaultValue: task.lastRun.status })}
+                              />
+                            )}
+                            <span className="text-xs text-zinc-500">{formatRelativeTime(task.lastRunAt)}</span>
+                          </span>
+                          {lastRunSnippet && (
+                            <span className={`mt-0.5 block truncate text-xs ${task.lastRun.error ? 'text-red-600' : 'text-zinc-400'}`}>
+                              {lastRunSnippet}
+                            </span>
+                          )}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-zinc-500">{t('loopTasks:run.never')}</span>
+                      )}
                     </td>
                     <td className={consoleTableBodyCellClass}>
                       {task.status === 'active' && task.nextRunAt ? (
@@ -497,7 +552,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                     <td className={consoleTableBodyCellClass}>
                       <button
                         type="button"
-                        onClick={() => { setSelectedRun(null); setRuns([]); setRunsOpenFor(task); }}
+                        onClick={() => openRuns(task)}
                         className={consoleIconButtonClass}
                         title={t('loopTasks:run.history')}
                         aria-label={t('loopTasks:run.history')}
@@ -723,67 +778,72 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                             {run.rounds != null && (
                               <span>{t('loopTasks:run.rounds', { count: run.rounds })}</span>
                             )}
-                            {run.sessionId && (
-                              <span
-                                role="button" tabIndex={0}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  navigate('/sessions', { state: { openLoopSession: { sessionId: run.sessionId, agentId: run.agentId, projectId: runsOpenFor.projectId, projectName: projectName(runsOpenFor.projectId) } } });
-                                }}
-                                onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); navigate('/sessions', { state: { openLoopSession: { sessionId: run.sessionId, agentId: run.agentId, projectId: runsOpenFor.projectId, projectName: projectName(runsOpenFor.projectId) } } }); } }}
-                                className="shrink-0 inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 hover:underline"
-                              >
-                                <ExternalLink className="h-3 w-3" />
-                                {t('loopTasks:run.open_session')}
-                              </span>
-                            )}
                           </span>
                         </button>
                       );
                     })}
                   </div>
-                  {/* 右：选中 run 的详情 */}
-                  <div className="flex-1 min-w-0 overflow-y-auto console-scroll-hidden">
+                  {/* 右：选中 run 的详情（轨迹是重内容 → 全页打开，业界标准） */}
+                  <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
                     {selectedRun ? (
-                      <div className="rounded-lg border border-zinc-200 bg-zinc-50/70 p-3">
-                        {/* 摘要行：开始时刻 · 时长 · 轮次 —— Actions/Vercel run 详情的通用头部 */}
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-500 mb-2 tabular-nums">
-                          {selectedRun.startedAt && (
-                            <span>
-                              <span className="text-zinc-400">{t('loopTasks:run.started')} </span>
-                              {fmtClock(selectedRun.startedAt)}
-                            </span>
-                          )}
-                          {(() => {
-                            const dur = fmtDuration((selectedRun.finishedAt ?? (selectedRun.status === 'running' ? Date.now() : NaN)) - selectedRun.startedAt);
-                            return dur ? (
+                      <div className="flex-1 min-h-0 overflow-y-auto console-scroll-hidden">
+                        <div className="rounded-lg border border-zinc-200 bg-zinc-50/70 p-3">
+                          {/* 摘要行：开始时刻 · 时长 · 轮次 —— Actions/Vercel run 详情的通用头部 */}
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-500 mb-2 tabular-nums">
+                            {selectedRun.startedAt && (
                               <span>
-                                <span className="text-zinc-400">{t('loopTasks:run.duration')} </span>
-                                {dur}
+                                <span className="text-zinc-400">{t('loopTasks:run.started')} </span>
+                                {fmtClock(selectedRun.startedAt)}
                               </span>
-                            ) : null;
-                          })()}
-                          {selectedRun.rounds != null && (
-                            <span>{t('loopTasks:run.rounds', { count: selectedRun.rounds })}</span>
-                          )}
-                        </div>
-                        {selectedRun.error && (
-                          <p className="text-xs text-red-700 mb-2 break-words">
-                            <span className="font-semibold">{t('loopTasks:run.error')}: </span>
-                            {selectedRun.error}
-                          </p>
-                        )}
-                        <div className="space-y-1">
-                          {(selectedRun.logs || []).map((entry, i) => (
-                            <div key={i} className="flex items-baseline gap-2 text-xs font-mono">
-                              <span className="shrink-0 text-zinc-400 tabular-nums">{fmtClock(entry.ts) ?? `#${entry.round}`}</span>
-                              <span className="shrink-0 text-zinc-700 font-semibold">{entry.action}</span>
-                              <span className="min-w-0 flex-1 break-all text-zinc-500">{entry.summary}</span>
+                            )}
+                            {(() => {
+                              const dur = fmtDuration((selectedRun.finishedAt ?? (selectedRun.status === 'running' ? Date.now() : NaN)) - selectedRun.startedAt);
+                              return dur ? (
+                                <span>
+                                  <span className="text-zinc-400">{t('loopTasks:run.duration')} </span>
+                                  {dur}
+                                </span>
+                              ) : null;
+                            })()}
+                            {selectedRun.rounds != null && (
+                              <span>{t('loopTasks:run.rounds', { count: selectedRun.rounds })}</span>
+                            )}
+                            {selectedRun.sessionId && (
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/loop-tasks/${runsOpenFor.id}/runs/${selectedRun.id}`)}
+                                className={`ml-auto inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 hover:underline ${consoleButtonFocusClass}`}
+                              >
+                                {t('loopTasks:run.view_trajectory')}
+                              </button>
+                            )}
+                          </div>
+                          {selectedRun.result && (
+                            <div className="mb-2">
+                              <p className="text-xs font-semibold text-zinc-700 mb-1">{t('loopTasks:run.result')}</p>
+                              <div className="max-h-40 overflow-y-auto console-scroll-hidden rounded-md border border-zinc-200 bg-surface px-2.5 py-2">
+                                <p className="text-xs text-zinc-700 whitespace-pre-wrap break-words">{selectedRun.result}</p>
+                              </div>
                             </div>
-                          ))}
-                          {(selectedRun.logs || []).length === 0 && !selectedRun.error && (
-                            <p className="text-xs text-zinc-400">{selectedRun.status === 'running' ? '…' : '—'}</p>
                           )}
+                          {selectedRun.error && (
+                            <p className="text-xs text-red-700 mb-2 break-words whitespace-pre-wrap font-mono">
+                              <span className="font-semibold">{t('loopTasks:run.error')}: </span>
+                              {selectedRun.error}
+                            </p>
+                          )}
+                          <div className="space-y-1">
+                            {(selectedRun.logs || []).map((entry, i) => (
+                              <div key={i} className="flex items-baseline gap-2 text-xs font-mono">
+                                <span className="shrink-0 text-zinc-400 tabular-nums">{fmtClock(entry.ts) ?? `#${entry.round}`}</span>
+                                <span className="shrink-0 text-zinc-700 font-semibold">{entry.action}</span>
+                                <span className="min-w-0 flex-1 break-all text-zinc-500">{entry.summary}</span>
+                              </div>
+                            ))}
+                            {(selectedRun.logs || []).length === 0 && !selectedRun.error && !selectedRun.result && (
+                              <p className="text-xs text-zinc-400">{selectedRun.status === 'running' ? '…' : '—'}</p>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ) : (

@@ -18,6 +18,7 @@ import { useToast } from '../components/Toast';
 import {
   consoleAdminPageClass,
   consoleAdminTableScrollClass,
+  consoleTableHeadBandClass,
   consoleAdminTableShellClass,
   consoleIconButtonClass,
   consoleStructuredDialogPanelClass,
@@ -258,7 +259,7 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
   ];
 
   return (
-    <div className={`${consoleAdminPageClass} px-4 sm:px-6 lg:px-8 py-6 ${className}`} aria-hidden={ariaHidden}>
+    <div className={`${consoleAdminPageClass} ${className}`} aria-hidden={ariaHidden}>
       <PageHeader title={t('skills:my_skills')} />
 
       <div className="flex items-center justify-between gap-3">
@@ -291,7 +292,7 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
       </div>
 
       <div className={consoleAdminTableShellClass}>
-        <div className={consoleAdminTableScrollClass}>
+        <div className={consoleTableHeadBandClass}>
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
               <col className="w-2/5" />
@@ -309,6 +310,17 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
                 <th className={consoleTableHeadCellClass}>{t('common:table.actions')}</th>
               </tr>
             </thead>
+          </table>
+        </div>
+        <div className={consoleAdminTableScrollClass}>
+          <table className="w-full table-fixed border-collapse text-left text-sm">
+            <colgroup>
+              <col className="w-2/5" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-40" />
+            </colgroup>
             <tbody className="divide-y divide-zinc-100">
               {loading ? (
                 <tr><td colSpan={5} className={`${consoleTableBodyCellClass} text-zinc-400`}>{t('common:state.loading')}</td></tr>

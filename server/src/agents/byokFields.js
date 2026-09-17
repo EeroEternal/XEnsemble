@@ -311,6 +311,21 @@ function generateKimiCode(values) {
 
 // ── opencode (opencode.json) ──
 
+// Built-in "system" theme: text/background stay on terminal defaults and
+// ANSI colors come from the host palette, so the TUI follows the light /
+// dark appearance of the embedded xterm instead of covering it with the
+// default dark canvas. Written unconditionally for opencode sessions
+// (BYOK and gateway modes alike); user-provided tui.json wins via merge.
+function opencodeThemeConfigFile() {
+    return {
+        path: '/root/.config/opencode/tui.json',
+        content: JSON.stringify({
+            $schema: 'https://opencode.ai/tui.json',
+            theme: 'system',
+        }, null, 2),
+    };
+}
+
 function generateOpencode(values) {
     const env = {};
     const configFiles = [];
@@ -341,6 +356,7 @@ function generateOpencode(values) {
             },
         };
         configFiles.push({ path: '/root/.config/opencode/opencode.json', content: JSON.stringify(config, null, 2) });
+        configFiles.push(opencodeThemeConfigFile());
     }
     return { env, configFiles };
 }
@@ -777,4 +793,5 @@ module.exports = {
     applyByokToSecrets,
     removeByokFromSecrets,
     mergeByokConfigFiles,
+    opencodeThemeConfigFile,
 };

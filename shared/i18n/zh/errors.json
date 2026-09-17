@@ -38,8 +38,8 @@
   "image_in_use": "无法删除镜像：{{count}} 个活跃会话正在使用它",
   "custom_image_not_found": "自定义镜像不存在",
   "image_version_not_found": "镜像版本不存在",
-  "custom_image_not_found": "自定义镜像不存在",
   "custom_image_name_exists": "已存在同名自定义镜像「{{name}}」",
+  "custom_image_agent_mismatch": "该运行环境是为「{{agent}}」构建的——请选择对应的 Agent 或改用其他运行环境",
   "custom_builds_unavailable": "自定义镜像构建不可用",
   "docker_not_available": "Docker 不可用",
   "build_in_progress": "镜像构建已在进行中",
@@ -85,5 +85,6 @@
   "loop_run_in_progress": "上一次执行仍在进行中。",
   "loop_field_required": "{{field}} 为必填项",
   "loop_interval_invalid": "执行间隔必须在 {{min}} 分钟到 {{max}} 天之间。",
-  "loop_schedule_past": "执行时间必须是未来时间。"
+  "loop_schedule_past": "执行时间必须是未来时间。",
+  "custom_image_curated_readonly": "精选镜像为只读，无法修改或删除"
 }

@@ -132,6 +132,24 @@ async function runRepoCloneReap({ log = console } = {}) {
 }
 
 /**
+ * custom-image-gc：回收无人使用的自定义镜像（两阶段：先标 stale，宽限期后删除）。
+ * 精选镜像、admin 拥有的镜像、活跃会话与 Workspace 默认环境引用的镜像永不回收。
+ */
+async function runCustomImageGc({ log = console } = {}) {
+    // Destructive and irreversible (deletes image rows + registry manifests), so
+    // it must be explicitly enabled by an operator.
+    if (process.env.CUSTOM_IMAGE_GC_ENABLED !== 'true') {
+        return 0;
+    }
+    const { collectStaleImages } = require('../runtime/CustomImageService');
+    const result = await collectStaleImages();
+    if (result.marked > 0 || result.deleted > 0) {
+        log.info?.(`[custom-image-gc] scanned=${result.scanned} marked=${result.marked} deleted=${result.deleted}`);
+    }
+    return result.marked + result.deleted;
+}
+
+/**
  * 返回当前启用的一组 job 定义（供 Scheduler 注入）。
  */
 function createJobs() {
@@ -156,7 +174,19 @@ function createJobs() {
             intervalMs: Number(process.env.LOOP_TASK_TICK_MS) || 30_000,
             run: (ctx) => require('../loopTasks/runner').tick({ log: ctx?.log || console }),
         },
+        {
+            name: 'custom-image-gc',
+            intervalMs: Number(process.env.CUSTOM_IMAGE_GC_INTERVAL_MS) || 6 * 60 * 60 * 1000,
+            run: (ctx) => runCustomImageGc(ctx),
+        },
     ];
 }
 
-module.exports = { createJobs, runConversationSummarize, listCandidateSessions, runRepoCloneReap, DEFAULT_INTERVAL_MS };
+module.exports = {
+    createJobs,
+    runConversationSummarize,
+    listCandidateSessions,
+    runRepoCloneReap,
+    runCustomImageGc,
+    DEFAULT_INTERVAL_MS,
+};

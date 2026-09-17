@@ -235,10 +235,10 @@ P2 已交付：对支持 native state 的 Agent，退出后可通过 `POST /api/
 
 ```json
 {
-  "default_id": "nord",
+  "default_id": "github-dark",
   "themes": [
-    { "id": "nord", "label": "Nord", "appearance": "dark" },
-    { "id": "dracula", "label": "Dracula", "appearance": "dark" }
+    { "id": "github-dark", "label": "GitHub Dark", "appearance": "dark" },
+    { "id": "nord", "label": "Nord", "appearance": "dark" }
   ]
 }
 ```

@@ -3,9 +3,9 @@ import { ExternalLink, Loader2, RefreshCw, Search } from 'lucide-react';
 import { openExternal } from '../../lib/githubApi.js';
 import * as gitApi from '../../lib/gitApi.js';
 import {
-  consoleTableShellClass,
   consoleTableHeadRowClass,
   consoleTableHeadCellDenseClass,
+  consoleTableHeadBandClass,
   consoleTableBodyDivideClass,
   consoleTableBodyRowClass,
   consoleTableBodyCellDenseClass,
@@ -153,15 +153,24 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
           />
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto bg-[#F0F1F3] p-3">
+      <div className="min-h-0 flex-1 flex flex-col bg-[#F0F1F3] p-3">
         {filteredMRs.length === 0 ? (
           <div className={`p-6 text-center text-xs ${textPlaceholder} ${consoleEmptyStateClass} rounded-xl bg-white shadow-sm border border-[#E8EAED]`}>
             {mergeRequests.length === 0 ? `No ${label.toLowerCase()} yet.` : 'No results match your filter.'}
           </div>
         ) : (
-          <div className="rounded-xl bg-white shadow-sm border border-[#E8EAED] overflow-hidden">
-            <table className={`w-full text-left ${consoleTableShellClass}`}>
-              <thead className={consoleTableHeadRowClass}>
+          <div className="flex min-h-0 flex-1 flex-col rounded-xl bg-white shadow-sm border border-[#E8EAED] overflow-hidden">
+            <div className={consoleTableHeadBandClass}>
+            <table className="w-full table-fixed text-left">
+              <colgroup>
+                <col className="w-10" />
+                <col />
+                <col className="w-24" />
+                <col className="w-56" />
+                <col className="w-28" />
+                <col className="w-16" />
+              </colgroup>
+              <thead>
                 <tr>
                   <th className={consoleTableHeadCellDenseClass}>#</th>
                   <th className={consoleTableHeadCellDenseClass}>Title</th>
@@ -171,6 +180,18 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
                   <th className={consoleTableHeadCellDenseClass}>Actions</th>
                 </tr>
               </thead>
+            </table>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+            <table className="w-full table-fixed text-left">
+              <colgroup>
+                <col className="w-10" />
+                <col />
+                <col className="w-24" />
+                <col className="w-56" />
+                <col className="w-28" />
+                <col className="w-16" />
+              </colgroup>
               <tbody className={consoleTableBodyDivideClass}>
                 {filteredMRs.map((mr) => (
                   <tr key={mr.id} className={`${consoleTableBodyRowClass} transition-colors hover:bg-[#F4F5F6]`}>
@@ -229,6 +250,7 @@ export default function MergeRequestListPanel({ projectId, provider, onSelectMR,
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>
