@@ -112,12 +112,19 @@ test('subscribeTerminal replays from cursor and continues live without duplicate
         assert.deepEqual(replayOutputs.map((p) => p.seq), [2]);
         assert.equal(replayOutputs[0].data, 'line-2\n');
 
+        // 重放结束标记：客户端据此把 OSC 10/11 颜色查询应答限定在实时输出
+        // 阶段，避免重放的历史探测被再次应答、打进前台 TUI 的 stdin。
+        assert.equal(payloads.filter((p) => p.type === 'replay-done').length, 1);
+        const markerIndex = payloads.findIndex((p) => p.type === 'replay-done');
+        assert.ok(markerIndex > payloads.findIndex((p) => p.type === 'output'));
+
         handle.emitData('line-3\n');
         await new Promise((resolve) => setTimeout(resolve, 50));
 
         const outputsAfterLive = payloads.filter((p) => p.type === 'output');
         assert.deepEqual(outputsAfterLive.map((p) => p.seq), [2, 3]);
         assert.equal(outputsAfterLive[1].data, 'line-3\n');
+        assert.ok(markerIndex < payloads.findIndex((p) => p.type === 'output' && p.seq === 3));
 
         handle.emitExit(0);
         await new Promise((resolve) => setImmediate(resolve));

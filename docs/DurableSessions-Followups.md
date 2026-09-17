@@ -80,14 +80,59 @@ lost if blink-server itself restarts. Closing this needs boxlite support for
 re-opening the stdio of a still-running in-box process. Tracked as a blink-side
 follow-up.
 
-## 5. Terminal OSC/DA escape-sequence echo-loop **[open]**
+## 5. Terminal OSC/DA escape-sequence echo-loop **[resolved]**
 
-Observed while testing #27: on terminal attach, a device-attributes / OSC
-response (`1;2c … rgb:2e2e/3434/4040`) is echoed back into the agent's stdin and
-can flood it. It reproduces on a fresh attach and is unrelated to the resume
-work, but it blocks reliably driving an interactive agent (e.g. asking it to
-recall a value) through the web terminal. Worth isolating: identify who emits
-the DA/OSC query and stop feeding the terminal's reply back into the PTY input.
+**Symptom.** Switching back to an agent terminal (or reconnecting it) auto-types
+junk into the foreground TUI, e.g. `11;rgb:ffff/ffff/ffff` (sometimes twice in a
+row). Same class as the `1;2c … rgb:2e2e/3434/4040` flood observed while testing
+#27: a terminal-query reply ends up as keystrokes on the PTY's stdin.
+
+**Root cause.** Agent TUIs probe the host terminal at startup (`ESC ] 11 ; ? ST`
+for the background color, `ESC [ 6 n` / `ESC [ c` for cursor position / device
+attributes). xterm.js answers such queries through exactly one channel —
+`onData` — which `AgentConsole` forwards to the PTY as *user input*, and the
+OSC 10/11 handler does the same for color queries. So "answer a probe" and "user
+typed a key" share one pipe.
+
+The bug is not answering once, it is answering **again from replay**: on first
+attach / session switch the client asks with `after=0`, `terminalBridge` replays
+the transcript tail, and the historical query in that replay is re-parsed by
+xterm → a fresh reply is pushed into the PTY. The TUI that asked has long since
+stopped waiting, so the reply just sits in the foreground process's stdin — if
+the foreground is another agent CLI (or the same CLI past its probe window), it
+renders it as typed text.
+
+**Fix.** Separate "live output" from "historical replay":
+
+- `terminalBridge` sends `{ type: 'replay-done' }` once the transcript replay is
+  finished and before any live frame is drained (chat-only subscriptions send it
+  too, as they never replay).
+- Both `AgentConsole`s track that boundary in `liveOutputRef`:
+  - replayed `output` is passed through `stripTerminalQueries()`
+    (`web/src/lib/terminalQueries.js`, same file under `desktop/`), which drops
+    the reply-triggering query sequences (OSC 10/11/12 `?`, `CSI 5n/6n/?6n`,
+    `CSI c`/`CSI >c`, `CSI 14t/18t`) before they reach xterm, so the parser
+    cannot generate a reply for them at all;
+  - `replyOscColor` additionally refuses to answer while not live — belt and
+    braces for reply bytes that already entered xterm's parse queue.
+
+**Why not answer historical probes.** A late reply is useless to the asker (its
+probe window is over) but actively harmful as stdin noise; the cost of not
+answering is only that the TUI falls back to its default (dark) rendering.
+`COLORFGBG` spawn env remains the intended path for that
+(`desktop/docs/terminal-theme-server-requirements.md`). Fresh sessions attach
+before the agent boots, so their startup probe still arrives live and is still
+answered.
+
+Client/server skew is fail-safe: a client talking to an older server that never
+sends `replay-done` simply never answers probes (theme-follow silently off)
+instead of typing replies into the foreground TUI.
+
+**Status.** Covered by `web/src/__tests__/terminalQueries.test.js` (vitest),
+`desktop/src/renderer/lib/terminalQueries.test.js` (node --test) and the
+`replay-done` ordering assertions in `server/src/session/terminalBridge.test.js`.
+Interactive verification against a real TUI still depends on real-agent boxlite
+e2e (see §3).
 
 ## 6. State-dir isolation for agents that hardcode `$HOME` **[open]**
 

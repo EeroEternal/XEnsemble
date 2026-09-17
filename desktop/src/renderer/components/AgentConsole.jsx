@@ -11,6 +11,7 @@ import {
   dropFullRepaintPrefix,
   FULL_REPAINT_DROP_MIN_KEEP_BYTES,
 } from '../lib/terminalFrameDrop';
+import { stripTerminalQueries } from '../lib/terminalQueries';
 import { useTerminalTheme } from '../hooks/useTerminalTheme.jsx';
 import { Loader2 } from 'lucide-react';
 import {
@@ -147,6 +148,10 @@ function AgentConsole({
   const firstConnectRef = useRef(true);
 
   const replayDoneRef = useRef(true);
+  // 是否处于「实时输出」阶段：服务端完成转录重放后会发 `replay-done`。
+  // 重放阶段（含重放数据仍在解析队列里的时间窗）不回送终端查询的回包，
+  // 否则历史探测会被再次应答，把回包当作按键打进前台 TUI 的 stdin。
+  const liveOutputRef = useRef(false);
   const shouldConnect = sessionLive;
   const shouldReplayIdle = sessionWakeable && !sessionLive;
   // eslint-disable-next-line no-unused-vars
@@ -234,6 +239,9 @@ function AgentConsole({
     // 假设渲染。这里用当前 xterm 主题的默认色应答，使 agent 主题跟随
     // 终端的浅/深模式。仅应答 "?" 查询；设色指令交回默认处理。
     const replyOscColor = (ident, data) => {
+      // 只应答实时输出里的探测；重放阶段的历史探测已从字节流剔除（见
+      // stripTerminalQueries），这里是兜底 —— 重放数据可能已进入解析队列。
+      if (!liveOutputRef.current) return true;
       if (String(data).trim() !== '?') return false;
       const theme = xtermThemeRef.current || {};
       const hex = expandHexColor16(ident === 10 ? theme.foreground : theme.background);
@@ -484,6 +492,7 @@ function AgentConsole({
           let authenticated = false;
           let replayDone = false;
           replayDoneRef.current = false;
+          liveOutputRef.current = false;
           let writeBuffer = '';
           let pendingSeq = null;
           // 裁剪日志只打一次（每个连接），避免高频裁剪刷屏。
@@ -818,9 +827,17 @@ function AgentConsole({
               markAuthenticated();
               return;
             }
+            if (msg.type === 'replay-done') {
+              // 转录重放结束：其后到达的输出才是实时输出，OSC 10/11 探测
+              // 恢复正常应答（重放阶段的探测在上面的分支里已被剔除）。
+              liveOutputRef.current = true;
+              return;
+            }
             if (msg.type === 'output') {
               if (msg.seq != null) pendingSeq = msg.seq;
-              writeBuffer += msg.data;
+              // 重放阶段的终端查询不交给 xterm：解析器会再次触发回包，
+              // 而提问的 TUI 已不再等待 → 回包变成打进它 stdin 的按键。
+              writeBuffer += liveOutputRef.current ? msg.data : stripTerminalQueries(msg.data);
               if (writeRafId === null) {
                 // Backpressure: rAF for the idle/fast case, setTimeout with a
                 // longer delay when xterm is still rendering earlier writes
