@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { apiFetch, getAccessToken, getWsUrl } from '../../lib/api';
 import { extractSkillFromSession } from '../../lib/skillsApi';
+import SessionReportPanel from './SessionReportPanel';
 import { useToast } from '../Toast';
 import { consoleButtonFocusClass } from '../../lib/consoleTokens';
 import { cn } from '../../lib/utils';
@@ -1038,6 +1039,11 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   const [query, setQuery] = useState('');
   const [exporting, setExporting] = useState(false);
   const [extracting, setExtracting] = useState(false);
+  // 会话报告：右侧滑入面板（rules 指标/问题 + LLM 提示词建议），实时计算不落库
+  const [report, setReport] = useState(null);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [copiedAfter, setCopiedAfter] = useState(null);
   const [follow, setFollow] = useState(true);
   // DeepSeek toolbar 开关：时长投影 / 轮次折叠 / 调用折叠
   const [durationOn, setDurationOn] = useState(false);
@@ -1091,6 +1097,8 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
     setGroupOverrides({});
     setCallsCollapsed(false);
     setExpandedSteps({});
+    setReport(null);
+    setReportOpen(false);
     fetchSteps({ reset: true });
   }, [sessionId, fetchSteps]);
 
@@ -1276,6 +1284,38 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   const totalLatency = steps.reduce((n, s) => n + (s.latencyMs || 0), 0);
   const rounds = groups.filter((g) => g.round > 0).length;
 
+  const openReport = async () => {
+    if (reportOpen) { setReportOpen(false); return; }
+    setReportOpen(true);
+    if (report || reportLoading) return;
+    setReportLoading(true);
+    try {
+      const res = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/report`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.status === 'ready') setReport(data);
+    } catch {
+      showToast('error', t('trajectory.report_load_failed'));
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const copyAfter = (s) => {
+    const text = typeof s?.after === 'string' ? s.after : '';
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+    setCopiedAfter(s);
+  };
+
+  // evidence seq → 定位到该步的首个条目（时间线点击选中同一实现）
+  const jumpToSeq = (seq) => {
+    const e = entries.find((en) => en.stepSeq === seq);
+    if (e) selectEntry(e.id, { scroll: true });
+  };
+
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', SURFACE, T1)}>
       {/* 指标栏：三个指标即可点击开关（对齐 DeepSeek toolbar） */}
@@ -1331,6 +1371,16 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
             className={cn('flex items-center gap-1.5 h-6 px-2.5 rounded-md border text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed', 'border-zinc-300 bg-surface text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900', consoleButtonFocusClass)}
           >
             {extracting ? <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} /> : <Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} />}
+          </button>
+          <button
+            type="button"
+            onClick={openReport}
+            aria-pressed={reportOpen}
+            title={t('trajectory.report_button')}
+            className={cn('flex items-center gap-1.5 h-6 px-2.5 rounded-md border text-xs font-medium', 'border-zinc-300 bg-surface text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900', consoleButtonFocusClass, reportOpen && 'bg-zinc-100 text-zinc-900')}
+          >
+            {reportLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} /> : <Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} />}
+            {t('trajectory.report_button')}
           </button>
           <button
             type="button"
@@ -1448,9 +1498,19 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
           )}
         </div>
 
-        {/* 右侧详情面板 */}
+        {/* 右侧详情面板：报告开启时滑入报告，否则显示条目详情 */}
         <aside className={cn('w-[400px] shrink-0 border-l flex flex-col min-h-0', CARD, BORDER)}>
-          <DetailPanel entry={selected} round={selected ? (roundByEntry.get(selected.id) || 0) : 0} entries={entries} onNavigate={selectEntry} />
+          {reportOpen ? (
+            <SessionReportPanel
+              report={report}
+              onClose={() => setReportOpen(false)}
+              onJumpToSeq={jumpToSeq}
+              onCopyAfter={copyAfter}
+              copiedAfter={copiedAfter}
+            />
+          ) : (
+            <DetailPanel entry={selected} round={selected ? (roundByEntry.get(selected.id) || 0) : 0} entries={entries} onNavigate={selectEntry} />
+          )}
         </aside>
       </div>
     </div>
