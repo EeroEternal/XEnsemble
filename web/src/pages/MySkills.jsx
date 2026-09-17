@@ -18,6 +18,7 @@ import { useToast } from '../components/Toast';
 import {
   consoleAdminPageClass,
   consoleAdminTableScrollClass,
+  consoleTableHeadBandClass,
   consoleAdminTableShellClass,
   consoleIconButtonClass,
   consoleStructuredDialogPanelClass,
@@ -291,6 +292,26 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
       </div>
 
       <div className={consoleAdminTableShellClass}>
+        <div className={consoleTableHeadBandClass}>
+          <table className="w-full table-fixed border-collapse text-left text-sm">
+            <colgroup>
+              <col className="w-2/5" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-40" />
+            </colgroup>
+            <thead>
+              <tr className={consoleTableHeadRowClass}>
+                <th className={consoleTableHeadCellClass}>{t('skills:field_title', { defaultValue: 'Title' })}</th>
+                <th className={consoleTableHeadCellClass}>{t('skills:field_status', { defaultValue: 'Status' })}</th>
+                <th className={consoleTableHeadCellClass}>{t('skills:field_market', { defaultValue: 'Market' })}</th>
+                <th className={consoleTableHeadCellClass}>{t('skills:field_source', { defaultValue: 'Source' })}</th>
+                <th className={consoleTableHeadCellClass}>{t('common:table.actions')}</th>
+              </tr>
+            </thead>
+          </table>
+        </div>
         <div className={consoleAdminTableScrollClass}>
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
@@ -300,15 +321,6 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
               <col className="w-1/6" />
               <col className="w-40" />
             </colgroup>
-            <thead className="sticky top-0 z-10 console-table-head-sticky">
-              <tr className={consoleTableHeadRowClass}>
-                <th className={consoleTableHeadCellClass}>{t('skills:field_title', { defaultValue: 'Title' })}</th>
-                <th className={consoleTableHeadCellClass}>{t('skills:field_status', { defaultValue: 'Status' })}</th>
-                <th className={consoleTableHeadCellClass}>{t('skills:field_market', { defaultValue: 'Market' })}</th>
-                <th className={consoleTableHeadCellClass}>{t('skills:field_source', { defaultValue: 'Source' })}</th>
-                <th className={consoleTableHeadCellClass}>{t('common:table.actions')}</th>
-              </tr>
-            </thead>
             <tbody className="divide-y divide-zinc-100">
               {loading ? (
                 <tr><td colSpan={5} className={`${consoleTableBodyCellClass} text-zinc-400`}>{t('common:state.loading')}</td></tr>

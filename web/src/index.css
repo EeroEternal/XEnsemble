@@ -169,12 +169,6 @@
     display: none;
   }
 
-  /* Sticky 表头分隔线：border-collapse:collapse 下画在 thead tr 上的边框不随
-     sticky 表头滚动，改用 th 内阴影，滚动时随表头一起钉在滚动容器顶部 */
-  .console-table-head-sticky th {
-    box-shadow: inset 0 -1px 0 0 #e4e4e7; /* zinc-200 */
-  }
-
   /* ParaRouter DESIGN.md — reveal scrollbar thumb on hover/focus */
   .scrollbar-hover {
     scrollbar-gutter: stable both-edges;

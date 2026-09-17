@@ -117,9 +117,11 @@ export const consoleTableShellClass =
 export const consoleAdminTableShellClass =
   `${consoleTableShellClass} flex min-h-0 flex-1 flex-col`;
 
-/** 表头行不再画 border：border-collapse:collapse 下 tr 边框不随 sticky 表头滚动，
- *  分隔线由 .console-table-head-sticky th 的内阴影绘制（见 index.css） */
-export const consoleTableHeadRowClass = `${bgTertiary}`;
+/** 表头带：独立于滚动区，天然固定不滚；声明与表体滚动层相同的 gutter，
+ *  保证双表列宽严格对齐（槽位等宽、但表头带无溢出故不显示滚动条） */
+export const consoleTableHeadBandClass = 'shrink-0 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]';
+
+export const consoleTableHeadRowClass = `${bgTertiary} border-b ${borderHairline}`;
 
 export const consoleTableBodyDivideClass = `divide-y ${divideHairline}`;
 

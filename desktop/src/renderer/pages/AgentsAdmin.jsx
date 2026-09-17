@@ -10,6 +10,7 @@ import {
   consoleAdminPageClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
+  consoleTableHeadBandClass,
   consoleTableShellClass,
 } from '../lib/consoleTheme';
 import { loadAdminAgentsCache, saveAdminAgentsCache } from '../lib/adminAgentsCache';
@@ -430,18 +431,38 @@ export default function AgentsAdmin() {
       />
 
       <div className={consoleTableShellClass}>
-        <div className="overflow-auto max-h-[calc(100vh-200px)]">
-          <table className="w-full text-left text-sm">
-            <thead className="sticky top-0 z-10 console-table-head-sticky">
+        <div className={consoleTableHeadBandClass}>
+          <table className="w-full table-fixed text-left text-sm">
+            <colgroup>
+              <col className="w-1/4" />
+              <col className="w-1/12" />
+              <col className="w-1/12" />
+              <col className="w-1/4" />
+              <col className="w-1/6" />
+              <col className="w-12" />
+            </colgroup>
+            <thead>
               <tr>
                 <th className={consoleTableHeadCellClass}>{t('agents:field.name')}</th>
                 <th className={consoleTableHeadCellClass}>{t('common:table.status', { defaultValue: 'Status' })}</th>
                 <th className={consoleTableHeadCellClass}>{t('agents:field.version')}</th>
                 <th className={consoleTableHeadCellClass}>{t('agents:field.executable')}</th>
                 <th className={consoleTableHeadCellClass}>{t('agents:field.auth')}</th>
-                <th className={`${consoleTableHeadCellClass} w-12 text-right`}>{t('agents:field.actions')}</th>
+                <th className={`${consoleTableHeadCellClass} text-right`}>{t('agents:field.actions')}</th>
               </tr>
             </thead>
+          </table>
+        </div>
+        <div className="overflow-y-auto max-h-[calc(100vh-200px)] [scrollbar-gutter:stable]">
+          <table className="w-full table-fixed text-left text-sm">
+            <colgroup>
+              <col className="w-1/4" />
+              <col className="w-1/12" />
+              <col className="w-1/12" />
+              <col className="w-1/4" />
+              <col className="w-1/6" />
+              <col className="w-12" />
+            </colgroup>
             <tbody className="divide-y divide-zinc-100">
               {loading && agents.length === 0 ? (
                 <tr>

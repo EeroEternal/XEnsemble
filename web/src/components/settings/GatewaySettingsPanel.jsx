@@ -23,6 +23,7 @@ import {
   consoleTableBodyDivideClass,
   consoleTableBodyRowClass,
   consoleTableHeadCellClass,
+  consoleTableHeadBandClass,
   consoleTableHeadRowClass,
   consoleTableShellClass,
 } from '../../lib/consoleTokens';
@@ -995,7 +996,7 @@ export default function GatewaySettingsPanel() {
             </p>
           ) : (
             <div className={consoleTableShellClass}>
-              <div className="max-h-96 overflow-y-auto">
+              <div className={consoleTableHeadBandClass}>
               <table className="w-full table-fixed border-collapse text-left text-sm">
                 <colgroup>
                   <col className="w-1/5" />
@@ -1004,7 +1005,7 @@ export default function GatewaySettingsPanel() {
                   <col className="w-1/5" />
                   <col className="w-48" />
                 </colgroup>
-                <thead className="sticky top-0 z-10 console-table-head-sticky">
+                <thead>
                   <tr className={consoleTableHeadRowClass}>
                     <th className={consoleTableHeadCellClass}>{t('gateway:table.name')}</th>
                     <th className={consoleTableHeadCellClass}>{t('gateway:table.endpoint')}</th>
@@ -1013,6 +1014,17 @@ export default function GatewaySettingsPanel() {
                     <th className={`${consoleTableHeadCellClass}`}>{t('gateway:table.actions')}</th>
                   </tr>
                 </thead>
+              </table>
+              </div>
+              <div className="min-h-0 max-h-96 overflow-y-auto [scrollbar-gutter:stable]">
+              <table className="w-full table-fixed border-collapse text-left text-sm">
+                <colgroup>
+                  <col className="w-1/5" />
+                  <col className="w-1/5" />
+                  <col className="w-1/5" />
+                  <col className="w-1/5" />
+                  <col className="w-48" />
+                </colgroup>
                 <tbody className={consoleTableBodyDivideClass}>
                   {filteredProviders.map((p) => {
                     const models = Array.isArray(p.models) ? p.models.filter(Boolean) : [];

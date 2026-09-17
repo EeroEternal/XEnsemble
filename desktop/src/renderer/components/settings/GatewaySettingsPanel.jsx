@@ -21,6 +21,7 @@ import {
   consoleTableBodyDivideClass,
   consoleTableBodyRowClass,
   consoleTableHeadCellClass,
+  consoleTableHeadBandClass,
   consoleTableHeadRowClass,
   consoleTableShellClass,
 } from '../../lib/consoleTheme';
@@ -892,20 +893,29 @@ export default function GatewaySettingsPanel() {
             <p className="text-sm text-[#5F6368]">No providers yet.</p>
           ) : (
             <div className={consoleTableShellClass}>
-              <div className="max-h-96 overflow-y-auto">
-              <table className="w-full border-collapse text-left">
+              <div className={consoleTableHeadBandClass}>
+              <table className="w-full table-fixed border-collapse text-left">
                 <colgroup>
                   <col />
                   <col style={{ width: '6.5rem' }} />
                   <col style={{ width: '6.75rem' }} />
                 </colgroup>
-                <thead className="sticky top-0 z-10 console-table-head-sticky">
+                <thead>
                   <tr className={consoleTableHeadRowClass}>
                     <th className={consoleTableHeadCellClass}>Name</th>
                     <th className={consoleTableHeadCellClass}>Status</th>
                     <th className={`${consoleTableHeadCellClass} text-right`}>Actions</th>
                   </tr>
                 </thead>
+              </table>
+              </div>
+              <div className="min-h-0 max-h-96 overflow-y-auto [scrollbar-gutter:stable]">
+              <table className="w-full table-fixed border-collapse text-left">
+                <colgroup>
+                  <col />
+                  <col style={{ width: '6.5rem' }} />
+                  <col style={{ width: '6.75rem' }} />
+                </colgroup>
                 <tbody className={consoleTableBodyDivideClass}>
                   {providers.map((p) => {
                     const detailTitle = [

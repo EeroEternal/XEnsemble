@@ -19,6 +19,7 @@ import { useToast } from '../components/Toast';
 import {
   consoleAdminPageClass,
   consoleAdminTableScrollClass,
+  consoleTableHeadBandClass,
   consoleAdminTableShellClass,
   consoleButtonFocusClass,
   consoleDialogPanelClass,
@@ -580,6 +581,28 @@ export function CustomImagesContent() {
 
       {/* Image List */}
       <div className={consoleAdminTableShellClass}>
+        <div className={consoleTableHeadBandClass}>
+          <table className="w-full table-fixed border-collapse text-left text-sm">
+          <colgroup>
+            <col className="w-1/6" />
+            <col className="w-1/6" />
+            <col className="w-1/6" />
+            <col className="w-1/6" />
+            <col className="w-1/6" />
+            <col className="w-48" />
+          </colgroup>
+          <thead>
+            <tr className={consoleTableHeadRowClass}>
+              <th className={consoleTableHeadCellClass}>{t('images:table.name')}</th>
+              <th className={consoleTableHeadCellClass}>{t('images:table.status')}</th>
+              <th className={consoleTableHeadCellClass}>{t('images:table.components')}</th>
+              <th className={consoleTableHeadCellClass}>{t('images:table.build_time')}</th>
+              <th className={consoleTableHeadCellClass}>{t('images:table.created')}</th>
+              <th className={consoleTableHeadCellClass}>{t('images:table.actions')}</th>
+            </tr>
+          </thead>
+          </table>
+        </div>
         <div className={consoleAdminTableScrollClass}>
           <table className="w-full table-fixed border-collapse text-left text-sm">
           <colgroup>
@@ -590,16 +613,6 @@ export function CustomImagesContent() {
             <col className="w-1/6" />
             <col className="w-48" />
           </colgroup>
-          <thead className="sticky top-0 z-10 console-table-head-sticky">
-            <tr className={consoleTableHeadRowClass}>
-              <th className={consoleTableHeadCellClass}>{t('images:table.name')}</th>
-              <th className={consoleTableHeadCellClass}>{t('images:table.status')}</th>
-              <th className={consoleTableHeadCellClass}>{t('images:table.components')}</th>
-              <th className={consoleTableHeadCellClass}>{t('images:table.build_time')}</th>
-              <th className={consoleTableHeadCellClass}>{t('images:table.created')}</th>
-              <th className={consoleTableHeadCellClass}>{t('images:table.actions')}</th>
-            </tr>
-          </thead>
           <tbody>
             {loading && images.length === 0 ? (
               <tr>

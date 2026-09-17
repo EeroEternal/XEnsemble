@@ -10,6 +10,7 @@ import MiniBarChart from '../components/usage/MiniBarChart';
 import {
   consoleAdminPageClass,
   consoleAdminTableScrollClass,
+  consoleTableHeadBandClass,
   consoleAdminTableShellClass,
   consoleIconButtonClass,
   consoleTableBodyCellClass,
@@ -205,6 +206,34 @@ export default function UsageAdmin() {
               </div>
             </div>
             <div className={consoleAdminTableShellClass}>
+              <div className={consoleTableHeadBandClass}>
+                <table className="w-full table-fixed border-collapse text-left text-sm">
+                  <colgroup>
+                    <col className="w-10" />
+                    <col className="w-1/5" />
+                    <col className="w-1/7" />
+                    <col className="w-1/7" />
+                    <col className="w-1/7" />
+                    <col className="w-1/7" />
+                    <col className="w-1/7" />
+                    <col className="w-1/6" />
+                    <col className="w-12" />
+                  </colgroup>
+                  <thead>
+                    <tr className={consoleTableHeadRowClass}>
+                      <th className={consoleTableHeadCellClass}>#</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.user')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.requests')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.prompt')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.completion')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.total_tokens')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.cache_hit_rate')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.share')}</th>
+                      <th className={consoleTableHeadCellClass} />
+                    </tr>
+                  </thead>
+                </table>
+              </div>
               <div className={consoleAdminTableScrollClass}>
                 <table className="w-full table-fixed border-collapse text-left text-sm">
                   <colgroup>
@@ -218,19 +247,6 @@ export default function UsageAdmin() {
                     <col className="w-1/6" />
                     <col className="w-12" />
                   </colgroup>
-                  <thead className="sticky top-0 z-10 console-table-head-sticky">
-                    <tr className={consoleTableHeadRowClass}>
-                      <th className={consoleTableHeadCellClass}>#</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.user')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.requests')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.prompt')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.completion')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.total_tokens')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.cache_hit_rate')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.share')}</th>
-                      <th className={consoleTableHeadCellClass} />
-                    </tr>
-                  </thead>
                   <tbody className="divide-y divide-zinc-100">
                     {visibleRows.length === 0 ? (
                       <tr>
@@ -291,9 +307,17 @@ export default function UsageAdmin() {
           <section className="shrink-0">
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.by_agent')}</h2>
             <div className={consoleAdminTableShellClass}>
-              <div className={`${consoleAdminTableScrollClass} max-h-64`}>
+              <div className={consoleTableHeadBandClass}>
                 <table className="w-full table-fixed border-collapse text-left text-sm">
-                  <thead className="sticky top-0 z-10 console-table-head-sticky">
+                  <colgroup>
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                  </colgroup>
+                  <thead>
                     <tr className={consoleTableHeadRowClass}>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.agent')}</th>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.requests')}</th>
@@ -303,6 +327,18 @@ export default function UsageAdmin() {
                       <th className={consoleTableHeadCellClass}>{t('users:usage.total_tokens')}</th>
                     </tr>
                   </thead>
+                </table>
+              </div>
+              <div className={`${consoleAdminTableScrollClass} max-h-64`}>
+                <table className="w-full table-fixed border-collapse text-left text-sm">
+                  <colgroup>
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                    <col className="w-1/6" />
+                  </colgroup>
                   <tbody className="divide-y divide-zinc-100">
                     {(overview?.byAgent || []).length === 0 ? (
                       <tr>

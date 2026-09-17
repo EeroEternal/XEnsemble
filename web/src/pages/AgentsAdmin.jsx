@@ -6,6 +6,7 @@ import PageHeader from '../components/PageHeader';
 import {
   consoleAdminPageClass,
   consoleAdminTableScrollClass,
+  consoleTableHeadBandClass,
   consoleAdminTableShellClass,
   consoleIconButtonClass,
   consoleTableBodyCellClass,
@@ -111,6 +112,24 @@ export default function AgentsAdmin() {
       />
 
       <div className={consoleAdminTableShellClass}>
+        <div className={consoleTableHeadBandClass}>
+          <table className="w-full table-fixed border-collapse text-left text-sm">
+            <colgroup>
+              <col className="w-1/4" />
+              <col className="w-1/4" />
+              <col className="w-1/4" />
+              <col className="w-48" />
+            </colgroup>
+            <thead>
+              <tr className={consoleTableHeadRowClass}>
+                <th className={consoleTableHeadCellClass}>{t('agents:field.name')}</th>
+                <th className={consoleTableHeadCellClass}>{t('agents:field.provider')}</th>
+                <th className={consoleTableHeadCellClass}>{t('agents:field.model')}</th>
+                <th className={consoleTableHeadCellClass}>{t('agents:field.actions')}</th>
+              </tr>
+            </thead>
+          </table>
+        </div>
         <div className={consoleAdminTableScrollClass}>
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
@@ -119,14 +138,6 @@ export default function AgentsAdmin() {
               <col className="w-1/4" />
               <col className="w-48" />
             </colgroup>
-            <thead className="sticky top-0 z-10 console-table-head-sticky">
-              <tr className={consoleTableHeadRowClass}>
-                <th className={consoleTableHeadCellClass}>{t('agents:field.name')}</th>
-                <th className={consoleTableHeadCellClass}>{t('agents:field.provider')}</th>
-                <th className={consoleTableHeadCellClass}>{t('agents:field.model')}</th>
-                <th className={consoleTableHeadCellClass}>{t('agents:field.actions')}</th>
-              </tr>
-            </thead>
             <tbody className="divide-y divide-zinc-100">
               {loading && agents.length === 0 ? (
                 <tr>

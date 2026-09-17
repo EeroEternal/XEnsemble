@@ -18,6 +18,7 @@ import { useToast } from '../components/Toast';
 import {
   consoleAdminPageClass,
   consoleAdminTableScrollClass,
+  consoleTableHeadBandClass,
   consoleAdminTableShellClass,
   consoleButtonFocusClass,
   consoleIconButtonClass,
@@ -434,6 +435,34 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
       </div>
 
       <div className={consoleAdminTableShellClass}>
+        <div className={consoleTableHeadBandClass}>
+          <table className="w-full table-fixed border-collapse text-left text-sm">
+            <colgroup>
+              <col className="w-[18%]" />
+              <col className="w-[12%]" />
+              <col className="w-[11%]" />
+              <col className="w-[13%]" />
+              <col className="w-[11%]" />
+              <col className="w-[11%]" />
+              <col className="w-[11%]" />
+              <col className="w-28" />
+              <col className="w-14" />
+            </colgroup>
+            <thead>
+              <tr className={consoleTableHeadRowClass}>
+                <th className={consoleTableHeadCellClass}>{t('loopTasks:field.title')}</th>
+                <th className={consoleTableHeadCellClass}>{t('loopTasks:field.workspace')}</th>
+                <th className={consoleTableHeadCellClass}>{t('loopTasks:field.agent')}</th>
+                <th className={consoleTableHeadCellClass}>{t('loopTasks:field.schedule')}</th>
+                <th className={consoleTableHeadCellClass}>{t('common:table.status', { defaultValue: 'Status' })}</th>
+                <th className={consoleTableHeadCellClass}>{t('loopTasks:run.last_run')}</th>
+                <th className={consoleTableHeadCellClass}>{t('loopTasks:run.next_run')}</th>
+                <th className={consoleTableHeadCellClass}>{t('loopTasks:run.history')}</th>
+                <th className={consoleTableHeadCellClass}>{t('common:table.actions')}</th>
+              </tr>
+            </thead>
+          </table>
+        </div>
         <div className={consoleAdminTableScrollClass}>
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
@@ -447,19 +476,6 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
               <col className="w-28" />
               <col className="w-14" />
             </colgroup>
-            <thead className="sticky top-0 z-10 console-table-head-sticky">
-              <tr className={consoleTableHeadRowClass}>
-                <th className={consoleTableHeadCellClass}>{t('loopTasks:field.title')}</th>
-                <th className={consoleTableHeadCellClass}>{t('loopTasks:field.workspace')}</th>
-                <th className={consoleTableHeadCellClass}>{t('loopTasks:field.agent')}</th>
-                <th className={consoleTableHeadCellClass}>{t('loopTasks:field.schedule')}</th>
-                <th className={consoleTableHeadCellClass}>{t('common:table.status', { defaultValue: 'Status' })}</th>
-                <th className={consoleTableHeadCellClass}>{t('loopTasks:run.last_run')}</th>
-                <th className={consoleTableHeadCellClass}>{t('loopTasks:run.next_run')}</th>
-                <th className={consoleTableHeadCellClass}>{t('loopTasks:run.history')}</th>
-                <th className={consoleTableHeadCellClass}>{t('common:table.actions')}</th>
-              </tr>
-            </thead>
             <tbody className="divide-y divide-zinc-100">
               {loading ? (
                 <tr><td colSpan={8} className={`${consoleTableBodyCellClass} text-zinc-400`}>{t('common:state.loading')}</td></tr>

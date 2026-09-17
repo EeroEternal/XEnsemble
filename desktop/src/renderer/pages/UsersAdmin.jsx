@@ -15,6 +15,7 @@ import {
   consoleSectionLabelClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
+  consoleTableHeadBandClass,
   consoleTableShellClass,
 } from '../lib/consoleTheme';
 import { apiFetch } from '../lib/api.ts';
@@ -253,9 +254,18 @@ export default function UsersAdmin() {
       />
 
       <div className={consoleTableShellClass}>
-        <div className="overflow-auto max-h-[calc(100vh-200px)]">
-          <table className="w-full text-left text-sm whitespace-nowrap">
-            <thead className="sticky top-0 z-10 console-table-head-sticky">
+        <div className={consoleTableHeadBandClass}>
+          <table className="w-full table-fixed text-left text-sm whitespace-nowrap">
+            <colgroup>
+              <col className="w-1/6" />
+              <col className="w-1/12" />
+              <col className="w-1/12" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-24" />
+            </colgroup>
+            <thead>
               <tr>
                 <th className={consoleTableHeadCellClass}>{t('users:field.username')}</th>
                 <th className={consoleTableHeadCellClass}>{t('users:field.status')}</th>
@@ -266,6 +276,19 @@ export default function UsersAdmin() {
                 <th className={consoleTableHeadCellClass}>{t('common:table.actions')}</th>
               </tr>
             </thead>
+          </table>
+        </div>
+        <div className="overflow-y-auto max-h-[calc(100vh-200px)] [scrollbar-gutter:stable]">
+          <table className="w-full table-fixed text-left text-sm whitespace-nowrap">
+            <colgroup>
+              <col className="w-1/6" />
+              <col className="w-1/12" />
+              <col className="w-1/12" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-24" />
+            </colgroup>
             <tbody className="divide-y divide-zinc-100">
               {loading ? (
                 <tr>

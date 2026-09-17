@@ -15,6 +15,7 @@ import {
   consoleDialogMdClass,
   consoleAdminPageClass,
   consoleAdminTableScrollClass,
+  consoleTableHeadBandClass,
   consoleAdminTableShellClass,
   consoleIconButtonClass,
   consoleSectionLabelClass,
@@ -263,6 +264,28 @@ export default function UsersAdmin() {
       </div>
 
       <div className={consoleAdminTableShellClass}>
+        <div className={consoleTableHeadBandClass}>
+          <table className="w-full table-fixed border-collapse text-left text-sm">
+            <colgroup>
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-1/6" />
+              <col className="w-48" />
+            </colgroup>
+            <thead>
+              <tr className={consoleTableHeadRowClass}>
+                <th className={consoleTableHeadCellClass}>{t('users:field.user')}</th>
+                <th className={consoleTableHeadCellClass}>{t('users:field.status')}</th>
+                <th className={consoleTableHeadCellClass}>{t('users:field.usage')}</th>
+                <th className={consoleTableHeadCellClass}>{t('users:usage.token_7d')}</th>
+                <th className={consoleTableHeadCellClass}>{t('users:field.last_login')}</th>
+                <th className={consoleTableHeadCellClass}>{t('common:table.actions')}</th>
+              </tr>
+            </thead>
+          </table>
+        </div>
         <div className={consoleAdminTableScrollClass}>
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
@@ -273,16 +296,6 @@ export default function UsersAdmin() {
               <col className="w-1/6" />
               <col className="w-48" />
             </colgroup>
-            <thead className="sticky top-0 z-10 console-table-head-sticky">
-              <tr className={consoleTableHeadRowClass}>
-                <th className={consoleTableHeadCellClass}>{t('users:field.user')}</th>
-                <th className={consoleTableHeadCellClass}>{t('users:field.status')}</th>
-                <th className={consoleTableHeadCellClass}>{t('users:field.usage')}</th>
-                <th className={consoleTableHeadCellClass}>{t('users:usage.token_7d')}</th>
-                <th className={consoleTableHeadCellClass}>{t('users:field.last_login')}</th>
-                <th className={consoleTableHeadCellClass}>{t('common:table.actions')}</th>
-              </tr>
-            </thead>
             <tbody className="divide-y divide-zinc-100">
               {loading ? (
                 <tr>
