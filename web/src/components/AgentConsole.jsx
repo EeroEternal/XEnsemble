@@ -1082,7 +1082,22 @@ function AgentConsole({
     const terminal = terminalRef.current;
     if (!terminal) return;
     try { terminal.options.theme = xtermTheme; } catch (_) { /* ignore */ }
-  }, [xtermTheme]);
+    // 同步通知 PTY 内的全屏 TUI（opencode "system" 主题等）宿主底色已变：
+    // 1) 主动上报新 OSC 10/11 默认色 → 内置模拟器更新 themeOscBackground；
+    // 2) Kitty 式深浅模式通知（CSI ? 997;n）→ 触发清空调色板缓存并重新
+    //    探测（重发 OSC 4/10/11 查询，由上方处理器用新主题应答），
+    //    system 主题随即按新底色重新生成，TUI 即时换色，无需重启。
+    const theme = xtermThemeRef.current || {};
+    const fg = expandHexColor16(theme.foreground);
+    const bg = expandHexColor16(theme.background);
+    const notify = [fg && `\x1b]10;rgb:${fg}\x1b\\`, bg && `\x1b]11;rgb:${bg}\x1b\\`]
+      .filter(Boolean).join('');
+    const mode = preset?.appearance === 'light' ? 1 : 2;
+    const payload = `${notify}\x1b[?997;${mode}n`;
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'input', data: payload }));
+    }
+  }, [xtermTheme, preset?.appearance]);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-transparent">
