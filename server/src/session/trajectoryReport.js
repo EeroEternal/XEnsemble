@@ -207,6 +207,7 @@ function analyzeTrajectory(steps, { exitCode = null, stopped = false } = {}) {
         metrics: {
             turnCount: turns.length,
             userTurnCount: userTurns.length,
+            modelCallCount: rows.length,
             toolCallCount,
             errorCallCount: errorRows.length,
             snapshotCount,

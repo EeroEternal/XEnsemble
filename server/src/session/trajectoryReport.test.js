@@ -60,6 +60,7 @@ test('analyzeTrajectory returns clean metrics for a simple session, no issues', 
     const r = trajectoryReport.analyzeTrajectory(steps);
     assert.equal(r.metrics.turnCount, 4); // user1, assistant1(+tool), user2, assistant2(final)
     assert.equal(r.metrics.userTurnCount, 2);
+    assert.equal(r.metrics.modelCallCount, 2); // 轨迹行数，与轨迹页「调用」同口径
     assert.equal(r.metrics.toolCallCount, 1);
     assert.equal(r.metrics.corrections, 0);
     assert.deepEqual(r.issues, []);

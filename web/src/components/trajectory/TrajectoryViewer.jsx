@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Loader2, Download, Search, Clock, Layers, Zap,
-  User, Bot, Wrench, Sparkles, XCircle, BookOpen,
+  User, Bot, Wrench, Sparkles, XCircle, BookOpen, Lightbulb,
 } from 'lucide-react';
 import { apiFetch, getAccessToken, getWsUrl } from '../../lib/api';
 import { extractSkillFromSession } from '../../lib/skillsApi';
@@ -272,11 +272,15 @@ function buildEntries(steps, t) {
     }
   }
 
-  // 每步的 tool_use 数量与工具名挂到该步首个助手/思考条目（调用折叠时显示摘要行）
+  // 每步的 tool_use 数量与工具名挂到该步首个助手/思考条目（调用折叠时显示摘要行）。
+  // 纯 tool_use 无文本的响应（常见于第一轮）没有 assistant/thinking 条目，
+  // 兜底挂到该步最后一个工具条目上，保证摘要行不丢。
   for (const s of steps) {
     const calls = respBlocks(s.response).filter((b) => b && b.type === 'tool_use');
     if (calls.length > 0) {
-      const e = entries.find((en) => en.stepSeq === s.seq && (en.kind === 'assistant' || en.kind === 'thinking'));
+      const stepEntries = entries.filter((en) => en.stepSeq === s.seq);
+      const e = stepEntries.find((en) => en.kind === 'assistant' || en.kind === 'thinking')
+        || stepEntries[stepEntries.length - 1];
       if (e) {
         e.toolCount = calls.length;
         e.toolNames = calls.map((b) => b.name).filter(Boolean);
@@ -1039,7 +1043,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   const [query, setQuery] = useState('');
   const [exporting, setExporting] = useState(false);
   const [extracting, setExtracting] = useState(false);
-  // 会话报告：右侧滑入面板（rules 指标/问题 + LLM 提示词建议），实时计算不落库
+  // 轨迹洞察：右侧滑入面板（rules 指标/问题 + LLM 提示词建议），实时计算不落库
   const [report, setReport] = useState(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
@@ -1179,8 +1183,12 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   const visibleEntries = useMemo(() => {
     const q = query.trim().toLowerCase();
     return entries.filter((e) => {
-      // 折叠工具调用：折叠状态下仅隐藏未被局部展开的 step 的工具条目
-      if (callsCollapsed && e.kind === 'tool' && !expandedSteps[e.stepSeq]) return false;
+      // 折叠工具调用：隐藏未被局部展开的 step 的工具条目。
+      // 摘要行锚点（挂了 toolCount 的条目）保持可见——纯 tool_use 无文本的步
+      // （常见于第一轮）锚点就是工具条目，不保留会让整步从列表里消失。
+      if (callsCollapsed && e.kind === 'tool' && !expandedSteps[e.stepSeq]) {
+        return e.toolCount > 0;
+      }
       if (q && !(`${e.text} ${e.name || ''}`.toLowerCase().includes(q))) return false;
       return true;
     });
@@ -1282,6 +1290,9 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   };
 
   const totalLatency = steps.reduce((n, s) => n + (s.latencyMs || 0), 0);
+  // 工具调用总数（DeepSeek harness 语义）：全部调用 response 里的 tool_use 块，
+  // 与折叠开关「展开/收起工具调用」同一口径
+  const toolCallTotal = steps.reduce((n, s) => n + respBlocks(s.response).filter((b) => b?.type === 'tool_use').length, 0);
   const rounds = groups.filter((g) => g.round > 0).length;
 
   const openReport = async () => {
@@ -1350,7 +1361,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
             className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 h-6', consoleButtonFocusClass, callsCollapsed ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100')}
           >
             <Zap className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.75} />
-            {t('trajectory.metric_calls')} <b className={cn(T1, 'font-mono')}>{steps.length}</b>
+            {t('trajectory.metric_calls')} <b className={cn(T1, 'font-mono')}>{toolCallTotal}</b>
             <span className="text-[10px] text-zinc-400">{callsCollapsed ? '⊞' : '⊟'}</span>
           </button>
           <div className="flex-1" />
@@ -1379,7 +1390,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
             title={t('trajectory.report_button')}
             className={cn('flex items-center gap-1.5 h-6 px-2.5 rounded-md border text-xs font-medium', 'border-zinc-300 bg-surface text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900', consoleButtonFocusClass, reportOpen && 'bg-zinc-100 text-zinc-900')}
           >
-            {reportLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} /> : <Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} />}
+            {reportLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} /> : <Lightbulb className="w-3.5 h-3.5" strokeWidth={1.75} />}
             {t('trajectory.report_button')}
           </button>
           <button
@@ -1454,10 +1465,15 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
                       {e.label}
                     </span>
                     <span className="flex-1 min-w-0 text-xs leading-relaxed break-all">
-                      {e.kind === 'tool' && e.name && <span className="text-amber-700 dark:text-amber-300 font-mono mr-1.5">{e.name}</span>}
-                      <span className={cn(style.text, e.kind === 'tool' && 'font-mono text-[11px]')}>
-                        {preview(e.text, e.kind === 'tool' ? 120 : 200)}
-                      </span>
+                      {/* 折叠时摘要锚点若是工具条目（纯 tool_use 步），隐藏其参数预览，只留汇总行 */}
+                      {!(callsCollapsed && e.toolCount > 0 && !expandedSteps[e.stepSeq] && e.kind === 'tool') && (
+                        <>
+                          {e.kind === 'tool' && e.name && <span className="text-amber-700 dark:text-amber-300 font-mono mr-1.5">{e.name}</span>}
+                          <span className={cn(style.text, e.kind === 'tool' && 'font-mono text-[11px]')}>
+                            {preview(e.text, e.kind === 'tool' ? 120 : 200)}
+                          </span>
+                        </>
+                      )}
                     </span>
                     {e.step.status === 'error' && <XCircle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" strokeWidth={2} />}
                   </button>

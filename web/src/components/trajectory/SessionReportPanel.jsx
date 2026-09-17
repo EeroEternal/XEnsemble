@@ -1,10 +1,10 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Copy, Check, X } from 'lucide-react';
+import { Lightbulb, Copy, Check, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 /**
- * SessionReportPanel — 会话过程报告面板（TrajectoryViewer 右侧滑入层）。
+ * SessionReportPanel — 轨迹洞察面板（TrajectoryViewer 右侧滑入层）。
  *
  * 三块内容：LLM 提示词改进建议（before → after 对照，可复制 after）、
  * 规则层过程指标与检测问题（evidence seq 可点击跳转对应轨迹条目）、
@@ -20,8 +20,10 @@ const SEV_DOT = {
 };
 
 const METRIC_KEYS = [
-  ['turnCount', 'report_metric_turns'],
+  // 与轨迹页头部同口径：用户输入数、模型调用次数（轨迹行数）
   ['userTurnCount', 'report_metric_user_turns'],
+  ['modelCallCount', 'report_metric_model_calls'],
+  // 洞察特有信号
   ['toolCallCount', 'report_metric_tool_calls'],
   ['errorCallCount', 'report_metric_errors'],
   ['snapshotCount', 'report_metric_compactions'],
@@ -72,7 +74,7 @@ export default function SessionReportPanel({ report, onClose, onJumpToSeq, onCop
     <div className="flex min-h-0 flex-1 flex-col">
       {/* 头部 */}
       <div className={cn('shrink-0 h-10 px-4 flex items-center gap-2 border-b', 'border-zinc-200')}>
-        <Sparkles className="w-3.5 h-3.5 text-violet-500 dark:text-violet-400" strokeWidth={1.75} />
+        <Lightbulb className="w-3.5 h-3.5 text-violet-500 dark:text-violet-400" strokeWidth={1.75} />
         <span className="text-xs font-semibold text-zinc-900">{t('trajectory.report_title')}</span>
         {report?.engine === 'rules+llm' && (
           <span className="inline-flex h-4 px-1.5 items-center rounded-full border border-violet-200 bg-violet-100 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/15 dark:text-violet-300 text-[10px] font-medium">
@@ -99,16 +101,18 @@ export default function SessionReportPanel({ report, onClose, onJumpToSeq, onCop
           </section>
         )}
 
-        {/* 提示词改进建议 */}
+        {/* 提示词改进建议：区分 有建议 / 顺利无建议 / 未配置 / LLM 出错 */}
         <section className="space-y-2">
           <h4 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{t('trajectory.report_suggestions')}</h4>
-          {advice
-            ? (advice.promptSuggestions.length > 0
-                ? advice.promptSuggestions.map((s, i) => (
-                    <SuggestionCard key={i} suggestion={s} copied={copiedAfter === s} onCopy={() => onCopyAfter?.(s)} />
-                ))
-                : <p className="text-[11px] text-zinc-500">{t('trajectory.report_advice_empty')}</p>)
-            : <p className="text-[11px] text-zinc-500">{t('trajectory.report_llm_hint')}</p>}
+          {advice?.promptSuggestions?.length > 0
+            ? advice.promptSuggestions.map((s, i) => (
+                <SuggestionCard key={i} suggestion={s} copied={copiedAfter === s} onCopy={() => onCopyAfter?.(s)} />
+            ))
+            : advice?.promptSuggestions
+              ? <p className="text-[11px] text-zinc-500">{t('trajectory.report_advice_empty')}</p>
+              : report?.llm_error
+                ? <p className="text-[11px] text-zinc-500">{t('trajectory.report_llm_error')}</p>
+                : <p className="text-[11px] text-zinc-500">{t('trajectory.report_llm_hint')}</p>}
         </section>
 
         {/* 过程指标 */}

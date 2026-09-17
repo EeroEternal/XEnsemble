@@ -8,7 +8,7 @@ const FULL_REPORT = {
   engine: 'rules+llm',
   exited: true,
   metrics: {
-    turnCount: 12, userTurnCount: 5, toolCallCount: 20,
+    userTurnCount: 5, modelCallCount: 8, toolCallCount: 20,
     errorCallCount: 1, snapshotCount: 1, corrections: 2,
   },
   issues: [
@@ -59,8 +59,9 @@ describe('SessionReportPanel', () => {
     expect(screen.getByText('修复登录 bug：错误分支应显示 401 提示')).toBeInTheDocument();
     expect(screen.getByText('loop_detected')).toBeInTheDocument();
     expect(screen.getByText('429 限流 2 次，建议错峰重试')).toBeInTheDocument();
-    // 指标值渲染
-    expect(screen.getByText('12')).toBeInTheDocument();
+    // 指标值渲染（用户输入 5 / 模型调用 8）
+    expect(screen.getByText('5')).toBeInTheDocument();
+    expect(screen.getByText('8')).toBeInTheDocument();
   });
 
   it('clicking evidence seq jumps to the trajectory entry', () => {
@@ -83,11 +84,17 @@ describe('SessionReportPanel', () => {
   });
 
   it('rules-only report shows LLM hint and no suggestion cards', () => {
-    renderPanel({ report: { ...FULL_REPORT, advice: null, engine: 'rules' } });
+    renderPanel({ report: { ...FULL_REPORT, advice: null, engine: 'rules', llm_error: null } });
     expect(screen.getByText(/LLM_ANALYZE_API_KEY/)).toBeInTheDocument();
     expect(screen.queryByText('先给验收标准')).not.toBeInTheDocument();
     // 规则层问题仍然展示
     expect(screen.getByText('loop_detected')).toBeInTheDocument();
+  });
+
+  it('llm_error shows failure hint instead of config hint', () => {
+    renderPanel({ report: { ...FULL_REPORT, advice: null, engine: 'rules', llm_error: 'timeout' } });
+    expect(screen.getByText(/failed to generate suggestions|生成建议失败/)).toBeInTheDocument();
+    expect(screen.queryByText(/LLM_ANALYZE_API_KEY/)).not.toBeInTheDocument();
   });
 
   it('clean session shows empty-state advice text', () => {
@@ -102,7 +109,7 @@ describe('SessionReportPanel', () => {
     expect(screen.getByText(/process issues|未检测到/)).toBeInTheDocument();
   });
 
-  it('null report (still loading) shows LLM hint fallback without crashing', () => {
+  it('null report (still loading) shows config hint fallback without crashing', () => {
     renderPanel({ report: null });
     expect(screen.getByText(/LLM_ANALYZE_API_KEY/)).toBeInTheDocument();
   });

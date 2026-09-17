@@ -1371,13 +1371,12 @@ fastify.get('/api/v1/sessions/:sessionId/report', { preValidation: [fastify.auth
     let advice = null;
     let engine = 'rules';
     let llmError = null;
-    if (insight.issues.length > 0 || exited) {
-        try {
-            advice = await trajectoryReport.generateAdvice(insight.turns, insight.issues);
-            if (advice) engine = 'rules+llm';
-        } catch (err) {
-            llmError = String(err?.message || err).slice(0, 300);
-        }
+    // 有轨迹就尝试生成建议（未配置 LLM 时 generateAdvice 同步抛错快速降级，不阻塞）。
+    try {
+        advice = await trajectoryReport.generateAdvice(insight.turns, insight.issues);
+        if (advice) engine = 'rules+llm';
+    } catch (err) {
+        llmError = String(err?.message || err).slice(0, 300);
     }
 
     return {
