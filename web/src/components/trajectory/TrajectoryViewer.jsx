@@ -69,6 +69,9 @@ const KIND_STYLES = {
   },
 };
 
+// response.content 块数组（response 为空/形状异常时返回 []）
+const respBlocks = (resp) => (Array.isArray(resp?.content) ? resp.content : []);
+
 function preview(text, max = 160) {
   const t = String(text || '').replace(/\s+/g, ' ').trim();
   return t.length > max ? `${t.slice(0, max)}…` : t;
@@ -177,8 +180,6 @@ function buildEntries(steps, t) {
       src, // 'req'=请求上下文 / 'resp'=模型响应（来源页展示）
     });
   };
-
-  const respBlocks = (resp) => (Array.isArray(resp?.content) ? resp.content : []);
 
   // 用户文本 → 上下文/用户 分段（注入标签拆分 + 压缩摘要识别）
   const pushUserText = (text, payload, step) => {
@@ -1388,10 +1389,10 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
             onClick={openReport}
             aria-pressed={reportOpen}
             title={t('trajectory.report_button')}
-            className={cn('flex items-center gap-1.5 h-6 px-2.5 rounded-md border text-xs font-medium', 'border-zinc-300 bg-surface text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900', consoleButtonFocusClass, reportOpen && 'bg-zinc-100 text-zinc-900')}
+            aria-label={t('trajectory.report_button')}
+            className={cn('flex items-center justify-center w-7 h-6 rounded-md border text-xs font-medium disabled:cursor-not-allowed', 'border-zinc-300 bg-surface text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900', consoleButtonFocusClass, reportOpen && 'bg-zinc-100 text-zinc-900')}
           >
             {reportLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} /> : <Lightbulb className="w-3.5 h-3.5" strokeWidth={1.75} />}
-            {t('trajectory.report_button')}
           </button>
           <button
             type="button"
