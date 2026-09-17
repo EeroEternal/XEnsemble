@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Gauge, BarChart3, Route } from 'lucide-react';
+import { Gauge, BarChart3, Route, TrendingUp } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
   consoleSettingsTabActiveClass,
@@ -10,6 +10,7 @@ import { SidebarAccountMenu } from './AppSidebar';
 
 export const OBSERVABILITY_TABS = [
   { id: 'quota', labelKey: 'observability:tabs.quota', icon: Gauge, adminOnly: false },
+  { id: 'my-usage', labelKey: 'observability:tabs.my_usage', icon: TrendingUp, adminOnly: false },
   { id: 'usage', labelKey: 'observability:tabs.usage', icon: BarChart3, adminOnly: true },
   { id: 'routing-analytics', labelKey: 'observability:tabs.routing_analytics', icon: Route, adminOnly: false },
 ];

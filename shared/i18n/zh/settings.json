@@ -46,22 +46,6 @@
     "loading": "正在加载配额信息…",
     "load_failed": "配额信息加载失败。"
   },
-  "usage": {
-    "title": "Token 用量",
-    "total_tokens": "总 Token",
-    "requests": "请求数",
-    "prompt_tokens": "输入",
-    "completion_tokens": "输出",
-    "cache_hit_rate": "缓存命中率",
-    "trend": "日趋势",
-    "by_project": "按项目分解",
-    "project": "项目",
-    "period_7d": "近 7 天",
-    "period_30d": "近 30 天",
-    "vs_prev": "较上一周期 {{pct}}%",
-    "no_data": "暂无用量数据",
-    "deleted_project": "已删除项目"
-  },
   "general": {
     "title": "通用",
     "registration": "注册",
