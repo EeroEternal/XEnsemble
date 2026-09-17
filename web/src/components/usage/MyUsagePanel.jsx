@@ -7,7 +7,7 @@ import { formatTokens, formatTokensFull } from '../../lib/formatTokens';
 import MiniBarChart from './MiniBarChart';
 import SelectMenu from '../SelectMenu';
 
-/** 个人 LLM Token 用量：汇总 / 日趋势 / 按项目分解。无配额上限，独立于配额页。 */
+/** 个人 LLM Token 用量：汇总 / 日趋势 / 按项目分解 / 按 Agent。无配额上限，独立于配额页。 */
 export default function MyUsagePanel() {
   const { t } = useTranslation();
   const [usageDays, setUsageDays] = useState('7');
@@ -90,7 +90,7 @@ export default function MyUsagePanel() {
             <div className={`${consoleSectionLabelClass} mb-2`}>{t('observability:my_usage.by_project')}</div>
             <div className={`${consoleCardClass} overflow-hidden`}>
               <div className="shrink-0 overflow-x-hidden overflow-y-auto">
-              <table className="w-full table-fixed border-collapse text-left text-xs">
+              <table className="w-full table-fixed border-collapse text-left text-sm">
                 <colgroup>
                   <col className="w-[40%]" />
                   <col className="w-[12%]" />
@@ -112,7 +112,7 @@ export default function MyUsagePanel() {
               </table>
               </div>
               <div className="max-h-64 overflow-y-auto overflow-x-hidden console-scroll-hidden">
-              <table className="w-full table-fixed border-collapse text-left text-xs">
+              <table className="w-full table-fixed border-collapse text-left text-sm">
                 <colgroup>
                   <col className="w-[40%]" />
                   <col className="w-[12%]" />
@@ -135,6 +135,62 @@ export default function MyUsagePanel() {
                       </td>
                       <td className="px-4 py-2.5 text-right font-mono font-semibold tabular-nums text-zinc-900">
                         {formatTokens(p.totalTokens)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div className={`${consoleSectionLabelClass} mb-2`}>{t('observability:my_usage.by_agent')}</div>
+            <div className={`${consoleCardClass} overflow-hidden`}>
+              <div className="shrink-0 overflow-x-hidden overflow-y-auto">
+              <table className="w-full table-fixed border-collapse text-left text-sm">
+                <colgroup>
+                  <col className="w-[40%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                </colgroup>
+                <thead>
+                  <tr className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-400">
+                    <th className="px-4 py-2 font-medium">{t('observability:my_usage.agent')}</th>
+                    <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.requests')}</th>
+                    <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.prompt_tokens')}</th>
+                    <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.cached_tokens')}</th>
+                    <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.cache_hit_rate')}</th>
+                    <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.total_tokens')}</th>
+                  </tr>
+                </thead>
+              </table>
+              </div>
+              <div className="max-h-64 overflow-y-auto overflow-x-hidden console-scroll-hidden">
+              <table className="w-full table-fixed border-collapse text-left text-sm">
+                <colgroup>
+                  <col className="w-[40%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                </colgroup>
+                <tbody className="divide-y divide-zinc-100">
+                  {(usage.byAgent || []).map((a) => (
+                    <tr key={a.key} className="text-zinc-600">
+                      <td className="px-4 py-2.5 font-medium text-zinc-900">{a.key}</td>
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums">{a.requests}</td>
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums">{formatTokens(a.promptTokens)}</td>
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums">{formatTokens(a.cachedTokens)}</td>
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums">
+                        {a.cacheHitRate != null ? `${Math.round(a.cacheHitRate * 100)}%` : '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-mono font-semibold tabular-nums text-zinc-900">
+                        {formatTokens(a.totalTokens)}
                       </td>
                     </tr>
                   ))}

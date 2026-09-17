@@ -394,13 +394,13 @@ function Row({ user, idx, share, expanded, expandable, onToggle, onOpenDialog, t
             </div>
           </div>
         </td>
-        <td className={`${consoleTableBodyCellClass} font-mono text-xs tabular-nums`}>{formatTokensFull(user.requests)}</td>
-        <td className={`${consoleTableBodyCellClass} font-mono text-xs tabular-nums text-zinc-500`}>{formatTokens(user.promptTokens)}</td>
-        <td className={`${consoleTableBodyCellClass} font-mono text-xs tabular-nums text-zinc-500`}>{formatTokens(user.completionTokens)}</td>
-        <td className={`${consoleTableBodyCellClass} font-mono text-xs font-semibold tabular-nums text-zinc-900`}>
+        <td className={`${consoleTableBodyCellClass} font-mono tabular-nums`}>{formatTokensFull(user.requests)}</td>
+        <td className={`${consoleTableBodyCellClass} font-mono tabular-nums text-zinc-500`}>{formatTokens(user.promptTokens)}</td>
+        <td className={`${consoleTableBodyCellClass} font-mono tabular-nums text-zinc-500`}>{formatTokens(user.completionTokens)}</td>
+        <td className={`${consoleTableBodyCellClass} font-mono font-semibold tabular-nums text-zinc-900`}>
           {formatTokens(user.totalTokens)}
         </td>
-        <td className={`${consoleTableBodyCellClass} font-mono text-xs tabular-nums text-zinc-500`}>
+        <td className={`${consoleTableBodyCellClass} font-mono tabular-nums text-zinc-500`}>
           {user.cacheHitRate != null ? `${Math.round(user.cacheHitRate * 100)}%` : '—'}
         </td>
         <td className={consoleTableBodyCellClass}>

@@ -35,7 +35,7 @@ function registerUserRoutes(fastify) {
         try {
             const { days } = request.query || {};
             const range = usageService.normalizeRange(days);
-            const [summary, byProject, trend, prevTotal] = await Promise.all([
+            const [summary, byProject, trend, prevTotal, byAgent] = await Promise.all([
                 usageService.getMyUsageSummary(request.user.id, { days }),
                 usageService.getMyUsageByProject(request.user.id, { days }),
                 usageService.getMyUsageTrend(request.user.id, { days }),
@@ -45,8 +45,10 @@ function registerUserRoutes(fastify) {
                     range.sinceTs - range.days * 24 * 60 * 60 * 1000,
                     range.sinceTs,
                 ),
+                // agent 粒度（getUsageByAgent 强制 userId self 过滤）
+                usageService.getUsageByAgent({ days, userId: request.user.id }),
             ]);
-            return { summary, byProject, trend, prevTotalTokens: prevTotal, days: range.days };
+            return { summary, byProject, trend, byAgent, prevTotalTokens: prevTotal, days: range.days };
         } catch (err) {
             return sendPublicError(reply, err, 'Failed to query usage', 500, request.locale || 'en');
         }
