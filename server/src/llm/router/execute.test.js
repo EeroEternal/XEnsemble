@@ -10,10 +10,10 @@ test('applyChosenModel prefixes nonempty provider onto canonical model', () => {
     assert.equal(out.model, 'deepseek/deepseek-chat');
 });
 
-test('applyChosenModel uses canonical model only when provider is empty', () => {
+test('applyChosenModel keeps the original body model when provider is empty', () => {
     const out = applyChosenModel(
-        { model: 'x' },
-        { chosenProvider: '', chosenModel: 'deepseek-chat' },
+        { model: 'openrouter/google/gemini-2.0-flash' },
+        { chosenProvider: '', chosenModel: 'gemini-2.0-flash' },
     );
-    assert.equal(out.model, 'deepseek-chat');
+    assert.equal(out.model, 'openrouter/google/gemini-2.0-flash');
 });

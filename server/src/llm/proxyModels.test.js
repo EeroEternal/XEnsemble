@@ -68,7 +68,7 @@ describe('LLM proxy /v1/models', () => {
         unigateway.ensureRunning = async () => ({ running: true, baseUrl: stubUrl, adminToken: '' });
         unigateway.ensureGatewaySecrets = () => ({ gatewayKey: 'test-gateway-key' });
 
-        ctx = await bootstrapTestDb(['../llm/serviceRouter', '../llm/proxy'], __dirname);
+        ctx = await bootstrapTestDb(['../llm/router/lastUsage', '../llm/serviceRouter', '../llm/proxy'], __dirname);
         ({ db, schema } = ctx);
         const serviceRouter = ctx.reloaded['../llm/serviceRouter'];
         serviceRouter.getAgentGatewayKey = async () => 'ugk_test_agent_gateway_key';

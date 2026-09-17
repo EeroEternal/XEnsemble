@@ -4,6 +4,7 @@ const { getAgentResume, getAgentResumeLevel, isSessionRecoverable, buildStateArg
 const { applyProjectGitEnv } = require('../agents/projectGitEnv');
 const { getUserSkillDirs } = require('../agents/defaultAgents');
 const transcriptStore = require('../runtime/TranscriptStore');
+const { waitForAgentExit } = require('./idleHibernate');
 
 const CRASH_UPTIME_MS = 30000;
 const CRASH_THRESHOLD = 3;
@@ -443,14 +444,14 @@ async function resumeSession({
                 }
             }
 
-            // Kill any lingering agent process from a previous run.
-            // Use SIGINT first (TUI agents like opencode checkpoint their SQLite
-            // state on SIGINT/Ctrl+C), then escalate to SIGKILL after a short wait.
+            // Kill any lingering agent process from a previous run of THIS
+            // session. On local runtime the host is shared — never pkill by
+            // CLI name (that would idle every other session using the same agent).
             if (runtimeRef) {
-                const agentBin = agentMeta.cmd || agentMeta.id;
                 try {
-                    await runtime.exec.exec('sh', ['-c', `pkill -INT -x "$1" 2>/dev/null || pkill -INT -f "$1" 2>/dev/null || true; sleep 1; pkill -KILL -x "$1" 2>/dev/null || pkill -KILL -f "$1" 2>/dev/null || true`, 'sh', agentBin], {}, {
-                        runtimeRef, cwd: '/', timeoutMs: 10000,
+                    await waitForAgentExit(runtime, runtimeRef, agentMeta.id, {
+                        streamRef: session.streamRef || null,
+                        timeoutMs: 10000,
                     });
                 } catch (_) { /* best-effort */ }
             }

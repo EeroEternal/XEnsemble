@@ -13,7 +13,7 @@
 
 v1 必须落地：接入信号、粘性、触发条件、成本优化器、执行改写、`routing_decisions`、画像获取接口（读仓库内静态 JSON）。
 
-v1 只留接口、不实现：**难度评估器**（返回 `null` 时逻辑模型 = 请求体 `model`，只做供应商粘性/成本选路）。
+v1 只留接口、不实现：**难度评估器**（返回 `null` 时不做能力门槛；优化器在 Agent 已勾选模型中选最便宜的一条）。
 
 ## 2. 非目标
 
@@ -110,23 +110,20 @@ async function evaluateDifficulty(signals) → DemandVector | null
 
 v1 恒为 `null`。日志列 `demand` 为 SQL `null`。接评估器时再定义为 JSON 对象（如 `reasoning` / `code` / `tools` / `long_context` 分数），v1 不预先写假向量。
 
-`null` 的语义是 **对逻辑模型无意见**：
+`null` 的语义是 **无能力门槛**：
 
-- **chosen 逻辑模型 = 请求体 `model`**（去掉 `anthropic.` 发现前缀后的值；空则回退 session token / Agent 主模型，仅作缺省）
-- 禁止用能力门槛改成别的模型，也禁止改成「会话默认」去覆盖 `/model`
-- 仍可在该逻辑模型上做供应商粘性与成本排序
-
-**禁止**：在 `null` 时把能力门槛当成全 0 从而永远选最便宜模型。
+- 不按 reasoning/tools/context 过滤模型
+- 优化器在 Agent 已勾选模型中按单价选最便宜的一条（无勾选列表时才回退请求体 `model`）
+- 禁止改成「会话默认 / claims.model」去覆盖 `/model` 与勾选列表
+- 粘性未过期时仍复用上次 `(model, provider)`
 
 ## 9. 成本-质量优化器
 
 ### 9.1 逻辑模型
 
-评估器返回 `null` 时（v1 总是如此）：**逻辑模型 = 请求体 `model`**。
+评估器返回 `null` 时（v1 总是如此）：**不按能力门槛过滤**，候选 = Agent 已勾选模型（`agent_gateway_config.model[]`）。剥掉 `anthropic.` / `provider/` 前缀后查画像。列表为空时才回退请求体 `model`（再空则 session token / Agent 主模型）。
 
-剥掉控制面为 claude-code 加的 `anthropic.` 前缀后再查画像。请求体没有 `model` 时才回退：session token 的 `model` → Agent `primaryModel`。
-
-评估器以后返回向量时，才允许按能力门槛换成列表里的其他模型。Session `lock` 仍是以后的配置项，与本条不冲突。
+评估器以后返回向量时，再按能力门槛从勾选列表里过滤。Session `lock` 仍是以后的配置项。
 
 ### 9.2 候选供应商
 
@@ -136,19 +133,18 @@ v1 一个 Agent 仍只绑一家 provider 时，候选通常只有一家；优化
 
 ### 9.3 成本
 
-对齐 SmartGate `UnitPrice`：
+- 单价：每 1M token 的 cache_read（缓存输入）/ cache_write（缓存输出）/ input / output，先换成美元再比
+- **不按请求 token 规模加权**；不读上一轮 `llm_usage`
+- 同一 canonical 模型比供应商：`cache_read` → `cache_write` → `input` → `output`
+- 跨模型选最便宜：`input` → `output` → `cache_read` → `cache_write`（避免有 cache 报价的更贵模型压过无 cache 报价的便宜模型）
+- 某轴 `null` 视为该轴最贵（unknown ≠ 免费）；显式 `0` 才是该轴免费
+- 无价候选不能赢过有价候选；未绑定候选不参与执行，只记 `skip_reason=provider_not_bound`
 
-- 单价：每 1M token 的 input / output / cache_read / cache_write
-- **unknown ≠ 免费**：该轴 `null` 则 `is_priced === false`，不得当最便宜；无价候选不能赢过有价候选
-- 显式 `0` 才是免费
-- 有缓存命中、无 `cache_read` 价：按 input 价的 10% 估算（与 SmartGate 默认折扣一致）
-- 压缩后触发：缓存归零，比较「留在当前供应商全价重建前缀」vs「换已绑定的其他候选全价处理同一前缀」；v1 若只有一家绑定，结果仍是留下并打日志
-
-货币：画像带 `price_currency`。v1 **只在同一货币内比较**；混币候选标 unknown 成本，不参与「更便宜」排序。
+货币：画像带 `price_currency`。写死 PBOC 中间价（2026-09-16 `USD/CNY = 6.7628`），`USD` 汇率为 1。表外货币视为 unknown。`cost_estimate` 存美元单价四元组。
 
 ### 9.4 `resolveProviderRoute(agentId, model)`
 
-返回按预估成本升序的 `{ provider, model, cost_estimate, bound }[]`。v1 的 `model` 实参为 §9.1 的请求体模型。以后评估器返回向量时，先按能力门槛过滤模型，再调用本函数。
+返回按单价排列的 `{ provider, model, cost_estimate, bound }[]`。v1 传入 Agent 勾选模型 + 网关 `provider`（执行 id 用网关名，价格从画像任意 offering 取最便宜的一条）。画像 `provider_id`（如 zhipu）不得直接写入 `body.model`，否则 UniGateway 对不上 binding。
 
 ## 10. 执行层
 
@@ -170,13 +166,9 @@ v1 一个 Agent 仍只绑一家 provider 时，候选通常只有一家；优化
 2. 将该文件放入本仓库 `server/src/llm/modelPortraits.registry.json`（可改名，但必须进 git）
 3. `fetchModelPortraits()` **只读这个文件**
 
-查找：`canonical_model_id`（去掉 `google/` 这类聚合前缀）+ 当前 provider/endpoint 匹配 `offerings[]`。
+查找：`server/src/llm/modelCatalog.json`，key 为 **provider + model**。值含 USD 单价（input / output / cache_read / cache_write）与 `capability`。同一 canonical/family 模型共用一套价格，暂不考虑供应商差价。未入表 → unknown（不能排到有价候选前面）。
 
-价格优先级：
-
-1. 静态表
-2. 若该 provider 的 `GET {base_url}/models` 条目带 `pricing`（如 OpenRouter），可作为覆盖写入画像内存视图，不改 JSON 文件
-3. 都没有 → unknown
+旧 `modelPortraits.registry.json` 不再用于查价。
 
 Agent 子集：现有 `agent_gateway_config` 模型列表，不改 Admin 勾选 UI。
 
@@ -198,7 +190,7 @@ Agent 子集：现有 `agent_gateway_config` 模型列表，不改 Admin 勾选 
 | `sticky_model`, `sticky_provider` | 本轮开始前 |
 | `candidates` jsonb | 优化器所见列表（含报价拆分与 `bound`） |
 | `chosen_model`, `chosen_provider` | 实际送出 |
-| `cost_estimate` jsonb | 全价输入 / 缓存读 / 缓存写 / 预估输出 / 货币 |
+| `cost_estimate` jsonb | 美元单价：`cache_read` / `cache_write` / `input` / `output` / `currency` |
 | `prompt_tokens`, `cached_tokens`, `completion_tokens`, `latency_ms`, `status_code` | 响应后回填 |
 | `error` text | |
 
@@ -217,9 +209,9 @@ Agent 子集：现有 `agent_gateway_config` 模型列表，不改 Admin 勾选 
 
 ## 14. 测试要点
 
-- `evaluateDifficulty` 恒 null 时，chosen 逻辑模型等于请求体 `model`（不是 session 默认模型）
+- `evaluateDifficulty` 恒 null 时，在 Agent 勾选模型中选最便宜的一条（无勾选列表才回退请求体 `model`，不是 session 默认模型）
 - 无粘性首轮 `trigger=first_turn`；随后未压缩未失败为 `sticky`
-- 压缩检测为 true 时 `trigger=compaction` 且成本按缓存归零估算
+- 压缩检测为 true 时 `trigger=compaction`（比价仍按美元单价，不按 token 规模）
 - 连续两次上游失败解除粘性并出现 `provider_fail`
 - unknown 报价不能排到有价候选前面；显式 0 可以
 - `fetchModelPortraits` 只读仓库 JSON，单测用夹具文件，不访问网络
@@ -227,7 +219,7 @@ Agent 子集：现有 `agent_gateway_config` 模型列表，不改 Admin 勾选 
 
 ## 15. 以后（不在 v1 实现）
 
-- 实现 `evaluateDifficulty` 后：按能力门槛换逻辑模型，再跑优化器；未实现前不得覆盖请求体模型
+- 实现 `evaluateDifficulty` 后：按能力门槛从勾选列表过滤，再跑优化器
 - Session `auto \| lock`
 - 同一 Agent 多 provider binding，使 `resolveProviderRoute` 的未绑定候选真正可执行
 - `fetchModelPortraits` 改为 HTTP

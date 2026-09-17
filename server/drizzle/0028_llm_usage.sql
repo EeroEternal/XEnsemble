@@ -8,9 +8,14 @@ CREATE TABLE IF NOT EXISTS "llm_usage" (
 	"prompt_tokens" integer NOT NULL DEFAULT 0,
 	"completion_tokens" integer NOT NULL DEFAULT 0,
 	"total_tokens" integer NOT NULL DEFAULT 0,
+	"cached_tokens" integer,
 	"status_code" integer,
 	"latency_ms" integer,
-	"created_at" bigint NOT NULL
+	"created_at" bigint NOT NULL,
+	"requested_model" text,
+	"trigger" text,
+	"seq" integer,
+	"difficulty" double precision
 );
 --> statement-breakpoint
 DO $$ BEGIN
@@ -28,3 +33,5 @@ CREATE INDEX IF NOT EXISTS "idx_llm_usage_user_created" ON "llm_usage" ("user_id
 CREATE INDEX IF NOT EXISTS "idx_llm_usage_user_project" ON "llm_usage" ("user_id", "project_id", "created_at");
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_llm_usage_created" ON "llm_usage" ("created_at");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_llm_usage_session_seq" ON "llm_usage" ("session_id", "seq");

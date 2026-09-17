@@ -17,9 +17,12 @@ let registerLlmProxy;
 const TEST_SESSION_ID = 'sess_proxy_routing_test';
 const TEST_AGENT_ID = 'proxy-routing-test';
 const TEST_PROJECT_ID = 'proj_proxy_routing_test';
+const OPENCODE_SESSION_ID = 'sess_proxy_routing_opencode';
 const BODY_MODEL = 'anthropic.acme/deepseek-chat';
 const TOKEN_MODEL = 'claude-sonnet-4';
 const EXPECTED_FORWARDED_MODEL = 'deepseek/deepseek-chat';
+const OPENCODE_REAL_MODEL = 'google/gemini-2.0-flash';
+const OPENCODE_ALIAS_MODEL = 'google-gemini-2.0-flash';
 
 describe('LLM proxy intelligent routing', { concurrency: false, timeout: 60000 }, () => {
     let app;
@@ -33,6 +36,19 @@ describe('LLM proxy intelligent routing', { concurrency: false, timeout: 60000 }
     let originalCaptureMode;
     let insertedAgent = false;
     const received = [];
+
+    async function waitForLatestUsage(sessionId) {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+            const rows = await db.select().from(schema.llmUsage)
+                .where(eq(schema.llmUsage.sessionId, sessionId));
+            if (rows.length > 0) {
+                return rows.sort((a, b) => Number(b.createdAt) - Number(a.createdAt))[0];
+            }
+            await new Promise((r) => setTimeout(r, 50));
+        }
+        throw new Error(`timed out waiting for llm_usage session=${sessionId}`);
+    }
 
     let originalUpstreamUrl;
 
@@ -89,7 +105,7 @@ describe('LLM proxy intelligent routing', { concurrency: false, timeout: 60000 }
         unigateway.ensureGatewaySecrets = () => ({ gatewayKey: 'test-gateway-key' });
 
         ctx = await bootstrapTestDb(
-            ['./router/sticky', './router/decisions', './serviceRouter', './proxy'],
+            ['./router/sticky', './router/lastUsage', './serviceRouter', './proxy'],
             __dirname,
         );
         ({ db, schema } = ctx);
@@ -141,6 +157,7 @@ describe('LLM proxy intelligent routing', { concurrency: false, timeout: 60000 }
         const next = {
             ...JSON.parse(originalConfig),
             [TEST_AGENT_ID]: { llm_auth_mode: 'gateway', provider: 'deepseek', model: 'deepseek-chat' },
+            opencode: { llm_auth_mode: 'gateway', provider: 'openrouter', model: OPENCODE_REAL_MODEL },
         };
         if (cfgRows.length > 0) {
             await db.update(schema.platformSettings).set({ value: JSON.stringify(next) }).where(eq(schema.platformSettings.key, 'agent_gateway_config'));
@@ -154,6 +171,27 @@ describe('LLM proxy intelligent routing', { concurrency: false, timeout: 60000 }
             userId: testUserId,
             projectId: TEST_PROJECT_ID,
             agentId: TEST_AGENT_ID,
+            cwd: '/tmp',
+            status: 'running',
+            createdAt: Date.now(),
+        });
+
+        const opencodeAgents = await db.select().from(schema.agents).where(eq(schema.agents.id, 'opencode'));
+        if (opencodeAgents.length === 0) {
+            await db.insert(schema.agents).values({
+                id: 'opencode',
+                name: 'OpenCode',
+                cmd: 'opencode',
+                args: '[]',
+                envRequired: '[]',
+            });
+        }
+        await db.delete(schema.sessions).where(eq(schema.sessions.id, OPENCODE_SESSION_ID));
+        await db.insert(schema.sessions).values({
+            id: OPENCODE_SESSION_ID,
+            userId: testUserId,
+            projectId: TEST_PROJECT_ID,
+            agentId: 'opencode',
             cwd: '/tmp',
             status: 'running',
             createdAt: Date.now(),
@@ -180,9 +218,12 @@ describe('LLM proxy intelligent routing', { concurrency: false, timeout: 60000 }
         } else {
             process.env.LLM_CAPTURE_MODE = originalCaptureMode;
         }
-        await db.delete(schema.routingDecisions).where(eq(schema.routingDecisions.sessionId, TEST_SESSION_ID));
+        await db.delete(schema.llmUsage).where(eq(schema.llmUsage.sessionId, TEST_SESSION_ID));
+        await db.delete(schema.llmUsage).where(eq(schema.llmUsage.sessionId, OPENCODE_SESSION_ID));
         await db.delete(schema.sessionRouteSticky).where(eq(schema.sessionRouteSticky.sessionId, TEST_SESSION_ID));
+        await db.delete(schema.sessionRouteSticky).where(eq(schema.sessionRouteSticky.sessionId, OPENCODE_SESSION_ID));
         await db.delete(schema.sessions).where(eq(schema.sessions.id, TEST_SESSION_ID));
+        await db.delete(schema.sessions).where(eq(schema.sessions.id, OPENCODE_SESSION_ID));
         await db.delete(schema.projects).where(eq(schema.projects.id, TEST_PROJECT_ID));
         if (insertedAgent) {
             await db.delete(schema.agents).where(eq(schema.agents.id, TEST_AGENT_ID));
@@ -245,5 +286,54 @@ describe('LLM proxy intelligent routing', { concurrency: false, timeout: 60000 }
         assert.equal(received[0].body.model, EXPECTED_FORWARDED_MODEL);
         assert.notEqual(received[0].body.model, TOKEN_MODEL);
         assert.notEqual(received[0].body.model, BODY_MODEL);
+
+        const usageRow = await waitForLatestUsage(TEST_SESSION_ID);
+        assert.equal(usageRow.model, EXPECTED_FORWARDED_MODEL);
+        assert.equal(usageRow.requestedModel, BODY_MODEL);
+        assert.equal(usageRow.trigger, 'first_turn');
+        assert.equal(usageRow.seq, 1);
+        assert.equal(usageRow.cachedTokens, 3);
+        assert.equal(typeof usageRow.difficulty, 'number');
+        assert.ok(usageRow.difficulty >= 0 && usageRow.difficulty <= 1);
+    });
+
+    it('opencode alias rewrites to real id after routing prefixes the alias', { timeout: 15000 }, async () => {
+        const token = issueSessionToken({
+            sessionId: OPENCODE_SESSION_ID,
+            userId: testUserId,
+            projectId: TEST_PROJECT_ID,
+            agentId: 'opencode',
+            model: TOKEN_MODEL,
+            role: 'admin',
+        });
+
+        received.length = 0;
+        const res = await fetch(`${appBaseUrl}/api/v1/llm/v1/chat/completions`, {
+            method: 'POST',
+            headers: {
+                authorization: `Bearer ${token}`,
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: OPENCODE_ALIAS_MODEL,
+                messages: [{ role: 'user', content: 'hello' }],
+            }),
+        });
+
+        const rawBody = await res.text();
+        assert.equal(res.status, 200, rawBody);
+        assert.equal(received.length, 1, 'gateway should receive one chat completion');
+        const forwarded = received[0].body.model;
+        assert.match(String(forwarded), /google\/gemini-2\.0-flash/);
+        assert.notEqual(forwarded, OPENCODE_ALIAS_MODEL);
+        assert.notEqual(forwarded, `openrouter/${OPENCODE_ALIAS_MODEL}`);
+
+        const usageRow = await waitForLatestUsage(OPENCODE_SESSION_ID);
+        assert.equal(usageRow.requestedModel, OPENCODE_ALIAS_MODEL);
+        assert.match(String(usageRow.model), /google\/gemini-2\.0-flash/);
+        assert.equal(usageRow.trigger, 'first_turn');
+        assert.equal(usageRow.seq, 1);
+        assert.equal(typeof usageRow.difficulty, 'number');
+        assert.ok(usageRow.difficulty >= 0 && usageRow.difficulty <= 1);
     });
 });

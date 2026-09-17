@@ -11,6 +11,7 @@ let sessionManager;
 let hibernateSession;
 let stopSession;
 let shouldHibernateSession;
+let waitForAgentExit;
 
 before(async () => {
     ctx = await bootstrapTestDb([
@@ -21,7 +22,7 @@ before(async () => {
     ], __dirname);
     ({ db, schema } = ctx);
     sessionManager = ctx.reloaded['./SessionManager'];
-    ({ hibernateSession, stopSession, shouldHibernateSession } = ctx.reloaded['./idleHibernate']);
+    ({ hibernateSession, stopSession, shouldHibernateSession, waitForAgentExit } = ctx.reloaded['./idleHibernate']);
 });
 
 after(async () => {
@@ -285,4 +286,78 @@ test('stopSession pauses local sessions without runtime hibernate and keeps tran
         await db.delete(schema.projects).where(eq(schema.projects.id, projectId));
         await db.delete(schema.users).where(eq(schema.users.id, userId));
     }
+});
+
+function spawnDetachedSleep() {
+    const { spawn } = require('node:child_process');
+    const child = spawn('sleep', ['30'], { stdio: 'ignore', detached: true });
+    child.unref();
+    return child;
+}
+
+function isPidAlive(pid) {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+test('waitForAgentExit on local pid does not kill sibling processes', async () => {
+    const target = spawnDetachedSleep();
+    const sibling = spawnDetachedSleep();
+    try {
+        assert.ok(target.pid > 0 && sibling.pid > 0);
+        const execCalls = [];
+        const runtime = {
+            exec: {
+                async exec(...args) {
+                    execCalls.push(args);
+                    return { exitCode: 0, stdout: '', stderr: '' };
+                },
+            },
+        };
+        await waitForAgentExit(runtime, 'local', 'kimi-code', {
+            streamRef: `local:pty:${Date.now()}_abcd_${target.pid}`,
+            timeoutMs: 5000,
+        });
+        assert.equal(execCalls.length, 0, 'must not pkill-by-name on the shared host');
+        assert.equal(isPidAlive(target.pid), false);
+        assert.equal(isPidAlive(sibling.pid), true);
+    } finally {
+        try { process.kill(sibling.pid, 'SIGKILL'); } catch (_) { /* already gone */ }
+        try { process.kill(target.pid, 'SIGKILL'); } catch (_) { /* already gone */ }
+    }
+});
+
+test('waitForAgentExit skips name-based pkill on local runtime without a pid', async () => {
+    const execCalls = [];
+    const runtime = {
+        exec: {
+            async exec(...args) {
+                execCalls.push(args);
+                return { exitCode: 0, stdout: '', stderr: '' };
+            },
+        },
+    };
+    await waitForAgentExit(runtime, 'local', 'kimi-code');
+    assert.equal(execCalls.length, 0);
+});
+
+test('waitForAgentExit still uses VM pkill for isolated runtimes', async () => {
+    const execCalls = [];
+    const runtime = {
+        exec: {
+            async exec(cmd, args, env, opts) {
+                execCalls.push({ cmd, args, opts });
+                return { exitCode: 0, stdout: '', stderr: '' };
+            },
+        },
+    };
+    await waitForAgentExit(runtime, 'boxlite:p_proj:rt_1', 'kimi-code');
+    assert.equal(execCalls.length, 1);
+    assert.equal(execCalls[0].cmd, 'sh');
+    assert.match(String(execCalls[0].args[1] || ''), /kill |pkill/);
+    assert.equal(execCalls[0].opts.runtimeRef, 'boxlite:p_proj:rt_1');
 });

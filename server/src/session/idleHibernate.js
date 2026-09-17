@@ -1,9 +1,67 @@
 const { eq } = require('drizzle-orm');
 const { terminateDetachedSessionProcess } = require('./sessionTermination');
+const { parseLocalPid } = require('./reconcileRunningSessions');
 
 const AGENT_EXIT_TIMEOUT_MS = 15000;
 
-async function waitForAgentExit(runtime, runtimeRef, agentId) {
+function isSharedHostRuntime(runtimeRef, streamRef) {
+    if (runtimeRef === 'local') return true;
+    return typeof streamRef === 'string' && streamRef.startsWith('local:pty:');
+}
+
+function pidExists(pid) {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (err) {
+        return err && err.code === 'EPERM';
+    }
+}
+
+function signalPid(pid, signal) {
+    try {
+        process.kill(-pid, signal);
+    } catch (_) {
+        try { process.kill(pid, signal); } catch (__) { /* ESRCH / EPERM */ }
+    }
+}
+
+async function waitForLocalPidExit(pid, timeoutMs = AGENT_EXIT_TIMEOUT_MS) {
+    if (!Number.isInteger(pid) || pid <= 0) return;
+    if (!pidExists(pid)) return;
+    signalPid(pid, 'SIGINT');
+    const start = Date.now();
+    let sentTerm = false;
+    let sentKill = false;
+    while (Date.now() - start < timeoutMs) {
+        if (!pidExists(pid)) return;
+        const elapsed = Date.now() - start;
+        if (!sentTerm && elapsed >= 3000) {
+            signalPid(pid, 'SIGTERM');
+            sentTerm = true;
+        }
+        if (!sentKill && elapsed >= 8000) {
+            signalPid(pid, 'SIGKILL');
+            sentKill = true;
+        }
+        await new Promise((r) => setTimeout(r, 150));
+    }
+    if (pidExists(pid)) signalPid(pid, 'SIGKILL');
+}
+
+async function waitForAgentExit(runtime, runtimeRef, agentId, options = {}) {
+    const streamRef = options.streamRef || null;
+    const localPid = options.localPid || parseLocalPid(streamRef);
+    if (localPid) {
+        await waitForLocalPidExit(localPid, options.timeoutMs || AGENT_EXIT_TIMEOUT_MS);
+        return;
+    }
+    // Local runtime shares the host with every other session. Name-based
+    // pkill/grep would terminate sibling sessions running the same CLI
+    // (their PTY exits → recoverable sessions flip to idle/"paused").
+    if (isSharedHostRuntime(runtimeRef, streamRef)) {
+        return;
+    }
     if (!runtime?.exec?.exec || !runtimeRef || !agentId) {
         await new Promise((r) => setTimeout(r, 3000));
         return;
@@ -73,7 +131,9 @@ async function waitForAgentExit(runtime, runtimeRef, agentId) {
         ].join('\n');
 
     try {
-        await runtime.exec.exec('sh', ['-c', script, 'sh', agentCmd], {}, { runtimeRef, cwd: '/', timeoutMs: AGENT_EXIT_TIMEOUT_MS });
+        await runtime.exec.exec('sh', ['-c', script, 'sh', agentCmd], {}, {
+            runtimeRef, cwd: '/', timeoutMs: options.timeoutMs || AGENT_EXIT_TIMEOUT_MS,
+        });
     } catch (_) {
         await new Promise((r) => setTimeout(r, 3000));
     }
@@ -193,7 +253,9 @@ async function stopSession({
 
         const runtimeRef = live?.runtimeRef || live?.runtimeId || null;
         if (runtimeRef) {
-            await waitForAgentExit(runtime, runtimeRef, live.agentId);
+            await waitForAgentExit(runtime, runtimeRef, live.agentId, {
+                streamRef: live?.streamRef || session.streamRef || null,
+            });
         }
         const rtRef = live?.runtimeRef || live?.runtimeId || live?.handle?.runtimeRef
             || session.runtimeRef || session.runtimeId || session.streamRef || null;
@@ -289,6 +351,8 @@ function createIdleHibernateMonitor({
 module.exports = {
     shouldHibernateSession,
     waitForAgentExit,
+    waitForLocalPidExit,
+    isSharedHostRuntime,
     stopSession,
     hibernateSession,
     createIdleHibernateMonitor,

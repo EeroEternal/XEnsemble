@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const DEFAULT_REGISTRY = path.join(__dirname, 'modelPortraits.registry.json');
+const portraitsCache = new Map();
 
 function canonicalModelId(raw) {
     let s = String(raw || '').trim();
@@ -13,8 +14,18 @@ function canonicalModelId(raw) {
 
 function fetchModelPortraits({ registryPath } = {}) {
     const p = registryPath || DEFAULT_REGISTRY;
+    let mtimeMs = 0;
+    try {
+        mtimeMs = fs.statSync(p).mtimeMs;
+    } catch {
+        mtimeMs = 0;
+    }
+    const hit = portraitsCache.get(p);
+    if (hit && hit.mtimeMs === mtimeMs) return hit.portraits;
     const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
-    return { registry_version: parsed.registry_version, offerings: parsed.offerings || [] };
+    const portraits = { registry_version: parsed.registry_version, offerings: parsed.offerings || [] };
+    portraitsCache.set(p, { mtimeMs, portraits });
+    return portraits;
 }
 
 function findOfferings(portraits, { modelId, providerId } = {}) {

@@ -1332,7 +1332,9 @@ async function teardownSession(session, sessionId, log) {
         }
         const runtimeRef = live.runtimeRef || live.runtimeId || null;
         if (runtimeRef) {
-            await waitForAgentExit(runtime, runtimeRef, live.agentId || session.agentId).catch(() => {});
+            await waitForAgentExit(runtime, runtimeRef, live.agentId || session.agentId, {
+                streamRef: live.streamRef || session.streamRef || null,
+            }).catch(() => {});
         }
     } else if (session.status === 'running' || session.status === 'idle' || session.status === 'pending') {
         let runtimeRef = null;

@@ -56,17 +56,11 @@ async function recordStickyFailure(sessionId) {
         return { failCount: 0, released: false };
     }
     const failCount = rows[0].failCount + 1;
-    if (failCount >= FAIL_THRESHOLD) {
-        await db
-            .delete(schema.sessionRouteSticky)
-            .where(eq(schema.sessionRouteSticky.sessionId, sessionId));
-        return { failCount, released: true };
-    }
     await db
         .update(schema.sessionRouteSticky)
         .set({ failCount, updatedAt: Date.now() })
         .where(eq(schema.sessionRouteSticky.sessionId, sessionId));
-    return { failCount, released: false };
+    return { failCount, released: failCount >= FAIL_THRESHOLD };
 }
 
 module.exports = {

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在控制面 LLM proxy 上落地缓存粘性、成本感知供应商选路、`routing_decisions` 观测；难度评估器仅 stub，逻辑模型等于请求体 `model`。
+**Goal:** 在控制面 LLM proxy 上落地缓存粘性、成本感知选路、`routing_decisions` 观测；难度评估器仅 stub，优化器在 Agent 勾选模型中选最便宜的一条。
 
 **Architecture:** 决策全部在 `server/src/llm/router/`，`proxy.js` 只编排。画像读仓库内 llm-providers ParaRouter 导出 JSON。粘性与决策进 PostgreSQL。UniGateway 仍只吃改写后的 `provider/model`。压缩无协议字段，用 trajectory 同一套 `samePrefix` 在 `recordRequest` **之前**推断。
 
@@ -11,8 +11,8 @@
 ## Global Constraints
 
 - 不引入 Redis；跨实例状态只写 PostgreSQL。
-- `evaluateDifficulty()` v1 恒返回 `null`；`null` 时 **不得** 覆盖请求体逻辑模型。
-- 逻辑模型 = `body.model`（去掉 `anthropic.` 前缀）；空才回退 token `model` → Agent `primaryModel`。
+- `evaluateDifficulty()` v1 恒返回 `null`；`null` 表示无能力门槛，优化器在 Agent 勾选模型中选最便宜的一条。
+- 无勾选列表时才回退 `body.model`（去掉 `anthropic.` 前缀）；再空才回退 token `model` → Agent `primaryModel`。
 - 价格优先仓库内静态 JSON；unknown ≠ 0 元；显式 0 才是免费。
 - `routing_decisions.seq` 必须等于同一次调用 `trajectory.recordRequest` 的 `seq`。
 - 测试 glob：`server/package.json` 的 `test` 必须包含 `src/llm/**/*.test.js`，否则 `router/` 下测试永不跑。
@@ -339,7 +339,8 @@ EOF
 - Produces:
   - `toUnitPrice(global_pricing) → { inputPer1m, outputPer1m, cacheReadPer1m, cacheWritePer1m }` 缺省轴为 `null`
   - `isPriced(unit) → boolean`：任一轴 `!= null`（含 `0`）
-  - `calculateCost(unit, { promptTokens, completionTokens, cacheHitTokens, cacheZero }) → number | null`：`!isPriced` 返回 `null`；`cacheZero` 时 hits=0；无 `cacheReadPer1m` 且 hits>0 时 cache 价 = input * 0.1
+  - `toUsdUnitPrice(globalPricing, currency) → { currency:'USD', cache_read, cache_write, input, output } | null`；未知货币或全 null 单价返回 `null`
+  - `compareUsdUnitPrice(a, b)`：字典序 `cache_read` → `cache_write` → `input` → `output`；轴 `null` 视为 +∞
 
 - [ ] **Step 1: 测试**
 

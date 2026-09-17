@@ -66,11 +66,11 @@ Gateway 模式 spawn 时，由 `agentEnv.js` 的 `applyGatewaySynthesis` 展开�
 Gateway 模式 chat 路径在 `proxy.js` 鉴权后、`forwardToGateway` 前，经四层流水线选路并写审计。**四层均在控制面 `server/src/llm/`，UniGateway 仍只按 `body.model` 与已有 binding 转发，不读 Session、不做任务评估。**
 
 1. **接入层**（`router/signals.js`）：从 JWT、请求体与 DB 用量抽取 session、前缀长度、缓存元数据；压缩由控制面自行推断（见下），无协议字段。
-2. **决策层**（`router/sticky.js`、`triggers.js`、`evaluateDifficulty.js`、`optimizer.js`）：粘性复用或触发重评估；v1 评估器 stub 恒返回 `null`，**逻辑模型 = 请求体 `model`**（剥 `anthropic.` 与聚合盘前缀；空才回退 session token / Agent 主模型），禁止据此换模型；优化器在已绑定 provider 内做成本排序。
+2. **决策层**（`router/sticky.js`、`triggers.js`、`evaluateDifficulty.js`、`optimizer.js`）：粘性复用或触发重评估。静态启发式给出任务难度 \(D \in [0,1]\)（写入 `llm_usage.difficulty`）。需要的能力分为 `0.35 + 0.55D`；\(D \ge 0.55\) 时还须接近池内最高能力分（容差 0.04）。优化器在 **合格且已勾选** 的模型中选最低价（跨模型比 `input` → `output`）。若谁都不够格，回退到请求体里用户选中的模型（`logicalModel`），而不是最低价。执行层写成 `{gatewayProvider}/{canonicalModel}`。请求体 `model` 只在没有勾选列表时作缺省，不锁死选路。
 3. **执行层**（`router/execute.js`）：改写 `body.model` 为 `{provider}/{model}`；opencode alias 改写在路由改写**之后**。
-4. **观测层**（`router/decisions.js`）：每次决策写入 PostgreSQL `routing_decisions`。
+4. **观测层**：每次成功且解析到 usage 的 chat 写入 `llm_usage`（含 `requested_model`、`trigger`、`seq`、`difficulty`）。不再写入 `routing_decisions`。
 
-**模型画像**：`fetchModelPortraits()` 读仓库提交的 `server/src/llm/modelPortraits.registry.json`（llm-providers 导出），不发起运行时 HTTP 请求。
+**模型报价/能力**：`fetchModelCatalog()` 读仓库内 `server/src/llm/modelCatalog.json`。记录以 **provider + model** 为 key，值含官方 USD 单价与能力分。同一 canonical/family 模型先共用一套价格，不按供应商差价。查价不再走 `modelPortraits.registry.json`。
 
 **压缩推断**：OpenAI / Anthropic 请求体无 `compaction` 标志。控制面用与 `trajectory.js` 相同的 `samePrefix` 规则：严格追加前缀则非压缩，否则（且已有上一轮）视为 `compacted`，触发 `trigger=compaction` 并重算缓存成本。
 
@@ -96,7 +96,8 @@ JWT claims（`typ: llm_session`）：`sid`、`uid`、`pid`、`aid`、`model`（�
 | `llm/sessionToken.js` | 签发 / 校验 `xel_` token |
 | `llm/proxy.js` | 反代、鉴权、限流、智能路由编排、审计事件 |
 | `llm/router/` | 智能路由：信号 / 粘性 / 触发 / 优化 / 执行 / 决策日志 |
-| `llm/modelPortraits.js` | 静态模型画像（`modelPortraits.registry.json`） |
+| `llm/modelCatalog.js` | 已配置模型的价格与能力分（`modelCatalog.json`） |
+| `llm/modelPortraits.js` | canonical model id；旧画像 registry 不再用于查价 |
 | `llm/gatewayUpstream.js` | 解析 UniGateway 上游地址 |
 | `llm/serviceRouter.js` | 派生并注册 per-agent UniGateway API key |
 | `llm/agentServiceSync.js` | 同步 `unigateway.toml` services/bindings（按 agent 替换 binding） |

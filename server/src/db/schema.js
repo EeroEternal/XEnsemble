@@ -5,6 +5,7 @@ const {
   bigint,
   bigserial,
   real,
+  doublePrecision,
   boolean,
   jsonb,
   unique,
@@ -578,10 +579,20 @@ const llmUsage = pgTable('llm_usage', {
   statusCode: integer('status_code'),
   latencyMs: integer('latency_ms'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  // 0034: 智能路由观测并入本表（仍只在成功且解析到 usage 时插入）
+  // requested_model = 路由前 Agent 请求体 model；model 仍是实际转发 id
+  requestedModel: text('requested_model'),
+  // first_turn / sticky / compaction / provider_fail；路由 skip 时为 null
+  trigger: text('trigger'),
+  // 与同一次 trajectory.recordRequest 的 seq 相同；trajectory 未记时为 null
+  seq: integer('seq'),
+  // 0035: 静态启发式任务难度 D ∈ [0,1]；路由 skip 时为 null
+  difficulty: doublePrecision('difficulty'),
 }, (table) => ({
   userCreatedIdx: index('idx_llm_usage_user_created').on(table.userId, table.createdAt),
   userProjectIdx: index('idx_llm_usage_user_project').on(table.userId, table.projectId, table.createdAt),
   createdIdx: index('idx_llm_usage_created').on(table.createdAt),
+  sessionSeqIdx: index('idx_llm_usage_session_seq').on(table.sessionId, table.seq),
 }));
 
 // STICKY_TTL_MS = 10 * 60 * 1000 — 文档用，TTL 逻辑在 sticky.js

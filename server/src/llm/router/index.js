@@ -8,40 +8,49 @@ function resolveGetSticky(deps) {
     return require('./sticky').getSticky;
 }
 
-async function planRoute({ claims, body, lastUsage, boundProviderIds, portraits }, deps = {}) {
+async function planRoute({
+    claims,
+    body,
+    lastUsage,
+    boundProviderIds,
+    catalog,
+    agentPrimaryModel,
+    allowedModels,
+    gatewayProvider,
+}, deps = {}) {
     const getSticky = resolveGetSticky(deps);
 
     const signals = collectSignals({
         sessionId: claims.sid,
         body,
         tokenModel: claims.model,
-        agentPrimaryModel: claims.agentPrimaryModel || '',
+        agentPrimaryModel: agentPrimaryModel || claims.agentPrimaryModel || '',
         lastUsage,
     });
-    const demand = await evaluateDifficulty(signals);
+    const demand = await evaluateDifficulty({ body, signals });
     const sticky = await getSticky(claims.sid);
     const trig = resolveTrigger({
         sticky,
         compacted: signals.compacted,
         stickyReleasedByFailures: !!(sticky && sticky.failCount >= 2),
     });
-    // v1 always uses body-derived signals.logicalModel. If demand is later
-    // used for capability gating, still do NOT fall back to claims.model.
-    const logicalModel = demand == null ? signals.logicalModel : signals.logicalModel;
+    // Static difficulty D gates the allowed set; optimizer then picks the
+    // cheapest qualified model. Body model is only the fallback when the
+    // Agent has no selectable list, and never claims.model.
+    const logicalModel = signals.logicalModel;
     const candidates = resolveProviderRoute({
-        portraits,
+        catalog,
         logicalModel,
         boundProviderIds: boundProviderIds || [],
-        cacheHitTokens: signals.lastCachedTokens || 0,
-        promptTokens: signals.lastPromptTokens || 0,
-        completionTokensGuess: 0,
-        cacheZero: trig.trigger === 'compaction',
         demand,
+        allowedModels,
+        gatewayProvider,
     });
     const chosen = chooseRoute(candidates, {
         sticky,
         reevaluate: trig.reevaluate,
         logicalModel,
+        gatewayProvider,
     });
     return { signals, demand, trig, chosen, candidates, sticky };
 }

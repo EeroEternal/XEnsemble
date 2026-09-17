@@ -20,12 +20,12 @@ test('compacted → compaction with reevaluate', () => {
     );
 });
 
-test('stickyReleasedByFailures or failCount >= 2 → provider_fail with reevaluate', () => {
+test('stickyReleasedByFailures true with failCount 1 still triggers provider_fail', () => {
     assert.deepEqual(
         resolveTrigger({
-            sticky: { chosenModel: 'm', chosenProvider: 'p', failCount: 2 },
+            sticky: { chosenModel: 'm', chosenProvider: 'p', failCount: 1 },
             compacted: false,
-            stickyReleasedByFailures: false,
+            stickyReleasedByFailures: true,
         }),
         { trigger: 'provider_fail', reevaluate: true },
     );

@@ -48,7 +48,7 @@ async function terminateDetachedSessionProcess({
     const agentId = session.agentId || null;
     if (runtimeRef && agentId && typeof waitForAgentExit === 'function' && runtime) {
         try {
-            await waitForAgentExit(runtime, runtimeRef, agentId);
+            await waitForAgentExit(runtime, runtimeRef, agentId, { streamRef });
             return { killed: true, reason: 'runtime_pkill' };
         } catch (err) {
             fastifyLog?.warn?.(err, '[sessions] failed runtime agent cleanup');

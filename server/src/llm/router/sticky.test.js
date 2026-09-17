@@ -88,7 +88,7 @@ describe('session route sticky (postgres)', { concurrency: false, timeout: 60000
         assert.equal(await getSticky(SESSION_ID), null);
     });
 
-    it('recordStickyFailure twice deletes the row and returns released', async () => {
+    it('recordStickyFailure twice keeps a tombstone so the next turn can trigger provider_fail', async () => {
         await touchSticky(SESSION_ID, { chosenModel: 'kimi-k2.5', chosenProvider: 'moonshot' });
         const first = await recordStickyFailure(SESSION_ID);
         assert.equal(first.failCount, 1);
@@ -98,12 +98,10 @@ describe('session route sticky (postgres)', { concurrency: false, timeout: 60000
         assert.equal(second.failCount, 2);
         assert.equal(second.released, true);
 
-        const rows = await db
-            .select()
-            .from(schema.sessionRouteSticky)
-            .where(eq(schema.sessionRouteSticky.sessionId, SESSION_ID));
-        assert.equal(rows.length, 0);
-        assert.equal(await getSticky(SESSION_ID), null);
+        const sticky = await getSticky(SESSION_ID);
+        assert.ok(sticky);
+        assert.equal(sticky.failCount, 2);
+        assert.equal(sticky.chosenProvider, 'moonshot');
     });
 
     it('recordStickyFailure is a noop when no row exists', async () => {
