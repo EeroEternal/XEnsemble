@@ -13,6 +13,7 @@ import {
   FULL_REPAINT_DROP_MIN_KEEP_BYTES,
 } from '../lib/terminalFrameDrop';
 import { useTerminalTheme } from '../hooks/useTerminalTheme.jsx';
+import { XTERM_MINIMUM_CONTRAST_RATIO } from '../lib/terminalThemes.js';
 import { Loader2 } from 'lucide-react';
 import {
   createTerminalReconnectState,
@@ -235,6 +236,9 @@ function AgentConsole({
       cursorBlink: true,
       cursorStyle: 'bar',
       drawBoldTextInBrightColors: true,
+      // 自动提升低对比度配色（如 kimi-code 的暗灰辅助文字），
+      // 常量与终端主题一同定义，见 terminalThemes.js
+      minimumContrastRatio: XTERM_MINIMUM_CONTRAST_RATIO,
       theme: xtermTheme,
     });
 
@@ -286,7 +290,8 @@ function AgentConsole({
     const replyOscColor = (ident, data) => {
       if (String(data).trim() !== '?') return false;
       const theme = xtermThemeRef.current || {};
-      const hex = expandHexColor16(ident === 10 ? theme.foreground : theme.background);
+      const source = ident === 10 ? theme.foreground : ident === 11 ? theme.background : theme.cursor;
+      const hex = expandHexColor16(source);
       if (!hex) return true;
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: 'input', data: `\x1b]${ident};rgb:${hex}\x1b\\` }));
@@ -295,6 +300,50 @@ function AgentConsole({
     };
     terminal.parser.registerOscHandler(10, (data) => replyOscColor(10, data));
     terminal.parser.registerOscHandler(11, (data) => replyOscColor(11, data));
+    // 光标色查询（OSC 12）：opencode 探测调色板时一并询问
+    terminal.parser.registerOscHandler(12, (data) => replyOscColor(12, data));
+    // 调色板查询（OSC 4）：opencode "system" 主题启动时会先发 "4;0;?" 探测
+    // 终端是否支持 OSC 应答，再逐色询问 256 色；任何一个都无应答则整个
+    // system 主题被弃用、回退到默认深色画布（浅色终端下面板全部发暗）。
+    // 按 xterm 主题 ANSI 16 色 + extendedAnsi（232-255 灰阶）+ 标准 6x6x6
+    // 方块补全应答。仅应答 "index;?" 查询；设色指令交回默认处理。
+    const XTERM_ANSI16_KEYS = [
+      'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
+      'brightBlack', 'brightRed', 'brightGreen', 'brightYellow',
+      'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite',
+    ];
+    const xtermColor256Hex = (index, theme) => {
+      if (!theme || !(index >= 0 && index <= 255)) return null;
+      if (index < 16) return theme[XTERM_ANSI16_KEYS[index]] || null;
+      const extended = Array.isArray(theme.extendedAnsi) ? theme.extendedAnsi[index - 16] : undefined;
+      if (extended) return extended;
+      if (index < 232) {
+        const i = index - 16;
+        return '#' + [Math.floor(i / 36), Math.floor(i / 6) % 6, i % 6]
+          .map((v) => (Math.round((v * 255) / 5)).toString(16).padStart(2, '0'))
+          .join('');
+      }
+      const v = 8 + (index - 232) * 10;
+      const h = v.toString(16).padStart(2, '0');
+      return `#${h}${h}${h}`;
+    };
+    const replyOscPalette = (data) => {
+      const theme = xtermThemeRef.current || {};
+      const parts = String(data).split(';');
+      let replied = false;
+      for (let i = 0; i + 1 < parts.length; i += 2) {
+        if (String(parts[i + 1]).trim() !== '?') continue;
+        const idx = parseInt(parts[i], 10);
+        const hex = expandHexColor16(xtermColor256Hex(idx, theme));
+        if (!hex) continue;
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'input', data: `\x1b]4;${idx};rgb:${hex}\x1b\\` }));
+        }
+        replied = true;
+      }
+      return replied;
+    };
+    terminal.parser.registerOscHandler(4, replyOscPalette);
     try { fitAddon.fit(); } catch (_) {}
     // Re-fit after flex layout settles; the first fit() may run when
     // the host element has partial width (before layout completes).
