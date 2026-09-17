@@ -49,6 +49,15 @@ describe('stripTerminalQueries', () => {
     assert.equal(stripTerminalQueries(`\x1b]4;0;?;1;#00ff00${ST}`), `\x1b]4;1;#00ff00${ST}`);
   });
 
+  it('removes color-scheme / mode-report / version / screen-size queries', () => {
+    assert.equal(stripTerminalQueries(`\x1b[?996n`), '');
+    assert.equal(stripTerminalQueries(`\x1b[?2026$p`), '');
+    assert.equal(stripTerminalQueries(`\x1b[4$p`), '');
+    assert.equal(stripTerminalQueries(`\x1b[>q`), '');
+    assert.equal(stripTerminalQueries(`\x1b[15t`), '');
+    assert.equal(stripTerminalQueries(`\x1b[16t`), '');
+  });
+
   it('does not touch OSC 52 clipboard writes or title updates', () => {
     const clipboard = `\x1b]52;c;aGVsbG8=${BEL}`;
     const title = `\x1b]0;opencode${BEL}`;

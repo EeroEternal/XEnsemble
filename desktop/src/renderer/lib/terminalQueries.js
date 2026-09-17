@@ -25,7 +25,10 @@
 //   OSC 10/11/12 ; ?          —— 默认前景 / 背景 / 光标色查询
 //   CSI 5n / 6n / ?6n         —— 设备状态 / 光标位置查询（DSR）
 //   CSI c / CSI >c            —— 设备属性查询（DA1 / DA2）
-//   CSI 14t / 18t             —— 窗口尺寸查询（像素 / 字符）
+//   CSI 14t / 15t / 16t / 18t —— 窗口 / 屏幕 / 单元尺寸查询
+//   CSI ?996n                 —— 浅/深配色偏好查询（xterm 回 ?997;1n / ?997;2n）
+//   CSI ?Ps$p                 —— DECRQM 模式查询（xterm 回 ?Ps;Pm$y）
+//   CSI >q                    —— XTVERSION 查询
 const TERMINAL_QUERY_RES = [
   /\x1b\](?:10|11|12);\?(?:\x07|\x1b\\)/g,
   /\x1b\[5n/g,
@@ -34,7 +37,12 @@ const TERMINAL_QUERY_RES = [
   /\x1b\[>c/g,
   /\x1b\[c/g,
   /\x1b\[14t/g,
+  /\x1b\[15t/g,
+  /\x1b\[16t/g,
   /\x1b\[18t/g,
+  /\x1b\[\?996n/g,
+  /\x1b\[[?0-9;]*\$p/g,
+  /\x1b\[>q/g,
 ];
 
 // OSC 4（调色板，`ESC ] 4 ; <idx> ; <value> ST`）可以一次携带多项。查询项

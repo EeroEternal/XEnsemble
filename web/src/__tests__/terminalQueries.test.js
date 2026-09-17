@@ -48,6 +48,15 @@ describe('stripTerminalQueries', () => {
     expect(stripTerminalQueries(`\x1b]4;0;?;1;#00ff00${ST}`)).toBe(`\x1b]4;1;#00ff00${ST}`);
   });
 
+  it('removes color-scheme / mode-report / version / screen-size queries', () => {
+    expect(stripTerminalQueries(`\x1b[?996n`)).toBe('');
+    expect(stripTerminalQueries(`\x1b[?2026$p`)).toBe('');
+    expect(stripTerminalQueries(`\x1b[4$p`)).toBe('');
+    expect(stripTerminalQueries(`\x1b[>q`)).toBe('');
+    expect(stripTerminalQueries(`\x1b[15t`)).toBe('');
+    expect(stripTerminalQueries(`\x1b[16t`)).toBe('');
+  });
+
   it('does not touch OSC 52 clipboard writes or title updates', () => {
     const clipboard = `\x1b]52;c;aGVsbG8=${BEL}`;
     const title = `\x1b]0;opencode${BEL}`;
