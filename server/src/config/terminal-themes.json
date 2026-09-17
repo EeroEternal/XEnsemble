@@ -31,6 +31,16 @@
       }
     },
     {
+      "id": "github-dark",
+      "label": "GitHub Dark",
+      "appearance": "dark",
+      "enabled": true,
+      "spawn_env": {
+        "COLORFGBG": "15;0",
+        "COLORTERM": "truecolor"
+      }
+    },
+    {
       "id": "solarized-light",
       "label": "Solarized Light",
       "appearance": "light",
@@ -51,5 +61,5 @@
       }
     }
   ],
-  "default_id": "nord"
+  "default_id": "github-dark"
 }

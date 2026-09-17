@@ -351,6 +351,19 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                         },
                     },
                 }, null, 2),
+                // The embedded terminal paints its own light/dark xterm theme;
+                // opencode's default theme is dark and would cover it with a
+                // black canvas in light mode. The built-in "system" theme keeps
+                // text/background on terminal defaults and reads ANSI 0-15 from
+                // the host palette, so the TUI follows the xterm appearance.
+                extraFiles: [{
+                    dirPath: '/root/.config/opencode',
+                    filePath: '/root/.config/opencode/tui.json',
+                    content: JSON.stringify({
+                        $schema: 'https://opencode.ai/tui.json',
+                        theme: 'system',
+                    }, null, 2),
+                }],
             };
         }
 

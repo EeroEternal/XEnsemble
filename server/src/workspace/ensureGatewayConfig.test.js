@@ -254,6 +254,18 @@ test('buildGatewayConfigSpec: opencode writes limit.context per model (official 
     assert.equal(content.model, 'gateway/deepseek-v4-flash');
 });
 
+test('buildGatewayConfigSpec: opencode writes tui.json with adaptive system theme', () => {
+    const spec = buildGatewayConfigSpec('opencode', ctx);
+    const tui = (spec.extraFiles || []).find((f) => f.filePath === '/root/.config/opencode/tui.json');
+    assert.ok(tui, 'expected tui.json in extraFiles');
+    assert.equal(tui.dirPath, '/root/.config/opencode');
+    const parsed = JSON.parse(tui.content);
+    // "system" theme follows the host terminal palette so the TUI matches the
+    // embedded xterm light/dark appearance instead of painting a dark canvas.
+    assert.equal(parsed.theme, 'system');
+    assert.ok(parsed.$schema);
+});
+
 test('buildGatewayConfigSpec: opencode with unknown model falls back to 1M', () => {
     const spec = buildGatewayConfigSpec('opencode', {
         ...ctx,

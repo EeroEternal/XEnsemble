@@ -103,6 +103,19 @@ function setCachedSeq(sessionId, seq) {
   } catch { /* ignore */ }
 }
 
+// 把 xterm 主题色（#RGB / #RRGGBB / #RRGGBBAA）展开成 OSC 10/11 应答所需的
+// rgb:RRRR/GGGG/BBBB（16 位通道）。无法解析时返回 null。
+function expandHexColor16(hex) {
+  const m = /^#([0-9a-f]{3,8})$/i.exec(String(hex || '').trim());
+  if (!m) return null;
+  let h = m[1];
+  if (h.length === 3 || h.length === 4) h = h.slice(0, 3).split('').map((c) => c + c).join('');
+  if (h.length !== 6 && h.length !== 8) return null;
+  if (h.length === 8) h = h.slice(0, 6);
+  const to16 = (v) => (v * 257).toString(16).padStart(4, '0');
+  return `${to16(parseInt(h.slice(0, 2), 16))}/${to16(parseInt(h.slice(2, 4), 16))}/${to16(parseInt(h.slice(4, 6), 16))}`;
+}
+
 function AgentConsole({
   sessionId,
   agentId,
@@ -118,6 +131,10 @@ function AgentConsole({
   // 其他 agent 为 false → 完全走原有字节透明管线，行为不变。
   const fullRepaintDrop = isFullRepaintDropAgent(agentId);
   const xtermTheme = preset?.xterm || FALLBACK_XTERM_THEME;
+  // 终端主题热切换时 Terminal 实例不会重建（就地更新 options.theme），
+  // OSC 10/11 应答需要读到最新配色，用 ref 跟踪。
+  const xtermThemeRef = useRef(xtermTheme);
+  xtermThemeRef.current = xtermTheme;
 
   const hostRef = useRef(null);
   const overlayRef = useRef(null);
@@ -212,6 +229,22 @@ function AgentConsole({
  } catch (_) {}
  return true;
  });
+    // 默认前景/背景色查询（OSC 10/11，如 opencode "system" 主题探测宿主
+    // 底色决定浅/深灰阶）：xterm.js 不代答，不回应时 TUI 探测失败会按深色
+    // 假设渲染。这里用当前 xterm 主题的默认色应答，使 agent 主题跟随
+    // 终端的浅/深模式。仅应答 "?" 查询；设色指令交回默认处理。
+    const replyOscColor = (ident, data) => {
+      if (String(data).trim() !== '?') return false;
+      const theme = xtermThemeRef.current || {};
+      const hex = expandHexColor16(ident === 10 ? theme.foreground : theme.background);
+      if (!hex) return true;
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'input', data: `\x1b]${ident};rgb:${hex}\x1b\\` }));
+      }
+      return true;
+    };
+    terminal.parser.registerOscHandler(10, (data) => replyOscColor(10, data));
+    terminal.parser.registerOscHandler(11, (data) => replyOscColor(11, data));
     // Fit terminal to container BEFORE creating WebSocket so transcript
     // replay doesn't wrap at the wrong width.
     try { fitAddon.fit(); } catch (_) {}

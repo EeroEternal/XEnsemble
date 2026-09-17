@@ -19,7 +19,7 @@ const DEFAULTS = {
         resource_tier: DEFAULT_QUOTA.resourceTier,
     },
     session_ttl_hours: 24,
-    default_terminal_theme_id: 'nord',
+    default_terminal_theme_id: 'github-dark',
     disabled_terminal_theme_ids: [],
     // preview 部署时数据库模式：
     //   local （默认）— 在沙箱内起 DB 并本地化 host（隔离、可复现、不碰生产库）；

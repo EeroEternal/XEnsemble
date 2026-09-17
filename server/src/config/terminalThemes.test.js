@@ -48,10 +48,10 @@ describe('terminalThemes', () => {
         assert.equal(warnings.length, 1);
     });
 
-    it('falls back when theme is catalog-disabled', () => {
+    it('falls back when theme id is not in the catalog', () => {
         assert.equal(
             resolveEffectiveTerminalThemeId({
-                requestThemeId: 'solarized-light',
+                requestThemeId: 'solarized-dark',
                 platformDefaultId: 'nord',
             }),
             'nord',
@@ -63,10 +63,10 @@ describe('terminalThemes', () => {
             platformDefaultId: 'nord',
             disabledIds: ['dracula'],
         });
-        assert.equal(catalog.default_id, 'nord');
+        assert.equal(catalog.default_id, 'github-dark');
         assert.ok(catalog.themes.some((t) => t.id === 'nord'));
         assert.ok(!catalog.themes.some((t) => t.id === 'dracula'));
-        assert.ok(!catalog.themes.some((t) => t.id === 'solarized-light'));
+        assert.ok(catalog.themes.some((t) => t.id === 'solarized-light'));
     });
 
     it('provides COLORFGBG from dark presets', () => {

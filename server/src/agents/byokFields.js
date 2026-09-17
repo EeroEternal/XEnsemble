@@ -341,6 +341,17 @@ function generateOpencode(values) {
             },
         };
         configFiles.push({ path: '/root/.config/opencode/opencode.json', content: JSON.stringify(config, null, 2) });
+        // Built-in "system" theme: text/background stay on terminal defaults and
+        // ANSI colors come from the host palette, so the TUI follows the light /
+        // dark appearance of the embedded xterm instead of covering it with the
+        // default dark canvas.
+        configFiles.push({
+            path: '/root/.config/opencode/tui.json',
+            content: JSON.stringify({
+                $schema: 'https://opencode.ai/tui.json',
+                theme: 'system',
+            }, null, 2),
+        });
     }
     return { env, configFiles };
 }
