@@ -88,9 +88,18 @@ export default function MyUsagePanel() {
 
           <div>
             <div className={`${consoleSectionLabelClass} mb-2`}>{t('observability:my_usage.by_project')}</div>
-            <div className={`${consoleCardClass} max-h-64 overflow-y-auto overflow-x-hidden console-scroll-hidden`}>
-              <table className="w-full border-collapse text-left text-xs">
-                <thead className="sticky top-0 z-10">
+            <div className={`${consoleCardClass} overflow-hidden`}>
+              <div className="shrink-0 overflow-x-hidden overflow-y-auto">
+              <table className="w-full table-fixed border-collapse text-left text-xs">
+                <colgroup>
+                  <col className="w-[40%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                </colgroup>
+                <thead>
                   <tr className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-400">
                     <th className="px-4 py-2 font-medium">{t('observability:my_usage.project')}</th>
                     <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.requests')}</th>
@@ -100,6 +109,18 @@ export default function MyUsagePanel() {
                     <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.total_tokens')}</th>
                   </tr>
                 </thead>
+              </table>
+              </div>
+              <div className="max-h-64 overflow-y-auto overflow-x-hidden console-scroll-hidden">
+              <table className="w-full table-fixed border-collapse text-left text-xs">
+                <colgroup>
+                  <col className="w-[40%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                </colgroup>
                 <tbody className="divide-y divide-zinc-100">
                   {(usage.byProject || []).map((p) => (
                     <tr key={p.projectId ?? 'deleted'} className="text-zinc-600">
@@ -119,6 +140,7 @@ export default function MyUsagePanel() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
         </>
