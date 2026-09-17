@@ -11,6 +11,7 @@ const DIMENSION_LIMIT = {
     projects: 'maxProjects',
     sessions: 'maxSessions',
     previews: 'maxPreviews',
+    custom_images: 'maxCustomImages',
 };
 
 const DEFAULT_QUOTA = {
@@ -18,8 +19,14 @@ const DEFAULT_QUOTA = {
     maxSessions: 20,
     maxPreviews: 5,
     maxRuntimes: 1,
+    maxCustomImages: 10,
     resourceTier: 'basic',
 };
+
+// Images created before the custom-image quota existed are grandfathered: only
+// rows created at/after this timestamp count, in both usage display and
+// enforcement (single source of truth for the rule).
+const QUOTA_EPOCH_MS = 1789568000000;
 
 async function ensureUserQuota(userId) {
     const rows = await db.select().from(schema.userQuotas).where(eq(schema.userQuotas.userId, userId));
@@ -34,6 +41,7 @@ async function ensureUserQuota(userId) {
         maxSessions: defaults.max_sessions ?? defaults.maxSessions ?? DEFAULT_QUOTA.maxSessions,
         maxPreviews: defaults.max_previews ?? defaults.maxPreviews ?? DEFAULT_QUOTA.maxPreviews,
         maxRuntimes: defaults.max_runtimes ?? defaults.maxRuntimes ?? DEFAULT_QUOTA.maxRuntimes,
+        maxCustomImages: defaults.max_custom_images ?? defaults.maxCustomImages ?? DEFAULT_QUOTA.maxCustomImages,
         resourceTier: defaults.resource_tier ?? defaults.resourceTier ?? DEFAULT_QUOTA.resourceTier,
         updatedAt: now,
     };
@@ -42,7 +50,7 @@ async function ensureUserQuota(userId) {
 }
 
 async function getUsage(userId) {
-    const [projectRow, sessionRow, previewRow] = await Promise.all([
+    const [projectRow, sessionRow, previewRow, customImageRow] = await Promise.all([
         db.select({ count: sql`count(*)` })
             .from(schema.projects)
             .where(eq(schema.projects.userId, userId)),
@@ -61,12 +69,24 @@ async function getUsage(userId) {
                 eq(schema.deployments.kind, 'preview'),
                 inArray(schema.deployments.status, ['pending', 'building', 'running']),
             )),
+        // Every image the user owns counts (named + inline-launch recipe rows),
+        // except admin-curated ones — once published, the platform owns the
+        // image and it stops consuming the owner's quota. Pre-epoch rows are
+        // grandfathered, matching enforceImageQuota exactly.
+        db.select({ count: sql`count(*)` })
+            .from(schema.customImages)
+            .where(and(
+                eq(schema.customImages.ownerUserId, userId),
+                eq(schema.customImages.isPublished, false),
+                sql`${schema.customImages.createdAt} >= ${QUOTA_EPOCH_MS}`,
+            )),
     ]);
 
     return {
         projects: Number(projectRow?.[0]?.count ?? 0),
         sessions: Number(sessionRow?.[0]?.count ?? 0),
         previews: Number(previewRow?.[0]?.count ?? 0),
+        custom_images: Number(customImageRow?.[0]?.count ?? 0),
     };
 }
 
@@ -76,6 +96,7 @@ function formatQuota(quotaRow, usage) {
         max_sessions: quotaRow.maxSessions,
         max_previews: quotaRow.maxPreviews,
         max_runtimes: quotaRow.maxRuntimes,
+        max_custom_images: quotaRow.maxCustomImages,
         resource_tier: quotaRow.resourceTier,
         usage,
     };
@@ -92,6 +113,7 @@ async function getEffectiveQuota(userId, role) {
         formatted.max_sessions = null;
         formatted.max_previews = null;
         formatted.max_runtimes = null;
+        formatted.max_custom_images = null;
     }
     return formatted;
 }
@@ -178,6 +200,7 @@ function agentAccessErrorReply(reply, result) {
 
 module.exports = {
     DEFAULT_QUOTA,
+    QUOTA_EPOCH_MS,
     ensureUserQuota,
     getUsage,
     getEffectiveQuota,

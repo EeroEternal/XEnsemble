@@ -128,6 +128,7 @@ async function listUsers() {
                 max_projects: quota.max_projects,
                 max_sessions: quota.max_sessions,
                 max_previews: quota.max_previews,
+                max_custom_images: quota.max_custom_images,
                 resource_tier: quota.resource_tier,
             },
             granted_agents_count: user.role === 'admin' ? null : grantedIds.length,
@@ -190,6 +191,7 @@ async function createUser({ username, password, role = 'user', status = 'active'
         maxSessions: quota?.max_sessions ?? defaults.max_sessions ?? policy.DEFAULT_QUOTA.maxSessions,
         maxPreviews: quota?.max_previews ?? defaults.max_previews ?? policy.DEFAULT_QUOTA.maxPreviews,
         maxRuntimes: quota?.max_runtimes ?? defaults.max_runtimes ?? policy.DEFAULT_QUOTA.maxRuntimes,
+        maxCustomImages: quota?.max_custom_images ?? defaults.max_custom_images ?? policy.DEFAULT_QUOTA.maxCustomImages,
         resourceTier: quota?.resource_tier ?? defaults.resource_tier ?? policy.DEFAULT_QUOTA.resourceTier,
         updatedBy: createdBy ?? null,
         updatedAt: now,
@@ -300,6 +302,7 @@ async function setUserQuota(userId, quotaPatch, actorId) {
     if (quotaPatch.max_sessions !== undefined) updates.maxSessions = quotaPatch.max_sessions;
     if (quotaPatch.max_previews !== undefined) updates.maxPreviews = quotaPatch.max_previews;
     if (quotaPatch.max_runtimes !== undefined) updates.maxRuntimes = quotaPatch.max_runtimes;
+    if (quotaPatch.max_custom_images !== undefined) updates.maxCustomImages = quotaPatch.max_custom_images;
     if (quotaPatch.resource_tier !== undefined) updates.resourceTier = quotaPatch.resource_tier;
 
     await db.update(schema.userQuotas).set(updates).where(eq(schema.userQuotas.userId, userId));

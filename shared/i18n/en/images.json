@@ -49,8 +49,7 @@
     "digest": "Digest",
     "started": "Started",
     "finished": "Finished",
-    "duration": "Duration",
-    "digest": "Digest"
+    "duration": "Duration"
   },
   "empty": {
     "no_images": "No images",
@@ -74,7 +73,9 @@
     "load_failed": "Failed to load data",
     "name_required": "Image name is required",
     "components_required": "Select at least one component",
-    "agent_required": "Select an agent (required)"
+    "agent_required": "Select an agent (required)",
+    "publish_image": "Failed to update preset",
+    "rename_image": "Failed to rename image"
   },
   "actions_for": "Actions for",
   "rebuilding": "Rebuilding…",
@@ -97,5 +98,19 @@
   "no_images_match": "No images match your search.",
   "toast": {
     "build_started": "Image build started"
-  }
+  },
+  "publish": "Publish as preset",
+  "unpublish": "Remove from presets",
+  "publishing": "Updating…",
+  "published_toast": "Published \"{{name}}\" as a preset",
+  "unpublished_toast": "Removed \"{{name}}\" from presets",
+  "preset_badge": "Preset",
+  "quota_used": "{{used}} / {{max}} images",
+  "curated_readonly": "Curated — read-only",
+  "owner": "Owner",
+  "rename": "Rename",
+  "rename_image": "Rename image",
+  "renaming": "Saving…",
+  "renamed_toast": "Renamed to \"{{name}}\"",
+  "name_placeholder": "Image name"
 }

@@ -38,6 +38,7 @@ import {
   Trash2,
   PanelRightClose,
   PanelRightOpen,
+  Boxes,
 } from 'lucide-react';
 import ByokConfigForm from '../components/ByokConfigForm';
 import LanguageToggle from '../components/LanguageToggle';
@@ -335,6 +336,15 @@ export default React.forwardRef(function Sessions({
   const [createNewWorkspaceInline, setCreateNewWorkspaceInline] = useState(false);
   const [customImageId, setCustomImageId] = useState('');
   const [customImages, setCustomImages] = useState([]);
+  const [presets, setPresets] = useState([]);
+  // Images resolved/created during this session, keyed by id: lets the top-bar
+  // environment chip render immediately without refetching the image list.
+  const [resolvedImages, setResolvedImages] = useState({});
+  // Component catalog (names/versions) — shared by the launch dialog and the
+  // top-bar environment label.
+  const [imageCatalog, setImageCatalog] = useState(null);
+  // Inline environment recipe components (agent is always prepended from the Agent field).
+  const [envComponents, setEnvComponents] = useState([]);
   // Onboarding wizard flow config
   const [wizardMode, setWizardMode] = useState('full'); // 'full' | 'session'
   const [wizardWorkspace, setWizardWorkspace] = useState(null);
@@ -422,17 +432,50 @@ export default React.forwardRef(function Sessions({
   }, [agents]);
 
   const fetchCustomImages = useCallback(() => {
-    return apiFetch('/api/v1/custom-images').then((res) => res.json()).then((data) => {
+    const images = apiFetch('/api/v1/custom-images').then((res) => res.json()).then((data) => {
       const list = data.images || (Array.isArray(data) ? data : []);
-      setCustomImages(list.filter((img) => img.status === 'ready'));
-    }).catch(() => {
-      setCustomImages([]);
+      return list.filter((img) => img.status === 'ready');
+    }).catch(() => []);
+    const presets = apiFetch('/api/v1/custom-images/presets').then((res) => res.json()).then((data) => {
+      return data.presets || [];
+    }).catch(() => []);
+    return Promise.all([images, presets]).then(([list, presetList]) => {
+      setCustomImages(list);
+      setPresets(presetList);
     });
   }, []);
 
   useEffect(() => {
     fetchCustomImages();
+    apiFetch('/api/v1/custom-images/catalog')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setImageCatalog(data))
+      .catch(() => {});
   }, [fetchCustomImages]);
+
+  const componentNameById = useMemo(() => {
+    const map = {};
+    for (const comp of (imageCatalog?.components || [])) map[comp.id] = comp.name;
+    return map;
+  }, [imageCatalog]);
+
+  const describeImageComponents = useCallback((components) => (components || [])
+    .filter((c) => !(c.component_id || '').startsWith('agent:'))
+    .map((c) => `${componentNameById[c.component_id] || c.component_id.replace(/^[a-z-]+:/, '')} ${c.version}`)
+    .join(' + '), [componentNameById]);
+
+  // Environment of the active session, shown next to the branch in the top bar:
+  // the image name, with the concrete components + versions as the hover title.
+  const activeEnvironment = useMemo(() => {
+    const id = activeSessionMeta?.customImageId || activeSession?.customImageId;
+    if (!id) return null;
+    const img = resolvedImages[id] || [...presets, ...customImages].find((c) => c.id === id);
+    if (!img) return null;
+    return {
+      name: img.name,
+      detail: describeImageComponents(img.components) || img.name,
+    };
+  }, [activeSessionMeta?.customImageId, activeSession?.customImageId, resolvedImages, presets, customImages, describeImageComponents]);
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId);
 
@@ -451,14 +494,83 @@ export default React.forwardRef(function Sessions({
 
   const ensureAgentSecrets = async () => true;
 
+  // Cache of the last resolved inline recipe: { key, id }.
+  const resolvedEnvRef = useRef(null);
+
+  // Poll the chosen environment image until its build finishes, so workspace
+  // creation can show a real "build image" stage instead of the build happening
+  // invisibly while the agent session provisions.
+  const waitForEnvironmentImage = async (imageId) => {
+    if (!imageId) return;
+    const deadline = Date.now() + 70 * 60 * 1000;
+    for (;;) {
+      const res = await apiFetch(`/api/v1/custom-images/${imageId}/build`);
+      const data = await res.json().catch(() => ({}));
+      // Legacy images may have no build row; treat that as "nothing to wait for".
+      if (res.status === 404) return;
+      if (!res.ok) {
+        throw new Error(data.error || t('sessions:creation.build_failed'));
+      }
+      const state = data.state || data.status;
+      if (state === 'ready') return;
+      if (state === 'failed') {
+        throw new Error(data.failure_reason || t('sessions:creation.build_failed'));
+      }
+      if (Date.now() > deadline) {
+        throw new Error(t('sessions:creation.build_timeout'));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  };
+
+  // Resolve the Environment chosen in the dialog to a custom image id, creating
+  // (and queueing a build for) the recipe when it has never been built. The
+  // agent is always part of the recipe, so a recipe can never be components-only.
+  const resolveEnvironmentImageId = async () => {
+    // A saved/preset/default pick carries no custom components and is used as-is.
+    const saved = (customImageId && customImageId !== '__none__' && envComponents.length === 0)
+      ? customImageId
+      : '';
+    if (saved) return saved;
+    if (!selectedAgentId || envComponents.length === 0) return '';
+
+    // Customize mode: the recipe decides the image (never a previously resolved
+    // id), so editing components after a failed launch cannot reuse the old
+    // image. Cached per recipe to avoid resolving twice in one launch.
+    const key = `${selectedAgentId}|${envComponents
+      .map((c) => `${c.component_id}@${c.version}`)
+      .sort()
+      .join(',')}`;
+    if (resolvedEnvRef.current?.key === key) return resolvedEnvRef.current.id;
+
+    const selection = [
+      { component_id: `agent:${selectedAgentId}`, version: 'latest' },
+      ...envComponents,
+    ];
+    const res = await apiFetch('/api/v1/custom-images/resolve', {
+      method: 'POST',
+      body: JSON.stringify({ selection }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || t('sessions:launch.env_resolve_failed'));
+    resolvedEnvRef.current = { key, id: data.id };
+    setResolvedImages((prev) => ({ ...prev, [data.id]: data }));
+    setCustomImageId(data.id);
+    return data.id;
+  };
+
   const handleCreateProject = async (nameOverride) => {
     const name = (nameOverride ?? newProjectName).trim() || defaultWorkspaceName();
     setProjectCreating(true);
     setError(null);
     try {
+      const environmentImageId = await resolveEnvironmentImageId();
       const res = await apiFetch('/api/v1/projects', {
         method: 'POST',
-        body: JSON.stringify({ name })
+        body: JSON.stringify({
+          name,
+          ...(environmentImageId ? { default_custom_image_id: environmentImageId } : {}),
+        })
       });
       const data = await res.json();
       if (!res.ok) {
@@ -470,7 +582,11 @@ export default React.forwardRef(function Sessions({
         }
         throw new Error(data.error || t('sessions:error.create_workspace_failed'));
       }
-      return { id: data.id, name: data.name || name };
+      return {
+        id: data.id,
+        name: data.name || name,
+        default_custom_image_id: data.default_custom_image_id || null,
+      };
     } catch (err) {
       setLaunchModalError(err.message);
       return null;
@@ -507,13 +623,17 @@ export default React.forwardRef(function Sessions({
         if (k && v && !requiredSet.has(k)) cleanCustomEnv[k] = v;
       }
 
+      const effectiveCustomImageId = (await resolveEnvironmentImageId()) || undefined;
+
       const response = await apiFetch('/api/v1/session/start', {
         method: 'POST',
         body: JSON.stringify({
           agent_id: selectedAgentId,
           project_id: projectId,
           terminal_theme_id: themeId,
-          custom_image_id: (customImageId && customImageId !== '__none__') ? customImageId : undefined,
+          // Explicit null = "no custom image": prevents the server from
+          // re-applying the workspace default when the user chose Default.
+          custom_image_id: effectiveCustomImageId || null,
           ...(cleanConfigFiles.length ? { config_files: cleanConfigFiles } : {}),
           ...(Object.keys(cleanCustomEnv).length ? { custom_env: cleanCustomEnv } : {}),
         })
@@ -553,6 +673,7 @@ export default React.forwardRef(function Sessions({
         agentName: selectedAgent.name,
         projectId,
         projectName: projectName || projectId,
+        customImageId: effectiveCustomImageId || null,
       });
       // 新创建 session：右半边只保留 Files + Changes 两个 tab，回到文件界面。
       // 先清 sessionStorage（WorkspacePanel 首次挂载时从它恢复 tab），再清面板内 state。
@@ -574,6 +695,7 @@ export default React.forwardRef(function Sessions({
             status: data.status || 'running',
             alive: !isPending,
             projectName: projectName || projectId,
+            customImageId: effectiveCustomImageId || null,
             createdAt: now,
           },
         ];
@@ -594,6 +716,8 @@ export default React.forwardRef(function Sessions({
     setLaunchModalError(null);
     setCreateNewWorkspaceInline(false);
     setCustomImageId('');
+    setEnvComponents([]);
+    resolvedEnvRef.current = null;
     setImportedProject(null);
     setNewProjectName('');
     fetchCustomImages();
@@ -624,6 +748,12 @@ export default React.forwardRef(function Sessions({
     }
     setWizardMode(nextMode);
     setWizardWorkspace(nextWorkspace);
+    // Prefill the Environment from the workspace default (P2), when it is ready.
+    const workspaceDefaultImage = nextWorkspace?.defaultCustomImageId
+      || nextWorkspace?.default_custom_image_id;
+    if (workspaceDefaultImage) {
+      setCustomImageId(workspaceDefaultImage);
+    }
     const prefs = loadSidebarPrefs();
     const sorted = sortAgentsByRecentUsage(freshAgents, prefs);
     if (sorted.length > 0) {
@@ -700,6 +830,8 @@ export default React.forwardRef(function Sessions({
             }
           }, 2000);
         });
+        setCreationStep('build');
+        await waitForEnvironmentImage(await resolveEnvironmentImageId());
         setCreationStep('session');
         await handleStartSession(result.id, importedProject.name || repos[0].name, { closeLaunchModal: true });
       } catch (err) {
@@ -771,6 +903,8 @@ export default React.forwardRef(function Sessions({
             }
           }, 2000);
         });
+        setCreationStep('build');
+        await waitForEnvironmentImage(await resolveEnvironmentImageId());
         setCreationStep('session');
         await handleStartSession(result.id, repo.full_name || repo.name, { closeLaunchModal: true });
       } catch (err) {
@@ -797,7 +931,7 @@ export default React.forwardRef(function Sessions({
         if (!created) return;
         setProjects((prev) => {
           if (prev.some((p) => p.id === created.id)) return prev;
-          return [...prev, { id: created.id, name: created.name, createdAt: Date.now() }];
+          return [...prev, { id: created.id, name: created.name, defaultCustomImageId: created.default_custom_image_id || null, createdAt: Date.now() }];
         });
         started = await handleStartSession(created.id, created.name, { closeLaunchModal: true });
         return;
@@ -809,7 +943,7 @@ export default React.forwardRef(function Sessions({
           if (!created) return;
           setProjects((prev) => {
             if (prev.some((p) => p.id === created.id)) return prev;
-            return [...prev, { id: created.id, name: created.name, createdAt: Date.now() }];
+            return [...prev, { id: created.id, name: created.name, defaultCustomImageId: created.default_custom_image_id || null, createdAt: Date.now() }];
           });
           started = await handleStartSession(created.id, created.name, { closeLaunchModal: true });
           return;
@@ -827,7 +961,7 @@ export default React.forwardRef(function Sessions({
       if (!created) return;
       setProjects((prev) => {
         if (prev.some((p) => p.id === created.id)) return prev;
-        return [...prev, { id: created.id, name: created.name, createdAt: Date.now() }];
+        return [...prev, { id: created.id, name: created.name, defaultCustomImageId: created.default_custom_image_id || null, createdAt: Date.now() }];
       });
       if (startSessionAfterCreate) {
         started = await handleStartSession(created.id, created.name, { closeLaunchModal: true });
@@ -1503,9 +1637,18 @@ export default React.forwardRef(function Sessions({
           <>
           {topbarEl && createPortal(
             <>
-              <div className="flex items-center min-w-0 justify-center">
+              <div className="flex items-center min-w-0 justify-center gap-2">
                 {activeSession?.projectId && activeProject?.repoProvider && GIT_REPO_PROVIDERS.has(activeProject.repoProvider) && (
                   <BranchSwitcher projectId={activeSession.projectId} project={activeProject} git={gitChanges} disabled />
+                )}
+                {activeEnvironment && (
+                  <span
+                    className="inline-flex max-w-[240px] items-center gap-1 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-600"
+                    title={activeEnvironment.detail}
+                  >
+                    <Boxes className="h-3 w-3 shrink-0" strokeWidth={1.75} />
+                    <span className="truncate">{activeEnvironment.name}</span>
+                  </span>
                 )}
               </div>
               <div className="flex items-center gap-0.5 shrink-0">
@@ -1779,8 +1922,13 @@ export default React.forwardRef(function Sessions({
               selectedAgentId={selectedAgentId}
               onSelectAgent={(id) => { setSelectedAgentId(id); setShowLaunchConfigModal(false); }}
               customImages={customImages}
+              presets={presets}
+              catalog={imageCatalog}
+              catalogLoading={!imageCatalog}
               customImageId={customImageId}
               setCustomImageId={setCustomImageId}
+              envComponents={envComponents}
+              setEnvComponents={setEnvComponents}
               importedProject={importedProject}
               onRepoImported={handleRepoImported}
               onClose={closeOnboarding}

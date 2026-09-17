@@ -406,6 +406,7 @@ fastify.get('/api/v1/projects', { preValidation: [fastify.authenticate] }, async
             id: p.id,
             name: p.name,
             default_runtime_id: p.defaultRuntimeId,
+            default_custom_image_id: p.defaultCustomImageId || null,
             repo_provider: p.repoProvider || 'none',
             repo_url: p.repoUrl || null,
             repo_default_branch: p.repoDefaultBranch || 'main',
@@ -434,6 +435,21 @@ fastify.post('/api/v1/projects', { preValidation: [fastify.authenticate] }, asyn
     const projectId = `proj_${crypto.randomBytes(8).toString('hex')}`;
     const createdAt = Date.now();
 
+    // Optional default environment (P2). Validated below, stored on the project
+    // and pre-built in the background so the first session starts instantly.
+    let defaultCustomImageId = null;
+    const requestedImageId = request.body?.default_custom_image_id;
+    if (requestedImageId) {
+        try {
+            const { getImage } = require('./runtime/CustomImageService');
+            const image = await getImage(request.user.id, String(requestedImageId), request.user.role);
+            if (image.status !== 'failed') defaultCustomImageId = image.id;
+        } catch (err) {
+            const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
+            return sendPublicError(reply, err, 'Cannot use custom image', statusCode);
+        }
+    }
+
     let workspacePath;
     let defaultRuntimeId;
     try {
@@ -442,6 +458,7 @@ fastify.post('/api/v1/projects', { preValidation: [fastify.authenticate] }, asyn
             userId: request.user.id,
             name,
             serverPath: '',
+            defaultCustomImageId,
             cloneStatus: null,
             createdAt,
         });
@@ -471,10 +488,30 @@ fastify.post('/api/v1/projects', { preValidation: [fastify.authenticate] }, asyn
         request.log.warn({ err, projectId }, 'Local git init failed (non-fatal)');
     }
 
+    // Warm the default environment in the background so the first session is instant.
+    if (defaultCustomImageId) {
+        setImmediate(async () => {
+            try {
+                const { getImage, resolveOrCreateImage } = require('./runtime/CustomImageService');
+                const image = await getImage(request.user.id, defaultCustomImageId, request.user.role);
+                if (image && Array.isArray(image.components) && image.components.length > 0) {
+                    await resolveOrCreateImage({
+                        ownerUserId: request.user.id,
+                        selection: image.components,
+                        role: request.user.role,
+                    });
+                }
+            } catch (err) {
+                request.log.warn({ err, projectId }, 'default environment prebuild failed (non-fatal)');
+            }
+        });
+    }
+
     return {
         id: projectId,
         name,
         default_runtime_id: defaultRuntimeId,
+        default_custom_image_id: defaultCustomImageId,
         created_at: createdAt,
     };
 });
@@ -501,13 +538,35 @@ fastify.patch('/api/v1/projects/:projectId', { preValidation: [fastify.authentic
     if (!name) return reply.code(400).send({ error: t('errors:project_name_required', { defaultValue: 'Project name is required' }, request.locale || 'en'), code: 'project_name_required' });
     if (name.length > 120) return reply.code(400).send({ error: t('errors:project_name_too_long', { defaultValue: 'Project name is too long' }, request.locale || 'en'), code: 'project_name_too_long' });
 
+    // Workspace default environment (P2): null clears it, otherwise it must be a
+    // usable custom image for this user.
+    let defaultCustomImageId = project.defaultCustomImageId || null;
+    if (Object.prototype.hasOwnProperty.call(request.body || {}, 'default_custom_image_id')) {
+        const requested = request.body.default_custom_image_id;
+        if (!requested) {
+            defaultCustomImageId = null;
+        } else {
+            try {
+                const { getImage } = require('./runtime/CustomImageService');
+                const image = await getImage(request.user.id, String(requested), request.user.role);
+                if (image.status === 'failed') {
+                    return reply.code(400).send({ error: t('errors:custom_image_not_ready', { defaultValue: 'Custom image is not ready' }, request.locale || 'en'), code: 'custom_image_not_ready' });
+                }
+                defaultCustomImageId = image.id;
+            } catch (err) {
+                const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
+                return sendPublicError(reply, err, 'Cannot use custom image', statusCode);
+            }
+        }
+    }
+
     await db.update(schema.projects)
-        .set({ name })
+        .set({ name, defaultCustomImageId })
         .where(eq(schema.projects.id, project.id));
 
     invalidateProjectCache(project.id);
 
-    return { id: project.id, name };
+    return { id: project.id, name, default_custom_image_id: defaultCustomImageId };
 });
 
 fastify.get('/api/v1/projects/:projectId/repository', { preValidation: [fastify.authenticate] }, async (request, reply) => {
@@ -1582,8 +1641,8 @@ fastify.post('/api/v1/sessions/:sessionId/resume', { preValidation: [fastify.aut
 
 // 启动 Agent Session（通过 RuntimeProvider + ExecAdapter）
 fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] }, async (request, reply) => {
-    const { agent_id, project_id, terminal_theme_id, custom_image_id, config_files, custom_env } = request.body;
-    const isShellOnly = !!(custom_image_id && !agent_id);
+    const { agent_id, project_id, terminal_theme_id, config_files, custom_env } = request.body;
+    let { custom_image_id } = request.body;
 
     if (!project_id) {
         return reply.code(400).send({ error: 'project_id is required. Select or create a project first.' });
@@ -1591,6 +1650,17 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
 
     const project = await getProjectForUser(request.user.id, project_id);
     if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+
+    // Workspace default environment: opt-in only, so existing API clients that
+    // simply omit `custom_image_id` keep their previous behavior (the web UI
+    // prefills the default explicitly from the workspace).
+    if (!custom_image_id
+        && request.body?.use_workspace_default_environment === true
+        && project.defaultCustomImageId) {
+        custom_image_id = project.defaultCustomImageId;
+    }
+
+    const isShellOnly = !!(custom_image_id && !agent_id);
 
     if (!isShellOnly) {
         const agentAccess = await policy.checkAgentAccess(request.user.id, agent_id, request.user.role);
@@ -1601,10 +1671,45 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
     if (!sessionQuota.ok) return policy.quotaErrorReply(reply, sessionQuota);
 
     let customImageRef = null;
+    let customImagePending = false;
     if (custom_image_id) {
         try {
-            const { getReadyImageRef } = require('./runtime/CustomImageService');
-            customImageRef = await getReadyImageRef(custom_image_id, request.user.id);
+            const { getImage, touchImageUsage } = require('./runtime/CustomImageService');
+            const customImage = await getImage(request.user.id, custom_image_id, request.user.role);
+            // Session use counts as activity so the image GC does not reclaim it.
+            touchImageUsage(custom_image_id).catch(() => {});
+
+            // A recipe always carries exactly one agent; the CLI is baked into the
+            // image, so a mismatch would spawn a missing/wrong agent.
+            if (!isShellOnly) {
+                const imageAgent = (customImage.components || [])
+                    .find((c) => (c.component_id || '').startsWith('agent:'));
+                const imageAgentId = imageAgent
+                    ? imageAgent.component_id.slice('agent:'.length)
+                    : null;
+                if (imageAgentId && imageAgentId !== agent_id) {
+                    return reply.code(400).send({
+                        error: t('errors:custom_image_agent_mismatch', { agent: imageAgentId }, request.locale || 'en'),
+                        code: 'custom_image_agent_mismatch',
+                    });
+                }
+            }
+
+            const imageState = customImage.status || customImage.latest_build?.state || null;
+            if (imageState === 'ready') {
+                customImageRef = customImage.latest_build?.image_ref || customImage.image_ref || null;
+            } else if (imageState === 'failed') {
+                return sendPublicError(
+                    reply,
+                    new RuntimeError('custom image build failed', 400),
+                    'Cannot use custom image',
+                    400,
+                );
+            } else {
+                // queued / building: the agent session provisions asynchronously and
+                // waits for the build (see createAgentSession).
+                customImagePending = true;
+            }
         } catch (err) {
             const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
             return sendPublicError(reply, err, 'Cannot use custom image', statusCode);
@@ -1615,6 +1720,12 @@ fastify.post('/api/v1/session/start', { preValidation: [fastify.authenticate] },
 
     // --- shell-only: synchronous fast path (no agent spawn, default image) ---
     if (isShellOnly) {
+        if (customImagePending) {
+            return reply.code(400).send({
+                error: 'custom image is not ready yet',
+                code: 'custom_image_not_ready',
+            });
+        }
         let workspacePath;
         let runtimeId;
         let ready;

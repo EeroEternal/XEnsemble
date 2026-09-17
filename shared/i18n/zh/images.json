@@ -54,7 +54,9 @@
     "load_failed": "数据加载失败",
     "name_required": "请输入镜像名称",
     "components_required": "请至少选择一个组件",
-    "agent_required": "请选择 Agent（必填）"
+    "agent_required": "请选择 Agent（必填）",
+    "publish_image": "更新精选失败",
+    "rename_image": "重命名镜像失败"
   },
   "table": {
     "name": "名称",
@@ -96,5 +98,19 @@
   "no_images_match": "没有匹配的镜像。",
   "toast": {
     "build_started": "镜像构建已开始"
-  }
+  },
+  "publish": "发布为精选",
+  "unpublish": "取消精选",
+  "publishing": "更新中…",
+  "published_toast": "已将「{{name}}」发布为精选",
+  "unpublished_toast": "已取消「{{name}}」的精选",
+  "preset_badge": "精选",
+  "quota_used": "{{used}} / {{max}} 个镜像",
+  "curated_readonly": "已被精选 — 只读",
+  "owner": "归属",
+  "rename": "重命名",
+  "rename_image": "重命名镜像",
+  "renaming": "保存中…",
+  "renamed_toast": "已重命名为「{{name}}」",
+  "name_placeholder": "镜像名称"
 }

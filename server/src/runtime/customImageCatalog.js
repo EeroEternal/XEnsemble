@@ -21,11 +21,12 @@ const LANGUAGE_INSTALL = {
     },
   },
   go: {
-    '1.21': { install: 'curl -fsSL https://go.dev/dl/go1.21.13.linux-amd64.tar.gz | tar -C /usr/local -xz && ln -sf /usr/local/go/bin/go /usr/local/bin/go && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt', default: false, diskSizeMb: 150 },
-    '1.22': { install: 'curl -fsSL https://go.dev/dl/go1.22.12.linux-amd64.tar.gz | tar -C /usr/local -xz && ln -sf /usr/local/go/bin/go /usr/local/bin/go && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt', default: false, diskSizeMb: 150 },
-    '1.23': { install: 'curl -fsSL https://go.dev/dl/go1.23.6.linux-amd64.tar.gz | tar -C /usr/local -xz && ln -sf /usr/local/go/bin/go /usr/local/bin/go && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt', default: true, diskSizeMb: 150 },
-    '1.24': { install: 'curl -fsSL https://go.dev/dl/go1.24.0.linux-amd64.tar.gz | tar -C /usr/local -xz && ln -sf /usr/local/go/bin/go /usr/local/bin/go && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt', default: false, diskSizeMb: 150 },
-    '1.25': { install: 'curl -fsSL https://go.dev/dl/go1.25.0.linux-amd64.tar.gz | tar -C /usr/local -xz && ln -sf /usr/local/go/bin/go /usr/local/bin/go && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt', default: false, diskSizeMb: 150 },
+    // mirrors.aliyun.com/golang mirrors go.dev/dl (already used by twoStage.js).
+    '1.21': { install: 'curl -fsSL https://mirrors.aliyun.com/golang/go1.21.13.linux-amd64.tar.gz | tar -C /usr/local -xz && ln -sf /usr/local/go/bin/go /usr/local/bin/go && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt', default: false, diskSizeMb: 150 },
+    '1.22': { install: 'curl -fsSL https://mirrors.aliyun.com/golang/go1.22.12.linux-amd64.tar.gz | tar -C /usr/local -xz && ln -sf /usr/local/go/bin/go /usr/local/bin/go && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt', default: false, diskSizeMb: 150 },
+    '1.23': { install: 'curl -fsSL https://mirrors.aliyun.com/golang/go1.23.6.linux-amd64.tar.gz | tar -C /usr/local -xz && ln -sf /usr/local/go/bin/go /usr/local/bin/go && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt', default: true, diskSizeMb: 150 },
+    '1.24': { install: 'curl -fsSL https://mirrors.aliyun.com/golang/go1.24.0.linux-amd64.tar.gz | tar -C /usr/local -xz && ln -sf /usr/local/go/bin/go /usr/local/bin/go && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt', default: false, diskSizeMb: 150 },
+    '1.25': { install: 'curl -fsSL https://mirrors.aliyun.com/golang/go1.25.0.linux-amd64.tar.gz | tar -C /usr/local -xz && ln -sf /usr/local/go/bin/go /usr/local/bin/go && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt', default: false, diskSizeMb: 150 },
   },
   java: {
     '17': { install: 'apt-get update && apt-get install -y openjdk-17-jdk-headless && rm -rf /var/lib/apt/lists/*', default: false, diskSizeMb: 300 },
@@ -78,7 +79,9 @@ const TOOLS_INSTALL = {
     'latest': { install: 'apt-get update && apt-get install -y redis-tools && rm -rf /var/lib/apt/lists/*', default: true, diskSizeMb: 20 },
   },
   kubectl: {
-    'latest': { install: 'curl -fsSL https://storage.googleapis.com/kubernetes-release/release/v1.31.0/bin/linux/amd64/kubectl -o /usr/local/bin/kubectl && chmod +x /usr/local/bin/kubectl', default: true, diskSizeMb: 50 },
+    // QingCloud's pek3b bucket mirrors the kubernetes-release GCS bucket; the
+    // upstream storage.googleapis.com host is unreachable from CN networks.
+    'latest': { install: 'curl -fsSL https://kubernetes-release.pek3b.qingstor.com/release/v1.31.0/bin/linux/amd64/kubectl -o /usr/local/bin/kubectl && chmod +x /usr/local/bin/kubectl', default: true, diskSizeMb: 50 },
   },
   terraform: {
     '1.10': { install: 'apt-get update && apt-get install -y unzip && curl -fsSL https://releases.hashicorp.com/terraform/1.10.5/terraform_1.10.5_linux_amd64.zip -o /tmp/tf.zip && unzip -q /tmp/tf.zip -d /usr/local/bin && rm -rf /tmp/tf.zip /var/lib/apt/lists/*', default: true, diskSizeMb: 80 },
@@ -312,6 +315,14 @@ function validateSelection(selection) {
     errors.push(
       `unknown component id(s): ${unknowns.join(', ')}`,
     );
+  }
+
+  // A recipe is always anchored on exactly one agent: components alone are not a
+  // runnable environment (nothing to spawn), and multiple agents cannot share one rootfs.
+  if (selectedAgents.length === 0) {
+    errors.push('selection must include exactly one agent component');
+  } else if (selectedAgents.length > 1) {
+    errors.push('selection must include at most one agent component');
   }
 
   // Cross-compatibility: check agent minNodeVersion requirements

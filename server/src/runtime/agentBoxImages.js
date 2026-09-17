@@ -145,6 +145,28 @@ async function resolveBoxImage({ agentId, image } = {}) {
     return resolveBoxBaseImage();
 }
 
+/**
+ * Resolve an agent image only when it was explicitly configured: an active
+ * `agent_box_images` row or a `BLINK_IMAGE_<AGENT_ID>` override. Unlike
+ * `resolveBoxImage`, this never guesses the default tag, so callers can rely on
+ * the result actually existing in the registry (or skip it and fall back).
+ */
+async function resolveExplicitAgentImage(agentId) {
+    if (!agentId) return null;
+    const catalog = AGENT_BOX_IMAGE_CATALOG[agentId];
+    if (catalog?.buildable === false) return null;
+
+    const envOverride = process.env[agentImageEnvKey(agentId)]?.trim();
+    if (envOverride) return envOverride;
+
+    const { getActiveImageRef } = require('./AgentBoxImageService');
+    try {
+        return (await getActiveImageRef(agentId)) || null;
+    } catch (_) {
+        return null;
+    }
+}
+
 function getAgentBoxInstallCommand(agentId) {
     const catalog = AGENT_BOX_IMAGE_CATALOG[agentId];
     if (catalog?.install) return catalog.install;
@@ -196,6 +218,7 @@ module.exports = {
     resolveBoxBaseImage,
     resolveAgentBoxImageDefault,
     resolveBoxImage,
+    resolveExplicitAgentImage,
     hasBoxImage,
     getAgentBoxInstallCommand,
     listBuildableAgentImages,

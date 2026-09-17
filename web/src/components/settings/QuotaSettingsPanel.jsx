@@ -41,11 +41,12 @@ export default function QuotaSettingsPanel() {
     { label: t('settings:quota.projects'), used: u.projects ?? 0, max: q.max_projects },
     { label: t('settings:quota.sessions'), used: u.sessions ?? 0, max: q.max_sessions },
     { label: t('settings:quota.previews'), used: u.previews ?? 0, max: q.max_previews },
+    { label: t('settings:quota.images'), used: u.custom_images ?? 0, max: q.max_custom_images },
   ];
 
   return (
     <div className="h-full overflow-y-auto console-scroll-hidden space-y-4">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {rows.map(({ label, used, max }) => (
           <div key={label} className={`${consoleCardClass} p-4`}>
             <div className={`${consoleSectionLabelClass} mb-2`}>{label}</div>

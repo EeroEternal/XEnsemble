@@ -1,4 +1,4 @@
-import { Loader2, Check, GitBranch, Rocket, AlertCircle, ArrowLeft } from 'lucide-react';
+import { Loader2, Check, GitBranch, Rocket, AlertCircle, ArrowLeft, Boxes } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
 import {
@@ -13,6 +13,7 @@ import { buttonClass } from '../lib/buttonStyles';
 
 const DEFAULT_STEPS = [
   { id: 'import', labelKey: 'sessions:creation.import_repository', icon: GitBranch },
+  { id: 'build', labelKey: 'sessions:creation.build_image', icon: Boxes },
   { id: 'session', labelKey: 'sessions:creation.start_session', icon: Rocket },
 ];
 

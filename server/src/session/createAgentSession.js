@@ -239,10 +239,41 @@ async function createAgentSession({
         let workspacePath;
         let runtimeId;
 
+        // Inline recipe from the launch dialog: the image may still be queued or
+        // building, so wait for it before creating the sandbox. Abort the wait as
+        // soon as the session is cancelled so we neither poll nor provision.
+        let resolvedImageRef = customImageRef;
+        if (!resolvedImageRef && customImageId) {
+            try {
+                const { waitForReadyImageRef } = require('../runtime/CustomImageService');
+                resolvedImageRef = await waitForReadyImageRef(customImageId, userId, {
+                    shouldContinue: () => isSessionStillPending(sessionId),
+                    role: user.role || null,
+                });
+            } catch (err) {
+                if (err && err.cancelled) {
+                    log.info({ sessionId }, '[sessions] session cancelled while waiting for custom image build');
+                    return;
+                }
+                log.error({ err, sessionId }, '[sessions] custom image build failed');
+                await markSessionFailed(
+                    sessionId,
+                    err instanceof RuntimeError ? err.message : (err.message || 'Custom image build failed'),
+                );
+                return;
+            }
+        }
+
+        // Guard: the user may have cancelled the session while the image built.
+        if (!(await isSessionStillPending(sessionId))) {
+            log.info({ sessionId }, '[sessions] session cancelled before runtime prepare');
+            return;
+        }
+
         try {
             ready = await ensureProjectRuntime(project, {
                 agentId: agentMeta.id,
-                ...(customImageRef ? { image: customImageRef } : {}),
+                ...(resolvedImageRef ? { image: resolvedImageRef } : {}),
                 ...(customImageId ? { customImageId: customImageId } : {}),
                 agentVmResources: dbAgents[0]?.vmResources || null,
             });
@@ -502,6 +533,7 @@ async function createAgentSession({
                         agentId: agentMeta.id,
                         runtimeId: ready.runtime.id,
                         forceRecreate: true,
+                        ...(resolvedImageRef ? { image: resolvedImageRef } : {}),
                     });
                     workspacePath = ready.workspacePath;
                     spawnOpts.cwd = workspacePath;

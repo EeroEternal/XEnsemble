@@ -38,8 +38,8 @@
   "image_in_use": "Cannot delete image: {{count}} active session(s) are using it",
   "custom_image_not_found": "Custom image not found",
   "image_version_not_found": "Image version not found",
-  "custom_image_not_found": "Custom image not found",
   "custom_image_name_exists": "Custom image named \"{{name}}\" already exists",
+  "custom_image_agent_mismatch": "This environment is built for \"{{agent}}\" — select that agent or pick another environment",
   "custom_builds_unavailable": "Custom image builds are not available",
   "docker_not_available": "Docker is not available",
   "build_in_progress": "Image build already in progress",
@@ -85,5 +85,6 @@
   "loop_run_in_progress": "Previous run is still in progress.",
   "loop_field_required": "{{field}} is required",
   "loop_interval_invalid": "Interval must be between {{min}} minutes and {{max}} days.",
-  "loop_schedule_past": "Scheduled time must be in the future."
+  "loop_schedule_past": "Scheduled time must be in the future.",
+  "custom_image_curated_readonly": "Curated images are read-only"
 }

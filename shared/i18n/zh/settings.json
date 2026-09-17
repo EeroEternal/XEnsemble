@@ -44,7 +44,8 @@
     "unlimited": "不限",
     "resource_tier": "资源等级",
     "loading": "正在加载配额信息…",
-    "load_failed": "配额信息加载失败。"
+    "load_failed": "配额信息加载失败。",
+    "images": "镜像"
   },
   "general": {
     "title": "通用",

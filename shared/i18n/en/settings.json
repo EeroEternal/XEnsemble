@@ -44,7 +44,8 @@
     "unlimited": "Unlimited",
     "resource_tier": "Resource tier",
     "loading": "Loading quota information…",
-    "load_failed": "Unable to load quota information."
+    "load_failed": "Unable to load quota information.",
+    "images": "Images"
   },
   "general": {
     "title": "General",

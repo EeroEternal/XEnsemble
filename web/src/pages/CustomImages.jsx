@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18next from 'i18next';
-import { ChevronDown, ChevronRight, Loader2, Plus, RefreshCw, RotateCw, ScrollText, Search, Trash2, X } from 'lucide-react';
+import { BadgeCheck, ChevronDown, ChevronRight, Loader2, Lock, Pencil, Plus, RefreshCw, RotateCw, ScrollText, Search, Trash2, X } from 'lucide-react';
+
+import { AuthContext } from '../App';
 
 import Button from '../components/Button';
 import BuildLogDialog from '../components/BuildLogDialog';
@@ -53,6 +55,17 @@ function componentIds(components) {
     : [];
 }
 
+// Same list with versions — used for tooltips and search, so hovering a row
+// reveals exactly which version of each component the image contains.
+function componentLabels(components) {
+  return Array.isArray(components)
+    ? components.map((c) => {
+      const id = (c.component_id || '').replace(/^(agent:|lang:|tool:)/, '');
+      return c.version ? `${id} ${c.version}` : id;
+    })
+    : [];
+}
+
 const CATEGORY_ORDER = ['agent', 'language', 'database', 'devops', 'package-manager', 'shell-tool'];
 
 const CATEGORY_LABEL_KEYS = {
@@ -88,6 +101,9 @@ export function CustomImagesContent() {
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renaming, setRenaming] = useState(false);
   const [pollIds, setPollIds] = useState(new Set());
   const [showCreate, setShowCreate] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -95,6 +111,9 @@ export function CustomImagesContent() {
   const [collapsedGroups, setCollapsedGroups] = useState(() => new Set(CATEGORY_ORDER));
   const [logImage, setLogImage] = useState(null);
   const [rebuildingId, setRebuildingId] = useState(null);
+  const [publishingId, setPublishingId] = useState(null);
+  const { user } = useContext(AuthContext);
+  const isAdmin = user?.role === 'admin';
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const inProgressCount = images.filter(
@@ -111,7 +130,7 @@ export function CustomImagesContent() {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return images;
     return images.filter((img) => {
-      const haystack = [img.name, ...componentIds(img.components)].join(' ').toLowerCase();
+      const haystack = [img.name, ...componentLabels(img.components)].join(' ').toLowerCase();
       return haystack.includes(q);
     });
   }, [images, searchQuery]);
@@ -128,7 +147,10 @@ export function CustomImagesContent() {
       const [cat, imgData] = await Promise.all([fetchCatalog(), fetchImages()]);
       setCatalog(cat);
       setImages(imgData.images);
-      setImageQuota({ count: imgData.count ?? imgData.images?.length ?? 0, max: imgData.max ?? 10 });
+      setImageQuota({
+        count: imgData.quota?.used ?? imgData.count ?? imgData.images?.length ?? 0,
+        max: imgData.quota?.max ?? imgData.max ?? null,
+      });
 
       const polling = new Set();
       for (const img of imgData.images) {
@@ -152,7 +174,10 @@ export function CustomImagesContent() {
       try {
         const imgData = await fetchImages();
         setImages(imgData.images);
-        setImageQuota({ count: imgData.count ?? imgData.images?.length ?? 0, max: imgData.max ?? 10 });
+        setImageQuota({
+        count: imgData.quota?.used ?? imgData.count ?? imgData.images?.length ?? 0,
+        max: imgData.quota?.max ?? imgData.max ?? null,
+      });
 
         const stillPolling = new Set();
         for (const img of imgData.images) {
@@ -260,6 +285,53 @@ export function CustomImagesContent() {
     }
   }
 
+  async function handlePublish(image, publish) {
+    setPublishingId(image.id);
+    try {
+      const res = await apiFetch(`/api/v1/custom-images/${image.id}/publish`, {
+        method: 'POST',
+        body: JSON.stringify({ is_published: publish }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || t('images:error.publish_image', { defaultValue: 'Failed to update preset' }));
+
+      setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, ...data } : img)));
+      showToast('success', publish
+        ? t('images:published_toast', { name: image.name, defaultValue: `Published "${image.name}" as a preset` })
+        : t('images:unpublished_toast', { name: image.name, defaultValue: `Removed "${image.name}" from presets` }));
+    } catch (err) {
+      showToast('error', err.message || t('images:error.publish_image', { defaultValue: 'Failed to update preset' }));
+    } finally {
+      setPublishingId(null);
+    }
+  }
+
+  async function handleRename() {
+    if (!renameTarget) return;
+    const name = renameValue.trim();
+    if (!name || name === renameTarget.name) {
+      setRenameTarget(null);
+      return;
+    }
+    setRenaming(true);
+    try {
+      const res = await apiFetch(`/api/v1/custom-images/${renameTarget.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || t('images:error.rename_image', { defaultValue: 'Failed to rename image' }));
+
+      setImages((prev) => prev.map((img) => (img.id === data.id ? { ...img, ...data } : img)));
+      setRenameTarget(null);
+      showToast('success', t('images:renamed_toast', { name: data.name, defaultValue: `Renamed to "${data.name}"` }));
+    } catch (err) {
+      showToast('error', err.message || t('images:error.rename_image', { defaultValue: 'Failed to rename image' }));
+    } finally {
+      setRenaming(false);
+    }
+  }
+
   async function handleDelete(image) {
     setDeletingId(image.id);
     try {
@@ -295,7 +367,11 @@ export function CustomImagesContent() {
       )}
 
       <div className="flex items-center justify-between gap-3">
-        <span className="text-xs text-zinc-500">{t('images:count_images', { count: imageQuota.count })}</span>
+        <span className="text-xs text-zinc-500">
+          {imageQuota.max != null
+            ? t('images:quota_used', { used: imageQuota.count, max: imageQuota.max })
+            : t('images:count_images', { count: imageQuota.count })}
+        </span>
         <div className="flex items-center gap-2">
           <div className="relative w-64">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
@@ -548,6 +624,44 @@ export function CustomImagesContent() {
         <BuildLogDialog image={logImage} onClose={() => setLogImage(null)} />
       )}
 
+      {/* Rename Dialog */}
+      {renameTarget && (
+        <ConsoleDialogShell onClose={() => (renaming ? null : setRenameTarget(null))} fitContent>
+          <div className={cn(consoleStructuredDialogPanelClass, 'min-w-[360px] max-w-md')}>
+            <ConsoleStructuredDialogHeader
+              title={t('images:rename_image', { defaultValue: 'Rename Image' })}
+              subtitle={renameTarget.name}
+            />
+            <ConsoleStructuredDialogBody>
+              <label className="block text-xs text-zinc-500 mb-1">{t('images:table.name')}</label>
+              <Input
+                autoFocus
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleRename(); }}
+                maxLength={80}
+                disabled={renaming}
+                placeholder={t('images:name_placeholder')}
+              />
+            </ConsoleStructuredDialogBody>
+            <ConsoleStructuredDialogFooter>
+              <div className="flex items-center gap-2 w-full justify-end">
+                <Button onClick={() => setRenameTarget(null)} disabled={renaming} variant="secondary" size="sm">
+                  {t('common:action.cancel')}
+                </Button>
+                <Button onClick={handleRename} disabled={renaming || !renameValue.trim()} size="sm">
+                  {renaming ? (
+                    <><Loader2 className="h-3.5 w-3.5 animate-spin" />{t('images:renaming', { defaultValue: 'Saving…' })}</>
+                  ) : (
+                    t('common:action.save', { defaultValue: 'Save' })
+                  )}
+                </Button>
+              </div>
+            </ConsoleStructuredDialogFooter>
+          </div>
+        </ConsoleDialogShell>
+      )}
+
       {/* Delete Confirm Dialog */}
       {confirmDelete && (
         <ConsoleDialogShell onClose={() => setConfirmDelete(null)} fitContent>
@@ -637,12 +751,28 @@ export function CustomImagesContent() {
                     ? new Date(build.finished_at) - new Date(build.started_at)
                     : null;
                 const names = componentIds(img.components);
+                const labels = componentLabels(img.components);
                 const max = 5;
+                // Server decides; fall back to the local rule for older payloads.
+                const canOperate = img.can_operate
+                  ?? (isAdmin || (img.owner_user_id === user?.id && !img.is_published));
 
                 return (
                   <tr key={img.id} className="border-b border-zinc-100 align-top">
                     <td className={cn(consoleTableBodyCellClass, 'font-medium text-zinc-900')}>
                       <span className="block truncate" title={img.name}>{img.name}</span>
+                      <span className="mt-0.5 flex items-center gap-1.5">
+                        {img.is_published && (
+                          <span className="shrink-0 inline-flex items-center rounded bg-zinc-900 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                            {t('images:preset_badge')}
+                          </span>
+                        )}
+                        {isAdmin && img.owner_username && (
+                          <span className="truncate text-[11px] font-normal text-zinc-400" title={img.owner_username}>
+                            @{img.owner_username}
+                          </span>
+                        )}
+                      </span>
                     </td>
                     <td className={consoleTableBodyCellClass}>
                       {stateBadge(img.status)}
@@ -651,17 +781,17 @@ export function CustomImagesContent() {
                       {names.length === 0 ? (
                         <span className="text-zinc-400">\u2014</span>
                       ) : names.length <= max ? (
-                        <div className="flex flex-nowrap gap-1 overflow-hidden" title={names.join(', ')}>
+                        <div className="flex flex-nowrap gap-1 overflow-hidden" title={labels.join(', ')}>
                           {names.map((n, i) => (
                             <span key={i} className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">{n}</span>
                           ))}
                         </div>
                       ) : (
-                        <div className="flex flex-nowrap gap-1 overflow-hidden" title={names.join(', ')}>
+                        <div className="flex flex-nowrap gap-1 overflow-hidden" title={labels.join(', ')}>
                           {names.slice(0, max).map((n, i) => (
                             <span key={i} className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">{n}</span>
                           ))}
-                          <span className="shrink-0 text-xs text-zinc-400" title={names.slice(max).join(', ')}>
+                          <span className="shrink-0 text-xs text-zinc-400" title={labels.slice(max).join(', ')}>
                             +{names.length - max} more
                           </span>
                         </div>
@@ -677,22 +807,46 @@ export function CustomImagesContent() {
                       <RowActionsMenu
                         label={`${t('images:actions_for')} ${img.name}`}
                         items={[
+                          // Logs stay readable for every visible image.
                           { icon: ScrollText, label: t('images:view_logs'), onClick: () => setLogImage(img) },
-                          img.status === 'failed' && {
+                          canOperate && img.status === 'failed' && {
                             icon: RotateCw,
                             label: t('images:rebuild'),
                             onClick: () => handleRebuild(img),
                             busy: rebuildingId === img.id,
                             busyLabel: t('images:rebuilding'),
                           },
-                          { separator: true },
-                          {
+                          isAdmin && img.status === 'ready' && {
+                            icon: BadgeCheck,
+                            label: img.is_published ? t('images:unpublish') : t('images:publish'),
+                            onClick: () => handlePublish(img, !img.is_published),
+                            busy: publishingId === img.id,
+                            busyLabel: t('images:publishing'),
+                          },
+                          canOperate && { separator: true },
+                          canOperate && {
+                            icon: Pencil,
+                            label: t('images:rename'),
+                            onClick: () => {
+                              setRenameTarget(img);
+                              setRenameValue(img.name);
+                            },
+                          },
+                          canOperate && {
                             icon: Trash2,
                             label: t('images:delete'),
                             danger: true,
                             onClick: () => setConfirmDelete(img),
                             busy: deletingId === img.id,
                             busyLabel: t('images:deleting'),
+                          },
+                          // Curated images are handed to the platform: explain why
+                          // the mutating actions are missing.
+                          !canOperate && { separator: true },
+                          !canOperate && {
+                            icon: Lock,
+                            label: t('images:curated_readonly'),
+                            disabled: true,
                           },
                         ].filter(Boolean)}
                       />

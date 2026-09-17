@@ -25,7 +25,7 @@ const ALL_TABS = [
   { id: 'general', labelKey: 'settings:tabs.general', icon: Settings2, route: '/settings', adminOnly: true },
   { id: 'git', labelKey: 'settings:tabs.git_providers', icon: GitBranch, route: '/settings', adminOnly: false },
   { id: 'skills', labelKey: 'settings:tabs.skills', icon: Sparkles, route: '/skills', adminOnly: false },
-  { id: 'images', labelKey: 'images:agent_images', icon: Container, route: '/custom-images', adminOnly: true },
+  { id: 'images', labelKey: 'images:agent_images', icon: Container, route: '/custom-images', adminOnly: false },
   { id: 'agents', labelKey: 'agents:title', icon: Bot, route: '/admin/agents', adminOnly: true },
   { id: 'users', labelKey: 'users:title', icon: Users, route: '/admin/users', adminOnly: true },
   { id: 'gateway', labelKey: 'gateway:title', icon: Globe, route: '/admin/gateway', adminOnly: true },

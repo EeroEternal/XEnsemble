@@ -41,7 +41,8 @@
     "max_projects": "Max workspaces",
     "max_sessions": "Max sessions",
     "max_previews": "Max previews",
-    "resource_tier": "Resource tier"
+    "resource_tier": "Resource tier",
+    "max_custom_images": "Images"
   },
   "role": {
     "admin": "Admin",

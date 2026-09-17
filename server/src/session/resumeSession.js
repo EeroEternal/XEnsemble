@@ -8,9 +8,9 @@ const transcriptStore = require('../runtime/TranscriptStore');
 const CRASH_UPTIME_MS = 30000;
 const CRASH_THRESHOLD = 3;
 
-async function resolveCustomImageRef(customImageId, userId) {
+async function resolveCustomImageRef(customImageId, userId, role = null) {
     const { getReadyImageRef } = require('../runtime/CustomImageService');
-    return getReadyImageRef(customImageId, userId);
+    return getReadyImageRef(customImageId, userId, role);
 }
 
 const inFlightResumes = new Map();
@@ -113,7 +113,7 @@ async function resumeSession({
             const runtimeReady = await ensureProjectRuntime(project, {
                 runtimeId: session.runtimeId || undefined,
                 agentId: 'shell',
-                ...(session.customImageId ? { image: await resolveCustomImageRef(session.customImageId, requestUser.id) } : {}),
+                ...(session.customImageId ? { image: await resolveCustomImageRef(session.customImageId, requestUser.id, requestUser.role || null) } : {}),
             });
 
             await db.update(schema.sessions)
@@ -158,7 +158,7 @@ async function resumeSession({
             // will use storedSpecs.image (the image the VM was created with),
             // avoiding imageMismatch -> needRecreate -> VM deletion+recreation
             // when the workspace was previously used with a different agent.
-            ...(session.customImageId ? { image: await resolveCustomImageRef(session.customImageId, requestUser.id) } : {}),
+            ...(session.customImageId ? { image: await resolveCustomImageRef(session.customImageId, requestUser.id, requestUser.role || null) } : {}),
         });
 
         const workspacePath = runtimeReady.workspacePath;

@@ -13,7 +13,17 @@
     "starting": "启动中…",
     "start_agent": "启动 Agent",
     "create_workspace": "创建工作空间",
-    "custom": "自定义"
+    "custom": "自定义",
+    "environment": "运行环境",
+    "select_environment": "选择运行环境",
+    "env_default": "默认镜像",
+    "env_customize": "自定义…",
+    "env_pick_hint": "至少选择一个组件来自定义运行环境。",
+    "env_checking": "正在检查可用性…",
+    "env_ready": "已就绪 — 可立即启动",
+    "env_needs_build": "尚未构建 — 将在启动时构建镜像",
+    "env_no_components": "暂无可选组件，将使用默认运行环境。",
+    "env_resolve_failed": "所选运行环境准备失败"
   },
   "empty": {
     "no_sessions": "此工作空间暂无会话。",
@@ -229,7 +239,10 @@
   },
   "creation": {
     "import_repository": "导入仓库",
-    "start_session": "启动会话"
+    "start_session": "启动会话",
+    "build_image": "构建镜像",
+    "build_failed": "镜像构建失败",
+    "build_timeout": "镜像构建超时"
   },
   "count_one": "{{count}} 个会话",
   "count_other": "{{count}} 个会话"

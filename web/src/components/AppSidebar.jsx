@@ -7,7 +7,6 @@ import {
   Settings2,
   Search,
   PenSquare,
-  Container,
   Loader2,
   ChevronDown,
   PanelLeftClose,
@@ -300,17 +299,6 @@ export default function AppSidebar({
     }
   }, []);
 
-  const [customImageMap, setCustomImageMap] = useState({});
-
-  useEffect(() => {
-    apiFetch('/api/v1/custom-images').then((res) => res.json()).then((data) => {
-      const list = data.images || (Array.isArray(data) ? data : []);
-      const map = {};
-      for (const img of list) { map[img.id] = img.name; }
-      setCustomImageMap(map);
-    }).catch(() => {});
-  }, [sessions.length]);
-
   const refreshSidebarPrefs = useCallback(() => setSidebarPrefs(loadSidebarPrefs()), []);
 
   useEffect(() => {
@@ -352,7 +340,6 @@ export default function AppSidebar({
     const canExit = isLive || isPending || s.status === 'idle';
     const label = s.title?.trim() || getAgentLabel(s.agentId);
     const timestamp = s.createdAt ? formatRelativeTime(s.createdAt) : '';
-    const imageName = s.customImageId ? customImageMap[s.customImageId] : null;
     const isRenaming = renamingId === s.id;
 
     return (
@@ -385,17 +372,11 @@ export default function AppSidebar({
             onClick={() => selectSession(s)}
             onDoubleClick={() => startRename(s)}
             className="flex flex-1 min-w-0 items-center gap-2 text-left"
-            title={imageName ? `${label} · ${imageName}` : label}
+            title={label}
           >
             <span className={`flex-1 truncate text-[13px] ${isActive ? 'font-medium text-zinc-900' : isExited ? 'text-zinc-400' : 'text-zinc-700'}`}>
               {label}
             </span>
-            {imageName && (
-              <span className="shrink-0 inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[10px] bg-zinc-100 text-zinc-500 max-w-[80px] truncate">
-                <Container className="w-2.5 h-2.5 shrink-0" />
-                {imageName}
-              </span>
-            )}
             {isPending && (
               <Loader2 className="w-3 h-3 shrink-0 animate-spin text-amber-500" />
             )}

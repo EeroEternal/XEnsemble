@@ -13,7 +13,17 @@
     "starting": "Starting…",
     "start_agent": "Start agent",
     "create_workspace": "Create workspace",
-    "custom": "Custom"
+    "custom": "Custom",
+    "environment": "Environment",
+    "select_environment": "Select environment",
+    "env_default": "Default image",
+    "env_customize": "Customize…",
+    "env_pick_hint": "Pick at least one component to customize this environment.",
+    "env_checking": "Checking availability…",
+    "env_ready": "Ready — starts instantly",
+    "env_needs_build": "Not built yet — the image will be built on start",
+    "env_no_components": "No components available. The default environment will be used.",
+    "env_resolve_failed": "Failed to prepare the selected environment"
   },
   "empty": {
     "no_sessions": "No sessions in this workspace yet.",
@@ -229,7 +239,10 @@
   },
   "creation": {
     "import_repository": "Import repository",
-    "start_session": "Start session"
+    "start_session": "Start session",
+    "build_image": "Build image",
+    "build_failed": "Image build failed",
+    "build_timeout": "Image build timed out"
   },
   "count_one": "{{count}} session",
   "count_other": "{{count}} sessions"

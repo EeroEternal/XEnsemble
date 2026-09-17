@@ -32,6 +32,7 @@ const userQuotas = pgTable('user_quotas', {
   maxSessions: integer('max_sessions').notNull().default(2),
   maxPreviews: integer('max_previews').notNull().default(5),
   maxRuntimes: integer('max_runtimes').notNull().default(1),
+  maxCustomImages: integer('max_custom_images').notNull().default(10),
   resourceTier: text('resource_tier').notNull().default('basic'),
   updatedBy: text('updated_by').references(() => users.id),
   updatedAt: bigint('updated_at', { mode: 'number' }),
@@ -58,6 +59,8 @@ const projects = pgTable('projects', {
   repoDefaultBranch: text('repo_default_branch').default('main'),
   repoInstallationRef: text('repo_installation_ref'),
   repoTokenSecretRef: text('repo_token_secret_ref'),
+  // P2: default environment (custom image) for sessions in this workspace.
+  defaultCustomImageId: text('default_custom_image_id'),
   workspaceMode: text('workspace_mode').default('local'),
   lastSyncSha: text('last_sync_sha'),
   lastSnapshotId: text('last_snapshot_id'),
@@ -521,10 +524,18 @@ const customImages = pgTable('custom_images', {
   slug: text('slug').notNull(),
   components: text('components').notNull(),
   imageRef: text('image_ref'),
+  // P2: curated catalog (admin publishes a ready image for all users) + GC marker.
+  isPublished: boolean('is_published').notNull().default(false),
+  description: text('description'),
+  category: text('category'),
+  staleAt: bigint('stale_at', { mode: 'number' }),
+  // Set only by the /resolve auto-creation path; never derived from the name.
+  isAuto: boolean('is_auto').notNull().default(false),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 }, (table) => ({
   unqOwnerName: unique().on(table.ownerUserId, table.name),
+  publishedIdx: index('idx_custom_images_published').on(table.isPublished),
 }));
 
 const customImageBuilds = pgTable('custom_image_builds', {
@@ -532,6 +543,8 @@ const customImageBuilds = pgTable('custom_image_builds', {
   customImageId: text('custom_image_id').notNull().references(() => customImages.id),
   state: text('state').notNull().default('queued'),
   imageRef: text('image_ref'),
+  // P2: recipe identity (components + resolved base image) for indexed lookup.
+  contentHash: text('content_hash'),
   logsRef: text('logs_ref'),
   failureReason: text('failure_reason'),
   startedAt: bigint('started_at', { mode: 'number' }),
@@ -539,6 +552,7 @@ const customImageBuilds = pgTable('custom_image_builds', {
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 }, (table) => ({
   imageStateIdx: index('idx_custom_image_builds_image_state').on(table.customImageId, table.state),
+  hashStateIdx: index('idx_custom_image_builds_hash_state').on(table.contentHash, table.state),
 }));
 
 const agentImageBuilds = pgTable('agent_image_builds', {

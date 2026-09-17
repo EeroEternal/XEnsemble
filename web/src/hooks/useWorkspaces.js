@@ -95,6 +95,7 @@ export function useWorkspaces(user) {
           cloneStatus: p.clone_status ?? p.cloneStatus ?? null,
           cloneError: p.clone_error ?? p.cloneError ?? null,
           workspaceMode: p.workspace_mode ?? p.workspaceMode ?? 'local',
+          defaultCustomImageId: p.default_custom_image_id ?? p.defaultCustomImageId ?? null,
         })));
       }
     } catch {

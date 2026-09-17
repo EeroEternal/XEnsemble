@@ -2,6 +2,7 @@ const { eq, sql, inArray, isNull, and, isNotNull } = require('drizzle-orm');
 const schema = require('./schema');
 const { DEFAULT_AGENTS } = require('../agents/defaultAgents');
 const { seedDefaults: seedPlatformDefaults } = require('../admin/PlatformSettings');
+const policy = require('../auth/PolicyService');
 const { backfillDefaultRuntimes } = require('./backfillRuntimes');
 
 const REMOVED_AGENT_IDS = ['xagent', 'xagent-cli'];
@@ -28,6 +29,7 @@ async function seedIfNeeded(db) {
             maxSessions: defaultQuota.max_sessions ?? 2,
             maxPreviews: defaultQuota.max_previews ?? 5,
             maxRuntimes: defaultQuota.max_runtimes ?? 1,
+            maxCustomImages: defaultQuota.max_custom_images ?? policy.DEFAULT_QUOTA.maxCustomImages,
             resourceTier: defaultQuota.resource_tier ?? 'basic',
             updatedAt: now,
         }).onConflictDoNothing();
@@ -105,6 +107,7 @@ async function getDefaultQuota(db) {
             max_sessions: 2,
             max_previews: 5,
             max_runtimes: 1,
+            max_custom_images: policy.DEFAULT_QUOTA.maxCustomImages,
             resource_tier: 'basic',
         };
     }
@@ -116,6 +119,7 @@ async function getDefaultQuota(db) {
             max_sessions: 2,
             max_previews: 5,
             max_runtimes: 1,
+            max_custom_images: policy.DEFAULT_QUOTA.maxCustomImages,
             resource_tier: 'basic',
         };
     }
