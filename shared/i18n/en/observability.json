@@ -14,6 +14,7 @@
     "completion_tokens": "Output",
     "cache_hit_rate": "Hit rate",
     "trend": "Daily trend",
+    "cost_trend": "Cost trend",
     "by_project": "By workspace",
     "by_agent": "By agent",
     "agent": "Agent",

@@ -73,16 +73,29 @@ export default function MyUsagePanel() {
 
           <div>
             <div className={`${consoleSectionLabelClass} mb-2`}>{t('observability:my_usage.trend')}</div>
-            <div className={`${consoleCardClass} px-3 py-4`}>
-              <MiniBarChart
-                data={(usage.trend || []).map((d) => ({
-                  label: d.day,
-                  tip: d.day,
-                  primary: d.promptTokens || 0,
-                  secondary: d.completionTokens || 0,
-                }))}
-                height={80}
-              />
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <div className={`${consoleCardClass} px-3 py-4`}>
+                <MiniBarChart
+                  data={(usage.trend || []).map((d) => ({
+                    label: d.day,
+                    tip: d.day,
+                    primary: d.promptTokens || 0,
+                    secondary: d.completionTokens || 0,
+                  }))}
+                  height={80}
+                  showAxes
+                  formatValue={formatTokens}
+                />
+              </div>
+              <div className={`${consoleCardClass} px-3 py-4`}>
+                <MiniBarChart
+                  data={(usage.trend || []).map((d) => ({ label: d.day, tip: d.day, primary: d.costUsd || 0 }))}
+                  height={80}
+                  showAxes
+                  formatValue={(v) => `$${Number(v).toFixed(2)}`}
+                  primaryLabel={t('observability:my_usage.cost_trend')}
+                />
+              </div>
             </div>
           </div>
 

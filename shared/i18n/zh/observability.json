@@ -14,6 +14,7 @@
     "completion_tokens": "输出",
     "cache_hit_rate": "缓存命中率",
     "trend": "日趋势",
+    "cost_trend": "费用日趋势",
     "by_project": "按项目分解",
     "by_agent": "按 Agent",
     "agent": "Agent",

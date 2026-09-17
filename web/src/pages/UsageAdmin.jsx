@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp, Loader2, RefreshCw, Search } from 'lucide-react
 
 import PageHeader from '../components/PageHeader';
 import SelectMenu from '../components/SelectMenu';
+import MultiSelectMenu from '../components/MultiSelectMenu';
 import UserUsageDialog from '../components/usage/UserUsageDialog';
 import MiniBarChart from '../components/usage/MiniBarChart';
 import {
@@ -94,6 +95,17 @@ export default function UsageAdmin() {
   // 搜索（本地过滤）；无搜索词时默认隐藏 0 用量用户，避免淹没排行榜
   const [search, setSearch] = useState('');
   const [showEmpty, setShowEmpty] = useState(false);
+  // 可选列：默认不展示，表头右上角下拉框勾选后显示
+  const [extraCols, setExtraCols] = useState([]);
+  const showSavings = extraCols.includes('savings');
+  const showDifficulty = extraCols.includes('difficulty');
+  // 用户排行列宽：可选列插在「总 Token」之后（表头带/表体两个 colgroup 共用）
+  const rankCols = [
+    'w-10', 'w-1/5', 'w-1/7', 'w-1/7', 'w-1/7', 'w-1/7',
+    ...(showSavings ? ['w-[9%]'] : []),
+    ...(showDifficulty ? ['w-[8%]'] : []),
+    'w-1/7', 'w-1/6', 'w-12',
+  ];
   const q = search.trim().toLowerCase();
   const matched = useMemo(() => {
     if (!q) return items;
@@ -175,7 +187,7 @@ export default function UsageAdmin() {
             />
           </div>
 
-          {/* 平台日趋势 */}
+          {/* 平台日趋势：左 Token（含横纵坐标）/ 右 费用 */}
           <section>
             <div className="mb-2 flex items-center gap-4">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.trend')}</h2>
@@ -186,8 +198,19 @@ export default function UsageAdmin() {
                 <span className="inline-block h-1.5 w-1.5 rounded-sm bg-emerald-400" /> {t('users:usage.completion')}
               </span>
             </div>
-            <div className="rounded-lg border border-zinc-200 bg-surface px-3 py-4">
-              <MiniBarChart data={trendData} height={104} />
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <div className="rounded-lg border border-zinc-200 bg-surface px-3 py-4">
+                <MiniBarChart data={trendData} height={104} showAxes formatValue={formatTokens} />
+              </div>
+              <div className="rounded-lg border border-zinc-200 bg-surface px-3 py-4">
+                <MiniBarChart
+                  data={(overview?.trend || []).map((d) => ({ label: d.day, tip: d.day, primary: d.costUsd || 0 }))}
+                  height={104}
+                  showAxes
+                  formatValue={(v) => `$${Number(v).toFixed(2)}`}
+                  primaryLabel={t('users:usage.cost_trend')}
+                />
+              </div>
             </div>
           </section>
 
@@ -209,15 +232,9 @@ export default function UsageAdmin() {
               <div className={consoleTableHeadBandClass}>
                 <table className="w-full table-fixed border-collapse text-left text-sm">
                   <colgroup>
-                    <col className="w-10" />
-                    <col className="w-1/5" />
-                    <col className="w-1/7" />
-                    <col className="w-1/7" />
-                    <col className="w-1/7" />
-                    <col className="w-1/7" />
-                    <col className="w-1/7" />
-                    <col className="w-1/6" />
-                    <col className="w-12" />
+                    {rankCols.map((c, i) => (
+                      <col key={i} className={c} />
+                    ))}
                   </colgroup>
                   <thead>
                     <tr className={consoleTableHeadRowClass}>
@@ -227,9 +244,25 @@ export default function UsageAdmin() {
                       <th className={consoleTableHeadCellClass}>{t('users:usage.prompt')}</th>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.completion')}</th>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.total_tokens')}</th>
+                      {showSavings && <th className={consoleTableHeadCellClass}>{t('users:usage.est_savings')}</th>}
+                      {showDifficulty && <th className={consoleTableHeadCellClass}>{t('users:usage.avg_difficulty')}</th>}
                       <th className={consoleTableHeadCellClass}>{t('users:usage.cache_hit_rate')}</th>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.share')}</th>
-                      <th className={consoleTableHeadCellClass} />
+                      <th className={`${consoleTableHeadCellClass} pr-2`}>
+                        <div className="flex justify-end">
+                          <MultiSelectMenu
+                            value={extraCols}
+                            onChange={setExtraCols}
+                            options={[
+                              { value: 'savings', label: t('users:usage.est_savings') },
+                              { value: 'difficulty', label: t('users:usage.avg_difficulty') },
+                            ]}
+                            placeholder={t('users:usage.extra_columns')}
+                            hideSummary
+                            className="flex justify-end"
+                          />
+                        </div>
+                      </th>
                     </tr>
                   </thead>
                 </table>
@@ -237,20 +270,14 @@ export default function UsageAdmin() {
               <div className={consoleAdminTableScrollClass}>
                 <table className="w-full table-fixed border-collapse text-left text-sm">
                   <colgroup>
-                    <col className="w-10" />
-                    <col className="w-1/5" />
-                    <col className="w-1/7" />
-                    <col className="w-1/7" />
-                    <col className="w-1/7" />
-                    <col className="w-1/7" />
-                    <col className="w-1/7" />
-                    <col className="w-1/6" />
-                    <col className="w-12" />
+                    {rankCols.map((c, i) => (
+                      <col key={i} className={c} />
+                    ))}
                   </colgroup>
                   <tbody className="divide-y divide-zinc-100">
                     {visibleRows.length === 0 ? (
                       <tr>
-                        <td colSpan={9} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>
+                        <td colSpan={9 + extraCols.length} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>
                           {q ? t('users:empty.no_match', { defaultValue: 'No users match your search.' }) : t('users:usage.no_data')}
                         </td>
                       </tr>
@@ -265,6 +292,8 @@ export default function UsageAdmin() {
                           share={share}
                           expanded={expanded}
                           expandable={u.requests > 0 || u.totalTokens > 0}
+                          showSavings={showSavings}
+                          showDifficulty={showDifficulty}
                           onToggle={() => toggleExpand(u.userId)}
                           onOpenDialog={() => setDialogUserId(u.userId)}
                           t={t}
@@ -276,7 +305,7 @@ export default function UsageAdmin() {
                         className="cursor-pointer transition-colors hover:bg-zinc-50"
                         onClick={() => setShowEmpty(true)}
                       >
-                        <td colSpan={9} className="px-4 py-2.5 text-center text-[11px] text-zinc-400">
+                        <td colSpan={9 + extraCols.length} className="px-4 py-2.5 text-center text-[11px] text-zinc-400">
                           <span className="mr-1 inline-flex items-center justify-center align-[-2px]">
                             <ChevronDown className="h-3 w-3" />
                           </span>
@@ -289,7 +318,7 @@ export default function UsageAdmin() {
                         className="cursor-pointer transition-colors hover:bg-zinc-50"
                         onClick={() => setShowEmpty(false)}
                       >
-                        <td colSpan={9} className="px-4 py-2.5 text-center text-[11px] text-zinc-400">
+                        <td colSpan={9 + extraCols.length} className="px-4 py-2.5 text-center text-[11px] text-zinc-400">
                           <span className="mr-1 inline-flex items-center justify-center align-[-2px]">
                             <ChevronUp className="h-3 w-3" />
                           </span>
@@ -371,7 +400,7 @@ export default function UsageAdmin() {
   );
 }
 
-function Row({ user, idx, share, expanded, expandable, onToggle, onOpenDialog, t }) {
+function Row({ user, idx, share, expanded, expandable, showSavings, showDifficulty, onToggle, onOpenDialog, t }) {
   return (
     <>
       <tr
@@ -400,6 +429,16 @@ function Row({ user, idx, share, expanded, expandable, onToggle, onOpenDialog, t
         <td className={`${consoleTableBodyCellClass} font-mono font-semibold tabular-nums text-zinc-900`}>
           {formatTokens(user.totalTokens)}
         </td>
+        {showSavings && (
+          <td className={`${consoleTableBodyCellClass} font-mono tabular-nums text-emerald-600`}>
+            {user.estSavingsUsd != null ? `$${Number(user.estSavingsUsd).toFixed(2)}` : '—'}
+          </td>
+        )}
+        {showDifficulty && (
+          <td className={`${consoleTableBodyCellClass} font-mono tabular-nums`}>
+            {user.avgDifficulty != null ? Number(user.avgDifficulty).toFixed(2) : '—'}
+          </td>
+        )}
         <td className={`${consoleTableBodyCellClass} font-mono tabular-nums text-zinc-500`}>
           {user.cacheHitRate != null ? `${Math.round(user.cacheHitRate * 100)}%` : '—'}
         </td>
@@ -425,7 +464,7 @@ function Row({ user, idx, share, expanded, expandable, onToggle, onOpenDialog, t
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={9} className="bg-zinc-50/60 px-4 py-4" onClick={(e) => e.stopPropagation()}>
+          <td colSpan={9 + (showSavings ? 1 : 0) + (showDifficulty ? 1 : 0)} className="bg-zinc-50/60 px-4 py-4" onClick={(e) => e.stopPropagation()}>
             <ExpandedDetail userId={user.userId} days={30} onOpenDialog={onOpenDialog} t={t} />
           </td>
         </tr>

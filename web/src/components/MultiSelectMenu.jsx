@@ -51,6 +51,8 @@ export default function MultiSelectMenu({
   label,
   showSelectAll = false,
   selectAllLabel,
+  // 纯图标触发器（如表头角落的列选择）：隐藏摘要文字，仅显示下拉符号
+  hideSummary = false,
 }) {
   const { t } = useTranslation();
   const effectivePlaceholder = placeholder || t('common:select.placeholder');
@@ -72,10 +74,12 @@ export default function MultiSelectMenu({
     const el = triggerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
+    // 列表最小 160px（纯图标触发器时）；靠右的触发器向左收拢避免溢出视口
+    const width = Math.max(rect.width, 160);
     setMenuRect({
       top: rect.bottom + 4,
-      left: rect.left,
-      width: rect.width,
+      left: Math.min(rect.left, window.innerWidth - width - 8),
+      width,
     });
   };
 
@@ -193,22 +197,33 @@ export default function MultiSelectMenu({
           aria-haspopup="listbox"
           aria-expanded={open}
           aria-controls={listId}
+          aria-label={effectivePlaceholder}
           onClick={() => setOpen((v) => !v)}
           className={cn(
-            consoleToolbarInputClass,
-            'relative w-full pr-9 text-left disabled:cursor-not-allowed',
-            selectAllActive
-              ? 'bg-zinc-100 text-zinc-400 border-zinc-200 cursor-not-allowed'
-              : 'hover:bg-zinc-50 disabled:opacity-50',
+            hideSummary
+              ? // 表头角落的 ghost 图标钮：透明底无框，hover 才显底色，融入表头
+                'flex h-6 w-6 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-200/70 hover:text-zinc-600 disabled:cursor-not-allowed disabled:opacity-40'
+              : cn(
+                  consoleToolbarInputClass,
+                  'relative w-full pr-9 text-left disabled:cursor-not-allowed',
+                  selectAllActive
+                    ? 'bg-zinc-100 text-zinc-400 border-zinc-200 cursor-not-allowed'
+                    : 'hover:bg-zinc-50 disabled:opacity-50',
+                ),
           )}
         >
-          <span className={cn('truncate block', selectAllActive || !value.length ? 'text-zinc-400' : 'text-zinc-900')}>
-            {summary}
-          </span>
+          {!hideSummary && (
+            <span className={cn('truncate block', selectAllActive || !value.length ? 'text-zinc-400' : 'text-zinc-900')}>
+              {summary}
+            </span>
+          )}
           <ChevronDown
-            className={`absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none transition-transform ${
-              selectAllActive ? 'text-zinc-300' : 'text-zinc-400'
-            } ${open ? 'rotate-180' : ''}`}
+            className={cn(
+              'w-4 h-4 pointer-events-none transition-transform',
+              hideSummary ? '' : 'absolute right-2.5 top-1/2 -translate-y-1/2',
+              selectAllActive ? 'text-zinc-300' : 'text-zinc-400',
+              open ? 'rotate-180' : '',
+            )}
           />
         </button>
         {list && createPortal(list, document.body)}
