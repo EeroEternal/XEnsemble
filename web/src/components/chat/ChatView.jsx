@@ -30,8 +30,8 @@ const TUI_PROMPT_QUIET_MS = 2500;
 // events per session; this view fetches them HISTORY_PAGE_SIZE at a time via
 // cursor pagination (?before_seq=) so a long qwen session renders one small
 // page on mount instead of hundreds of Markdown-heavy bubbles at once.
-// 500 / 50 = at most 10 「加载更早」 page-backs from newest to oldest.
-const HISTORY_PAGE_SIZE = 50;
+// 500 / 25 = exactly 20 「加载更早」page-backs from newest to oldest.
+const HISTORY_PAGE_SIZE = 25;
 // Assistant replies above this many chars render truncated with an expand
 // button: a single multi-hundred-KB reply pushed through the markdown /
 // highlight / katex pipeline can stall the tab on its own, and pagination
