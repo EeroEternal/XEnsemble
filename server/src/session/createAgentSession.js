@@ -185,6 +185,12 @@ async function createAgentSession({
         resolved.env = { ...resolved.env, ...byokConfig.env };
         byokConfigFiles = byokConfig.configFiles || [];
     }
+    // opencode TUI follows the embedded xterm theme (gateway mode has no BYOK
+    // config generation, so bootstrap the theme file here for both modes).
+    if (agentMeta.id === 'opencode' && !byokConfigFiles.some((f) => f.path === '/root/.config/opencode/tui.json')) {
+        const { opencodeThemeConfigFile } = require('../agents/byokFields');
+        byokConfigFiles = [...byokConfigFiles, opencodeThemeConfigFile()];
+    }
 
     // Validate config files BEFORE creating the session so we can reject
     // invalid JSON without leaving an orphaned session row.
