@@ -7,4 +7,12 @@ CREATE TABLE IF NOT EXISTS "session_route_sticky" (
 	"updated_at" bigint NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "session_route_sticky" ADD CONSTRAINT "session_route_sticky_session_id_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."sessions"("id") ON DELETE cascade ON UPDATE no action;
+DO $$ BEGIN
+	IF NOT EXISTS (
+		SELECT 1 FROM pg_constraint
+		WHERE conname = 'session_route_sticky_session_id_sessions_id_fk'
+		  AND conrelid = 'session_route_sticky'::regclass
+	) THEN
+		ALTER TABLE "session_route_sticky" ADD CONSTRAINT "session_route_sticky_session_id_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."sessions"("id") ON DELETE cascade ON UPDATE no action;
+	END IF;
+END $$;
