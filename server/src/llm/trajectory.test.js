@@ -258,3 +258,44 @@ test('getPrevMessages returns what rememberPrev stored via record path', () => {
     const t = require('./trajectory');
     assert.equal(t.getPrevMessages('sess_none'), null);
 });
+
+// ---------------------------------------------------------------------------
+// computeStats: full-session totals for the viewer header (not paged)
+// ---------------------------------------------------------------------------
+
+test('computeStats aggregates duration, tool calls, user turns and maxSeq', () => {
+    const steps = [
+        {
+            seq: 1, ts: 1, latencyMs: 100, snapshot: true, msgCount: 1, status: 'ok',
+            request: { snapshot: true, params: {}, messages: [{ role: 'user', content: 'hello' }] },
+            response: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] },
+        },
+        {
+            seq: 2, ts: 2, latencyMs: 200, snapshot: false, msgCount: 4, status: 'ok',
+            request: {
+                snapshot: false, params: {}, messages: [
+                    { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] },
+                    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'a.js' }] },
+                    { role: 'user', content: 'second' },
+                ],
+            },
+            response: { content: [{ type: 'text', text: 'done' }] },
+        },
+    ];
+    const stats = trajectory.computeStats(steps);
+    assert.equal(stats.modelCalls, 2);
+    assert.equal(stats.durationMs, 300);
+    // 只数 response 里的 tool_use：重放的请求侧 tool_use 不重复计
+    assert.equal(stats.toolCalls, 1);
+    // 与轨迹洞察同源：user 只有 hello / second，tool_result 与合成消息不计轮次
+    assert.equal(stats.userTurns, 2);
+    assert.equal(stats.maxSeq, 2);
+});
+
+test('computeStats tolerates empty / null latency rows', () => {
+    assert.deepEqual(trajectory.computeStats([]), { modelCalls: 0, durationMs: 0, toolCalls: 0, userTurns: 0, maxSeq: 0 });
+    const stats = trajectory.computeStats([{ seq: 3, latencyMs: null, response: null, request: { snapshot: true, params: {}, messages: [] } }]);
+    assert.equal(stats.modelCalls, 1);
+    assert.equal(stats.durationMs, 0);
+    assert.equal(stats.maxSeq, 3);
+});

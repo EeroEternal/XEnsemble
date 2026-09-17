@@ -1331,7 +1331,10 @@ fastify.get('/api/v1/sessions/:sessionId/trajectory', { preValidation: [fastify.
     const afterSeq = Number(request.query.after_seq) || 0;
     const limit = Number(request.query.limit) || 100;
     const { steps, hasMore } = await trajectory.getSteps(sessionId, { afterSeq, limit });
-    return { session_id: sessionId, steps, has_more: hasMore };
+    // 全量聚合只在首屏（after_seq=0）算一次：头部时长/轮次/调用不能被分页截断，
+    // 与 /report 的全量口径保持一致。后续分页不再重复计算。
+    const totals = afterSeq === 0 ? await trajectory.getStats(sessionId) : undefined;
+    return { session_id: sessionId, steps, has_more: hasMore, ...(totals ? { totals } : {}) };
 });
 
 // 0029: JSONL 导出。服务端重放 snapshot/delta，把每步还原为完整请求载荷

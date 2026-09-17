@@ -654,6 +654,42 @@ async function getAllSteps(sessionId) {
 }
 
 /**
+ * Aggregate session-wide totals from the full step rows (pure, exported for
+ * tests). The viewer header shows these over ALL calls instead of the paged
+ * `steps` it has loaded, so long sessions don't under-count until "load more".
+ *
+ * userTurns/toolCalls reuse conversationExtractor so the header matches the
+ * trajectory report (same dedupe of replayed assistant messages).
+ */
+function computeStats(steps) {
+    const rows = Array.isArray(steps) ? steps : [];
+    let durationMs = 0;
+    let toolCalls = 0;
+    let maxSeq = 0;
+    for (const s of rows) {
+        if (Number.isFinite(s?.seq) && s.seq > maxSeq) maxSeq = s.seq;
+        if (Number.isFinite(s?.latencyMs)) durationMs += s.latencyMs;
+        const content = Array.isArray(s?.response?.content) ? s.response.content : [];
+        for (const b of content) {
+            if (b && b.type === 'tool_use') toolCalls += 1;
+        }
+    }
+    let userTurns = 0;
+    try {
+        const { extractFromTrajectory } = require('../session/conversationExtractor');
+        const { turns } = extractFromTrajectory(rows, { maxTurns: null }) || {};
+        for (const turn of turns || []) {
+            if (turn?.role === 'user') userTurns += 1;
+        }
+    } catch (_) { /* extraction failure → keep 0, header degrades to local count */ }
+    return { modelCalls: rows.length, durationMs, toolCalls, userTurns, maxSeq };
+}
+
+async function getStats(sessionId) {
+    return computeStats(await getAllSteps(sessionId));
+}
+
+/**
  * Replay snapshot/delta rows into per-call full payloads (pure, exported for
  * tests). Each returned line carries the complete context messages the agent
  * sent on that call — semantically identical to storing every request
@@ -707,12 +743,14 @@ module.exports = {
     recordFailure,
     getSteps,
     getAllSteps,
+    getStats,
     subscribe,
     // exported for tests / skill pipeline consumers
     buildRequestRecord,
     parseResponseBytes,
     replayToFull,
     capRequestRecord,
+    computeStats,
     isSyntheticBypassCall,
     isSyntheticUserMessage,
     samePrefix,

@@ -162,14 +162,16 @@ function isSyntheticUserMessage(m) {
  * 把 steps 展开为消息级条目。绝对游标去重（agent 每轮重放全量历史），
  * 与 conversationExtractor.extractFromTrajectory 同一套规则。
  */
-function buildEntries(steps, t) {
+export function buildEntries(steps, t) {
   const entries = [];
   let cursor = 0;
   let systemSeen = false;
   let src = 'req'; // 当前记录来源：'req'=请求上下文 / 'resp'=模型响应
 
+  const toolById = new Map(); // tool_use.id -> 已呈现的调用条目（去重重放的 tool_use）
+
   const push = (kind, label, text, payload, step, name) => {
-    entries.push({
+    const entry = {
       id: `${step.seq}:${entries.length}`,
       kind, label, name: name || null,
       text: String(text || ''),
@@ -178,7 +180,38 @@ function buildEntries(steps, t) {
       step,
       ts: step.ts,
       src, // 'req'=请求上下文 / 'resp'=模型响应（来源页展示）
-    });
+    };
+    entries.push(entry);
+    return entry;
+  };
+
+  const resultTextOf = (b) => {
+    const c = b && typeof b === 'object' && 'content' in b ? b.content : b;
+    return typeof c === 'string' ? c : JSON.stringify(c ?? '');
+  };
+
+  // 工具调用（tool_use）。agent 每次请求会重放上一条 assistant 消息，同一个
+  // tool_use 会先随 response 出现、再随下一次请求出现——按 id 去重，以 response
+  // 侧为权威（与 conversationExtractor 的 pending-response 去重同一语义）。
+  const pushToolCall = (b, step) => {
+    const id = b?.id ?? null;
+    if (id && toolById.has(id)) return;
+    const entry = push('tool', t('trajectory.role_tool'), JSON.stringify(b?.input ?? {}), b, step, b?.name);
+    if (id) toolById.set(id, entry);
+  };
+
+  // 工具结果（tool_result / role:tool）。按 tool_use_id 挂到对应调用条目
+  // （列表箭头拼接、详情页参数下方展示结果）；匹配不到（分页截断 / 无 id）
+  // 时保留为独立结果条目。
+  const pushToolResult = (b, step) => {
+    const id = b?.tool_use_id ?? b?.tool_call_id ?? null;
+    const call = id ? toolById.get(id) : null;
+    const text = resultTextOf(b);
+    if (call) {
+      if (call.result == null) call.result = { text, payload: b, step, ts: step.ts };
+      return;
+    }
+    push('tool', t('trajectory.role_tool'), text, b, step);
   };
 
   // 用户文本 → 上下文/用户 分段（注入标签拆分 + 压缩摘要识别）
@@ -235,8 +268,7 @@ function buildEntries(steps, t) {
         if (Array.isArray(content)) {
           for (const b of content) {
             if (b?.type === 'tool_result') {
-              const r = typeof b.content === 'string' ? b.content : JSON.stringify(b.content);
-              push('tool', t('trajectory.role_tool'), r, b, step);
+              pushToolResult(b, step);
             } else if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
               pushUserText(b.text, b, step);
             }
@@ -245,17 +277,14 @@ function buildEntries(steps, t) {
           pushUserText(typeof content === 'string' ? content : '', m, step);
         }
       } else if (m.role === 'assistant') {
-        // 重发的助手消息跳过 —— 由该调用 response 的内容块呈现（避免重复）
+        // 重发的助手消息按 tool_use.id 去重（response 侧已呈现同一次调用）
         if (Array.isArray(content)) {
           for (const b of content) {
-            if (b?.type === 'tool_use') {
-              push('tool', t('trajectory.role_tool'), JSON.stringify(b.input ?? {}), b, step, b.name);
-            }
+            if (b?.type === 'tool_use') pushToolCall(b, step);
           }
         }
       } else if (m.role === 'tool') {
-        const r = typeof content === 'string' ? content : JSON.stringify(content);
-        push('tool', t('trajectory.role_tool'), r, m, step);
+        pushToolResult(m, step);
       } else if (m.role === 'system') {
         push(systemSeen ? 'context' : 'system', systemSeen ? t('trajectory.role_context') : t('trajectory.role_system'), typeof content === 'string' ? content : JSON.stringify(content), m, step);
         systemSeen = true;
@@ -269,7 +298,7 @@ function buildEntries(steps, t) {
     for (const b of respBlocks(step.response)) {
       if (b.type === 'text' && b.text) push(errored ? 'error' : 'assistant', t('trajectory.role_assistant'), b.text, b, step);
       else if (b.type === 'thinking' && b.thinking) push('thinking', t('trajectory.role_thinking'), b.thinking, b, step);
-      else if (b.type === 'tool_use') push('tool', t('trajectory.role_tool'), JSON.stringify(b.input ?? {}), b, step, b.name);
+      else if (b.type === 'tool_use') pushToolCall(b, step);
     }
   }
 
@@ -829,7 +858,12 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
   const usage = step.response?.usage;
   const style = KIND_STYLES[entry.kind] || KIND_STYLES.assistant;
   const raw = entry.name != null
-    ? { name: entry.name, input: entry.payload?.input ?? entry.payload, step: { seq: step.seq, model: step.model, status: step.status, latency_ms: step.latencyMs } }
+    ? {
+        name: entry.name,
+        input: entry.payload?.input ?? entry.payload,
+        ...(entry.result ? { result: entry.result.payload } : {}),
+        step: { seq: step.seq, model: step.model, status: step.status, latency_ms: step.latencyMs },
+      }
     : entry.payload;
   const srcLabel = entry.src === 'resp' ? t('trajectory.src_response') : t('trajectory.src_request');
 
@@ -857,6 +891,12 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
     try { return JSON.parse(entry.text); } catch { return null; }
   })();
   const toolOutput = (() => {
+    // 合并后的工具条目：结果挂在 entry.result（箭头拼接 / 参数下方展示）
+    if (entry.result) {
+      const c = entry.result.payload?.content ?? entry.result.text;
+      if (typeof c === 'string') { try { return JSON.parse(c); } catch { return c; } }
+      return c;
+    }
     const p = entry.payload;
     if (p && p.content != null) {
       if (typeof p.content === 'string') { try { return JSON.parse(p.content); } catch { return p.content; } }
@@ -1035,6 +1075,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   const { t } = useTranslation('sessions');
   const { showToast } = useToast();
   const [steps, setSteps] = useState([]);
+  const [totals, setTotals] = useState(null);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -1084,6 +1125,8 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
         return merged;
       });
       setHasMore(Boolean(data.has_more));
+      // totals 只在首屏（after_seq=0）由服务端返回：头部指标走全量口径
+      if (data.totals) setTotals(data.totals);
     } catch (e) {
       setError(e?.message || 'load failed');
     } finally {
@@ -1096,6 +1139,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   useEffect(() => {
     afterSeqRef.current = 0;
     setSteps([]);
+    setTotals(null);
     setSelectedId(null);
     setRange(null);
     setTurnsCollapsed(false);
@@ -1190,7 +1234,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
       if (callsCollapsed && e.kind === 'tool' && !expandedSteps[e.stepSeq]) {
         return e.toolCount > 0;
       }
-      if (q && !(`${e.text} ${e.name || ''}`.toLowerCase().includes(q))) return false;
+      if (q && !(`${e.text} ${e.name || ''} ${e.result?.text || ''}`.toLowerCase().includes(q))) return false;
       return true;
     });
   }, [entries, callsCollapsed, expandedSteps, query]);
@@ -1290,11 +1334,24 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
     }
   };
 
-  const totalLatency = steps.reduce((n, s) => n + (s.latencyMs || 0), 0);
+  // 头部三个指标以服务端全量聚合为准（首屏 totals），避免分页截断；
+  // totals 缺失（旧接口 / 加载中）时回退到已加载步骤的本地计算。
+  // totals 之后新到的步骤（WS 推送 / 分页）按 seq > totals.maxSeq 增量补上。
+  const localRounds = useMemo(() => entries.reduce((n, e) => n + (e.kind === 'user' ? 1 : 0), 0), [entries]);
+  const baseMaxSeq = totals?.maxSeq ?? null;
+  const extraSteps = baseMaxSeq == null ? steps : steps.filter((s) => s.seq > baseMaxSeq);
+  const extraDurationMs = extraSteps.reduce((n, s) => n + (s.latencyMs || 0), 0);
   // 工具调用总数（DeepSeek harness 语义）：全部调用 response 里的 tool_use 块，
   // 与折叠开关「展开/收起工具调用」同一口径
-  const toolCallTotal = steps.reduce((n, s) => n + respBlocks(s.response).filter((b) => b?.type === 'tool_use').length, 0);
-  const rounds = groups.filter((g) => g.round > 0).length;
+  const extraToolCalls = extraSteps.reduce((n, s) => n + respBlocks(s.response).filter((b) => b?.type === 'tool_use').length, 0);
+  const extraRounds = useMemo(
+    () => entries.reduce((n, e) => n + (e.kind === 'user' && baseMaxSeq != null && e.stepSeq > baseMaxSeq ? 1 : 0), 0),
+    [entries, baseMaxSeq],
+  );
+  const durationMs = (totals?.durationMs ?? 0) + extraDurationMs;
+  const toolCallTotal = (totals?.toolCalls ?? 0) + extraToolCalls;
+  // 轮次 = 用户输入轮次；totals 为全量基准，之后的新轮次增量补上
+  const rounds = totals ? totals.userTurns + extraRounds : localRounds;
 
   const openReport = async () => {
     if (reportOpen) { setReportOpen(false); return; }
@@ -1341,7 +1398,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
             className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 h-6', consoleButtonFocusClass, durationOn ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100')}
           >
             <Clock className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.75} />
-            {t('trajectory.metric_duration')} <b className={cn(T1, 'font-mono')}>{(totalLatency / 1000).toFixed(1)}s</b>
+            {t('trajectory.metric_duration')} <b className={cn(T1, 'font-mono')}>{(durationMs / 1000).toFixed(1)}s</b>
           </button>
           <button
             type="button"
@@ -1473,6 +1530,12 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
                           <span className={cn(style.text, e.kind === 'tool' && 'font-mono text-[11px]')}>
                             {preview(e.text, e.kind === 'tool' ? 120 : 200)}
                           </span>
+                          {e.result && (
+                            <>
+                              <span className="text-zinc-400 mx-1">→</span>
+                              <span className="font-mono text-[11px] text-zinc-500 dark:text-zinc-400">{preview(e.result.text, 100)}</span>
+                            </>
+                          )}
                         </>
                       )}
                     </span>
