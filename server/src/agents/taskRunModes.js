@@ -12,8 +12,9 @@
  *   qwen-code      qwen -p "<prompt>"                      gemini-cli 系
  *   opencode       opencode run "<prompt>"                 非交互执行，默认自动跑工具
  *   cursor         cursor-agent -p "<prompt>"              print 模式
- *   droid          droid exec "<prompt>" --auto high       exec 默认 Auto (Off) 全部要审批，
- *                  --auto high 完全自治（否则无人值守挂死）
+ *   droid          droid exec --auto high "<prompt>"       exec 默认 Auto (Off) 全部要审批，
+ *                  --auto high 完全自治（否则无人值守挂死）；BYOK 的 --model 必须由
+ *                  createAgentSession 插到 exec 之后（顶层 --model 会劫持解析进 TUI）
  *   cline          cline "<prompt>"（位置参数；注意剔除基础参数 -i，否则进 TUI）
  *                  --yolo 跳过审批且跑完即退
  *   hermes         hermes -z "<prompt>"                    顶层 oneshot 模式（审批自动绕过，
@@ -58,8 +59,11 @@ const TASK_RUN_MODES = {
         // droid exec 默认 Auto (Off)——所有动作都要审批，无人应答直接挂死到超时。
         // 二进制内官方指引：exec 模式用 --auto low|medium|high 提升自治等级；
         // high = 完全自治不询问（与 --skip-permissions-unsafe 互斥）。
-        args: (prompt) => ['exec', prompt],
-        autoApproveArgs: ['--auto', 'high'],
+        // --auto 置于 prompt 之前（droid 0.221 实测位置参数后仍可解析，但顺序
+        // 与官方文档一致更稳）；prompt 固定为最后一个元素——createAgentSession
+        // 依赖该约定把 BYOK 的 --model 插到它前面。
+        args: (prompt) => ['exec', '--auto', 'high', prompt],
+        autoApproveArgs: [],
     },
     'cline': {
         args: (prompt) => [prompt],

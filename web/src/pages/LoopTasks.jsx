@@ -336,6 +336,12 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
     await act(() => deleteLoopTask(task.id), t('loopTasks:toast.deleted'));
   };
 
+  const openRuns = (task) => {
+    setSelectedRun(null);
+    setRuns([]);
+    setRunsOpenFor(task);
+  };
+
   // 执行历史：打开时拉取；有 running run 时 5s 轮询（runsRef 避免闭包过期）
   const runsRef = useRef([]);
   const fetchRuns = useCallback((taskId) => {
@@ -483,6 +489,8 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                 <tr><td colSpan={8} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>{t('loopTasks:empty')}</td></tr>
               ) : tasks.map((task) => {
                 const meta = TASK_STATUS_META[task.status] || TASK_STATUS_META.paused;
+                const runMeta = task.lastRun ? (RUN_STATUS_META[task.lastRun.status] || RUN_STATUS_META.failed) : null;
+                const lastRunSnippet = task.lastRun?.error || task.lastRun?.result || null;
                 return (
                   <tr key={task.id} className="hover:bg-zinc-50/50">
                     <td className={consoleTableBodyCellClass}>
@@ -506,9 +514,33 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                       <StatusBadge tone={meta.tone} icon={meta.icon} label={t(`loopTasks:status.${task.status}`, { defaultValue: task.status })} />
                     </td>
                     <td className={consoleTableBodyCellClass}>
-                      <span className="text-xs text-zinc-500" title={task.lastRunAt ? new Date(task.lastRunAt).toLocaleString() : ''}>
-                        {task.lastRunAt ? formatRelativeTime(task.lastRunAt) : t('loopTasks:run.never')}
-                      </span>
+                      {/* 上次执行概要：状态徽标 + 结果/错误一行摘要，点击直达执行历史 */}
+                      {task.lastRunAt ? (
+                        <button
+                          type="button"
+                          onClick={() => openRuns(task)}
+                          className={`block w-full text-left ${consoleButtonFocusClass}`}
+                          title={lastRunSnippet || t('loopTasks:run.history')}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            {runMeta && (
+                              <StatusBadge
+                                tone={runMeta.tone}
+                                spinning={runMeta.spinning}
+                                label={t(`loopTasks:run.status_${task.lastRun.status}`, { defaultValue: task.lastRun.status })}
+                              />
+                            )}
+                            <span className="text-xs text-zinc-500">{formatRelativeTime(task.lastRunAt)}</span>
+                          </span>
+                          {lastRunSnippet && (
+                            <span className={`mt-0.5 block truncate text-xs ${task.lastRun.error ? 'text-red-600' : 'text-zinc-400'}`}>
+                              {lastRunSnippet}
+                            </span>
+                          )}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-zinc-500">{t('loopTasks:run.never')}</span>
+                      )}
                     </td>
                     <td className={consoleTableBodyCellClass}>
                       {task.status === 'active' && task.nextRunAt ? (
@@ -520,7 +552,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                     <td className={consoleTableBodyCellClass}>
                       <button
                         type="button"
-                        onClick={() => { setSelectedRun(null); setRuns([]); setRunsOpenFor(task); }}
+                        onClick={() => openRuns(task)}
                         className={consoleIconButtonClass}
                         title={t('loopTasks:run.history')}
                         aria-label={t('loopTasks:run.history')}
