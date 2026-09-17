@@ -1,6 +1,7 @@
 const platformSettings = require('../admin/PlatformSettings');
 const userPreferences = require('../admin/UserPreferences');
 const usageService = require('../admin/UsageService');
+const routingService = require('../admin/RoutingService');
 const terminalThemes = require('../config/terminalThemes');
 const { previewSpawnEnv } = require('../agents/agentEnv');
 const { db } = require('../db/index');
@@ -28,6 +29,12 @@ function registerUserRoutes(fastify) {
         } catch (err) {
             return sendPublicError(reply, err, 'Failed to update preferences', 400, request.locale || 'en');
         }
+    });
+
+    // 本人智能路由统计（路由分析页；self 过滤，仅可见自己的路由决策）
+    fastify.get('/api/v1/routing/me', { preValidation: [fastify.authenticate] }, async (request) => {
+        const { days } = request.query || {};
+        return routingService.getMyRoutingOverview(request.user.id, { days });
     });
 
     // 本人 Token 用量（用户自助：强制 self 过滤，仅可见自己的数据）
