@@ -13,6 +13,7 @@ import {
   FULL_REPAINT_DROP_MIN_KEEP_BYTES,
 } from '../lib/terminalFrameDrop';
 import { stripTerminalQueries } from '../lib/terminalQueries';
+import { shouldNotifyTuiTheme } from '../lib/terminalThemeNotify';
 import { useTerminalTheme } from '../hooks/useTerminalTheme.jsx';
 import { XTERM_MINIMUM_CONTRAST_RATIO } from '../lib/terminalThemes.js';
 import { Loader2 } from 'lucide-react';
@@ -1114,6 +1115,11 @@ function AgentConsole({
       .filter(Boolean).join('');
     const mode = preset?.appearance === 'light' ? 1 : 2;
     const payload = `${notify}\x1b[?997;${mode}n`;
+    // 只在「同一会话 + payload 真的变了」时发送：本 effect 的依赖 xtermTheme 是
+    // 每次 render 新建的对象，而切会话会因 key={sessionId} 重新挂载 —— 不加门槛
+    // 就会每次切换/重连都把 payload 灌进前台 TUI 的 stdin，表现为被自动输入
+    // `10;rgb:…11;rgb:…997;2n`（详见 lib/terminalThemeNotify.js）。
+    if (!shouldNotifyTuiTheme(sessionId, payload)) return;
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'input', data: payload }));
     }
