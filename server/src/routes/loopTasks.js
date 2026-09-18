@@ -25,7 +25,7 @@ const runner = require('../loopTasks/runner');
 const policy = require('../auth/PolicyService');
 const { isTaskRunSupported } = require('../agents/taskRunModes');
 
-const MAX_TASKS_PER_USER = Number(process.env.LOOP_TASK_MAX_PER_USER) || 10;
+const MAX_TASKS_PER_USER = Number(process.env.LOOP_TASK_MAX_PER_USER) || 12;
 
 // 时区接受任意合法 IANA 名称（覆盖用户全局偏好的所有条目），非法值回退。
 // 此前是 11 项硬编码白名单——不在表内的全局偏好会被静默回退 UTC，属隐患。
