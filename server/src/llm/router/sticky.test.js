@@ -66,12 +66,12 @@ describe('session route sticky (postgres)', { concurrency: false, timeout: 60000
     });
 
     it('getSticky returns null when no row exists', async () => {
-        assert.equal(await getSticky(SESSION_ID), null);
+        assert.equal(await getSticky(SESSION_ID, 'line-a'), null);
     });
 
     it('touchSticky upserts and getSticky returns model/provider', async () => {
-        await touchSticky(SESSION_ID, { chosenModel: 'deepseek-chat', chosenProvider: 'deepseek' });
-        const sticky = await getSticky(SESSION_ID);
+        await touchSticky(SESSION_ID, 'line-a', { chosenModel: 'deepseek-chat', chosenProvider: 'deepseek' });
+        const sticky = await getSticky(SESSION_ID, 'line-a');
         assert.ok(sticky);
         assert.equal(sticky.chosenModel, 'deepseek-chat');
         assert.equal(sticky.chosenProvider, 'deepseek');
@@ -79,33 +79,44 @@ describe('session route sticky (postgres)', { concurrency: false, timeout: 60000
         assert.ok(sticky.expiresAt > Date.now());
     });
 
+    it('sticky is isolated per line within one session', async () => {
+        await touchSticky(SESSION_ID, 'line-a', { chosenModel: 'glm-5.3-flash', chosenProvider: 'personal_glm' });
+        await touchSticky(SESSION_ID, 'line-b', { chosenModel: 'glm-5.3', chosenProvider: 'personal_glm' });
+        const a = await getSticky(SESSION_ID, 'line-a');
+        const b = await getSticky(SESSION_ID, 'line-b');
+        assert.equal(a.chosenModel, 'glm-5.3-flash');
+        assert.equal(b.chosenModel, 'glm-5.3');
+        // 空 lineKey 退化为 session 级，不与具体线互相干扰
+        assert.equal(await getSticky(SESSION_ID, ''), null);
+    });
+
     it('getSticky returns null when expiresAt is in the past', async () => {
-        await touchSticky(SESSION_ID, { chosenModel: 'deepseek-chat', chosenProvider: 'deepseek' });
+        await touchSticky(SESSION_ID, 'line-a', { chosenModel: 'deepseek-chat', chosenProvider: 'deepseek' });
         await db
             .update(schema.sessionRouteSticky)
             .set({ expiresAt: Date.now() - 1000 })
             .where(eq(schema.sessionRouteSticky.sessionId, SESSION_ID));
-        assert.equal(await getSticky(SESSION_ID), null);
+        assert.equal(await getSticky(SESSION_ID, 'line-a'), null);
     });
 
     it('recordStickyFailure twice keeps a tombstone so the next turn can trigger provider_fail', async () => {
-        await touchSticky(SESSION_ID, { chosenModel: 'kimi-k2.5', chosenProvider: 'moonshot' });
-        const first = await recordStickyFailure(SESSION_ID);
+        await touchSticky(SESSION_ID, 'line-a', { chosenModel: 'kimi-k2.5', chosenProvider: 'moonshot' });
+        const first = await recordStickyFailure(SESSION_ID, 'line-a');
         assert.equal(first.failCount, 1);
         assert.equal(first.released, false);
 
-        const second = await recordStickyFailure(SESSION_ID);
+        const second = await recordStickyFailure(SESSION_ID, 'line-a');
         assert.equal(second.failCount, 2);
         assert.equal(second.released, true);
 
-        const sticky = await getSticky(SESSION_ID);
+        const sticky = await getSticky(SESSION_ID, 'line-a');
         assert.ok(sticky);
         assert.equal(sticky.failCount, 2);
         assert.equal(sticky.chosenProvider, 'moonshot');
     });
 
     it('recordStickyFailure is a noop when no row exists', async () => {
-        const result = await recordStickyFailure(SESSION_ID);
+        const result = await recordStickyFailure(SESSION_ID, 'line-a');
         assert.deepEqual(result, { failCount: 0, released: false });
     });
 });

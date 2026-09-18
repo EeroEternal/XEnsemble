@@ -1,14 +1,26 @@
-const { eq } = require('drizzle-orm');
+const { and, eq } = require('drizzle-orm');
 const { db, schema } = require('../../db');
 
 const STICKY_TTL_MS = 10 * 60 * 1000;
 const FAIL_THRESHOLD = 2;
 
-async function getSticky(sessionId) {
+/**
+ * 粘性按 (sessionId, lineKey) 定位：一个 session 下可有多条并行对话线
+ * （Agent 派生的并行子任务共用 sessionId），各自独立粘性，互不覆盖。
+ * lineKey 为空串时退化为「一个 session 一条粘性」（历史行/无线索请求）。
+ */
+function stickyKey(sessionId, lineKey) {
+    return { sessionId, lineKey: lineKey || '' };
+}
+
+async function getSticky(sessionId, lineKey) {
     const rows = await db
         .select()
         .from(schema.sessionRouteSticky)
-        .where(eq(schema.sessionRouteSticky.sessionId, sessionId))
+        .where(and(
+            eq(schema.sessionRouteSticky.sessionId, sessionId),
+            eq(schema.sessionRouteSticky.lineKey, lineKey || ''),
+        ))
         .limit(1);
     const row = rows[0];
     if (!row) return null;
@@ -21,13 +33,14 @@ async function getSticky(sessionId) {
     };
 }
 
-async function touchSticky(sessionId, { chosenModel, chosenProvider }) {
+async function touchSticky(sessionId, lineKey, { chosenModel, chosenProvider }) {
     const now = Date.now();
     const expiresAt = now + STICKY_TTL_MS;
+    const key = stickyKey(sessionId, lineKey);
     await db
         .insert(schema.sessionRouteSticky)
         .values({
-            sessionId,
+            ...key,
             chosenModel,
             chosenProvider,
             failCount: 0,
@@ -35,7 +48,7 @@ async function touchSticky(sessionId, { chosenModel, chosenProvider }) {
             updatedAt: now,
         })
         .onConflictDoUpdate({
-            target: schema.sessionRouteSticky.sessionId,
+            target: [schema.sessionRouteSticky.sessionId, schema.sessionRouteSticky.lineKey],
             set: {
                 chosenModel,
                 chosenProvider,
@@ -46,11 +59,14 @@ async function touchSticky(sessionId, { chosenModel, chosenProvider }) {
         });
 }
 
-async function recordStickyFailure(sessionId) {
+async function recordStickyFailure(sessionId, lineKey) {
     const rows = await db
         .select()
         .from(schema.sessionRouteSticky)
-        .where(eq(schema.sessionRouteSticky.sessionId, sessionId))
+        .where(and(
+            eq(schema.sessionRouteSticky.sessionId, sessionId),
+            eq(schema.sessionRouteSticky.lineKey, lineKey || ''),
+        ))
         .limit(1);
     if (rows.length === 0) {
         return { failCount: 0, released: false };
@@ -59,7 +75,10 @@ async function recordStickyFailure(sessionId) {
     await db
         .update(schema.sessionRouteSticky)
         .set({ failCount, updatedAt: Date.now() })
-        .where(eq(schema.sessionRouteSticky.sessionId, sessionId));
+        .where(and(
+            eq(schema.sessionRouteSticky.sessionId, sessionId),
+            eq(schema.sessionRouteSticky.lineKey, lineKey || ''),
+        ));
     return { failCount, released: failCount >= FAIL_THRESHOLD };
 }
 

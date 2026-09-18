@@ -20,6 +20,8 @@
  * the proxy hot path; seq assignment is serialized per session.
  */
 
+const { lineKeyOf } = require('./lineKey');
+
 const MAX_JSON_BYTES = 1.5 * 1024 * 1024; // per jsonb column budget
 const STR_CAP = 8000; // per-string cap once a record exceeds the budget
 const MAX_PREV_SESSIONS = 50; // LRU on per-session "previous messages" cache
@@ -32,6 +34,10 @@ const chains = new Map();
 const seqState = new Map();
 // sessionId -> previous request's messages array (delta verification base)
 const prevMessages = new Map();
+// `${sessionId}\u0000${lineKey}` -> previous request's messages of that line.
+// 仅供路由做「同线是否压缩」判定：delta 存储与线性重放仍用 sessionId 单槽
+// （replayToFull 按 seq 线性拼接 delta，改成按线会破坏重放）。
+const prevByLine = new Map();
 // sessionId -> Set<fn(step)> — live WS subscribers (trajectory_event)
 const subscribers = new Map();
 
@@ -152,11 +158,6 @@ function samePrefix(messages, prev) {
     }
 }
 
-function getPrevMessages(sessionId) {
-    const prev = prevMessages.get(sessionId);
-    return Array.isArray(prev) ? prev : null;
-}
-
 function capDeep(v, cap, depth) {
     const d = depth || 0;
     if (typeof v === 'string') {
@@ -209,6 +210,30 @@ function rememberPrev(sessionId, messages) {
     }
 }
 
+function lineCacheKey(sessionId, lineKey) {
+    return `${sessionId}\u0000${lineKey || ''}`;
+}
+
+function rememberPrevForLine(sessionId, lineKey, messages) {
+    if (!Array.isArray(messages)) return;
+    try {
+        if (jsonBytes(messages) > MAX_PREV_BYTES) return;
+    } catch (_) { return; }
+    const key = lineCacheKey(sessionId, lineKey);
+    prevByLine.delete(key); // refresh LRU position
+    prevByLine.set(key, messages);
+    while (prevByLine.size > MAX_PREV_SESSIONS) {
+        const oldest = prevByLine.keys().next().value;
+        prevByLine.delete(oldest);
+    }
+}
+
+/** 该对话线上一次的 messages；无记录返回 null。 */
+function getPrevMessagesForLine(sessionId, lineKey) {
+    const prev = prevByLine.get(lineCacheKey(sessionId, lineKey));
+    return Array.isArray(prev) ? prev : null;
+}
+
 /**
  * Record a model-call request. Resolves to the claimed seq (for response
  * pairing), or null when the call is not recordable. The row is inserted
@@ -230,7 +255,10 @@ function recordRequest({ sessionId, agentId, model, body }) {
             record = { snapshot: true, params: {}, messages: [] };
         }
         record = capRequestRecord(record);
-        rememberPrev(sessionId, Array.isArray(body.messages) ? body.messages : null);
+        const msgs = Array.isArray(body.messages) ? body.messages : null;
+        rememberPrev(sessionId, msgs);
+        // 路由侧按线记录，供「同线是否压缩」判定（与 delta 存储解耦）
+        rememberPrevForLine(sessionId, lineKeyOf(msgs), msgs);
         const row = {
             sessionId,
             seq,
@@ -727,5 +755,5 @@ module.exports = {
     capRequestRecord,
     computeStats,
     samePrefix,
-    getPrevMessages,
+    getPrevMessagesForLine,
 };

@@ -948,11 +948,13 @@ async function proxyLlmRequest(request, reply) {
         } catch (_) { /* never block the proxy hot path */ }
     }
     let routeFailureRecorded = false;
+    // 粘性按对话线隔离：同一 session 下并行子任务各写各的 (session, lineKey)
+    const routeLineKey = routePlan?.signals?.lineKey || '';
     const recordRouteSuccess = () => {
         try {
             const chosen = routePlan?.chosen;
             if (chosen?.chosenModel && claims.sid) {
-                void touchSticky(claims.sid, {
+                void touchSticky(claims.sid, routeLineKey, {
                     chosenModel: chosen.chosenModel,
                     chosenProvider: chosen.chosenProvider || '',
                 }).catch((err) => request.log.warn({ err: err?.message }, '[llm-proxy] touchSticky skipped'));
@@ -966,7 +968,7 @@ async function proxyLlmRequest(request, reply) {
         routeFailureRecorded = true;
         try {
             if (claims.sid) {
-                void recordStickyFailure(claims.sid)
+                void recordStickyFailure(claims.sid, routeLineKey)
                     .catch((err) => request.log.warn({ err: err?.message }, '[llm-proxy] recordStickyFailure skipped'));
             }
         } catch (err) {

@@ -28,7 +28,8 @@ async function planRoute({
         lastUsage,
     });
     const demand = await evaluateDifficulty({ body, signals });
-    const sticky = await getSticky(claims.sid);
+    // 粘性按对话线隔离：同一 session 下的并行子任务各自独立粘性
+    const sticky = await getSticky(claims.sid, signals.lineKey);
     const trig = resolveTrigger({
         sticky,
         compacted: signals.compacted,

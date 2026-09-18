@@ -616,14 +616,20 @@ const llmUsage = pgTable('llm_usage', {
 }));
 
 // STICKY_TTL_MS = 10 * 60 * 1000 — 文档用，TTL 逻辑在 sticky.js
+// 主键为 (session_id, line_key)：一个 session 下可有多条并行对话线（Agent 派生的
+// 并行子任务共用 sessionId），各自独立粘性，避免互相覆盖。line_key 为空串表示
+// 无线索（历史行/空 messages），此时退化为原来的「一个 session 一条粘性」。
 const sessionRouteSticky = pgTable('session_route_sticky', {
-  sessionId: text('session_id').primaryKey().references(() => sessions.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  lineKey: text('line_key').notNull().default(''),
   chosenModel: text('chosen_model').notNull(),
   chosenProvider: text('chosen_provider').notNull(),
   failCount: integer('fail_count').notNull().default(0),
   expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
-});
+}, (table) => ({
+  pk: primaryKey({ columns: [table.sessionId, table.lineKey] }),
+}));
 
 const routingDecisions = pgTable('routing_decisions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),

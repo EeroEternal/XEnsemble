@@ -219,9 +219,9 @@ test('samePrefix: equal prefix is true, rewrite is false', () => {
     assert.equal(samePrefix([{ role: 'user', content: 'compressed' }], prev), false);
 });
 
-test('getPrevMessages returns what rememberPrev stored via record path', () => {
+test('getPrevMessagesForLine returns null for an unknown line', () => {
     const t = require('./trajectory');
-    assert.equal(t.getPrevMessages('sess_none'), null);
+    assert.equal(t.getPrevMessagesForLine('sess_none', 'line-none'), null);
 });
 
 // ---------------------------------------------------------------------------
