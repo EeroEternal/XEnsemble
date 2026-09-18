@@ -76,15 +76,15 @@ export default function RoutingAnalytics() {
           <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{t('observability:routing.complexity_breakdown')}</div>
           <div className="mt-1 grid grid-cols-3 divide-x divide-zinc-200">
             <div className="pr-3">
-              <div className="text-xl font-bold tabular-nums text-purple-700">{loading ? '—' : buckets.high}</div>
+              <div className="text-xl font-bold tabular-nums text-zinc-900">{loading ? '—' : buckets.high}</div>
               <div className="text-[11px] text-zinc-400">{t('observability:routing.tier_high_short')}</div>
             </div>
             <div className="px-3">
-              <div className="text-xl font-bold tabular-nums text-amber-600">{loading ? '—' : buckets.mid}</div>
+              <div className="text-xl font-bold tabular-nums text-zinc-900">{loading ? '—' : buckets.mid}</div>
               <div className="text-[11px] text-zinc-400">{t('observability:routing.tier_medium_short')}</div>
             </div>
             <div className="pl-3">
-              <div className="text-xl font-bold tabular-nums text-emerald-600">{loading ? '—' : buckets.low}</div>
+              <div className="text-xl font-bold tabular-nums text-zinc-900">{loading ? '—' : buckets.low}</div>
               <div className="text-[11px] text-zinc-400">{t('observability:routing.tier_low_short')}</div>
             </div>
           </div>
@@ -96,11 +96,11 @@ export default function RoutingAnalytics() {
           <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{t('observability:routing.model_tier_routing')}</div>
           <div className="mt-1 grid grid-cols-2 divide-x divide-zinc-200">
             <div className="pr-3">
-              <div className="text-xl font-bold tabular-nums text-purple-700">{loading ? '—' : tier.pro}</div>
+              <div className="text-xl font-bold tabular-nums text-zinc-900">{loading ? '—' : tier.pro}</div>
               <div className="text-[11px] text-zinc-400">{t('observability:routing.pro_model_short')}</div>
             </div>
             <div className="px-3">
-              <div className="text-xl font-bold tabular-nums text-emerald-600">{loading ? '—' : tier.flash}</div>
+              <div className="text-xl font-bold tabular-nums text-zinc-900">{loading ? '—' : tier.flash}</div>
               <div className="text-[11px] text-zinc-400">{t('observability:routing.flash_model_short')}</div>
             </div>
           </div>
@@ -110,7 +110,7 @@ export default function RoutingAnalytics() {
         {/* 预估节省成本 */}
         <div className={`${consoleCardClass} p-4`}>
           <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{t('observability:routing.estimated_savings')}</div>
-          <div className="mt-1 text-2xl font-bold tabular-nums text-emerald-600">
+          <div className="mt-1 text-2xl font-bold tabular-nums text-zinc-900">
             {loading ? '—' : `$${Number(summary.estSavingsUsd || 0).toFixed(2)}`}
           </div>
           <div className="mt-0.5 text-[11px] text-zinc-400">

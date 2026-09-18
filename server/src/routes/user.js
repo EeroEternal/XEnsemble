@@ -32,9 +32,14 @@ function registerUserRoutes(fastify) {
     });
 
     // 本人智能路由统计（路由分析页；self 过滤，仅可见自己的路由决策）
-    fastify.get('/api/v1/routing/me', { preValidation: [fastify.authenticate] }, async (request) => {
-        const { days } = request.query || {};
-        return routingService.getMyRoutingOverview(request.user.id, { days });
+    fastify.get('/api/v1/routing/me', { preValidation: [fastify.authenticate] }, async (request, reply) => {
+        try {
+            const { days } = request.query || {};
+            return await routingService.getMyRoutingOverview(request.user.id, { days });
+        } catch (err) {
+            request.log.error({ err, userId: request.user.id }, '[routing] failed to query routing overview');
+            return sendPublicError(reply, err, 'Failed to query routing analytics', 500, request.locale || 'en');
+        }
     });
 
     // 本人 Token 用量（用户自助：强制 self 过滤，仅可见自己的数据）
