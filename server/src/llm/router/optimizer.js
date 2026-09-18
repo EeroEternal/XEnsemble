@@ -20,19 +20,14 @@ function difficultyOf(demand) {
 function applyCapabilityGate(candidates, demand) {
     const difficulty = difficultyOf(demand);
     if (difficulty == null) return candidates;
-    const caps = candidates
-        .map((c) => c.capability)
-        .filter((c) => c != null && Number.isFinite(Number(c)))
-        .map(Number);
-    const maxPool = caps.length ? Math.max(...caps) : 1;
-    const anyCap = caps.length > 0;
+    const anyCap = candidates.some((c) => c.capability != null && Number.isFinite(Number(c.capability)));
     const required = requiredCapability(difficulty);
     return candidates.map((c) => {
         let qualified = true;
         if (anyCap) {
             qualified = c.capability == null
                 ? false
-                : capabilityQualified(c.capability, difficulty, maxPool);
+                : capabilityQualified(c.capability, difficulty);
         }
         return {
             ...c,

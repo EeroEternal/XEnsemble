@@ -130,7 +130,7 @@ test('on-disk project catalog keys are provider+model', () => {
         assert.ok(entry.price);
     }
     const glmFlash = lookupCatalog(cat, { provider: 'personal_glm', model: 'glm-5.3-flash' });
-    assert.equal(glmFlash.capability, 0.92);
+    assert.equal(glmFlash.capability, 0.8);
     assert.equal(glmFlash.price.input, 0.15);
     const glm53 = lookupCatalog(cat, { provider: 'personal_glm', model: 'glm-5.3' });
     assert.equal(glm53.model, 'glm-5.3');

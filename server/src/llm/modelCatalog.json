@@ -2,14 +2,14 @@
   "version": 1,
   "currency": "USD",
   "priced_at": "2026-09-17",
-  "notes": "Official first-party list prices. Same canonical/family model shares one price across providers; provider is kept on the key for later per-vendor overrides.",
+  "notes": "Official first-party list prices. Same canonical/family model shares one price across providers; provider is kept on the key for later per-vendor overrides. capability is the difficulty ceiling: a model is qualified for request difficulty D iff capability >= 0.35 + 0.55*D (see llm/router/evaluateDifficulty.js). Keep flash-tier models below the pro tier so hard requests escalate.",
   "entries": [
     {
       "provider": "volcengine-zxs",
       "model": "deepseek-v4-flash-ga-260731",
       "canonical_model_id": "deepseek-v4-flash-ga-260731",
       "family": "deepseek-v4-flash",
-      "capability": 0.9,
+      "capability": 0.78,
       "price": { "input": 0.15, "output": 0.6, "cache_read": 0.003, "cache_write": null }
     },
     {
@@ -17,7 +17,7 @@
       "model": "deepseek-v4-flash-ga-260731",
       "canonical_model_id": "deepseek-v4-flash-ga-260731",
       "family": "deepseek-v4-flash",
-      "capability": 0.9,
+      "capability": 0.78,
       "price": { "input": 0.15, "output": 0.6, "cache_read": 0.003, "cache_write": null }
     },
     {
@@ -25,7 +25,7 @@
       "model": "deepseek-v4-flash-ga-260731",
       "canonical_model_id": "deepseek-v4-flash-ga-260731",
       "family": "deepseek-v4-flash",
-      "capability": 0.9,
+      "capability": 0.78,
       "price": { "input": 0.15, "output": 0.6, "cache_read": 0.003, "cache_write": null }
     },
     {
@@ -33,7 +33,7 @@
       "model": "deepseek-v4-flash",
       "canonical_model_id": "deepseek-v4-flash",
       "family": "deepseek-v4-flash",
-      "capability": 0.9,
+      "capability": 0.78,
       "price": { "input": 0.15, "output": 0.6, "cache_read": 0.003, "cache_write": null }
     },
     {
@@ -41,7 +41,7 @@
       "model": "glm-5-3-flash-260826",
       "canonical_model_id": "glm-5-3-flash-260826",
       "family": "glm-5.3-flash",
-      "capability": 0.92,
+      "capability": 0.8,
       "price": { "input": 0.15, "output": 0.5, "cache_read": 0.03, "cache_write": null }
     },
     {
@@ -49,7 +49,7 @@
       "model": "glm-5.3-flash",
       "canonical_model_id": "glm-5.3-flash",
       "family": "glm-5.3-flash",
-      "capability": 0.92,
+      "capability": 0.8,
       "price": { "input": 0.15, "output": 0.5, "cache_read": 0.03, "cache_write": null }
     },
     {
@@ -65,7 +65,7 @@
       "model": "glm-4.5",
       "canonical_model_id": "glm-4.5",
       "family": "glm-4.5",
-      "capability": 0.72,
+      "capability": 0.63,
       "price": { "input": 0.6, "output": 2.2, "cache_read": 0.11, "cache_write": null }
     },
     {
@@ -73,7 +73,7 @@
       "model": "minimax/minimax-m3:free",
       "canonical_model_id": "minimax-m3:free",
       "family": "minimax-m3",
-      "capability": 0.86,
+      "capability": 0.75,
       "price": { "input": 0, "output": 0, "cache_read": 0, "cache_write": null }
     },
     {
@@ -81,7 +81,7 @@
       "model": "minimax/minimax-m3:free",
       "canonical_model_id": "minimax-m3:free",
       "family": "minimax-m3",
-      "capability": 0.86,
+      "capability": 0.75,
       "price": { "input": 0, "output": 0, "cache_read": 0, "cache_write": null }
     }
   ]

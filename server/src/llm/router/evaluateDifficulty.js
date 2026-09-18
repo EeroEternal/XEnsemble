@@ -1,5 +1,4 @@
 const HARD_TASK_DIFFICULTY = 0.55;
-const CAPABILITY_TOP_TOLERANCE = 0.04;
 const TOKENS_PER_CHAR_WIDE = 1.0;
 const CHARS_PER_TOKEN_NARROW = 4.0;
 
@@ -100,8 +99,12 @@ const CORRECTION = [
     '不对', '还是报错', '理解错了', '遗漏',
 ];
 
-function containsAny(haystack, needles) {
-    return needles.some((n) => haystack.includes(n));
+function countHits(haystack, needles) {
+    let n = 0;
+    for (const needle of needles) {
+        if (haystack.includes(needle)) n += 1;
+    }
+    return n;
 }
 
 function heuristicDifficulty(body) {
@@ -125,16 +128,22 @@ function heuristicDifficulty(body) {
         d += 0.12;
     }
     if (tokens > 12000) d += 0.10;
-    if (containsAny(lower, HIGH_REASONING) || containsAny(text, HIGH_REASONING)) {
-        d += 0.50;
-    } else if (containsAny(lower, DESIGN_INTENT) || containsAny(text, DESIGN_INTENT)) {
-        d += 0.25;
+    // 关键词信号改为「计数 + 封顶」：单个词不再一击越过 HARD_TASK_DIFFICULTY。
+    // 原实现命中一个词即 +0.50，导致「架构文档改错别字」这类普通请求被判高难，
+    // 评分饱和到 1.0，能力门槛失去区分度。
+    const reasoningHits = countHits(lower, HIGH_REASONING);
+    const designHits = countHits(lower, DESIGN_INTENT);
+    if (reasoningHits > 0) {
+        d += Math.min(0.45, 0.20 + 0.10 * (reasoningHits - 1));
+    } else if (designHits > 0) {
+        d += Math.min(0.25, 0.15 + 0.05 * (designHits - 1));
     }
     const userTurns = (Array.isArray(body?.messages) ? body.messages : [])
         .filter((m) => m?.role === 'user').length;
     if (userTurns >= 8) d += 0.10;
-    if (containsAny(lower, CORRECTION) || containsAny(text, CORRECTION)) {
-        d += 0.30;
+    const correctionHits = countHits(lower, CORRECTION);
+    if (correctionHits > 0) {
+        d += Math.min(0.30, 0.20 + 0.08 * (correctionHits - 1));
     }
     return clamp01(d);
 }
@@ -143,15 +152,14 @@ function requiredCapability(difficulty) {
     return 0.35 + 0.55 * clamp01(difficulty);
 }
 
-function capabilityQualified(capabilityScore, difficulty, maxPoolCapability) {
+/** 连续能力门槛：capability >= requiredCapability(D) 即合格。
+ * 原实现在 D>=0.55 时切换为「必须接近目录最高分」的硬门槛，导致门槛在 0.55 处
+ * 从 0.647 跳到 0.91，把 0.72~0.90 的中档模型一刀切淘汰，且 D 从 0.55 涨到 1.0
+ * 时合格集合不再收窄（与 requiredCapability 倒挂）。改为单一连续公式。 */
+function capabilityQualified(capabilityScore, difficulty) {
     const cap = Number(capabilityScore);
     if (!Number.isFinite(cap)) return false;
-    const d = clamp01(difficulty);
-    const maxCap = Number.isFinite(Number(maxPoolCapability)) ? Number(maxPoolCapability) : 1;
-    if (d >= HARD_TASK_DIFFICULTY) {
-        return cap >= (maxCap - CAPABILITY_TOP_TOLERANCE);
-    }
-    return cap >= requiredCapability(d);
+    return cap >= requiredCapability(difficulty);
 }
 
 async function evaluateDifficulty({ body, signals } = {}) {
@@ -169,5 +177,4 @@ module.exports = {
     requiredCapability,
     capabilityQualified,
     HARD_TASK_DIFFICULTY,
-    CAPABILITY_TOP_TOLERANCE,
 };

@@ -61,12 +61,17 @@ test('agent envelope (tools + system) does not make 你好 a hard task', () => {
     assert.ok(d > heuristicDifficulty({ messages: [{ role: 'user', content: '你好' }] }));
 });
 
-test('requiredCapability and hard-task qualification match SmartGate gates', () => {
+test('requiredCapability and hard-task qualification use one continuous gate', () => {
     assert.equal(requiredCapability(0), 0.35);
     assert.equal(requiredCapability(1), 0.9);
     assert.equal(HARD_TASK_DIFFICULTY, 0.55);
-    assert.equal(capabilityQualified(0.65, 0.15, 0.95), true);
-    assert.equal(capabilityQualified(0.65, 0.70, 0.95), false);
-    assert.equal(capabilityQualified(0.92, 0.70, 0.95), true);
-    assert.equal(capabilityQualified(0.95, 0.70, 0.95), true);
+    assert.ok(Math.abs(requiredCapability(0.55) - 0.6525) < 1e-9);
+    // 连续门槛：D=0.55 不再跳到「目录最高分 - 0.04」的硬门槛
+    assert.equal(capabilityQualified(0.65, 0.15), true);
+    assert.equal(capabilityQualified(0.65, 0.70), false);
+    assert.equal(capabilityQualified(0.92, 0.70), true);
+    assert.equal(capabilityQualified(0.95, 0.70), true);
+    // 0.55 处与相邻难度保持连续，无断崖
+    assert.equal(capabilityQualified(0.65, 0.54), true);
+    assert.equal(capabilityQualified(0.65, 0.55), false);
 });
