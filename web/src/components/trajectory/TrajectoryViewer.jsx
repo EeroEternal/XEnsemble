@@ -812,7 +812,7 @@ function OverviewSection({ label, onOpen, children }) {
       <button
         type="button"
         onClick={onOpen}
-        className={cn('flex items-center gap-1 text-[11px] font-semibold tracking-wider uppercase mb-1.5', T3, 'hover:text-zinc-700 dark:hover:text-zinc-200', consoleButtonFocusClass)}
+        className={cn('flex items-center gap-1 text-[11px] font-semibold tracking-wider uppercase mb-1.5', T3, 'hover:text-zinc-700', consoleButtonFocusClass)}
       >
         <span>{label}</span>
         <span className="text-zinc-400">→</span>
@@ -834,10 +834,10 @@ function JsonTree({ value, name = null }) {
     const color = isStr ? 'text-emerald-700 dark:text-emerald-300'
       : isNum ? 'text-sky-700 dark:text-sky-300'
         : isBool ? 'text-amber-700 dark:text-amber-300'
-          : isNull ? 'text-zinc-400' : 'text-zinc-700 dark:text-zinc-200';
+          : isNull ? 'text-zinc-400' : 'text-zinc-700';
     return (
       <div className="pl-5 font-mono text-[11.5px] leading-relaxed break-all">
-        {name !== null && <span className="text-zinc-500 dark:text-zinc-400">{name}<span className="text-zinc-400">: </span></span>}
+        {name !== null && <span className="text-zinc-500">{name}<span className="text-zinc-400">: </span></span>}
         <span className={color}>{isStr ? `"${value}"` : String(value)}</span>
       </div>
     );
@@ -849,10 +849,10 @@ function JsonTree({ value, name = null }) {
       <button
         type="button"
         onClick={() => setCollapsed((c) => !c)}
-        className={cn('flex items-center gap-1 text-left hover:text-zinc-900 dark:hover:text-zinc-100', consoleButtonFocusClass)}
+        className={cn('flex items-center gap-1 text-left hover:text-zinc-900', consoleButtonFocusClass)}
       >
         <span className="w-3 shrink-0 text-zinc-400">{collapsed ? '▸' : '▾'}</span>
-        {name !== null && <span className="text-zinc-600 dark:text-zinc-300">{name}<span className="text-zinc-400">: </span></span>}
+        {name !== null && <span className="text-zinc-600">{name}<span className="text-zinc-400">: </span></span>}
         <span className="text-zinc-400">{isArr ? '[' : '{'}</span>
         {collapsed && <span className="text-zinc-400">…{isArr ? `] ${pairs.length}` : `} ${pairs.length}`}</span>}
       </button>
@@ -869,9 +869,8 @@ function JsonTree({ value, name = null }) {
 function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
   const { t } = useTranslation('sessions');
   const [tab, setTab] = useState('overview');
-  const [overviewExpanded, setOverviewExpanded] = useState(false);
   const [thinkingOpen, setThinkingOpen] = useState(false);
-  useEffect(() => { setTab('overview'); setOverviewExpanded(false); setThinkingOpen(false); }, [entry?.id]);
+  useEffect(() => { setTab('overview'); setThinkingOpen(false); }, [entry?.id]);
   if (!entry) {
     return <div className={cn('flex-1 flex items-center justify-center text-xs', T3)}>{t('trajectory.detail_empty')}</div>;
   }
@@ -893,15 +892,34 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
     ? entries.find((e) => e.id !== entry.id && e.stepSeq === entry.stepSeq && e.kind === 'assistant') || null
     : null;
 
-  // 助手正文：预览 tab 全量走 MarkdownView（代码高亮 / KaTeX 公式，与会话历史一致）。
-  // 思考不在这里，而是概述里预览下方的独立「思考」折叠区。
-  const renderedBody = (previewMode) => (
-    <div className={cn(
-      'text-[13px]',
-      previewMode && 'max-h-56 overflow-hidden relative',
-    )}>
+  // 助手正文：全量走 MarkdownView（代码高亮 / KaTeX 公式，与会话历史一致）。
+  // 概述里由外层限高 + 滚动，预览 tab 显示全文。
+  const renderedBody = () => (
+    <div className="text-[13px]">
       {entry.text ? <MarkdownView>{entry.text}</MarkdownView> : <p className="text-zinc-400">—</p>}
     </div>
+  );
+
+  // 思考块：概述与预览 tab 共用。概述限高滚动，预览 tab 不限高完整铺开。
+  const renderThinking = ({ bounded = true } = {}) => (
+    entry.thinking ? (
+      <div className="mb-1.5">
+        <button
+          type="button"
+          onClick={() => setThinkingOpen((o) => !o)}
+          aria-expanded={thinkingOpen}
+          className={cn('flex items-center gap-1 text-[11px] font-semibold tracking-wider uppercase text-zinc-400 hover:text-zinc-700', consoleButtonFocusClass)}
+        >
+          <ChevronRight className={cn('w-3 h-3 shrink-0 transition-transform', thinkingOpen && 'rotate-90')} strokeWidth={2} />
+          <span>{t('trajectory.role_thinking')}</span>
+        </button>
+        {thinkingOpen && (
+          <div className={cn('mt-1.5 border-l-2 border-zinc-200 pl-3', bounded && 'max-h-40 overflow-y-auto')}>
+            <p className="text-[12px] leading-relaxed text-zinc-500 whitespace-pre-wrap break-words">{entry.thinking}</p>
+          </div>
+        )}
+      </div>
+    ) : null
   );
 
   // 工具调用：参数（tool_use.input）与结果（tool_result/tool.content）
@@ -953,7 +971,7 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
             <OverviewSection label={t('trajectory.tab_output', { defaultValue: '结果' })} onOpen={() => setTab('output')}>
               {typeof toolOutput === 'object'
                 ? <JsonTree value={toolOutput} />
-                : <pre className="font-mono text-[11px] text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap break-words max-h-40 overflow-hidden">{toolOutput}</pre>}
+                : <pre className="font-mono text-[11px] text-zinc-700 whitespace-pre-wrap break-words max-h-40 overflow-hidden">{toolOutput}</pre>}
             </OverviewSection>
           )}
         </div>
@@ -962,37 +980,11 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
     return (
       <OverviewSection label={t('trajectory.tab_preview')} onOpen={() => setTab('preview')}>
         {/* 思考：放在「预览」标题下、正文上方，默认折叠 */}
-        {entry.thinking && (
-          <div className="mb-1.5">
-            <button
-              type="button"
-              onClick={() => setThinkingOpen((o) => !o)}
-              aria-expanded={thinkingOpen}
-              className={cn('flex items-center gap-1 text-[11px] font-semibold tracking-wider uppercase text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200', consoleButtonFocusClass)}
-            >
-              <ChevronRight className={cn('w-3 h-3 shrink-0 transition-transform', thinkingOpen && 'rotate-90')} strokeWidth={2} />
-              <span>{t('trajectory.role_thinking')}</span>
-            </button>
-            {thinkingOpen && (
-              <div className="mt-1.5 rounded-md border border-zinc-200 bg-zinc-50/80 px-2.5 py-2 dark:border-zinc-700/60 dark:bg-zinc-800/40">
-                <p className="text-[12px] italic leading-relaxed text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap break-words">{entry.thinking}</p>
-              </div>
-            )}
-          </div>
-        )}
-        {/* DeepSeek harness 原则：折叠的是容器，不裁内容——默认折叠，就地展开全文 */}
-        <div className={cn('relative', !overviewExpanded && 'max-h-56 overflow-hidden')}>
-          {renderedBody(false)}
+        {renderThinking()}
+        {/* 概述只做有界预览：正文限高、范围内滚动；看全文点标题跳「预览」tab */}
+        <div className="max-h-56 overflow-y-auto">
+          {renderedBody()}
         </div>
-        <button
-          type="button"
-          onClick={() => setOverviewExpanded((o) => !o)}
-          className={cn('mt-1 inline-flex items-center gap-1 text-[11px]', T3, 'hover:text-zinc-800 dark:hover:text-zinc-200', consoleButtonFocusClass)}
-        >
-          {overviewExpanded
-            ? t('trajectory.collapse', { defaultValue: '收起' })
-            : t('trajectory.expand_all', { defaultValue: '展开全部' })}
-        </button>
       </OverviewSection>
     );
   };
@@ -1047,7 +1039,7 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
               <button
                 type="button"
                 onClick={() => onNavigate?.(parentMessage.id)}
-                className={cn('flex items-center gap-1.5 text-[11px] text-left', T2, 'hover:text-zinc-900 dark:hover:text-zinc-100', consoleButtonFocusClass)}
+                className={cn('flex items-center gap-1.5 text-[11px] text-left', T2, 'hover:text-zinc-900', consoleButtonFocusClass)}
               >
                 <span>{t('trajectory.from_assistant', { defaultValue: '来自助手消息' })}</span>
                 <span className="text-zinc-400">·</span>
@@ -1057,7 +1049,12 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
             {renderOverviewSections()}
           </div>
         )}
-        {tab === 'preview' && renderedBody(false)}
+        {tab === 'preview' && (
+          <div className="space-y-3">
+            {renderThinking({ bounded: false })}
+            {renderedBody()}
+          </div>
+        )}
         {tab === 'input' && (
           toolInput != null
             ? <JsonTree value={toolInput} />
@@ -1067,7 +1064,7 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
           toolOutput != null
             ? (typeof toolOutput === 'object'
                 ? <JsonTree value={toolOutput} />
-                : <pre className="font-mono text-[11.5px] text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap break-words">{toolOutput}</pre>)
+                : <pre className="font-mono text-[11.5px] text-zinc-700 whitespace-pre-wrap break-words">{toolOutput}</pre>)
             : <p className="text-xs text-zinc-400">{t('trajectory.detail_empty')}</p>
         )}
         {tab === 'raw' && (
@@ -1587,13 +1584,13 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
                     </span>
                     <span className="flex-1 min-w-0 text-xs leading-relaxed break-all">
                       {e.kind === 'tool' && e.name && <span className="text-amber-700 dark:text-amber-300 font-mono mr-1.5">{e.name}</span>}
-                      <span className={cn(style.text, e.kind === 'tool' && 'font-mono text-[11px]', e.kind !== 'tool' && !e.text && e.thinking && 'italic text-zinc-500 dark:text-zinc-400')}>
+                      <span className={cn(style.text, e.kind === 'tool' && 'font-mono text-[11px]', e.kind !== 'tool' && !e.text && e.thinking && 'text-zinc-500')}>
                         {preview(e.text || e.thinking, e.kind === 'tool' ? 120 : 200)}
                       </span>
                       {e.result && (
                         <>
                           <span className="text-zinc-400 mx-1">→</span>
-                          <span className="font-mono text-[11px] text-zinc-500 dark:text-zinc-400">{preview(e.result.text, 100)}</span>
+                          <span className="font-mono text-[11px] text-zinc-500">{preview(e.result.text, 100)}</span>
                         </>
                       )}
                     </span>
