@@ -15,6 +15,8 @@
  */
 
 const { cleanTerminalText, truncateMiddle } = require('./terminalText');
+// Agent CLI 注入的伪用户包裹标签（与 web 查看器共享同一份白名单）
+const INJECTED_TAGS = new Set(require('../../../shared/injectedTags.json').tags);
 
 const EXTRACTOR_VERSION = '1';
 const MAX_TURNS = 100;
@@ -333,6 +335,48 @@ function isSyntheticUserMessage(msg) {
     return trimmed.length > 0 && SYNTHETIC_USER_RES.some((re) => re.test(trimmed));
 }
 
+/**
+ * 剥离 Agent CLI 注入的伪用户上下文标签（<system-reminder>…</system-reminder>
+ * 等白名单平衡标签对），只保留真实用户文本。与 web 端
+ * TrajectoryViewer.splitInjectedSegments 使用同一份标签白名单与平衡游走规则。
+ */
+function stripInjectedTags(text) {
+    if (!text) return '';
+    const TAG_NAME_RE = '[A-Za-z][A-Za-z0-9-]*';
+    const OPEN_RE = new RegExp('^<(' + TAG_NAME_RE + ')(\\s[^>]*)?>');
+    const CLOSE_RE = new RegExp('^</(' + TAG_NAME_RE + ')>');
+    let out = '';
+    let i = 0;
+    while (i < text.length) {
+        const rest = text.slice(i);
+        const m = rest.match(OPEN_RE);
+        if (m && INJECTED_TAGS.has(m[1])) {
+            const name = m[1];
+            const innerStart = i + m[0].length;
+            let depth = 1;
+            let j = innerStart;
+            let balanced = false;
+            while (j < text.length) {
+                const sub = text.slice(j);
+                const close = sub.match(CLOSE_RE);
+                if (close && close[1] === name) {
+                    depth -= 1;
+                    j += close[0].length;
+                    if (depth === 0) { balanced = true; break; }
+                    continue;
+                }
+                const open = sub.match(OPEN_RE);
+                if (open && open[1] === name) { depth += 1; j += open[0].length; continue; }
+                j += 1;
+            }
+            if (balanced) { i = j; continue; }
+        }
+        out += text[i];
+        i += 1;
+    }
+    return out;
+}
+
 function extractFromTrajectory(steps, { maxTurns = MAX_TURNS } = {}) {
     const { replayToFull } = require('../llm/trajectory');
     const lines = replayToFull(steps || []);
@@ -354,7 +398,11 @@ function extractFromTrajectory(steps, { maxTurns = MAX_TURNS } = {}) {
         if (!trimmed) return;
         // CLI 合成的伪用户消息（记忆整理/压缩摘要等）不计入用户轮次
         if (SYNTHETIC_USER_RES.some((re) => re.test(trimmed))) return;
-        const t = truncateMiddle(trimmed, TURN_MAX_BYTES);
+        // 纯注入上下文（<system-reminder> 等）不算用户输入；与查看器同一套白名单，
+        // 保证头部「用户轮次」与列表分组/折叠边界一致
+        const cleaned = stripInjectedTags(trimmed).trim();
+        if (!cleaned) return;
+        const t = truncateMiddle(cleaned, TURN_MAX_BYTES);
         turns.push({ role: 'user', ts, text: t.text, truncated: t.truncated });
     };
 

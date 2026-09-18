@@ -598,3 +598,50 @@ test('extract uses transcript when no stateDirRef', async () => {
     assert.equal(source, 'transcript');
     assert.equal(turns.length, 1);
 });
+
+test('extractFromTrajectory ignores injected-context-only messages and strips injected tags', () => {
+    // 与 web 查看器同一套用户轮次口径：纯注入上下文不算用户输入，
+    // 文本+注入+文本仍是一条 user 消息 = 一轮。
+    const steps = [
+        {
+            seq: 1, ts: 1000, msgCount: 1, status: 'ok',
+            request: {
+                snapshot: true, params: {},
+                messages: [
+                    { role: 'user', content: '<system-reminder>injected only</system-reminder>' },
+                ],
+            },
+            response: null,
+        },
+        {
+            seq: 2, ts: 2000, msgCount: 2, status: 'ok',
+            request: {
+                snapshot: false, params: {},
+                messages: [
+                    { role: 'user', content: 'hello <system-reminder>ctx</system-reminder> world' },
+                ],
+            },
+            response: null,
+        },
+    ];
+    const { turns } = extractor.extractFromTrajectory(steps, { maxTurns: null });
+    const userTurns = turns.filter((t) => t.role === 'user');
+    assert.equal(userTurns.length, 1);
+    assert.equal(userTurns[0].text, 'hello  world');
+});
+
+// 跨端 parity：web 端 TrajectoryEntries.test.jsx 读同一份 fixtures 断言 round 数，
+// 任一端的注入剥离规则漂移都会让这组用例失败。
+for (const c of require('../../../shared/injectedContext.fixtures.json').cases) {
+    test(`user-turn parity (server): ${c.name}`, () => {
+        const steps = [{
+            seq: 1, ts: 1000, msgCount: 1, status: 'ok',
+            request: { snapshot: true, params: {}, messages: [{ role: 'user', content: c.content }] },
+            response: null,
+        }];
+        const { turns } = extractor.extractFromTrajectory(steps, { maxTurns: null });
+        const userTurns = turns.filter((t) => t.role === 'user');
+        assert.equal(userTurns.length, c.userTurns);
+        if (c.expectText !== undefined) assert.equal(userTurns[0]?.text, c.expectText);
+    });
+}

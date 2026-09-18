@@ -1,0 +1,33 @@
+{
+  "cases": [
+    {
+      "name": "plain user message",
+      "content": "plain ask",
+      "userTurns": 1,
+      "expectText": "plain ask"
+    },
+    {
+      "name": "text + injected context + text",
+      "content": "hello <system-reminder>x</system-reminder> world",
+      "userTurns": 1,
+      "expectText": "hello  world"
+    },
+    {
+      "name": "injected context only",
+      "content": "<system-reminder>only</system-reminder>",
+      "userTurns": 0
+    },
+    {
+      "name": "nested injected tags",
+      "content": "a <system-reminder>o <b>i</b></system-reminder> b",
+      "userTurns": 1,
+      "expectText": "a  b"
+    },
+    {
+      "name": "command wrappers stripped",
+      "content": "<command-name>/compact</command-name> please compact",
+      "userTurns": 1,
+      "expectText": "please compact"
+    }
+  ]
+}

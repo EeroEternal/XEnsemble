@@ -12,6 +12,7 @@ import { useToast } from '../Toast';
 import { consoleButtonFocusClass } from '../../lib/consoleTokens';
 import { cn } from '../../lib/utils';
 import MarkdownView from '../Markdown';
+import injectedTags from '../../../../shared/injectedTags.json';
 
 /**
  * TrajectoryViewer (0029) — 全量执行轨迹查看器（DeepSeek harness 风格，明暗双主题）。
@@ -77,11 +78,8 @@ function preview(text, max = 160) {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
-// Agent CLI 注入的伪用户消息包裹标签（与 server 端 proxy.js stripInjectedContext 同一约定集）
-const INJECTED_TAGS = new Set([
-  'system-reminder', 'local-command-caveat', 'local-command-stdout',
-  'command-name', 'command-message', 'command-args',
-]);
+// Agent CLI 注入的伪用户包裹标签（与 server 端共享同一份白名单）
+const INJECTED_TAGS = new Set(injectedTags.tags || []);
 
 /**
  * 把 role:'user' 的文本拆成 真实用户输入 / 注入上下文 分段。
@@ -167,6 +165,7 @@ export function buildEntries(steps, t) {
   let cursor = 0;
   let systemSeen = false;
   let src = 'req'; // 当前记录来源：'req'=请求上下文 / 'resp'=模型响应
+  let round = 0; // 用户轮次：一条真实用户输入开启一轮（见 pushUserText）
 
   const toolById = new Map(); // tool_use.id -> 已呈现的调用条目（去重重放的 tool_use）
 
@@ -180,6 +179,7 @@ export function buildEntries(steps, t) {
       step,
       ts: step.ts,
       src, // 'req'=请求上下文 / 'resp'=模型响应（来源页展示）
+      round, // 用户轮次编号（分组/折叠/边界统一用它）
     };
     entries.push(entry);
     return entry;
@@ -225,6 +225,9 @@ export function buildEntries(steps, t) {
     else if (CAVEAT_RE.test(raw)) tag = 'caveat';
     else if (SUGGESTION_MODE_RE.test(raw)) tag = 'suggestion';
     const segs = tag ? [{ kind: 'context', text: raw, tag }] : splitInjectedSegments(raw);
+    // 一条 user 消息 = 至多一个用户轮次：剥离注入后仍有真实文本才开启新一轮，
+    // 该消息的所有分段（含 context）落在同一轮，纯注入消息不开启。
+    if (segs.some((seg) => seg.kind === 'user')) round += 1;
     for (const seg of segs) {
       if (seg.kind === 'context') push('context', t('trajectory.role_context'), seg.text, payload, step, seg.tag);
       else push('user', t('trajectory.role_user'), seg.text, payload, step);
@@ -293,28 +296,29 @@ export function buildEntries(steps, t) {
     // 快照行推进绝对游标；delta 行不推进（并行合成调用会交错改写 msgCount）
     if (isSnapshot && (Number(step.msgCount) || 0) > cursor) cursor = Number(step.msgCount);
 
-    // 该次调用的响应 → 助手文本 + 思考 + 工具调用
+    // 该次调用的响应 → 一条助手条目（思考 + 正文）+ 工具调用。
+    // 思考本就是助手回复的一部分（同一 response 的 content 块），不再单独成行。
     src = 'resp';
+    const thinkingParts = [];
+    const textParts = [];
     for (const b of respBlocks(step.response)) {
-      if (b.type === 'text' && b.text) push(errored ? 'error' : 'assistant', t('trajectory.role_assistant'), b.text, b, step);
-      else if (b.type === 'thinking' && b.thinking) push('thinking', t('trajectory.role_thinking'), b.thinking, b, step);
-      else if (b.type === 'tool_use') pushToolCall(b, step);
+      if (b.type === 'thinking' && b.thinking) thinkingParts.push(b.thinking);
+      else if (b.type === 'text' && b.text) textParts.push(b.text);
     }
-  }
-
-  // 每步的 tool_use 数量与工具名挂到该步首个助手/思考条目（调用折叠时显示摘要行）。
-  // 纯 tool_use 无文本的响应（常见于第一轮）没有 assistant/thinking 条目，
-  // 兜底挂到该步最后一个工具条目上，保证摘要行不丢。
-  for (const s of steps) {
-    const calls = respBlocks(s.response).filter((b) => b && b.type === 'tool_use');
-    if (calls.length > 0) {
-      const stepEntries = entries.filter((en) => en.stepSeq === s.seq);
-      const e = stepEntries.find((en) => en.kind === 'assistant' || en.kind === 'thinking')
-        || stepEntries[stepEntries.length - 1];
-      if (e) {
-        e.toolCount = calls.length;
-        e.toolNames = calls.map((b) => b.name).filter(Boolean);
-      }
+    const thinkingText = thinkingParts.join('\n');
+    const replyText = textParts.join('\n');
+    if (thinkingText || replyText) {
+      const entry = push(
+        errored ? 'error' : 'assistant',
+        t('trajectory.role_assistant'),
+        replyText,
+        { role: 'assistant', thinking: thinkingText || null, text: replyText },
+        step,
+      );
+      if (thinkingText) entry.thinking = thinkingText;
+    }
+    for (const b of respBlocks(step.response)) {
+      if (b.type === 'tool_use') pushToolCall(b, step);
     }
   }
   return entries;
@@ -376,6 +380,7 @@ function buildEntryTiming(entries, steps) {
     byStep.get(e.stepSeq).push(e);
   }
 
+  let lastRound = 0;
   for (const s of steps) {
     const meta = stepMeta.get(s.seq);
     const list = byStep.get(s.seq) || [];
@@ -384,7 +389,12 @@ function buildEntryTiming(entries, steps) {
         timing.set(e.id, { t0: meta.start, t1: meta.start, dur: 0 });
       }
     }
-    if (list.some((e) => e.kind === 'user')) boundariesMs.push(meta.start);
+    // 每开启一个用户轮次画一条边界线（一轮一条）
+    const maxRound = list.reduce((m, e) => Math.max(m, e.round), 0);
+    if (maxRound > lastRound) {
+      boundariesMs.push(meta.start);
+      lastRound = maxRound;
+    }
     const modelEntry = list.find((e) => e.kind === 'assistant' || e.kind === 'thinking' || e.kind === 'error');
     if (modelEntry) timing.set(modelEntry.id, { t0: meta.start, t1: meta.end, dur: meta.end - meta.start });
     const calls = list.filter((e) => e.kind === 'tool' && e.name != null);
@@ -404,9 +414,11 @@ function buildEntryTiming(entries, steps) {
 function buildSequenceTimeline(entries, timing) {
   const spans = [];
   const boundaries = [];
+  let lastRound = 0;
   entries.forEach((e, i) => {
+    // 每开启一个用户轮次画一条边界线（一轮一条）
+    if (e.round > lastRound) { boundaries.push(i); lastRound = e.round; }
     if (e.kind === 'tool' && e.name == null) return;
-    if (e.kind === 'user') boundaries.push(i);
     const tm = timing.get(e.id) || { t0: 0, t1: 0, dur: 0 };
     spans.push({
       entryId: e.id, kind: spanKind(e), lane: spanLane(spanKind(e)),
@@ -867,20 +879,26 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
     : entry.payload;
   const srcLabel = entry.src === 'resp' ? t('trajectory.src_response') : t('trajectory.src_request');
 
-  // 层级导航：tool 的父消息（同一次调用里发起它的 assistant/thinking）
+  // 层级导航：tool 的父消息（同一次调用里发起它的助手条目），助手条目已含思考
   const parentMessage = entry.kind === 'tool'
-    ? entries.find((e) => e.id !== entry.id && e.stepSeq === entry.stepSeq && (e.kind === 'assistant' || e.kind === 'thinking')) || null
+    ? entries.find((e) => e.id !== entry.id && e.stepSeq === entry.stepSeq && e.kind === 'assistant') || null
     : null;
 
-  // 预览 tab 全量走 markdown 渲染（代码高亮 / KaTeX 公式，与会话历史一致）；
-  // thinking 保持弱化色调。原始 tab 保留纯文本 JSON 视图。
+  // 助手回复：思考块（弱化灰底 + 斜体，不加标签）+ 正文（markdown）。
+  // 预览 tab 全量走 MarkdownView（代码高亮 / KaTeX 公式，与会话历史一致）。
   const renderedBody = (previewMode) => (
     <div className={cn(
       'text-[13px]',
       previewMode && 'max-h-56 overflow-hidden relative',
-      entry.kind === 'thinking' && 'opacity-80',
     )}>
-      <MarkdownView>{entry.text || '—'}</MarkdownView>
+      {entry.thinking && (
+        <div className="mb-2 rounded-md border border-zinc-200 bg-zinc-50/80 px-2.5 py-2 dark:border-zinc-700/60 dark:bg-zinc-800/40">
+          <p className="text-[12px] italic leading-relaxed text-zinc-500 dark:text-zinc-400 whitespace-pre-wrap break-words">{entry.thinking}</p>
+        </div>
+      )}
+      {entry.text
+        ? <MarkdownView>{entry.text}</MarkdownView>
+        : (!entry.thinking && <p className="text-zinc-400">—</p>)}
     </div>
   );
 
@@ -1228,16 +1246,11 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   const visibleEntries = useMemo(() => {
     const q = query.trim().toLowerCase();
     return entries.filter((e) => {
-      // 折叠工具调用：隐藏未被局部展开的 step 的工具条目。
-      // 摘要行锚点（挂了 toolCount 的条目）保持可见——纯 tool_use 无文本的步
-      // （常见于第一轮）锚点就是工具条目，不保留会让整步从列表里消失。
-      if (callsCollapsed && e.kind === 'tool' && !expandedSteps[e.stepSeq]) {
-        return e.toolCount > 0;
-      }
-      if (q && !(`${e.text} ${e.name || ''} ${e.result?.text || ''}`.toLowerCase().includes(q))) return false;
+      // 搜索过滤（工具折叠在渲染时按「两个助手之间」处理，不在这里过滤）
+      if (q && !(`${e.text} ${e.name || ''} ${e.thinking || ''} ${e.result?.text || ''}`.toLowerCase().includes(q))) return false;
       return true;
     });
-  }, [entries, callsCollapsed, expandedSteps, query]);
+  }, [entries, query]);
 
   // 选区聚焦：span 与选区相交的条目保持高亮，其余在列表中变暗（用当前激活投影）
   const focusIds = useMemo(() => {
@@ -1249,17 +1262,20 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
     return set;
   }, [range, model]);
 
-  // 轮次分组：以用户条目为界；轮次可整体折叠（DeepSeek turns 开关）
+  // 轮次分组：按条目上的用户轮次编号（buildEntries 按 user 消息打标），
+  // 轮次可整体折叠（DeepSeek turns 开关）
   const groups = useMemo(() => {
     const out = [];
-    let idx = 0;
+    const byRound = new Map();
     for (const e of visibleEntries) {
-      if (e.kind === 'user') {
-        idx += 1;
-        out.push({ round: idx, title: e.text, entries: [] });
+      let g = byRound.get(e.round);
+      if (!g) {
+        g = { round: e.round, title: '', entries: [] };
+        byRound.set(e.round, g);
+        out.push(g);
       }
-      if (!out.length) out.push({ round: 0, title: '', entries: [] });
-      out[out.length - 1].entries.push(e);
+      if (!g.title && e.kind === 'user') g.title = e.text;
+      g.entries.push(e);
     }
     return out;
   }, [visibleEntries]);
@@ -1276,12 +1292,21 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   // 选中条目所属轮次（概述页头部展示）
   const roundByEntry = useMemo(() => {
     const map = new Map();
-    let idx = 0;
-    for (const e of entries) {
-      if (e.kind === 'user') idx += 1;
-      map.set(e.id, idx);
-    }
+    for (const e of entries) map.set(e.id, e.round);
     return map;
+  }, [entries]);
+
+  // 每个模型调用（两个助手之间）的工具汇总，折叠「调用」时在该助手之后显示一行
+  const stepToolMeta = useMemo(() => {
+    const m = new Map();
+    for (const e of entries) {
+      if (e.kind !== 'tool' || !e.name) continue;
+      const cur = m.get(e.stepSeq) || { count: 0, names: [] };
+      cur.count += 1;
+      if (e.name) cur.names.push(e.name);
+      m.set(e.stepSeq, cur);
+    }
+    return m;
   }, [entries]);
 
   // follow：新条目到达自动选中最后一条
@@ -1337,17 +1362,27 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   // 头部三个指标以服务端全量聚合为准（首屏 totals），避免分页截断；
   // totals 缺失（旧接口 / 加载中）时回退到已加载步骤的本地计算。
   // totals 之后新到的步骤（WS 推送 / 分页）按 seq > totals.maxSeq 增量补上。
-  const localRounds = useMemo(() => entries.reduce((n, e) => n + (e.kind === 'user' ? 1 : 0), 0), [entries]);
+  const localRounds = useMemo(() => entries.reduce((n, e) => Math.max(n, e.round), 0), [entries]);
   const baseMaxSeq = totals?.maxSeq ?? null;
   const extraSteps = baseMaxSeq == null ? steps : steps.filter((s) => s.seq > baseMaxSeq);
   const extraDurationMs = extraSteps.reduce((n, s) => n + (s.latencyMs || 0), 0);
   // 工具调用总数（DeepSeek harness 语义）：全部调用 response 里的 tool_use 块，
   // 与折叠开关「展开/收起工具调用」同一口径
   const extraToolCalls = extraSteps.reduce((n, s) => n + respBlocks(s.response).filter((b) => b?.type === 'tool_use').length, 0);
-  const extraRounds = useMemo(
-    () => entries.reduce((n, e) => n + (e.kind === 'user' && baseMaxSeq != null && e.stepSeq > baseMaxSeq ? 1 : 0), 0),
-    [entries, baseMaxSeq],
-  );
+  // totals 快照之后新开启的用户轮次（其首条消息在快照 maxSeq 之后）
+  const extraRounds = useMemo(() => {
+    if (baseMaxSeq == null) return 0;
+    const inBase = new Set();
+    const newOnes = new Set();
+    for (const e of entries) {
+      if (e.round <= 0) continue;
+      if (e.stepSeq <= baseMaxSeq) inBase.add(e.round);
+      else newOnes.add(e.round);
+    }
+    let n = 0;
+    for (const r of newOnes) if (!inBase.has(r)) n += 1;
+    return n;
+  }, [entries, baseMaxSeq]);
   const durationMs = (totals?.durationMs ?? 0) + extraDurationMs;
   const toolCallTotal = (totals?.toolCalls ?? 0) + extraToolCalls;
   // 轮次 = 用户输入轮次；totals 为全量基准，之后的新轮次增量补上
@@ -1500,10 +1535,31 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
                     )}
                   </button>
                 )}
-                {expanded && g.entries.map((e) => {
+                {expanded && g.entries.map((e, i) => {
                 const style = KIND_STYLES[e.kind] || KIND_STYLES.assistant;
                 const Icon = style.icon;
                 const dimmed = range !== null && focusIds !== null && !focusIds.has(e.id);
+                // 工具调用折叠：按「两个助手之间」（同一次模型调用）聚合。
+                // 在该步第一个工具条目处渲染一行汇总，其余工具条目隐藏。
+                if (callsCollapsed && e.kind === 'tool' && !expandedSteps[e.stepSeq]) {
+                  const prev = g.entries[i - 1];
+                  const firstOfStep = !prev || prev.stepSeq !== e.stepSeq || prev.kind !== 'tool';
+                  if (!firstOfStep) return null;
+                  const meta = stepToolMeta.get(e.stepSeq);
+                  if (!meta) return null;
+                  return (
+                    <div key={`calls-${e.stepSeq}`} className="pl-10 pr-3 py-1">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedSteps((o) => ({ ...o, [e.stepSeq]: true }))}
+                        title={t('trajectory.expand_calls')}
+                        className={cn('text-[10px] text-zinc-400 font-mono hover:text-zinc-700', consoleButtonFocusClass)}
+                      >
+                        ⚙ {t('trajectory.calls_summary', { count: meta.count, tools: meta.names.join(', ') })}
+                      </button>
+                    </div>
+                  );
+                }
                 return (
                   <Fragment key={e.id}>
                   <button
@@ -1523,36 +1579,19 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
                       {e.label}
                     </span>
                     <span className="flex-1 min-w-0 text-xs leading-relaxed break-all">
-                      {/* 折叠时摘要锚点若是工具条目（纯 tool_use 步），隐藏其参数预览，只留汇总行 */}
-                      {!(callsCollapsed && e.toolCount > 0 && !expandedSteps[e.stepSeq] && e.kind === 'tool') && (
+                      {e.kind === 'tool' && e.name && <span className="text-amber-700 dark:text-amber-300 font-mono mr-1.5">{e.name}</span>}
+                      <span className={cn(style.text, e.kind === 'tool' && 'font-mono text-[11px]', e.kind !== 'tool' && !e.text && e.thinking && 'italic text-zinc-500 dark:text-zinc-400')}>
+                        {preview(e.text || e.thinking, e.kind === 'tool' ? 120 : 200)}
+                      </span>
+                      {e.result && (
                         <>
-                          {e.kind === 'tool' && e.name && <span className="text-amber-700 dark:text-amber-300 font-mono mr-1.5">{e.name}</span>}
-                          <span className={cn(style.text, e.kind === 'tool' && 'font-mono text-[11px]')}>
-                            {preview(e.text, e.kind === 'tool' ? 120 : 200)}
-                          </span>
-                          {e.result && (
-                            <>
-                              <span className="text-zinc-400 mx-1">→</span>
-                              <span className="font-mono text-[11px] text-zinc-500 dark:text-zinc-400">{preview(e.result.text, 100)}</span>
-                            </>
-                          )}
+                          <span className="text-zinc-400 mx-1">→</span>
+                          <span className="font-mono text-[11px] text-zinc-500 dark:text-zinc-400">{preview(e.result.text, 100)}</span>
                         </>
                       )}
                     </span>
                     {e.step.status === 'error' && <XCircle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" strokeWidth={2} />}
                   </button>
-                  {callsCollapsed && e.toolCount > 0 && !expandedSteps[e.stepSeq] && (
-                    <div className="pl-10 pr-3 -mt-0.5 mb-1">
-                      <button
-                        type="button"
-                        onClick={() => setExpandedSteps((o) => ({ ...o, [e.stepSeq]: true }))}
-                        title={t('trajectory.expand_calls')}
-                        className={cn('text-[10px] text-zinc-400 font-mono hover:text-zinc-700', consoleButtonFocusClass)}
-                      >
-                        ⚙ {t('trajectory.calls_summary', { count: e.toolCount, tools: (e.toolNames || []).join(', ') })}
-                      </button>
-                    </div>
-                  )}
                   </Fragment>
                 );
               })}

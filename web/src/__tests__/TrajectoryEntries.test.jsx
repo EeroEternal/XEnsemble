@@ -114,3 +114,123 @@ describe('trajectory buildEntries: tool call + result merge', () => {
         expect(toolResults(entries)[0].text).toBe('orphan');
     });
 });
+
+describe('trajectory buildEntries: thinking belongs to the assistant turn', () => {
+    it('merges thinking + reply into one assistant entry (no standalone thinking row)', () => {
+        const steps = [
+            {
+                seq: 1, ts: 1, msgCount: 1, snapshot: true, status: 'ok',
+                request: { messages: [{ role: 'user', content: 'go' }] },
+                response: {
+                    content: [
+                        { type: 'thinking', thinking: 'let me think' },
+                        { type: 'text', text: 'here is the answer' },
+                        { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } },
+                    ],
+                },
+            },
+        ];
+
+        const entries = buildEntries(steps, t);
+        expect(entries.some((e) => e.kind === 'thinking')).toBe(false);
+        const assistant = entries.find((e) => e.kind === 'assistant');
+        expect(assistant.text).toBe('here is the answer');
+        expect(assistant.thinking).toBe('let me think');
+    });
+
+    it('keeps a thinking-only response as an assistant entry with an empty reply', () => {
+        const steps = [
+            {
+                seq: 1, ts: 1, msgCount: 1, snapshot: true, status: 'ok',
+                request: { messages: [{ role: 'user', content: 'go' }] },
+                response: {
+                    content: [
+                        { type: 'thinking', thinking: 'only thinking' },
+                        { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } },
+                    ],
+                },
+            },
+        ];
+
+        const entries = buildEntries(steps, t);
+        const assistant = entries.find((e) => e.kind === 'assistant');
+        expect(assistant.thinking).toBe('only thinking');
+        expect(assistant.text).toBe('');
+        // 工具调用与助手同属一个用户轮次
+        expect(assistant.round).toBe(1);
+        expect(entries.find((e) => e.kind === 'tool').round).toBe(1);
+    });
+});
+
+describe('trajectory buildEntries: user turn boundaries', () => {
+    it('counts one turn per user message even with injected context between texts', () => {
+        const steps = [
+            {
+                seq: 1, ts: 1, msgCount: 1, snapshot: true, status: 'ok',
+                request: { messages: [{ role: 'user', content: 'hello <system-reminder>x</system-reminder> world' }] },
+                response: { content: [{ type: 'text', text: 'ok' }] },
+            },
+        ];
+        const entries = buildEntries(steps, t);
+        expect(entries.filter((e) => e.kind === 'user')).toHaveLength(2);
+        expect(entries.reduce((m, e) => Math.max(m, e.round), 0)).toBe(1);
+    });
+
+    it('does not open a turn for an injected-context-only message', () => {
+        const steps = [
+            {
+                seq: 1, ts: 1, msgCount: 1, snapshot: true, status: 'ok',
+                request: { messages: [{ role: 'user', content: '<system-reminder>only</system-reminder>' }] },
+                response: { content: [{ type: 'text', text: 'ok' }] },
+            },
+        ];
+        const entries = buildEntries(steps, t);
+        expect(entries.filter((e) => e.kind === 'user')).toHaveLength(0);
+        expect(entries.reduce((m, e) => Math.max(m, e.round), 0)).toBe(0);
+    });
+
+    it('keeps all tool calls of one user turn in the same round', () => {
+        const mk = (seq, prevIds, ids) => ({
+            seq, ts: seq, msgCount: 1, snapshot: seq === 1, status: 'ok',
+            request: {
+                snapshot: seq === 1, params: {},
+                messages: seq === 1
+                    ? [{ role: 'user', content: 'go' }]
+                    : [
+                        { role: 'assistant', content: prevIds.map((id) => ({ type: 'tool_use', id, name: 'T', input: {} })) },
+                        { role: 'user', content: prevIds.map((id) => ({ type: 'tool_result', tool_use_id: id, content: 'r' })) },
+                    ],
+            },
+            response: {
+                content: [
+                    { type: 'thinking', thinking: `th${seq}` },
+                    ...ids.map((id) => ({ type: 'tool_use', id, name: 'T', input: {} })),
+                ],
+            },
+        });
+        const entries = buildEntries([mk(1, [], ['a1', 'a2']), mk(2, ['a1', 'a2'], ['b1', 'b2']), mk(3, ['b1', 'b2'], ['c1', 'c2'])], t);
+        const rounds = new Set(entries.filter((e) => e.kind === 'tool').map((e) => e.round));
+        expect(rounds.size).toBe(1);
+        expect([...rounds][0]).toBe(1);
+    });
+});
+
+// 跨端 parity：server 端 conversationExtractor.test.js 读同一份 fixtures 断言
+// userTurns / 剥离文本，这里断言 buildEntries 的 round 数一致。
+import injectedFixtures from '../../../shared/injectedContext.fixtures.json';
+
+describe('user turn parity (web, shared fixtures)', () => {
+    for (const c of injectedFixtures.cases) {
+        it(c.name, () => {
+            const steps = [
+                {
+                    seq: 1, ts: 1000, msgCount: 1, status: 'ok',
+                    request: { snapshot: true, params: {}, messages: [{ role: 'user', content: c.content }] },
+                    response: null,
+                },
+            ];
+            const entries = buildEntries(steps, t);
+            expect(entries.reduce((m, e) => Math.max(m, e.round), 0)).toBe(c.userTurns);
+        });
+    }
+});
