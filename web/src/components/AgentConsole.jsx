@@ -263,6 +263,36 @@ function AgentConsole({
     terminal.unicode.activeVersion = '11';
     host.replaceChildren();
     terminal.open(host);
+
+    // 满屏重绘型 TUI（qwen 等）用「光标上移 + 2K 重画」原地刷新，从不把旧行
+    // 顶出屏幕 → 终端 scrollback 恒为空（视口 SH==CH，无可滚区间）。此时滚轮
+    // 被 xterm 保留后无事可做，事件会链式转发到页面，造成「滚轮滚的是整个
+    // 页面几行」的错觉。仿终端 alternate scroll mode：无滚动区间时把滚轮
+    // 转成 PageUp/PageDown 发给 TUI，由它自己翻页（与键盘行为一致）。
+    // 仅在 primary buffer + 未开启鼠标追踪时接管；TUI 自己要鼠标/alt screen
+    // 时维持 xterm 原生行为。
+    let lastWheelForwardAt = 0;
+    const onTerminalWheel = (ev) => {
+      if (ev.deltaY === 0 || disposed || serverEnded) return;
+      try {
+        if (terminal.modes?.mouseTrackingMode && terminal.modes.mouseTrackingMode !== 'none') return;
+        // 仅当「本地无可滚区间」时接管：normal buffer 无 scrollback（满屏重绘型
+        // TUI 原地重写、历史在 TUI 内存里），或 alt screen（本身无回滚历史）。
+        // 有 scrollback 时交给 xterm 原生滚动，行为不变。
+        const buf = terminal.buffer.active;
+        if (buf.type === 'normal' && buf.length > terminal.rows) return;
+      } catch (_) { /* buffer 未就绪等异常时维持原生行为 */ return; }
+      ev.preventDefault();
+      ev.stopPropagation();
+      const now = Date.now();
+      // 节流：一次滚轮滚动会连发多个事件，逐个转发会让 TUI 翻页过冲
+      if (now - lastWheelForwardAt < 150) return;
+      lastWheelForwardAt = now;
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'input', data: ev.deltaY > 0 ? '\x1b[6~' : '\x1b[5~' }));
+      }
+    };
+    host.addEventListener('wheel', onTerminalWheel, { capture: true, passive: false });
  // opencode TUI writes the clipboard via the OSC 52 escape sequence
  // (ESC ] 52 ; c ; <base64> BEL). xterm.js 5.5.0 has no built-in OSC 52
  // write handler, so without this the agent prints "copied to clipboard"
@@ -1112,6 +1142,7 @@ function AgentConsole({
       host.removeEventListener('mousedown', focusTerminal);
       host.removeEventListener('click', focusTerminal);
       host.removeEventListener('contextmenu', handleContextMenu);
+      host.removeEventListener('wheel', onTerminalWheel, { capture: true });
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
