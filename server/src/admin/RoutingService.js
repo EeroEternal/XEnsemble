@@ -28,18 +28,26 @@ function normalizeRange(days) {
     return { days: d, sinceTs: Date.now() - d * DAY_MS };
 }
 
-/** 模型 → 档位（pro/flash）：目录池顶带为 pro（与优化器硬门槛同一判定） */
-function buildTierMap(catalog) {
+/** 模型 → 档位分类器（pro/flash）：目录池顶带（max − 0.04）为 pro。
+ * 匹配必须走 findCatalogEntries 的 family/canonical 模糊匹配——llm_usage.model
+ * 是路由后带 provider 前缀的完整串，与目录裸模型名精确比对永远 miss。 */
+function buildTierClassifier(catalog) {
     const entries = catalog?.entries || [];
     const caps = entries.map((e) => Number(e.capability)).filter((n) => Number.isFinite(n));
     const maxCap = caps.length ? Math.max(...caps) : 1;
-    const map = new Map();
-    for (const e of entries) {
-        const cap = Number(e.capability);
-        if (!Number.isFinite(cap)) continue;
-        map.set(e.model, cap >= maxCap - TOP_TIER_TOLERANCE ? 'pro' : 'flash');
-    }
-    return map;
+    const cache = new Map();
+    return (model) => {
+        if (cache.has(model)) return cache.get(model);
+        const matched = findCatalogEntries(catalog, { model });
+        const matchedCaps = matched
+            .map((e) => Number(e.capability))
+            .filter((n) => Number.isFinite(n));
+        const tier = matchedCaps.length
+            ? (Math.max(...matchedCaps) >= maxCap - TOP_TIER_TOLERANCE ? 'pro' : 'flash')
+            : null;
+        cache.set(model, tier);
+        return tier;
+    };
 }
 
 function usdCost(unit, tokens) {
@@ -55,7 +63,7 @@ function usdCost(unit, tokens) {
  */
 async function getMyRoutingOverview(userId, { days } = {}) {
     const { days: d, sinceTs } = normalizeRange(days);
-    const tierMap = buildTierMap(fetchModelCatalog());
+    const tierOf = buildTierClassifier(fetchModelCatalog());
     const analyzed = [
         eq(schema.llmUsage.userId, userId),
         gte(schema.llmUsage.createdAt, sinceTs),
@@ -125,7 +133,7 @@ async function getMyRoutingOverview(userId, { days } = {}) {
     let tierPro = 0;
     let tierFlash = 0;
     for (const row of tierRows) {
-        const tier = tierMap.get(row.model);
+        const tier = tierOf(row.model);
         if (tier === 'pro') tierPro += Number(row.n);
         else if (tier === 'flash') tierFlash += Number(row.n);
     }
