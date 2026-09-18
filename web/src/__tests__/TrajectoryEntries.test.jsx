@@ -225,7 +225,7 @@ describe('user turn parity (web, shared fixtures)', () => {
             const steps = [
                 {
                     seq: 1, ts: 1000, msgCount: 1, status: 'ok',
-                    request: { snapshot: true, params: {}, messages: [{ role: 'user', content: c.content }] },
+                    request: { snapshot: true, params: {}, messages: [{ role: 'user', content: c.blocks ?? c.content }] },
                     response: null,
                 },
             ];

@@ -28,6 +28,15 @@
       "content": "<command-name>/compact</command-name> please compact",
       "userTurns": 1,
       "expectText": "please compact"
+    },
+    {
+      "name": "two text blocks in one user message",
+      "blocks": [
+        { "type": "text", "text": "first part" },
+        { "type": "text", "text": "second part" }
+      ],
+      "userTurns": 1,
+      "expectText": "first part\nsecond part"
     }
   ]
 }

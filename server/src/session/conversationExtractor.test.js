@@ -636,7 +636,7 @@ for (const c of require('../../../shared/injectedContext.fixtures.json').cases) 
     test(`user-turn parity (server): ${c.name}`, () => {
         const steps = [{
             seq: 1, ts: 1000, msgCount: 1, status: 'ok',
-            request: { snapshot: true, params: {}, messages: [{ role: 'user', content: c.content }] },
+            request: { snapshot: true, params: {}, messages: [{ role: 'user', content: c.blocks ?? c.content }] },
             response: null,
         }];
         const { turns } = extractor.extractFromTrajectory(steps, { maxTurns: null });

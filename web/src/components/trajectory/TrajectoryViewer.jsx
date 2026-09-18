@@ -271,13 +271,17 @@ export function buildEntries(steps, t) {
 
       if (m.role === 'user' || m.role === 'human') {
         if (Array.isArray(content)) {
+          // 一条 user 消息的所有 text 块合并后只调一次 pushUserText——多 text 块
+          // 不能各开一轮（与 server extractor 的 addUserText 同口径）。
+          let userText = '';
           for (const b of content) {
             if (b?.type === 'tool_result') {
               pushToolResult(b, step);
             } else if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
-              pushUserText(b.text, b, step);
+              userText += (userText ? '\n' : '') + b.text;
             }
           }
+          if (userText.trim()) pushUserText(userText, content, step);
         } else {
           pushUserText(typeof content === 'string' ? content : '', m, step);
         }
@@ -956,24 +960,10 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
       );
     }
     return (
-      <>
-        <OverviewSection label={t('trajectory.tab_preview')} onOpen={() => setTab('preview')}>
-          {/* DeepSeek harness 原则：折叠的是容器，不裁内容——默认折叠，就地展开全文 */}
-          <div className={cn('relative', !overviewExpanded && 'max-h-56 overflow-hidden')}>
-            {renderedBody(false)}
-          </div>
-          <button
-            type="button"
-            onClick={() => setOverviewExpanded((o) => !o)}
-            className={cn('mt-1 inline-flex items-center gap-1 text-[11px]', T3, 'hover:text-zinc-800 dark:hover:text-zinc-200', consoleButtonFocusClass)}
-          >
-            {overviewExpanded
-              ? t('trajectory.collapse', { defaultValue: '收起' })
-              : t('trajectory.expand_all', { defaultValue: '展开全部' })}
-          </button>
-        </OverviewSection>
+      <OverviewSection label={t('trajectory.tab_preview')} onOpen={() => setTab('preview')}>
+        {/* 思考：放在「预览」标题下、正文上方，默认折叠 */}
         {entry.thinking && (
-          <section>
+          <div className="mb-1.5">
             <button
               type="button"
               onClick={() => setThinkingOpen((o) => !o)}
@@ -988,9 +978,22 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
                 <p className="text-[12px] italic leading-relaxed text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap break-words">{entry.thinking}</p>
               </div>
             )}
-          </section>
+          </div>
         )}
-      </>
+        {/* DeepSeek harness 原则：折叠的是容器，不裁内容——默认折叠，就地展开全文 */}
+        <div className={cn('relative', !overviewExpanded && 'max-h-56 overflow-hidden')}>
+          {renderedBody(false)}
+        </div>
+        <button
+          type="button"
+          onClick={() => setOverviewExpanded((o) => !o)}
+          className={cn('mt-1 inline-flex items-center gap-1 text-[11px]', T3, 'hover:text-zinc-800 dark:hover:text-zinc-200', consoleButtonFocusClass)}
+        >
+          {overviewExpanded
+            ? t('trajectory.collapse', { defaultValue: '收起' })
+            : t('trajectory.expand_all', { defaultValue: '展开全部' })}
+        </button>
+      </OverviewSection>
     );
   };
 
@@ -1387,24 +1390,10 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   // 工具调用总数（DeepSeek harness 语义）：全部调用 response 里的 tool_use 块，
   // 与折叠开关「展开/收起工具调用」同一口径
   const extraToolCalls = extraSteps.reduce((n, s) => n + respBlocks(s.response).filter((b) => b?.type === 'tool_use').length, 0);
-  // totals 快照之后新开启的用户轮次（其首条消息在快照 maxSeq 之后）
-  const extraRounds = useMemo(() => {
-    if (baseMaxSeq == null) return 0;
-    const inBase = new Set();
-    const newOnes = new Set();
-    for (const e of entries) {
-      if (e.round <= 0) continue;
-      if (e.stepSeq <= baseMaxSeq) inBase.add(e.round);
-      else newOnes.add(e.round);
-    }
-    let n = 0;
-    for (const r of newOnes) if (!inBase.has(r)) n += 1;
-    return n;
-  }, [entries, baseMaxSeq]);
   const durationMs = (totals?.durationMs ?? 0) + extraDurationMs;
   const toolCallTotal = (totals?.toolCalls ?? 0) + extraToolCalls;
-  // 轮次 = 用户输入轮次；totals 为全量基准，之后的新轮次增量补上
-  const rounds = totals ? totals.userTurns + extraRounds : localRounds;
+  // 轮次 = 列表实际渲染的轮次数（与可见「第 N 轮」严格一致；分页时也只算已加载）
+  const rounds = localRounds;
 
   const openReport = async () => {
     if (reportOpen) { setReportOpen(false); return; }
@@ -1544,10 +1533,10 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
                   <button
                     type="button"
                     onClick={() => expandable && toggleGroup(g.round)}
-                    className={cn('sticky top-0 z-10 w-full flex items-center gap-2 px-3 h-8 backdrop-blur border-b text-left', 'bg-zinc-100/95', 'border-zinc-200', consoleButtonFocusClass, expandable && 'cursor-pointer')}
+                    className={cn('sticky top-0 z-10 w-full flex items-center gap-2 px-3 h-7 backdrop-blur border-b text-left', 'bg-zinc-100/95', 'border-zinc-200', consoleButtonFocusClass, expandable && 'cursor-pointer')}
                   >
-                    <span className={cn('text-[11px]', T3)}>{t('trajectory.round_label', { n: g.round })}</span>
-                    <span className="text-xs text-sky-700 dark:text-sky-300 truncate min-w-0">{preview(g.title, 60)}</span>
+                    <span className={cn('text-[10px] shrink-0', T3)}>{t('trajectory.round_label', { n: g.round })}</span>
+                    <span className="text-[11px] text-sky-700 dark:text-sky-300 truncate min-w-0">{preview(g.title, 60)}</span>
                     {expandable && !expanded && (
                       <span className={cn('ml-auto text-[10px] shrink-0', T3)}>{t('trajectory.hidden_count', { count: g.entries.length })}</span>
                     )}
