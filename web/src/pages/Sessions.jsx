@@ -146,6 +146,9 @@ export default React.forwardRef(function Sessions({
   // 拖拽期间禁用面板容器指针事件：DeployPanel 的预览是 iframe，会吞掉 mousemove/mouseup，
   // 导致拖拽冻结或面板跟着 iframe 内部行为乱跑；pointer-events:none 让事件穿透到父窗口。
   const panelContainerRef = useRef(null);
+  // 正在进行的拖拽收尾函数（卸载时调用），防止 pointerEvents:none / body 样式残留。
+  const panelResizeCleanupRef = useRef(null);
+  useEffect(() => () => { panelResizeCleanupRef.current?.(); }, []);
   const [skipPendingSpinner, setSkipPendingSpinner] = useState(false);
 
   // Measure actual container width for true 1:1 ratio (sidebar width varies)
@@ -364,10 +367,13 @@ export default React.forwardRef(function Sessions({
   }, [selectedAgentId]);
 
   const startPanelResize = useCallback((e) => {
+    // 只处理主键，避免右键/中键进入拿不到 mouseup 的挂起态。
+    if (e.button !== 0) return;
     e.preventDefault();
     const startX = e.clientX;
     const startW = panelWidth;
     let moved = false;
+    let finished = false;
     const maxW = Math.max(720, window.innerWidth - 240);
     // 按下即禁用面板容器指针事件：DeployPanel/浏览器预览是 iframe，会吞掉 mousemove/mouseup，
     // 导致拖拽冻结或面板跟着 iframe 乱跑；pointer-events:none 让事件穿透到父窗口。
@@ -380,6 +386,10 @@ export default React.forwardRef(function Sessions({
       setPanelWidth(latestNext);
     };
     const onMove = (ev) => {
+      // 兜底：mouseup 被 iframe/窗口边界吞掉（或拖拽中失焦）时 ev.buttons 已为 0，
+      // 立即收尾。否则 pointer-events:none 会永久留在面板容器上 —— 右侧工作区
+      // 鼠标整体穿透（滚轮/点击全失效），只剩键盘可用。
+      if (ev.buttons === 0) { onUp(); return; }
       if (Math.abs(ev.clientX - startX) > 3) {
         moved = true;
         setPanelDragging(true);
@@ -389,6 +399,8 @@ export default React.forwardRef(function Sessions({
       if (rafId === null) rafId = requestAnimationFrame(applyWidth);
     };
     const onUp = () => {
+      if (finished) return;
+      finished = true;
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
         // flush 最后一次宽度，避免快速松手丢失最终尺寸
@@ -396,15 +408,34 @@ export default React.forwardRef(function Sessions({
       }
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('blur', onUp);
+      document.removeEventListener('mouseleave', onUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       setPanelDragging(false);
       if (panelContainerRef.current) panelContainerRef.current.style.pointerEvents = '';
+      panelResizeCleanupRef.current = null;
       // A click without dragging toggles the panel closed.
       if (!moved) setPanelOpen(false);
     };
+    // 卸载（切 session / 路由离开）时的纯同步收尾：不触发 setState。
+    panelResizeCleanupRef.current = () => {
+      if (finished) return;
+      finished = true;
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('blur', onUp);
+      document.removeEventListener('mouseleave', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      if (panelContainerRef.current) panelContainerRef.current.style.pointerEvents = '';
+    };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
+    // 拖拽中窗口失焦 / 指针离开窗口也要收尾（mouseup 可能收不到）。
+    window.addEventListener('blur', onUp);
+    document.addEventListener('mouseleave', onUp);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
   }, [panelWidth]);

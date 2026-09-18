@@ -296,6 +296,10 @@ export default function ChatView({ sessionId, onSessionEnd }) {
     return () => clearInterval(id);
   }, []);
   const scrollbarTrackRef = useRef(null);
+  // Teardown of an in-flight scrollbar drag. Cleaned up on unmount so a drag
+  // that never saw its mouseup can't leave window listeners behind.
+  const scrollbarDragCleanupRef = useRef(null);
+  useEffect(() => () => { scrollbarDragCleanupRef.current?.(); }, []);
 
   // Headless terminal for TUI prompt detection. xterm parses VT100 into a
   // screen buffer without any DOM attachment, so cursor-addressed repaints
@@ -631,25 +635,41 @@ export default function ChatView({ sessionId, onSessionEnd }) {
                   className="absolute right-2 w-1.5 rounded-full bg-zinc-300/80 hover:bg-zinc-500 transition-colors cursor-grab"
                   style={{ top: thumbTop, height: thumbH }}
                   onMouseDown={(e) => {
+                    // 只处理主键：右键/中键不进入可能拿不到 mouseup 的拖拽态。
+                    if (e.button !== 0) return;
                     e.preventDefault();
-                    setScrollbarDrag(true);
                     const startY = e.clientY;
                     const startTop = scrollTop;
+                    const travel = Math.max(1, trackH - thumbH);
+                    let finished = false;
                     const onMove = (ev) => {
+                      // 兜底：mouseup 被窗口边界 / iframe / 失焦吞掉时，ev.buttons
+                      // 已为 0 —— 立即收尾。否则全局 mousemove 监听会永久残留，
+                      // 此后鼠标每移动一下都改写 scrollTop，表现为「对话区滚轮、
+                      // 鼠标失灵，但键盘 PageUp/PageDown 仍可用」。
+                      if (ev.buttons === 0) { onUp(); return; }
                       const dy = ev.clientY - startY;
-                      const next = overflow
-                        ? startTop + (dy / (trackH - thumbH)) * maxScroll
-                        : startTop + dy;
+                      const next = overflow ? startTop + (dy / travel) * maxScroll : startTop + dy;
                       if (listRef.current) listRef.current.scrollTop = Math.max(0, Math.min(maxScroll, next));
                     };
                     const onUp = () => {
-                      setScrollbarDrag(false);
-                      setScrollbarHover(false);
+                      if (finished) return;
+                      finished = true;
+                      scrollbarDragCleanupRef.current = null;
                       window.removeEventListener('mousemove', onMove);
                       window.removeEventListener('mouseup', onUp);
+                      window.removeEventListener('blur', onUp);
+                      document.removeEventListener('mouseleave', onUp);
+                      setScrollbarDrag(false);
+                      setScrollbarHover(false);
                     };
+                    scrollbarDragCleanupRef.current = onUp;
+                    setScrollbarDrag(true);
                     window.addEventListener('mousemove', onMove);
                     window.addEventListener('mouseup', onUp);
+                    // 拖拽中窗口失焦 / 指针离开窗口也要收尾（mouseup 可能收不到）。
+                    window.addEventListener('blur', onUp);
+                    document.addEventListener('mouseleave', onUp);
                   }}
                 />
               ) : null}
