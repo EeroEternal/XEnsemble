@@ -58,41 +58,6 @@ test('rewritten prefix (same length or mangled) resets to a snapshot', () => {
 });
 
 // ---------------------------------------------------------------------------
-// isSyntheticBypassCall: 旁路合成调用识别（写入端拒绝）
-// ---------------------------------------------------------------------------
-
-test('isSyntheticBypassCall detects suggestion-mode and memory calls', () => {
-    assert.equal(trajectory.isSyntheticBypassCall({
-        messages: [
-            { role: 'user', content: '你会总结对话内容吗' },
-            { role: 'assistant', content: '不会' },
-            { role: 'user', content: '[SUGGESTION MODE: Suggest what the user might naturally type next]...' },
-        ],
-    }), true);
-
-    assert.equal(trajectory.isSyntheticBypassCall({
-        messages: [
-            { role: 'user', content: 'hello' },
-            { role: 'user', content: 'Managed memory has TWO directories. Choose...' },
-        ],
-    }), true);
-
-    assert.equal(trajectory.isSyntheticBypassCall({
-        messages: [
-            { role: 'user', content: 'hello' },
-            { role: 'assistant', content: 'hi there' },
-        ],
-    }), false);
-
-    assert.equal(trajectory.isSyntheticBypassCall({
-        messages: [{ role: 'user', content: '真实用户消息' }],
-    }), false);
-
-    assert.equal(trajectory.isSyntheticBypassCall({ messages: [] }), false);
-    assert.equal(trajectory.isSyntheticBypassCall(null), false);
-});
-
-// ---------------------------------------------------------------------------
 // capRequestRecord
 // ---------------------------------------------------------------------------
 
@@ -287,7 +252,7 @@ test('computeStats aggregates duration, tool calls, user turns and maxSeq', () =
     assert.equal(stats.durationMs, 300);
     // 只数 response 里的 tool_use：重放的请求侧 tool_use 不重复计
     assert.equal(stats.toolCalls, 1);
-    // 与轨迹洞察同源：user 只有 hello / second，tool_result 与合成消息不计轮次
+    // 与轨迹洞察同源：user 只有 hello / second（tool_result 配对进工具不计轮次）
     assert.equal(stats.userTurns, 2);
     assert.equal(stats.maxSeq, 2);
 });

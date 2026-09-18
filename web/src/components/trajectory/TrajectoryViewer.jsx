@@ -12,7 +12,6 @@ import { useToast } from '../Toast';
 import { consoleButtonFocusClass } from '../../lib/consoleTokens';
 import { cn } from '../../lib/utils';
 import MarkdownView from '../Markdown';
-import injectedTags from '../../../../shared/injectedTags.json';
 
 /**
  * TrajectoryViewer (0029) — 全量执行轨迹查看器（DeepSeek harness 风格，明暗双主题）。
@@ -78,91 +77,27 @@ function preview(text, max = 160) {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
-// Agent CLI 注入的伪用户包裹标签（与 server 端共享同一份白名单）
-const INJECTED_TAGS = new Set(injectedTags.tags || []);
+// 已消费消息的 JSON 串（公共前缀比对用）；与 server 端 conversationExtractor
+// 同一套结构去重规则，不涉及任何内容分类。
+const stringifyMsg = (m) => {
+  try { return JSON.stringify(m); } catch { return String(m); }
+};
 
-/**
- * 把 role:'user' 的文本拆成 真实用户输入 / 注入上下文 分段。
- * 用与 proxy.js 相同的平衡标签游走（嵌套包裹也能正确闭合），
- * 这样所有 Agent（claude-code/droid/kimi/qwen…）的注入都能统一识别，
- * 而不是把 <system-reminder> 错标成「用户」。
- */
-function splitInjectedSegments(text) {
-  const OPEN = /^<([A-Za-z][A-Za-z0-9-]*)(\s[^>]*)?>/;
-  const CLOSE = /^<\/([A-Za-z][A-Za-z0-9-]*)>/;
-  const segments = [];
-  let userBuf = '';
-  const flushUser = () => {
-    if (userBuf.trim()) segments.push({ kind: 'user', text: userBuf });
-    userBuf = '';
-  };
+function commonPrefixLen(messages, consumed) {
+  const n = Math.min(messages.length, consumed.length);
   let i = 0;
-  while (i < text.length) {
-    const rest = text.slice(i);
-    const m = rest.match(OPEN);
-    if (m && INJECTED_TAGS.has(m[1])) {
-      const innerStart = i + m[0].length;
-      let depth = 1;
-      let j = innerStart;
-      let balanced = false;
-      while (j < text.length) {
-        const sub = text.slice(j);
-        const c = sub.match(CLOSE);
-        if (c && c[1] === m[1]) {
-          depth -= 1;
-          j += c[0].length;
-          if (depth === 0) { balanced = true; break; }
-          continue;
-        }
-        const o = sub.match(OPEN);
-        if (o && o[1] === m[1]) { depth += 1; j += o[0].length; continue; }
-        j += 1;
-      }
-      if (balanced) {
-        flushUser();
-        const inner = text.slice(innerStart, j - m[1].length - 3).trim();
-        segments.push({ kind: 'context', text: inner || text.slice(i, j), tag: m[1] });
-        i = j;
-        continue;
-      }
-    }
-    userBuf += text[i];
-    i += 1;
-  }
-  flushUser();
-  return segments;
-}
-
-// claude-code/qwen-code 压缩/警示/离开总结/记忆整理/输入建议生成等 CLI 注入开头模式 → 上下文
-const COMPACTED_RE = /^This session is being continued from a previous conversation/;
-const CAVEAT_RE = /^Caveat: The messages below/;
-const STEPPED_AWAY_RE = /^The user (?:stepped away|is away|has stepped away)/;
-const MEMORY_RE = /^Managed memory has/;
-const SUGGESTION_MODE_RE = /^\[SUGGESTION MODE:/;
-
-const SYNTHETIC_USER_RES = [COMPACTED_RE, CAVEAT_RE, STEPPED_AWAY_RE, MEMORY_RE, SUGGESTION_MODE_RE];
-
-/** 该消息是否为 CLI 合成的伪用户指令（与 server 端 conversationExtractor 同一约定集） */
-function isSyntheticUserMessage(m) {
-  if (!m || typeof m !== 'object' || (m.role !== 'user' && m.role !== 'human')) return false;
-  let text = '';
-  if (typeof m.content === 'string') text = m.content;
-  else if (Array.isArray(m.content)) {
-    for (const b of m.content) {
-      if (b?.type === 'text' && typeof b.text === 'string') text += (text ? '\n' : '') + b.text;
-    }
-  }
-  const trimmed = text.trim();
-  return trimmed.length > 0 && SYNTHETIC_USER_RES.some((re) => re.test(trimmed));
+  while (i < n && stringifyMsg(messages[i]) === consumed[i]) i += 1;
+  return i;
 }
 
 /**
- * 把 steps 展开为消息级条目。绝对游标去重（agent 每轮重放全量历史），
- * 与 conversationExtractor.extractFromTrajectory 同一套规则。
+ * 把 steps 展开为消息级条目。结构化公共前缀去重（agent 每轮重放全量历史），
+ * 与 conversationExtractor.extractFromTrajectory 同一套规则；CLI 注入/合成的
+ * role=user 内容不过滤、原样呈现。
  */
 export function buildEntries(steps, t) {
   const entries = [];
-  let cursor = 0;
+  let consumed = []; // 已消费消息的 JSON 串（镜像当前上下文链）
   let systemSeen = false;
   let src = 'req'; // 当前记录来源：'req'=请求上下文 / 'resp'=模型响应
   let round = 0; // 用户轮次：一条真实用户输入开启一轮（见 pushUserText）
@@ -216,55 +151,41 @@ export function buildEntries(steps, t) {
     push('tool', t('trajectory.role_tool'), text, b, step);
   };
 
-  // 用户文本 → 上下文/用户 分段（注入标签拆分 + 压缩摘要识别）
+  // 用户文本 → 一条用户条目（不过滤：CLI 注入/合成内容原样呈现，一条消息一轮）
   const pushUserText = (text, payload, step) => {
     const raw = String(text || '');
     if (!raw.trim()) return;
-    let tag = null;
-    if (COMPACTED_RE.test(raw)) tag = 'compacted';
-    else if (STEPPED_AWAY_RE.test(raw)) tag = 'recap';
-    else if (MEMORY_RE.test(raw)) tag = 'memory';
-    else if (CAVEAT_RE.test(raw)) tag = 'caveat';
-    else if (SUGGESTION_MODE_RE.test(raw)) tag = 'suggestion';
-    const segs = tag ? [{ kind: 'context', text: raw, tag }] : splitInjectedSegments(raw);
-    // 一条 user 消息 = 至多一个用户轮次：剥离注入后仍有真实文本才开启新一轮，
-    // 该消息的所有分段（含 context）落在同一轮，纯注入消息不开启。
-    if (segs.some((seg) => seg.kind === 'user')) { round += 1; callsGroup = 0; }
-    for (const seg of segs) {
-      if (seg.kind === 'context') push('context', t('trajectory.role_context'), seg.text, payload, step, seg.tag);
-      else push('user', t('trajectory.role_user'), seg.text, payload, step);
-    }
+    round += 1;
+    callsGroup = 0;
+    push('user', t('trajectory.role_user'), raw, payload, step);
   };
 
   for (const step of steps) {
     const req = step.request || {};
     if (!Array.isArray(req.messages)) continue;
-    // delta 行（非快照）的 messages 已由 proxy 前缀比对保证全是新增——
-    // 并行合成调用（如 qwen memory 刷新）会交错推进历史，绝对游标只对
-    // 快照行有效，delta 行必须全量处理，否则真实用户消息会被误跳过。
     const isSnapshot = step.snapshot === true;
-    const base = (Number(step.msgCount) || 0) - req.messages.length;
     const msgs = req.messages;
     const errored = step.status === 'error';
     src = 'req';
 
-    // 合成旁路调用（建议生成/记忆整理等）：整行的新增消息全部是 CLI 合成用户
-    // 指令时跳过——否则快照行会推进游标越过真实用户消息（真实消息被误跳过），
-    // 指令也会被标成「用户」。快照行看绝对下标 ≥ cursor 的增量；delta 行的
-    // 全部消息即增量。
-    {
-      const startIdx = isSnapshot ? Math.max(cursor - base, 0) : 0;
-      if (msgs.length > startIdx) {
-        let syntheticOnly = true;
-        for (let i = startIdx; i < msgs.length; i += 1) {
-          if (!isSyntheticUserMessage(msgs[i])) { syntheticOnly = false; break; }
-        }
-        if (syntheticOnly) continue;
+    // 消费起点（与 server 端 conversationExtractor 同口径）：delta 行全部为新增、
+    // 全量消费；快照行与已消费历史求公共前缀，前缀之后都是本链尚未消费的消息。
+    // 历史整体缩短（压缩重写）时全部视为已呈现，仅重置基线，避免旧尾部重复成轮。
+    let start = 0;
+    if (isSnapshot) {
+      if (msgs.length < consumed.length) {
+        start = msgs.length;
+        consumed = msgs.map(stringifyMsg);
+      } else {
+        start = commonPrefixLen(msgs, consumed);
+        consumed = msgs.map(stringifyMsg);
       }
+    } else {
+      consumed = consumed.concat(msgs.map(stringifyMsg));
     }
 
     for (let i = 0; i < msgs.length; i += 1) {
-      if (isSnapshot && base + i < cursor) continue;
+      if (isSnapshot && i < start) continue;
       const m = msgs[i];
       if (!m || typeof m !== 'object') continue;
       const content = m.content;
@@ -299,10 +220,6 @@ export function buildEntries(steps, t) {
         systemSeen = true;
       }
     }
-    // 游标推进到该请求的绝对上下文长度（每行都推进，与 server extractor 同口径）。
-    // 只在快照行推进会让后续快照把已消费的历史再算一遍 → 重复的用户消息/轮次。
-    if ((Number(step.msgCount) || 0) > cursor) cursor = Number(step.msgCount);
-
     // 该次调用的响应 → 一条助手条目（思考 + 正文）+ 工具调用。
     // 思考本就是助手回复的一部分（同一 response 的 content 块），不再单独成行。
     src = 'resp';

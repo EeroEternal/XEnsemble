@@ -117,43 +117,6 @@ function pickParams(body) {
     return params;
 }
 
-// CLI 注入的合成用户消息（记忆整理/压缩摘要/离开总结/输入建议生成）。
-// 与 session/conversationExtractor.js 同一约定集，用于识别「旁路调用」——
-// 其请求历史末尾是 CLI 自身生成的伪指令，而非真实用户输入。
-const SYNTHETIC_USER_RES = [
-    /^This session is being continued from a previous conversation/,
-    /^Caveat: The messages below/,
-    /^The user (?:stepped away|is away|has stepped away)/,
-    /^Managed memory has/,
-    /^\[SUGGESTION MODE:/,
-];
-
-/** 单条消息是否为 CLI 合成的伪用户指令 */
-function isSyntheticUserMessage(msg) {
-    if (!msg || typeof msg !== 'object') return false;
-    if (msg.role !== 'user' && msg.role !== 'human') return false;
-    let text = '';
-    if (typeof msg.content === 'string') text = msg.content;
-    else if (Array.isArray(msg.content)) {
-        for (const b of msg.content) {
-            if (b?.type === 'text' && typeof b.text === 'string') text += (text ? '\n' : '') + b.text;
-        }
-    }
-    const trimmed = text.trim();
-    return trimmed.length > 0 && SYNTHETIC_USER_RES.some((re) => re.test(trimmed));
-}
-
-/**
- * 是否为「旁路合成调用」：请求历史末尾是 CLI 生成的伪用户指令（输入建议、
- * 记忆整理等）。这类调用与主对话分支不同、会污染 prev 链与读取端游标，
- * 导致真实用户消息被误跳过、伪指令泄漏成用户轮次——写入前整条拒绝记录。
- */
-function isSyntheticBypassCall(body) {
-    const msgs = Array.isArray(body?.messages) ? body.messages : null;
-    if (!msgs || msgs.length === 0) return false;
-    return isSyntheticUserMessage(msgs[msgs.length - 1]);
-}
-
 /**
  * Build the stored request record. Pure (exported for tests).
  * Delta applies only when the new history is a strict append of the previous
@@ -253,9 +216,8 @@ function rememberPrev(sessionId, messages) {
  */
 function recordRequest({ sessionId, agentId, model, body }) {
     if (!sessionId || !body || typeof body !== 'object') return Promise.resolve(null);
-    // 旁路合成调用（输入建议/记忆整理）不落轨迹：写入整条会污染 prev 链，
-    // 读取端的分歧快照又把游标顶过真实消息 → 消息丢失 + 伪指令泄漏。
-    if (isSyntheticBypassCall(body)) return Promise.resolve(null);
+    // 旁路调用（建议生成/记忆整理等）原样记录：轨迹是全量执行记录，不做内容
+    // 过滤。其分歧上下文由读取端按结构（公共前缀）对齐，见 conversationExtractor。
     return enqueue(sessionId, async () => {
         const st = state(sessionId);
         await seedSeq(st, sessionId);
@@ -741,8 +703,8 @@ function replayToFull(steps) {
         }
         line.msg_count = ctx.length;
         line.request = { params: req.params || {}, messages: ctx.slice() };
-        // delta 行保留原始新增尾巴：并行合成调用（如 qwen memory）与真实调用
-        // 交错时，线性重放的绝对位置会互相错位，提取器按 delta 原样消费才不丢消息
+        // delta 行保留原始新增尾巴：旁路调用（如 qwen memory）与真实调用交错
+        // 推进历史时，线性重放的绝对位置会互相错位，提取器按 delta 原样消费才不丢消息
         line.delta_messages = req.snapshot ? null : incoming.slice();
         lines.push(line);
     }
@@ -764,8 +726,6 @@ module.exports = {
     replayToFull,
     capRequestRecord,
     computeStats,
-    isSyntheticBypassCall,
-    isSyntheticUserMessage,
     samePrefix,
     getPrevMessages,
 };

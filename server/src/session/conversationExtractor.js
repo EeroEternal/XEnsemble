@@ -15,8 +15,6 @@
  */
 
 const { cleanTerminalText, truncateMiddle } = require('./terminalText');
-// Agent CLI 注入的伪用户包裹标签（与 web 查看器共享同一份白名单）
-const INJECTED_TAGS = new Set(require('../../../shared/injectedTags.json').tags);
 
 const EXTRACTOR_VERSION = '1';
 const MAX_TURNS = 100;
@@ -300,8 +298,13 @@ function textFromBlocks(content) {
  * Extract turns from trajectory rows (session_trajectory, seq order).
  * Replays snapshot/delta rows into per-call context (via llm/trajectory
  * replayToFull) but only consumes messages not yet processed — agent CLIs
- * resend the full history on every call, so a monotonic cursor keeps each
- * user/assistant/tool message contributing exactly one turn.
+ * resend the full history on every call, so structural prefix alignment keeps
+ * each user/assistant/tool message contributing exactly one turn.
+ *
+ * Dedupe is purely structural (common prefix against consumed history) — no
+ * content classification: CLI-injected / synthetic user messages are recorded
+ * and shown verbatim, and real user messages are never skipped even when a
+ * bypass call (suggestion generation, memory consolidation) interleaves.
  *
  * Both wire formats are handled per-message: OpenAI (role:'tool' results)
  * and Anthropic (tool_result blocks inside user messages).
@@ -311,70 +314,20 @@ function textFromBlocks(content) {
  * @param {number|null} [opts.maxTurns]
  * @returns {{ source: 'trajectory', turns: Array }}
  */
-// CLI 注入的合成用户消息（记忆整理/压缩摘要/离开总结/输入建议生成）——不计入用户轮次
-const SYNTHETIC_USER_RES = [
-    /^This session is being continued from a previous conversation/,
-    /^Caveat: The messages below/,
-    /^The user (?:stepped away|is away|has stepped away)/,
-    /^Managed memory has/,
-    /^\[SUGGESTION MODE:/,
-];
 
-/** 该消息是否为 CLI 合成的伪用户指令（文本命中任一已知模式） */
-function isSyntheticUserMessage(msg) {
-    if (!msg || typeof msg !== 'object') return false;
-    if (msg.role !== 'user' && msg.role !== 'human') return false;
-    let text = '';
-    if (typeof msg.content === 'string') text = msg.content;
-    else if (Array.isArray(msg.content)) {
-        for (const b of msg.content) {
-            if (b?.type === 'text' && typeof b.text === 'string') text += (text ? '\n' : '') + b.text;
-        }
-    }
-    const trimmed = text.trim();
-    return trimmed.length > 0 && SYNTHETIC_USER_RES.some((re) => re.test(trimmed));
+/** 已消费消息的 JSON 串形式（公共前缀比对用）。 */
+function stringifyMsg(msg) {
+    try { return JSON.stringify(msg); } catch (_) { return String(msg); }
 }
 
 /**
- * 剥离 Agent CLI 注入的伪用户上下文标签（<system-reminder>…</system-reminder>
- * 等白名单平衡标签对），只保留真实用户文本。与 web 端
- * TrajectoryViewer.splitInjectedSegments 使用同一份标签白名单与平衡游走规则。
+ * incoming 与已消费历史的公共前缀长度。纯结构比对，不涉及任何内容分类。
  */
-function stripInjectedTags(text) {
-    if (!text) return '';
-    const TAG_NAME_RE = '[A-Za-z][A-Za-z0-9-]*';
-    const OPEN_RE = new RegExp('^<(' + TAG_NAME_RE + ')(\\s[^>]*)?>');
-    const CLOSE_RE = new RegExp('^</(' + TAG_NAME_RE + ')>');
-    let out = '';
+function commonPrefixLen(messages, consumed) {
+    const n = Math.min(messages.length, consumed.length);
     let i = 0;
-    while (i < text.length) {
-        const rest = text.slice(i);
-        const m = rest.match(OPEN_RE);
-        if (m && INJECTED_TAGS.has(m[1])) {
-            const name = m[1];
-            const innerStart = i + m[0].length;
-            let depth = 1;
-            let j = innerStart;
-            let balanced = false;
-            while (j < text.length) {
-                const sub = text.slice(j);
-                const close = sub.match(CLOSE_RE);
-                if (close && close[1] === name) {
-                    depth -= 1;
-                    j += close[0].length;
-                    if (depth === 0) { balanced = true; break; }
-                    continue;
-                }
-                const open = sub.match(OPEN_RE);
-                if (open && open[1] === name) { depth += 1; j += open[0].length; continue; }
-                j += 1;
-            }
-            if (balanced) { i = j; continue; }
-        }
-        out += text[i];
-        i += 1;
-    }
-    return out;
+    while (i < n && stringifyMsg(messages[i]) === consumed[i]) i += 1;
+    return i;
 }
 
 function extractFromTrajectory(steps, { maxTurns = MAX_TURNS } = {}) {
@@ -383,7 +336,10 @@ function extractFromTrajectory(steps, { maxTurns = MAX_TURNS } = {}) {
     const turns = [];
     let pendingAssistant = null;
     const callMap = new Map(); // callId -> tools entry, for result pairing
-    let cursor = 0; // 快照行推进的绝对消息游标（仅快照行使用）
+    // 已消费消息的 JSON 串（镜像当前上下文链）。快照行与它做公共前缀对齐决定
+    // 消费起点，替代旧的绝对游标：旁路调用（建议生成/记忆整理等）的分歧上下文
+    // 会把绝对下标顶过真实用户消息，结构比对则不依赖任何内容分类。
+    let consumed = [];
 
     const pushAssistantTurn = (ts) => {
         const turn = { role: 'assistant', ts, text: '', tools: [] };
@@ -395,14 +351,10 @@ function extractFromTrajectory(steps, { maxTurns = MAX_TURNS } = {}) {
     const addUserText = (text, ts) => {
         pendingAssistant = null;
         const trimmed = String(text || '').trim();
+        // 不过滤：CLI 注入/合成的 role=user 内容原样成轮（轨迹忠实呈现），
+        // 区分真实用户消息交由上层按需处理
         if (!trimmed) return;
-        // CLI 合成的伪用户消息（记忆整理/压缩摘要等）不计入用户轮次
-        if (SYNTHETIC_USER_RES.some((re) => re.test(trimmed))) return;
-        // 纯注入上下文（<system-reminder> 等）不算用户输入；与查看器同一套白名单，
-        // 保证头部「用户轮次」与列表分组/折叠边界一致
-        const cleaned = stripInjectedTags(trimmed).trim();
-        if (!cleaned) return;
-        const t = truncateMiddle(cleaned, TURN_MAX_BYTES);
+        const t = truncateMiddle(trimmed, TURN_MAX_BYTES);
         turns.push({ role: 'user', ts, text: t.text, truncated: t.truncated });
     };
 
@@ -461,38 +413,37 @@ function extractFromTrajectory(steps, { maxTurns = MAX_TURNS } = {}) {
     for (const line of lines) {
         const req = line.request;
         if (!req || !Array.isArray(req.messages)) continue;
-        // delta 行（非快照）的 messages 已由 proxy 前缀比对保证全是新增——
-        // 并行合成调用（如 qwen memory 刷新）会交错推进历史，绝对游标只对
-        // 快照行有效，delta 行必须全量处理，否则真实用户消息会被误跳过。
+        // 消费起点：delta 行（非快照）的 messages 已由 proxy 前缀比对保证全是
+        // 新增，全量消费；快照行与已消费历史求公共前缀——前缀之后都是本链尚未
+        // 消费的消息（含被旁路调用顶乱下标的真实消息）。历史整体缩短（压缩重写）
+        // 时全部视为已呈现过，仅把基线重置为新链，避免旧尾部重复成轮。
         const isDelta = Array.isArray(line.delta_messages);
         const messages = isDelta ? line.delta_messages : req.messages;
         const ts = Number.isFinite(line.ts) ? line.ts : null;
-        // 合成旁路调用（建议生成/记忆整理等）：其上下文是「主历史 + 末尾 CLI 指令」的
-        // 分歧分支（前缀比对失败 → 存为快照）。若按游标消费，cursor 会被推进到
-        // 真实用户消息之后，导致后续主调用的新增消息被误跳过（消息"消失"），
-        // 且 CLI 指令会泄漏成用户轮次。判定：游标之后的增量全部是已知合成用户
-        // 指令 → 整行跳过（不消费、不推进 cursor、不取其 response）。
-        if (!isDelta && messages.length > cursor) {
-            let syntheticOnly = true;
-            for (let i = cursor; i < messages.length; i += 1) {
-                if (!isSyntheticUserMessage(messages[i])) { syntheticOnly = false; break; }
-            }
-            if (syntheticOnly) continue;
+        let start = 0;
+        if (isDelta) {
+            consumed = consumed.concat(messages.map(stringifyMsg));
+        } else if (messages.length < consumed.length) {
+            start = messages.length;
+            consumed = messages.map(stringifyMsg);
+        } else {
+            start = commonPrefixLen(messages, consumed);
+            consumed = messages.map(stringifyMsg);
         }
         // Resolve the previous call's pending response: delta 行不重发历史，
-        // 上一次响应直接落为助手轮；snapshot 行先探测 cursor 处是否为重发的
+        // 上一次响应直接落为助手轮；snapshot 行先探测消费起点处是否为重发的
         // assistant 消息，是则丢弃 pending 副本避免重复。
         if (pendingResp) {
             let emitIt = true;
             if (!isDelta) {
-                const histMsg = (cursor >= 0 && cursor < req.messages.length) ? req.messages[cursor] : null;
+                const histMsg = (start >= 0 && start < messages.length) ? messages[start] : null;
                 if (histMsg && histMsg.role === 'assistant') emitIt = false;
             }
             if (emitIt) emitResponse(pendingResp, pendingRespTs);
             pendingResp = null;
         }
         for (let i = 0; i < messages.length; i += 1) {
-            if (!isDelta && i < cursor) continue;
+            if (!isDelta && i < start) continue;
             const msg = messages[i];
             if (!msg || typeof msg !== 'object') continue;
             const content = msg.content;
@@ -548,7 +499,6 @@ function extractFromTrajectory(steps, { maxTurns = MAX_TURNS } = {}) {
                 addToolResult(msg.tool_call_id ?? null, typeof content === 'string' ? content : textFromBlocks(content));
             }
         }
-        if ((Number(line.msg_count) || 0) > cursor) cursor = Number(line.msg_count);
         pendingResp = line.response;
         pendingRespTs = ts;
     }

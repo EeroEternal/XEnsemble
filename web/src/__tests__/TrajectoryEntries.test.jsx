@@ -163,7 +163,7 @@ describe('trajectory buildEntries: thinking belongs to the assistant turn', () =
 });
 
 describe('trajectory buildEntries: user turn boundaries', () => {
-    it('counts one turn per user message even with injected context between texts', () => {
+    it('presents a user message with injected context verbatim as one user entry', () => {
         const steps = [
             {
                 seq: 1, ts: 1, msgCount: 1, snapshot: true, status: 'ok',
@@ -172,11 +172,12 @@ describe('trajectory buildEntries: user turn boundaries', () => {
             },
         ];
         const entries = buildEntries(steps, t);
-        expect(entries.filter((e) => e.kind === 'user')).toHaveLength(2);
+        expect(entries.filter((e) => e.kind === 'user')).toHaveLength(1);
+        expect(entries.find((e) => e.kind === 'user').text).toBe('hello <system-reminder>x</system-reminder> world');
         expect(entries.reduce((m, e) => Math.max(m, e.round), 0)).toBe(1);
     });
 
-    it('does not open a turn for an injected-context-only message', () => {
+    it('opens a turn for an injected-context-only message (no filtering)', () => {
         const steps = [
             {
                 seq: 1, ts: 1, msgCount: 1, snapshot: true, status: 'ok',
@@ -185,8 +186,35 @@ describe('trajectory buildEntries: user turn boundaries', () => {
             },
         ];
         const entries = buildEntries(steps, t);
-        expect(entries.filter((e) => e.kind === 'user')).toHaveLength(0);
-        expect(entries.reduce((m, e) => Math.max(m, e.round), 0)).toBe(0);
+        expect(entries.filter((e) => e.kind === 'user')).toHaveLength(1);
+        expect(entries.reduce((m, e) => Math.max(m, e.round), 0)).toBe(1);
+    });
+
+    it('never loses real user messages around divergent bypass snapshots', () => {
+        // 旁路调用（建议生成等）的分歧快照顶断前缀链后，主链真实消息仍照常成轮；
+        // 合成指令原样呈现（与 server 端 extractFromTrajectory 同一契约）。
+        const steps = [
+            {
+                seq: 1, ts: 1, msgCount: 2, snapshot: true, status: 'ok',
+                request: { messages: [{ role: 'user', content: '你会总结对话内容吗' }, { role: 'assistant', content: '不会主动总结' }] },
+                response: null,
+            },
+            {
+                seq: 2, ts: 2, msgCount: 3, snapshot: true, status: 'ok',
+                request: { messages: [{ role: 'user', content: '你会总结对话内容吗' }, { role: 'assistant', content: '不会主动总结' }, { role: 'user', content: '[SUGGESTION MODE: suggest next input]' }] },
+                response: { content: [{ type: 'text', text: 'suggested reply text' }] },
+            },
+            {
+                seq: 3, ts: 3, msgCount: 3, snapshot: true, status: 'ok',
+                request: { messages: [{ role: 'user', content: '你会总结对话内容吗' }, { role: 'assistant', content: '不会主动总结' }, { role: 'user', content: '我自己问的：你会总结对话内容吗' }] },
+                response: null,
+            },
+        ];
+        const entries = buildEntries(steps, t);
+        const userTexts = entries.filter((e) => e.kind === 'user').map((e) => e.text);
+        expect(userTexts).toContain('你会总结对话内容吗');
+        expect(userTexts).toContain('我自己问的：你会总结对话内容吗');
+        expect(userTexts).toContain('[SUGGESTION MODE: suggest next input]');
     });
 
     it('keeps all tool calls of one user turn in the same round', () => {
@@ -215,22 +243,3 @@ describe('trajectory buildEntries: user turn boundaries', () => {
     });
 });
 
-// 跨端 parity：server 端 conversationExtractor.test.js 读同一份 fixtures 断言
-// userTurns / 剥离文本，这里断言 buildEntries 的 round 数一致。
-import injectedFixtures from '../../../shared/injectedContext.fixtures.json';
-
-describe('user turn parity (web, shared fixtures)', () => {
-    for (const c of injectedFixtures.cases) {
-        it(c.name, () => {
-            const steps = [
-                {
-                    seq: 1, ts: 1000, msgCount: 1, status: 'ok',
-                    request: { snapshot: true, params: {}, messages: [{ role: 'user', content: c.blocks ?? c.content }] },
-                    response: null,
-                },
-            ];
-            const entries = buildEntries(steps, t);
-            expect(entries.reduce((m, e) => Math.max(m, e.round), 0)).toBe(c.userTurns);
-        });
-    }
-});

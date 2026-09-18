@@ -266,9 +266,10 @@ test('extractFromTrajectory handles anthropic tool_use / tool_result blocks', ()
     assert.equal(asst.tools[0].result, 'file contents here');
 });
 
-test('extractFromTrajectory survives parallel synthetic memory calls (qwen memory)', () => {
-    // 真实场景：qwen-code 在轮次间并行发起记忆整理调用，其合成提示与真实
-    // 用户消息交错——真实消息不能被绝对游标误跳过，合成提示不计入用户轮次
+test('extractFromTrajectory keeps real messages when bypass memory deltas interleave', () => {
+    // 真实场景：CLI 在轮次间并行发起记忆整理调用（旁路上下文以 delta 落库，
+    // 随后主调用因前缀链断裂存为快照）。内容过滤已移除：合成消息原样成轮，
+    // 但真实用户消息绝不能因旁路上下文顶乱下标而被跳过丢失。
     const steps = [
         {
             seq: 1, ts: 1000, msgCount: 2, status: 'ok',
@@ -292,10 +293,13 @@ test('extractFromTrajectory survives parallel synthetic memory calls (qwen memor
             response: null,
         },
         {
+            // 主调用 N+1：旁路 delta 顶断前缀链 → 存为快照
             seq: 3, ts: 3000, msgCount: 3, status: 'ok',
             request: {
-                snapshot: false, params: {},
+                snapshot: true, params: {},
                 messages: [
+                    { role: 'user', content: '你是会总结对话内容吗' },
+                    { role: 'assistant', content: 'turn1 answer' },
                     { role: 'user', content: '你自己会总结对话内容吗' },
                 ],
             },
@@ -303,18 +307,18 @@ test('extractFromTrajectory survives parallel synthetic memory calls (qwen memor
         },
     ];
     const { turns } = extractor.extractFromTrajectory(steps);
-    const userTurns = turns.filter((t) => t.role === 'user');
-    assert.equal(userTurns.length, 2);
-    assert.ok(userTurns.some((t) => t.text === '你是会总结对话内容吗'));
-    assert.ok(userTurns.some((t) => t.text === '你自己会总结对话内容吗'));
-    assert.ok(!turns.some((t) => t.text && t.text.includes('Managed memory has')));
+    const texts = turns.filter((t) => t.role === 'user').map((t) => t.text);
+    assert.ok(texts.includes('你是会总结对话内容吗'));
+    assert.ok(texts.includes('你自己会总结对话内容吗'));
+    // 合成消息原样呈现（不再过滤），且真实消息无重复
+    assert.ok(texts.some((t) => t.startsWith('Managed memory has')));
+    assert.equal(texts.filter((t) => t === '你自己会总结对话内容吗').length, 1);
 });
 
-test('extractFromTrajectory skips parallel suggestion-mode calls (divergent snapshot)', () => {
+test('extractFromTrajectory never loses real messages around divergent suggestion snapshots', () => {
     // 真实场景：CLI 在轮次间并行发起「输入建议」生成调用，其上下文 = 主历史 +
-    // 末尾 [SUGGESTION MODE:] 指令（前缀比对失败 → 存为快照行）。若按绝对游标
-    // 消费，cursor 会被顶过真实用户消息的下标 → 真实消息被误跳过、指令泄漏成
-    // 用户轮次。正确行为：整行跳过，真实消息正常出现。
+    // 末尾 [SUGGESTION MODE:] 指令（前缀比对失败 → 存为快照）。不做内容过滤：
+    // 合成指令与其响应原样呈现，主链的真实用户消息照常成轮。
     const steps = [
         {
             seq: 1, ts: 1000, msgCount: 2, status: 'ok',
@@ -355,13 +359,55 @@ test('extractFromTrajectory skips parallel suggestion-mode calls (divergent snap
         },
     ];
     const { turns } = extractor.extractFromTrajectory(steps);
-    const userTurns = turns.filter((t) => t.role === 'user');
-    assert.equal(userTurns.length, 2);
-    assert.ok(userTurns.some((t) => t.text === '你会总结对话内容吗'));
-    assert.ok(userTurns.some((t) => t.text === '我自己问的：你会总结对话内容吗'));
-    // 合成指令与其响应不得出现在对话投影里
-    assert.ok(!turns.some((t) => t.text && t.text.includes('[SUGGESTION MODE')));
-    assert.ok(!turns.some((t) => t.text === 'suggested reply text'));
+    const userTexts = turns.filter((t) => t.role === 'user').map((t) => t.text);
+    assert.ok(userTexts.includes('你会总结对话内容吗'));
+    assert.ok(userTexts.includes('我自己问的：你会总结对话内容吗'));
+    // 合成指令与其响应不过滤，原样出现在轨迹里
+    assert.ok(userTexts.some((t) => t.startsWith('[SUGGESTION MODE')));
+    assert.ok(turns.some((t) => t.role === 'assistant' && t.text === 'suggested reply text'));
+});
+
+test('extractFromTrajectory shrunk-history snapshot (compaction) resets baseline without duplicate turns', () => {
+    const steps = [
+        {
+            seq: 1, ts: 1000, msgCount: 3, status: 'ok',
+            request: {
+                snapshot: true, params: {},
+                messages: [
+                    { role: 'user', content: 'a' },
+                    { role: 'assistant', content: 'b' },
+                    { role: 'user', content: 'c' },
+                ],
+            },
+            response: null,
+        },
+        {
+            // 压缩重写：历史整体缩短 → 只重置基线，旧尾部不重复成轮
+            seq: 2, ts: 2000, msgCount: 2, status: 'ok',
+            request: {
+                snapshot: true, params: {},
+                messages: [
+                    { role: 'user', content: 'summary of a/b/c' },
+                    { role: 'assistant', content: 'compacted' },
+                ],
+            },
+            response: null,
+        },
+        {
+            seq: 3, ts: 3000, msgCount: 3, status: 'ok',
+            request: {
+                snapshot: false, params: {},
+                messages: [{ role: 'user', content: 'after compaction' }],
+            },
+            response: null,
+        },
+    ];
+    const { turns } = extractor.extractFromTrajectory(steps);
+    const texts = turns.map((t) => t.text);
+    // 压缩前的旧消息不因重写快照而重复
+    assert.equal(texts.filter((t) => t === 'a').length, 1);
+    assert.equal(texts.filter((t) => t === 'c').length, 1);
+    assert.ok(texts.includes('after compaction'));
 });
 
 test('extractFromTranscript coalesces consecutive keystroke in frames into one user turn', () => {
@@ -599,9 +645,8 @@ test('extract uses transcript when no stateDirRef', async () => {
     assert.equal(turns.length, 1);
 });
 
-test('extractFromTrajectory ignores injected-context-only messages and strips injected tags', () => {
-    // 与 web 查看器同一套用户轮次口径：纯注入上下文不算用户输入，
-    // 文本+注入+文本仍是一条 user 消息 = 一轮。
+test('extractFromTrajectory presents injected-context user messages verbatim (no filtering)', () => {
+    // 内容过滤已移除：注入标签/合成消息原样成轮，一条 user 消息 = 一轮。
     const steps = [
         {
             seq: 1, ts: 1000, msgCount: 1, status: 'ok',
@@ -626,22 +671,7 @@ test('extractFromTrajectory ignores injected-context-only messages and strips in
     ];
     const { turns } = extractor.extractFromTrajectory(steps, { maxTurns: null });
     const userTurns = turns.filter((t) => t.role === 'user');
-    assert.equal(userTurns.length, 1);
-    assert.equal(userTurns[0].text, 'hello  world');
+    assert.equal(userTurns.length, 2);
+    assert.equal(userTurns[0].text, '<system-reminder>injected only</system-reminder>');
+    assert.equal(userTurns[1].text, 'hello <system-reminder>ctx</system-reminder> world');
 });
-
-// 跨端 parity：web 端 TrajectoryEntries.test.jsx 读同一份 fixtures 断言 round 数，
-// 任一端的注入剥离规则漂移都会让这组用例失败。
-for (const c of require('../../../shared/injectedContext.fixtures.json').cases) {
-    test(`user-turn parity (server): ${c.name}`, () => {
-        const steps = [{
-            seq: 1, ts: 1000, msgCount: 1, status: 'ok',
-            request: { snapshot: true, params: {}, messages: [{ role: 'user', content: c.blocks ?? c.content }] },
-            response: null,
-        }];
-        const { turns } = extractor.extractFromTrajectory(steps, { maxTurns: null });
-        const userTurns = turns.filter((t) => t.role === 'user');
-        assert.equal(userTurns.length, c.userTurns);
-        if (c.expectText !== undefined) assert.equal(userTurns[0]?.text, c.expectText);
-    });
-}
