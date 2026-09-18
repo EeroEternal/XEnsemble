@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Loader2, Download, Search, Clock, Layers, Zap,
-  User, Bot, Wrench, Sparkles, XCircle, BookOpen, Lightbulb,
+  User, Bot, Wrench, Sparkles, XCircle, BookOpen, Lightbulb, ChevronRight,
 } from 'lucide-react';
 import { apiFetch, getAccessToken, getWsUrl } from '../../lib/api';
 import { extractSkillFromSession } from '../../lib/skillsApi';
@@ -166,6 +166,7 @@ export function buildEntries(steps, t) {
   let systemSeen = false;
   let src = 'req'; // 当前记录来源：'req'=请求上下文 / 'resp'=模型响应
   let round = 0; // 用户轮次：一条真实用户输入开启一轮（见 pushUserText）
+  let callsGroup = 0; // 工具折叠分组：最近一条助手消息的 stepSeq（两个助手之间的工具同组）
 
   const toolById = new Map(); // tool_use.id -> 已呈现的调用条目（去重重放的 tool_use）
 
@@ -180,6 +181,7 @@ export function buildEntries(steps, t) {
       ts: step.ts,
       src, // 'req'=请求上下文 / 'resp'=模型响应（来源页展示）
       round, // 用户轮次编号（分组/折叠/边界统一用它）
+      callsGroup, // 工具折叠分组（两个助手之间的工具归为同组）
     };
     entries.push(entry);
     return entry;
@@ -227,7 +229,7 @@ export function buildEntries(steps, t) {
     const segs = tag ? [{ kind: 'context', text: raw, tag }] : splitInjectedSegments(raw);
     // 一条 user 消息 = 至多一个用户轮次：剥离注入后仍有真实文本才开启新一轮，
     // 该消息的所有分段（含 context）落在同一轮，纯注入消息不开启。
-    if (segs.some((seg) => seg.kind === 'user')) round += 1;
+    if (segs.some((seg) => seg.kind === 'user')) { round += 1; callsGroup = 0; }
     for (const seg of segs) {
       if (seg.kind === 'context') push('context', t('trajectory.role_context'), seg.text, payload, step, seg.tag);
       else push('user', t('trajectory.role_user'), seg.text, payload, step);
@@ -308,6 +310,8 @@ export function buildEntries(steps, t) {
     const thinkingText = thinkingParts.join('\n');
     const replyText = textParts.join('\n');
     if (thinkingText || replyText) {
+      // 有助手消息：开启新的工具折叠组（后续无助手的纯工具步也归入本组）
+      callsGroup = step.seq;
       const entry = push(
         errored ? 'error' : 'assistant',
         t('trajectory.role_assistant'),
@@ -862,7 +866,8 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
   const { t } = useTranslation('sessions');
   const [tab, setTab] = useState('overview');
   const [overviewExpanded, setOverviewExpanded] = useState(false);
-  useEffect(() => { setTab('overview'); setOverviewExpanded(false); }, [entry?.id]);
+  const [thinkingOpen, setThinkingOpen] = useState(false);
+  useEffect(() => { setTab('overview'); setOverviewExpanded(false); setThinkingOpen(false); }, [entry?.id]);
   if (!entry) {
     return <div className={cn('flex-1 flex items-center justify-center text-xs', T3)}>{t('trajectory.detail_empty')}</div>;
   }
@@ -884,21 +889,14 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
     ? entries.find((e) => e.id !== entry.id && e.stepSeq === entry.stepSeq && e.kind === 'assistant') || null
     : null;
 
-  // 助手回复：思考块（弱化灰底 + 斜体，不加标签）+ 正文（markdown）。
-  // 预览 tab 全量走 MarkdownView（代码高亮 / KaTeX 公式，与会话历史一致）。
+  // 助手正文：预览 tab 全量走 MarkdownView（代码高亮 / KaTeX 公式，与会话历史一致）。
+  // 思考不在这里，而是概述里预览下方的独立「思考」折叠区。
   const renderedBody = (previewMode) => (
     <div className={cn(
       'text-[13px]',
       previewMode && 'max-h-56 overflow-hidden relative',
     )}>
-      {entry.thinking && (
-        <div className="mb-2 rounded-md border border-zinc-200 bg-zinc-50/80 px-2.5 py-2 dark:border-zinc-700/60 dark:bg-zinc-800/40">
-          <p className="text-[12px] italic leading-relaxed text-zinc-500 dark:text-zinc-400 whitespace-pre-wrap break-words">{entry.thinking}</p>
-        </div>
-      )}
-      {entry.text
-        ? <MarkdownView>{entry.text}</MarkdownView>
-        : (!entry.thinking && <p className="text-zinc-400">—</p>)}
+      {entry.text ? <MarkdownView>{entry.text}</MarkdownView> : <p className="text-zinc-400">—</p>}
     </div>
   );
 
@@ -958,21 +956,41 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
       );
     }
     return (
-      <OverviewSection label={t('trajectory.tab_preview')} onOpen={() => setTab('preview')}>
-        {/* DeepSeek harness 原则：折叠的是容器，不裁内容——默认折叠，就地展开全文 */}
-        <div className={cn('relative', !overviewExpanded && 'max-h-56 overflow-hidden')}>
-          {renderedBody(false)}
-        </div>
-        <button
-          type="button"
-          onClick={() => setOverviewExpanded((o) => !o)}
-          className={cn('mt-1 inline-flex items-center gap-1 text-[11px]', T3, 'hover:text-zinc-800 dark:hover:text-zinc-200', consoleButtonFocusClass)}
-        >
-          {overviewExpanded
-            ? t('trajectory.collapse', { defaultValue: '收起' })
-            : t('trajectory.expand_all', { defaultValue: '展开全部' })}
-        </button>
-      </OverviewSection>
+      <>
+        <OverviewSection label={t('trajectory.tab_preview')} onOpen={() => setTab('preview')}>
+          {/* DeepSeek harness 原则：折叠的是容器，不裁内容——默认折叠，就地展开全文 */}
+          <div className={cn('relative', !overviewExpanded && 'max-h-56 overflow-hidden')}>
+            {renderedBody(false)}
+          </div>
+          <button
+            type="button"
+            onClick={() => setOverviewExpanded((o) => !o)}
+            className={cn('mt-1 inline-flex items-center gap-1 text-[11px]', T3, 'hover:text-zinc-800 dark:hover:text-zinc-200', consoleButtonFocusClass)}
+          >
+            {overviewExpanded
+              ? t('trajectory.collapse', { defaultValue: '收起' })
+              : t('trajectory.expand_all', { defaultValue: '展开全部' })}
+          </button>
+        </OverviewSection>
+        {entry.thinking && (
+          <section>
+            <button
+              type="button"
+              onClick={() => setThinkingOpen((o) => !o)}
+              aria-expanded={thinkingOpen}
+              className={cn('flex items-center gap-1 text-[11px] font-semibold tracking-wider uppercase text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200', consoleButtonFocusClass)}
+            >
+              <ChevronRight className={cn('w-3 h-3 shrink-0 transition-transform', thinkingOpen && 'rotate-90')} strokeWidth={2} />
+              <span>{t('trajectory.role_thinking')}</span>
+            </button>
+            {thinkingOpen && (
+              <div className="mt-1.5 rounded-md border border-zinc-200 bg-zinc-50/80 px-2.5 py-2 dark:border-zinc-700/60 dark:bg-zinc-800/40">
+                <p className="text-[12px] italic leading-relaxed text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap break-words">{entry.thinking}</p>
+              </div>
+            )}
+          </section>
+        )}
+      </>
     );
   };
 
@@ -1115,7 +1133,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   const [groupOverrides, setGroupOverrides] = useState({});
   const [callsCollapsed, setCallsCollapsed] = useState(false);
   // 局部展开的 stepSeq（折叠状态下点某个摘要行，只展开该步的工具调用）
-  const [expandedSteps, setExpandedSteps] = useState({});
+  const [expandedGroups, setExpandedGroups] = useState({});
   const afterSeqRef = useRef(0);
   const loadingMoreRef = useRef(false);
   const listRef = useRef(null);
@@ -1163,7 +1181,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
     setTurnsCollapsed(false);
     setGroupOverrides({});
     setCallsCollapsed(false);
-    setExpandedSteps({});
+    setExpandedGroups({});
     setReport(null);
     setReportOpen(false);
     fetchSteps({ reset: true });
@@ -1296,15 +1314,15 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
     return map;
   }, [entries]);
 
-  // 每个模型调用（两个助手之间）的工具汇总，折叠「调用」时在该助手之后显示一行
-  const stepToolMeta = useMemo(() => {
+  // 「两个助手之间」的工具汇总：无助手的纯工具步会与上一个助手同组
+  const callsGroupMeta = useMemo(() => {
     const m = new Map();
     for (const e of entries) {
       if (e.kind !== 'tool' || !e.name) continue;
-      const cur = m.get(e.stepSeq) || { count: 0, names: [] };
+      const cur = m.get(e.callsGroup) || { count: 0, names: [] };
       cur.count += 1;
       if (e.name) cur.names.push(e.name);
-      m.set(e.stepSeq, cur);
+      m.set(e.callsGroup, cur);
     }
     return m;
   }, [entries]);
@@ -1450,7 +1468,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
             type="button"
             aria-pressed={callsCollapsed}
             title={callsCollapsed ? t('trajectory.expand_calls') : t('trajectory.collapse_calls')}
-            onClick={() => { setCallsCollapsed((p) => !p); setExpandedSteps({}); }}
+            onClick={() => { setCallsCollapsed((p) => !p); setExpandedGroups({}); }}
             className={cn('flex items-center gap-1.5 text-xs rounded px-1 -mx-1 h-6', consoleButtonFocusClass, callsCollapsed ? 'text-sky-700 dark:text-sky-300 bg-sky-100/60 dark:bg-sky-500/10' : T2, 'hover:bg-zinc-100')}
           >
             <Zap className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.75} />
@@ -1539,19 +1557,19 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
                 const style = KIND_STYLES[e.kind] || KIND_STYLES.assistant;
                 const Icon = style.icon;
                 const dimmed = range !== null && focusIds !== null && !focusIds.has(e.id);
-                // 工具调用折叠：按「两个助手之间」（同一次模型调用）聚合。
-                // 在该步第一个工具条目处渲染一行汇总，其余工具条目隐藏。
-                if (callsCollapsed && e.kind === 'tool' && !expandedSteps[e.stepSeq]) {
+                // 工具调用折叠：按「两个助手之间」聚合（中间没有助手消息的多个
+                // 纯工具步合并成一组）。在该组第一个工具条目处渲染一行汇总。
+                if (callsCollapsed && e.kind === 'tool' && !expandedGroups[e.callsGroup]) {
                   const prev = g.entries[i - 1];
-                  const firstOfStep = !prev || prev.stepSeq !== e.stepSeq || prev.kind !== 'tool';
-                  if (!firstOfStep) return null;
-                  const meta = stepToolMeta.get(e.stepSeq);
+                  const firstOfGroup = !prev || prev.callsGroup !== e.callsGroup || prev.kind !== 'tool';
+                  if (!firstOfGroup) return null;
+                  const meta = callsGroupMeta.get(e.callsGroup);
                   if (!meta) return null;
                   return (
-                    <div key={`calls-${e.stepSeq}`} className="pl-10 pr-3 py-1">
+                    <div key={`calls-${e.callsGroup}`} className="pl-10 pr-3 py-1">
                       <button
                         type="button"
-                        onClick={() => setExpandedSteps((o) => ({ ...o, [e.stepSeq]: true }))}
+                        onClick={() => setExpandedGroups((o) => ({ ...o, [e.callsGroup]: true }))}
                         title={t('trajectory.expand_calls')}
                         className={cn('text-[10px] text-zinc-400 font-mono hover:text-zinc-700', consoleButtonFocusClass)}
                       >
