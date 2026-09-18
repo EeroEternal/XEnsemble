@@ -10,10 +10,10 @@
 const { and, eq, gte, isNotNull, lt, ne, sql } = require('drizzle-orm');
 const { db } = require('../db/index');
 const schema = require('../db/schema');
-// 智能路由的节省估算依赖模型目录的 USD 单价（无 DB 依赖，无循环引用）
+// 费用趋势按目录 USD 单价估算
 const { fetchModelCatalog, lookupCatalog, usdEstimateFromEntry } = require('../llm/modelCatalog');
-const { canonicalModelId } = require('../llm/modelPortraits');
-const agentGatewayConfig = require('./AgentGatewayConfig');
+// 路由成本/节省估算抽到 routingCost，供本服务与路由分析页共用一套口径
+const { getRoutingCostByUser } = require('./routingCost');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -221,7 +221,7 @@ async function getUsageByUser({ days } = {}) {
             )
             .groupBy(schema.users.id, schema.users.username, schema.users.displayName, schema.users.role)
             .orderBy(sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0) desc`),
-        getRoutingSavingsByUser({ days }),
+        getRoutingCostByUser({ days }),
     ]);
     return rows.map((r) => {
         const cachedTokens = Number(r.cached || 0);
@@ -242,91 +242,6 @@ async function getUsageByUser({ days } = {}) {
             estSavingsUsd: savings ? Number(savings.estSavingsUsd.toFixed(4)) : null,
         };
     });
-}
-
-/**
- * 路由节省估算（按用户聚合）：对「路由真的换了模型」的请求，分别按两个模型的
- * 目录 USD 单价估算本次成本，差值即路由省下（或额外付出，如能力门槛强制升档）。
- *
- * 计入条件（缺一不可）：
- * 1. requested 与 chosen 的 canonical id 不同（仅 provider 前缀差异不算换模型）；
- * 2. requested 的 canonical id 属于该 Agent 网关当前绑定的模型列表——否则它既非
- *    该网关可服务的模型、也不可能是路由候选，如用户选择的 claude-sonnet-5，或网关
- *    配置变更后存量会话残留的旧 provider/model（此时不该记成"路由亏损"）；
- * 3. 两侧在目录中都能查到价格。
- *
- * 注：Agent 网关模型取"当前"配置。历史配置无留存，故跨越配置变更的窗口只能按现状判定。
- * @returns {Promise<Map<userId, { estSavingsUsd:number, savingsRequests:number }>>}
- */
-async function getRoutingSavingsByUser({ days } = {}) {
-    const { sinceTs } = normalizeRange(days);
-    const catalog = fetchModelCatalog();
-    const rows = await db
-        .select({
-            userId: schema.llmUsage.userId,
-            agentId: schema.llmUsage.agentId,
-            requestedModel: schema.llmUsage.requestedModel,
-            chosenModel: schema.llmUsage.model,
-            prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::bigint`,
-            completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::bigint`,
-            cached: sql`coalesce(sum(${schema.llmUsage.cachedTokens}), 0)::bigint`,
-        })
-        .from(schema.llmUsage)
-        .where(and(
-            gte(schema.llmUsage.createdAt, sinceTs),
-            isNotNull(schema.llmUsage.requestedModel),
-            isNotNull(schema.llmUsage.agentId),
-            ne(schema.llmUsage.requestedModel, schema.llmUsage.model),
-        ))
-        .groupBy(
-            schema.llmUsage.userId,
-            schema.llmUsage.agentId,
-            schema.llmUsage.requestedModel,
-            schema.llmUsage.model,
-        );
-
-    const usdCost = (model, tokens) => {
-        const unit = usdEstimateFromEntry(lookupCatalog(catalog, { model }));
-        if (!unit) return null;
-        return (Number(tokens.prompt) / 1e6) * (unit.input ?? 0)
-            + (Number(tokens.completion) / 1e6) * (unit.output ?? 0)
-            + (Number(tokens.cached) / 1e6) * (unit.cache_read ?? 0);
-    };
-
-    // 每个 Agent 网关可服务模型的 canonical 集合；null 表示该 Agent 无网关模型配置。
-    const allowedCache = new Map();
-    const allowedCanonicalSet = async (agentId) => {
-        if (allowedCache.has(agentId)) return allowedCache.get(agentId);
-        let set = null;
-        try {
-            const cfg = await agentGatewayConfig.getForAgent(agentId);
-            const models = agentGatewayConfig.allModels(cfg);
-            if (models.length > 0) set = new Set(models.map((m) => canonicalModelId(m)));
-        } catch {
-            set = null;
-        }
-        allowedCache.set(agentId, set);
-        return set;
-    };
-
-    const byUser = new Map();
-    for (const r of rows) {
-        const requestedCanon = canonicalModelId(r.requestedModel);
-        const chosenCanon = canonicalModelId(r.chosenModel);
-        // 仅 provider 前缀差异不算换模型（如 glm-5.3-flash → personal_glm/glm-5.3-flash）
-        if (!requestedCanon || requestedCanon === chosenCanon) continue;
-        const allowed = await allowedCanonicalSet(r.agentId);
-        if (!allowed || !allowed.has(requestedCanon)) continue;
-        const tokens = { prompt: r.prompt, completion: r.completion, cached: r.cached };
-        const requestedCost = usdCost(r.requestedModel, tokens);
-        const chosenCost = usdCost(r.chosenModel, tokens);
-        if (requestedCost == null || chosenCost == null) continue;
-        const acc = byUser.get(r.userId) || { estSavingsUsd: 0, savingsRequests: 0 };
-        acc.estSavingsUsd += requestedCost - chosenCost;
-        acc.savingsRequests += 1;
-        byUser.set(r.userId, acc);
-    }
-    return byUser;
 }
 
 /**
