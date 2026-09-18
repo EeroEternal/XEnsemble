@@ -29,7 +29,9 @@ const { createAgentSession } = require('../session/createAgentSession');
 const transcriptStore = require('../runtime/TranscriptStore');
 const trajectory = require('../llm/trajectory');
 
-const TIMEOUT_MS = Number(process.env.LOOP_TASK_TIMEOUT_MS) || 30 * 60_000;
+// 任务超时默认 60min：qwen/gemini 系 headless 全程静默、只在结束时打印最终回复，
+// 重任务（如风险扫描读数百提交 diff）30min 跑不完会被误杀——表现与挂死完全一致。
+const TIMEOUT_MS = Number(process.env.LOOP_TASK_TIMEOUT_MS) || 60 * 60_000;
 const SPAWN_WAIT_MS = Number(process.env.LOOP_TASK_SPAWN_WAIT_MS) || 5 * 60_000;
 const ALIVE_POLL_MS = 2000;
 const MAX_CONCURRENT_PER_USER = Number(process.env.LOOP_TASK_MAX_CONCURRENT_PER_USER) || 2;
@@ -265,7 +267,8 @@ async function executeRun(task, run, log = console) {
         // 超时兜底：到点判 timeout 并终止会话（finalize 幂等，与 exit 竞争首个终态）
         deadlineTimer = setTimeout(() => {
             void (async () => {
-                await finalize('timeout', `task timed out after ${TIMEOUT_MS}ms`);
+                const mins = Math.round(TIMEOUT_MS / 60_000);
+                await finalize('timeout', `task timed out after ${mins} min`);
                 await stopTaskSession(sessionId, log);
             })();
         }, TIMEOUT_MS);
