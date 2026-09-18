@@ -14,7 +14,7 @@
 const { and, eq, gte, isNotNull, ne, sql } = require('drizzle-orm');
 const { db } = require('../db/index');
 const schema = require('../db/schema');
-const { fetchModelCatalog, lookupCatalog, usdEstimateFromEntry } = require('../llm/modelCatalog');
+const { fetchModelCatalog, lookupCatalog, usdEstimateFromEntry, findCatalogEntries } = require('../llm/modelCatalog');
 const { HARD_TASK_DIFFICULTY } = require('../llm/router/evaluateDifficulty');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
