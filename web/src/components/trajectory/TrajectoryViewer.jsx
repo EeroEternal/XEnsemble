@@ -299,8 +299,9 @@ export function buildEntries(steps, t) {
         systemSeen = true;
       }
     }
-    // 快照行推进绝对游标；delta 行不推进（并行合成调用会交错改写 msgCount）
-    if (isSnapshot && (Number(step.msgCount) || 0) > cursor) cursor = Number(step.msgCount);
+    // 游标推进到该请求的绝对上下文长度（每行都推进，与 server extractor 同口径）。
+    // 只在快照行推进会让后续快照把已消费的历史再算一遍 → 重复的用户消息/轮次。
+    if ((Number(step.msgCount) || 0) > cursor) cursor = Number(step.msgCount);
 
     // 该次调用的响应 → 一条助手条目（思考 + 正文）+ 工具调用。
     // 思考本就是助手回复的一部分（同一 response 的 content 块），不再单独成行。

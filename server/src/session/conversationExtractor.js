@@ -407,6 +407,9 @@ function extractFromTrajectory(steps, { maxTurns = MAX_TURNS } = {}) {
     };
 
     const addToolCall = (name, args, callId, ts) => {
+        // 同一次调用会先随 response 出现、再随下一次请求重放出现（agent 每轮重放
+        // 上一条 assistant 消息）。按 callId 去重，保证工具调用只计一次。
+        if (callId != null && callMap.has(callId)) return;
         if (!pendingAssistant) pushAssistantTurn(ts);
         const entry = { tool: name || 'tool', args: String(args ?? '') };
         if (entry.args.length > TURN_MAX_BYTES) {

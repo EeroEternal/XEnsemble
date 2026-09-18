@@ -27,7 +27,7 @@ const ISSUES_CAP = 10;
 // 建议生成参数
 const ADVICE_MAX_SUGGESTIONS = 3;
 const ADVICE_TURN_CHARS = 500;
-const ADVICE_PROMPT_CHAR_BUDGET = 4000;
+const ADVICE_PROMPT_CHAR_BUDGET = 12000;
 const ADVICE_MAX_TOKENS = 1500;
 
 // 修改类工具名（file_rework 只统计真正改文件的动作）
@@ -98,7 +98,15 @@ function analyzeTrajectory(steps, { exitCode = null, stopped = false } = {}) {
     const { turns } = extractFromTrajectory(rows, { maxTurns: null }) || {};
 
     const errorRows = rows.filter((r) => r && r.status === 'error');
-    const snapshotCount = rows.filter((r) => r && r.snapshot === true).length;
+    // 「上下文压缩」= 首条请求之外的快照行。snapshot 语义是「重新发送全量上下文」，
+    // 而首条请求必然是快照；其后的快照才是压缩/历史重写。
+    let snapshotCount = 0;
+    let seenInitialSnapshot = false;
+    for (const r of rows) {
+        if (!r || r.snapshot !== true) continue;
+        if (!seenInitialSnapshot) { seenInitialSnapshot = true; continue; }
+        snapshotCount += 1;
+    }
     let toolCallCount = 0;
     for (const turn of turns) {
         if (turn.role === 'assistant' && Array.isArray(turn.tools)) toolCallCount += turn.tools.length;
@@ -234,7 +242,12 @@ function buildAdvicePrompt(turns, issues) {
         }
     }
     let flow = lines.join('\n');
-    if (flow.length > ADVICE_PROMPT_CHAR_BUDGET) flow = flow.slice(0, ADVICE_PROMPT_CHAR_BUDGET);
+    if (flow.length > ADVICE_PROMPT_CHAR_BUDGET) {
+        // 保留首尾（开头含最初需求、结尾含最新进展），中间省略——纯截断只留
+        // 开头，长会话里模型几乎看不到有效上下文，容易返回空建议。
+        const half = Math.floor((ADVICE_PROMPT_CHAR_BUDGET - 24) / 2);
+        flow = `${flow.slice(0, half)}\n…[中间轨迹省略]…\n${flow.slice(-half)}`;
+    }
 
     return [
         '以下是本次会话的交互轨迹（user = 用户输入，assistant = Agent 回复与工具调用），',
@@ -270,7 +283,7 @@ function validateAdvice(raw) {
         const problem = String(s.problem || '').trim();
         const before = String(s.before || '').trim();
         const after = String(s.after || '').trim();
-        if (!title || !before || !after) continue; // 无真实引用的丢弃
+        if (!title || !after) continue; // title/after 必填；before 允许缺失（不强求引用）
         clean.push({ title, problem, before, after });
         if (clean.length >= ADVICE_MAX_SUGGESTIONS) break;
     }
@@ -291,11 +304,23 @@ async function generateAdvice(turns, issues) {
         err.code = 'llm_not_configured';
         throw err;
     }
-    const raw = await analyzeClient.chatJson({
+    const user = buildAdvicePrompt(turns, issues);
+    const base = {
         system: ADVICE_SYSTEM,
-        user: buildAdvicePrompt(turns, issues),
+        user,
         options: { maxTokens: ADVICE_MAX_TOKENS, temperature: 0.3 },
-    });
+    };
+    let raw;
+    try {
+        raw = await analyzeClient.chatJson({ ...base, options: { ...base.options, responseFormat: 'json' } });
+    } catch (err) {
+        // 部分上游不支持 response_format（400），回退到纯提示词约束
+        if (err && err.name === 'LlmRequestError' && err.status === 400) {
+            raw = await analyzeClient.chatJson(base);
+        } else {
+            throw err;
+        }
+    }
     return validateAdvice(raw);
 }
 

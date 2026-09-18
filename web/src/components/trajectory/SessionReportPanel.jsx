@@ -51,10 +51,12 @@ function SuggestionCard({ suggestion, copied, onCopy }) {
       </div>
       {suggestion.problem && <p className="text-[11px] leading-relaxed text-zinc-600">{suggestion.problem}</p>}
       <div className="grid gap-1.5">
-        <div className="rounded border border-zinc-200 bg-surface px-2 py-1.5">
-          <span className="text-[10px] uppercase tracking-wider text-zinc-400">before</span>
-          <p className="text-[11.5px] leading-relaxed text-zinc-500 whitespace-pre-wrap break-words line-through decoration-zinc-300">{suggestion.before}</p>
-        </div>
+        {suggestion.before && (
+          <div className="rounded border border-zinc-200 bg-surface px-2 py-1.5">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-400">before</span>
+            <p className="text-[11.5px] leading-relaxed text-zinc-500 whitespace-pre-wrap break-words line-through decoration-zinc-300">{suggestion.before}</p>
+          </div>
+        )}
         <div className="rounded border border-emerald-200 bg-emerald-50/60 dark:border-emerald-500/30 dark:bg-emerald-500/10 px-2 py-1.5">
           <span className="text-[10px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400">after</span>
           <p className="text-[11.5px] leading-relaxed text-zinc-800 whitespace-pre-wrap break-words">{suggestion.after}</p>

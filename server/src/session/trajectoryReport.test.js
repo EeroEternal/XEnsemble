@@ -67,6 +67,26 @@ test('analyzeTrajectory returns clean metrics for a simple session, no issues', 
     assert.ok(Array.isArray(r.turns) && r.turns.length > 0);
 });
 
+test('toolCallCount counts each call once even when replayed in a later request (delta rows)', () => {
+    const a1 = { role: 'assistant', content: [textBlock('let me read'), toolUse('t1', 'Read', { path: 'a.js' })] };
+    const steps = [
+        snap(1, 1000, [{ role: 'user', content: 'go' }], { content: [textBlock('let me read'), toolUse('t1', 'Read', { path: 'a.js' })] }),
+        {
+            seq: 2, ts: 2000, agentId: 'test-agent', model: 'test-model',
+            snapshot: false, msgCount: 3,
+            request: {
+                snapshot: false, params: {},
+                messages: [a1, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'done' }] }],
+            },
+            response: { content: [textBlock('done')] },
+            status: 'ok', latencyMs: 100, error: null,
+        },
+    ];
+    const r = trajectoryReport.analyzeTrajectory(steps);
+    // response 与下一次请求重放的 assistant tool_use 是同一个调用，不能计两次
+    assert.equal(r.metrics.toolCallCount, 1);
+});
+
 test('loop_detected fires at >=3 identical consecutive tool calls', () => {
     const mk = (id) => toolUse(id, 'Bash', { command: 'npm test' });
     const steps = session([
@@ -148,7 +168,7 @@ test('frequent_compaction fires at >=3 snapshot rows beyond the first', () => {
     const r = trajectoryReport.analyzeTrajectory(steps);
     const comp = r.issues.find((i) => i.code === 'frequent_compaction');
     assert.ok(comp, 'expected frequent_compaction issue');
-    assert.equal(comp.count, 5); // 全部行都是 snapshot
+    assert.equal(comp.count, 4); // 5 行 snapshot：首行是全量快照，不算压缩
 });
 
 test('call_errors clusters by error prefix', () => {
@@ -201,22 +221,24 @@ test('generateAdvice throws llm_not_configured without API key', async () => {
     );
 });
 
-test('validateAdvice drops suggestions without a real "before" quote and caps at 3', () => {
+test('validateAdvice keeps suggestions without a "before" quote but drops missing title/after, caps at 3', () => {
     const advice = trajectoryReport.validateAdvice({
         overall: 'ok-ish',
         promptSuggestions: [
             { title: 'a', problem: 'p', before: '用户原话', after: '改写' },
-            { title: 'b', problem: 'p', before: '', after: '无引用丢弃' },
-            { title: 'c', problem: 'p', before: '原话2', after: '改写2' },
-            { title: 'd', problem: 'p', before: '原话3', after: '改写3' },
-            { title: 'e', problem: 'p', before: '原话4', after: '改写4' },
+            { title: 'b', problem: 'p', before: '', after: '无引用保留' },
+            { title: '', problem: 'p', before: 'x', after: 'y' },
+            { title: 'c', problem: 'p', before: 'x', after: '' },
+            { title: 'd', problem: 'p', before: '原话2', after: '改写2' },
+            { title: 'e', problem: 'p', before: '原话3', after: '改写3' },
         ],
         agentNotes: [' note '],
     });
-    assert.equal(advice.promptSuggestions.length, 3);
+    assert.equal(advice.promptSuggestions.length, 3); // a, b, d
     assert.equal(advice.promptSuggestions[0].title, 'a');
+    assert.equal(advice.promptSuggestions[1].title, 'b');
+    assert.equal(advice.promptSuggestions[1].before, '');
     assert.equal(advice.agentNotes[0], 'note');
-    assert.ok(!advice.promptSuggestions.some((s) => s.title === 'b'));
 });
 
 test('validateAdvice returns null for empty/invalid payloads', () => {
@@ -229,6 +251,6 @@ test('buildAdvicePrompt truncates flow to char budget and embeds issues JSON', (
     const turns = [];
     for (let i = 0; i < 200; i += 1) turns.push({ role: 'user', ts: i, text: 'x'.repeat(600) });
     const prompt = trajectoryReport.buildAdvicePrompt(turns, [{ code: 'loop_detected', severity: 'critical', count: 3, evidence: [] }]);
-    assert.ok(prompt.length < 6000);
+    assert.ok(prompt.length < 14000);
     assert.ok(prompt.includes('loop_detected'));
 });
