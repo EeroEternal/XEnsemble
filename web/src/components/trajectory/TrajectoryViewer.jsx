@@ -1298,6 +1298,22 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
     return out;
   }, [visibleEntries]);
 
+  // 每个用户轮次的折叠摘要：步骤数（不同模型调用）+ 工具调用数
+  const roundMeta = useMemo(() => {
+    const m = new Map();
+    const stepSets = new Map();
+    for (const e of entries) {
+      let cur = m.get(e.round);
+      if (!cur) { cur = { steps: 0, toolCalls: 0 }; m.set(e.round, cur); }
+      if (e.kind === 'tool' && e.name) cur.toolCalls += 1;
+      let set = stepSets.get(e.round);
+      if (!set) { set = new Set(); stepSets.set(e.round, set); }
+      set.add(e.stepSeq);
+    }
+    for (const [round, cur] of m) cur.steps = stepSets.get(round)?.size || 0;
+    return m;
+  }, [entries]);
+
   const groupExpanded = (round) => groupOverrides[round] ?? !turnsCollapsed;
   const toggleGroup = (round) => setGroupOverrides((o) => ({ ...o, [round]: !(o[round] ?? !turnsCollapsed) }));
   const toggleAllGroups = () => {
@@ -1535,7 +1551,11 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
                     <span className={cn('text-[10px] shrink-0', T3)}>{t('trajectory.round_label', { n: g.round })}</span>
                     <span className="text-[11px] text-sky-700 dark:text-sky-300 truncate min-w-0">{preview(g.title, 60)}</span>
                     {expandable && !expanded && (
-                      <span className={cn('ml-auto text-[10px] shrink-0', T3)}>{t('trajectory.hidden_count', { count: g.entries.length })}</span>
+                      <span className={cn('ml-auto text-[10px] shrink-0 font-mono', T3)}>
+                        {t('trajectory.group_steps', { count: roundMeta.get(g.round)?.steps || 0 })}
+                        {' · '}
+                        ⚙ {t('trajectory.group_calls', { count: roundMeta.get(g.round)?.toolCalls || 0 })}
+                      </span>
                     )}
                   </button>
                 )}
