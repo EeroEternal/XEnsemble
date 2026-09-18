@@ -1808,6 +1808,7 @@ export default React.forwardRef(function Sessions({
                   <ChatView
                     key={activeSession.sessionId}
                     sessionId={activeSession.sessionId}
+                    agentId={activeSession.agentId}
                     onSessionEnd={handleSessionEnd}
                   />
                 ) : (

@@ -27,8 +27,14 @@
 // 只有这些 agent 走裁剪路径。其余 agent 保持原有字节透明管线。
 export const FULL_REPAINT_DROP_AGENTS = ['qwen-code'];
 
-// 裁剪后至少保留的积压字节数（远小于 8MB 硬阈值，避免触顶自愈）。
-export const FULL_REPAINT_DROP_MIN_KEEP_BYTES = 256 * 1024;
+// 裁剪后至少保留的积压字节数。
+//
+// 注意：这个值也是**单次 flush 在主线程上同步处理的数据量上限**（flush 里
+// 会把积压交给 vsProcess 逐行 diff + terminal.write，都是同步阻塞）。
+// 256KB 的满屏重绘帧一次处理可卡住主线程数秒，表现为终端“冻住”；降到 64KB
+// 把长阻塞切成短阻塞（flush 之间 setTimeout 会还给事件循环，UI 保持响应）。
+// 锚点帧重画整屏，保留更少帧不改变最终画面（qwen 满屏重绘语义不变）。
+export const FULL_REPAINT_DROP_MIN_KEEP_BYTES = 64 * 1024;
 
 const SYNC_OPEN = '\x1b[?2026h';
 const SYNC_CLOSE = '\x1b[?2026l';

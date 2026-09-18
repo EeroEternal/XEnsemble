@@ -9,6 +9,11 @@ import { apiFetch, getAccessToken, getWsUrl } from '../../lib/api';
 import { consoleInputClass, consoleButtonFocusClass } from '../../lib/consoleTokens';
 import MarkdownView from '../Markdown';
 import {
+  isFullRepaintDropAgent,
+  dropFullRepaintPrefix,
+  FULL_REPAINT_DROP_MIN_KEEP_BYTES,
+} from '../../lib/terminalFrameDrop';
+import {
   KEY_ARROW_DOWN, KEY_ARROW_UP, KEY_ENTER, KEY_SPACE,
   parseQuestionTool, detectTuiPrompt, readScreenLines,
 } from '../../lib/chatPrompt';
@@ -56,7 +61,7 @@ const TUI_PROMPT_ACTION_BTN = 'inline-flex h-7 items-center gap-1 rounded-md bor
  * confirmation/selection prompts (permission pickers, plan approval, y/n)
  * that never appear as chat events — see lib/chatPrompt.js.
  */
-export default function ChatView({ sessionId, onSessionEnd }) {
+export default function ChatView({ sessionId, agentId, onSessionEnd }) {
   const { t } = useTranslation();
   const [messages, setMessages] = useState([]);
   const [connected, setConnected] = useState(false);
@@ -162,6 +167,62 @@ export default function ChatView({ sessionId, onSessionEnd }) {
     // the thinking spinner clears and we stop hammering the server.
     let failedConnects = 0;
 
+    // 与 AgentConsole 一致的终端背压/裁剪。ChatView 也订阅同一份 live PTY 输出
+    // （chat=1 仅跳过历史回放），把每帧直接 term.write() 给 headless xterm：
+    // qwen-code 突发整屏重绘（~156KB/s）时 xterm 写/解析队列无界增长，会把主
+    // 线程拖死 —— 表现为对话界面「冻结」（鼠标事件处理不了，键盘/合成滚动仍可
+    // 用）。终端视图已有这套保护（8ca2b38），对话视图此前没有，这就是 qwen
+    // 会话仍卡顿的根因。做法：批量写入 + pendingWrites 背压 + qwen 满屏重绘
+    // 锚点裁剪（仅 primary buffer 语义，其他 agent 字节不变）。
+    const fullRepaintDrop = isFullRepaintDropAgent(agentId);
+    // 最后一道防线：万一满屏重绘锚点裁剪失败（如屏高很大、帧内无合格锚点），
+    // 也不能让 pendingOutput 无界增长——直接清空。qwen 的屏幕可由下一次整屏
+    // 重绘完全恢复，headless 缓冲短暂陈旧远优于主线程被拖死。
+    const MAX_PENDING_OUTPUT_BYTES = 2 * 1024 * 1024;
+    let pendingOutput = '';
+    let pendingWrites = 0;
+    let flushTimer = null;
+    let fullRepaintDropLogged = false;
+    const flushOutput = () => {
+      flushTimer = null;
+      const term = termRef.current;
+      if (!term) { pendingOutput = ''; return; }
+      let data = pendingOutput;
+      pendingOutput = '';
+      // alt screen 下 TUI 靠自身增量重绘，前缀切分会造成画面残缺
+      // （与 AgentConsole 的裁剪语义保持一致，仅 primary buffer 生效）。
+      const inAltScreen = term.buffer.active === term.buffer.alternate;
+      if (fullRepaintDrop && !inAltScreen && data.length > FULL_REPAINT_DROP_MIN_KEEP_BYTES) {
+        const trimmed = dropFullRepaintPrefix(data, { rows: term.rows });
+        if (trimmed.droppedBytes > 0) {
+          data = trimmed.data;
+          if (!fullRepaintDropLogged) {
+            fullRepaintDropLogged = true;
+            console.warn(`[ChatView] full-repaint backlog trimmed (dropped ${trimmed.droppedBytes} bytes, agent=${agentId})`);
+          }
+        }
+      }
+      if (!data) return;
+      pendingWrites += 1;
+      try {
+        term.write(data, () => { pendingWrites = Math.max(0, pendingWrites - 1); });
+      } catch (_) {
+        pendingWrites = Math.max(0, pendingWrites - 1);
+      }
+    };
+    // xterm 尚在解析早先写入时拉长下一次 flush 间隔，给它时间排空，
+    // 避免无界堆积（间隔策略与 AgentConsole 一致）。
+    const enqueueOutput = (chunk) => {
+      pendingOutput += chunk;
+      if (fullRepaintDrop && pendingOutput.length > MAX_PENDING_OUTPUT_BYTES) {
+        pendingOutput = '';
+      }
+      if (flushTimer === null) {
+        const delay = pendingWrites > 4 ? 64 : pendingWrites > 1 ? 32 : 16;
+        flushTimer = setTimeout(flushOutput, delay);
+      }
+    };
+
     const connect = () => {
       if (disposed) return;
       const token = getAccessToken();
@@ -197,11 +258,11 @@ export default function ChatView({ sessionId, onSessionEnd }) {
           return;
         }
         if (msg.type === 'output' && typeof msg.data === 'string') {
-          // Feed the live PTY stream into the headless terminal, then scan
-          // the screen (debounced) for confirmation/selection prompts.
-          const term = termRef.current;
-          if (term) {
-            try { term.write(msg.data); } catch { /* ignore */ }
+          // Feed the live PTY stream into the headless terminal (batched +
+          // backpressured, see enqueueOutput), then scan the screen
+          // (debounced) for confirmation/selection prompts.
+          if (termRef.current) {
+            enqueueOutput(msg.data);
             if (!promptScanTimerRef.current) {
               promptScanTimerRef.current = setTimeout(() => runPromptScanRef.current(), 400);
             }
@@ -269,10 +330,11 @@ export default function ChatView({ sessionId, onSessionEnd }) {
     return () => {
       disposed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (flushTimer !== null) clearTimeout(flushTimer);
       try { ws?.close(); } catch (_) { /* ignore */ }
       wsRef.current = null;
     };
-  }, [sessionId, loadHistory]);
+  }, [sessionId, agentId, loadHistory]);
 
   const [scrollMetrics, setScrollMetrics] = useState({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 });
   const [scrollbarHover, setScrollbarHover] = useState(false);

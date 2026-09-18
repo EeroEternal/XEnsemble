@@ -998,6 +998,22 @@ function AgentConsole({
               // 4MB），终端直接恢复到最新画面。线程冻结期间本检查不会执行，
               // 那种情况由服务端拥塞自杀（WS_CONGEST_KILL_MS）兜底。
               if (writeBuffer.length > MAX_WRITE_BUFFER_BYTES) {
+                // qwen：先尝试「满整屏重绘锚点裁剪」把积压压到阈值内，避免直接
+                // 触发「断开 + 锚点重放 → 再堆积」的自愈循环（那正是长时间冻结的
+                // 形态）。只有裁剪确实无效（无合格锚点）时才走 resync。
+                // 裁剪用与 flush 相同的组合串（syncTermPending + writeBuffer），
+                // 语义一致。
+                if (fullRepaintDrop && !inAltScreen) {
+                  const preTrim = dropFullRepaintPrefix(syncTermPending + writeBuffer, {
+                    rows: terminal.rows,
+                  });
+                  if (preTrim.droppedBytes > 0) {
+                    syncTermPending = '';
+                    writeBuffer = preTrim.data;
+                  }
+                }
+              }
+              if (writeBuffer.length > MAX_WRITE_BUFFER_BYTES) {
                 writeBuffer = '';
                 if (!resyncRef.current) {
                   resyncRef.current = true;
