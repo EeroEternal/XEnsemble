@@ -1161,58 +1161,6 @@ fastify.patch('/api/v1/sessions/:sessionId/title', { preValidation: [fastify.aut
     return { ok: true, sessionId, title, titleManual: true };
 });
 
-const conversationRefreshInFlight = new Map();
-
-fastify.get('/api/v1/sessions/:sessionId/conversation', { preValidation: [fastify.authenticate, fastify.requireActive] }, async (request, reply) => {
-    const { sessionId } = request.params;
-    const rows = await db.select().from(schema.sessions)
-        .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
-    if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
-
-    const { getConversation } = require('./session/conversationSummaryService');
-    const offset = Math.max(0, Number.parseInt(request.query?.offset, 10) || 0);
-    const limitRaw = request.query?.limit != null ? Number.parseInt(request.query.limit, 10) : null;
-    const limit = limitRaw == null || Number.isNaN(limitRaw) ? null : Math.min(200, Math.max(1, limitRaw));
-    const view = await getConversation(sessionId, { offset, limit });
-    if (!view) return reply.code(404).send({ code: 'conversation_not_found' });
-    return view;
-});
-
-fastify.post('/api/v1/sessions/:sessionId/conversation/refresh', { preValidation: [fastify.authenticate, fastify.requireActive] }, async (request, reply) => {
-    const { sessionId } = request.params;
-    const rows = await db.select().from(schema.sessions)
-        .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, request.user.id)));
-    if (rows.length === 0) return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
-
-    if (conversationRefreshInFlight.has(sessionId)) {
-        return reply.code(409).send({ code: 'refresh_in_progress' });
-    }
-
-    const { summarizeSession } = require('./session/conversationSummaryService');
-    const { LlmRequestError } = require('./llm/analyzeClient');
-
-    const promise = summarizeSession(sessionId, { force: true })
-        .catch((err) => {
-            if (err?.code === 'llm_not_configured') {
-                return reply.code(503).send({ code: 'llm_not_configured' });
-            }
-            if (err instanceof LlmRequestError || err?.code === 'llm_request_failed') {
-                return reply.code(502).send({ code: 'llm_request_failed' });
-            }
-            if (err?.code === 'no_content') {
-                return reply.code(422).send({ code: 'no_content' });
-            }
-            request.log.error(err, '[conversation] refresh failed');
-            return reply.code(500).send({ error: 'Failed to refresh conversation summary' });
-        })
-        .finally(() => {
-            conversationRefreshInFlight.delete(sessionId);
-        });
-
-    conversationRefreshInFlight.set(sessionId, promise);
-    return promise;
-});
-
 fastify.post('/api/v1/sessions/:sessionId/stop', { preValidation: [fastify.authenticate] }, async (request, reply) => {
     const { sessionId } = request.params;
     const rows = await db.select().from(schema.sessions)

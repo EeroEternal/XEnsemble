@@ -11,7 +11,6 @@ import {
   ChevronDown,
   PanelLeftClose,
   PanelLeft,
-  List,
   ListTodo,
   Activity,
   Square,
@@ -225,7 +224,6 @@ export default function AppSidebar({
   onOpenSettings,
   onOpenObservability,
   onLogout,
-  onOpenHistory,
   onOpenLoopTasks,
   minimal = false,
 }) {
@@ -579,16 +577,6 @@ export default function AppSidebar({
         </div>
         {/* 二级页面导航：轻一档，与主动作分区 */}
         <div className="space-y-0.5">
-          {onOpenHistory && (
-            <button
-              type="button"
-              onClick={onOpenHistory}
-              className={`${sidebarSubNavClass}`}
-            >
-              <List className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
-              {t('sessions:history.view_all', { defaultValue: 'View all history' })}
-            </button>
-          )}
           {onOpenLoopTasks && (
             <button
               type="button"

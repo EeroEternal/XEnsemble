@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { ArrowLeft } from 'lucide-react';
 import Login from './pages/Login';
 import Sessions from './pages/Sessions';
-import History from './pages/History';
 import SkillsMarket from './pages/SkillsMarket';
 import MySkills from './pages/MySkills';
 import LoopTasks from './pages/LoopTasks';
@@ -72,7 +71,6 @@ function AuthenticatedLayout({
   }, [location.pathname]);
 
   const isSessions = location.pathname === '/sessions';
-  const isTrajectory = location.pathname === '/trajectory';
   const isMySkills = location.pathname === '/skills';
   const isSkillsMarket = location.pathname === '/skills/market';
   const isSkillsManager = isMySkills || isSkillsMarket;
@@ -199,16 +197,6 @@ function AuthenticatedLayout({
             isSessions ? 'relative z-20' : offRouteClass,
           )}
           aria-hidden={!isSessions}
-        />
-        <History
-          agents={agents}
-          projects={projects}
-          active={isTrajectory}
-          className={cn(
-            'flex h-full min-h-0 flex-1 flex-col',
-            isTrajectory ? 'relative z-20' : offRouteClass,
-          )}
-          aria-hidden={!isTrajectory}
         />
         <LoopTasks
           className={cn(
@@ -474,8 +462,8 @@ function App() {
               }
             >
               <Route path="/sessions" element={null} />
-              <Route path="/trajectory" element={null} />
-              <Route path="/history" element={<Navigate to="/trajectory" replace />} />
+              <Route path="/trajectory" element={<Navigate to="/sessions" replace />} />
+              <Route path="/history" element={<Navigate to="/sessions" replace />} />
               <Route path="/skills" element={null} />
               <Route path="/skills/market" element={null} />
               <Route path="/loop-tasks" element={null} />
