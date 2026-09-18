@@ -12,6 +12,10 @@ import {
   FULL_REPAINT_DROP_MIN_KEEP_BYTES,
 } from '../lib/terminalFrameDrop';
 import { stripTerminalQueries } from '../lib/terminalQueries';
+import {
+  isHoverMouseDowngradeAgent,
+  downgradeHoverMouseMode,
+} from '../lib/terminalMouseMode';
 import { useTerminalTheme } from '../hooks/useTerminalTheme.jsx';
 import { Loader2 } from 'lucide-react';
 import {
@@ -131,6 +135,10 @@ function AgentConsole({
   // 全屏重绘型 TUI（qwen-code）：积压超阈值时按「满整屏重绘帧」锚点裁剪。
   // 其他 agent 为 false → 完全走原有字节透明管线，行为不变。
   const fullRepaintDrop = isFullRepaintDropAgent(agentId);
+  // 悬停鼠标降级（opencode）：把 ANY(1003) 协议降为 DRAG(1002)，丢弃「未按键的
+  // 纯移动」上报，避免 hover 触发的高频重绘抢占渲染线程。其他 agent 为 false →
+  // 字节流完全不变。
+  const hoverMouseDowngrade = isHoverMouseDowngradeAgent(agentId);
   const xtermTheme = preset?.xterm || FALLBACK_XTERM_THEME;
   // 终端主题热切换时 Terminal 实例不会重建（就地更新 options.theme），
   // OSC 10/11 应答需要读到最新配色，用 ref 跟踪。
@@ -779,6 +787,10 @@ function AgentConsole({
           };
 
           function writeTerminalData(processed) {
+            // 悬停鼠标降级：ANY(1003) → DRAG(1002)，仅丢弃「未按键的纯移动」上报。
+            // 放在这个唯一出口，保证重放与实时两条路径行为一致；opencode 之外
+            // 的 agent 不进入此分支（hoverMouseDowngrade 为 false）。
+            if (hoverMouseDowngrade) processed = downgradeHoverMouseMode(processed);
             const buf = terminal.buffer.active;
             const atBottom = buf.baseY + terminal.rows >= buf.length;
             pendingWrites++;
