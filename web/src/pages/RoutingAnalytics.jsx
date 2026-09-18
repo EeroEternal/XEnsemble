@@ -68,7 +68,6 @@ export default function RoutingAnalytics() {
         <div className={`${consoleCardClass} p-4`}>
           <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{t('observability:routing.analyzed_queries')}</div>
           <div className="mt-1 text-2xl font-bold tabular-nums text-zinc-900">{loading ? '—' : summary.requests}</div>
-          <div className="mt-0.5 text-[11px] text-zinc-400">{t('observability:routing.analyzed_queries_sub')}</div>
         </div>
 
         {/* 复杂度分布：高 / 中 / 低 三档计数 */}
@@ -88,7 +87,6 @@ export default function RoutingAnalytics() {
               <div className="text-[11px] text-zinc-400">{t('observability:routing.tier_low_short')}</div>
             </div>
           </div>
-          <div className="mt-0.5 text-[11px] text-zinc-400">{t('observability:routing.high_reasoning_sub', { pct: summary.highDifficultyShare != null ? Math.round(summary.highDifficultyShare * 100) : '—' })}</div>
         </div>
 
         {/* 模型梯度路由：Pro / Flash 计数 */}
@@ -104,7 +102,6 @@ export default function RoutingAnalytics() {
               <div className="text-[11px] text-zinc-400">{t('observability:routing.flash_model_short')}</div>
             </div>
           </div>
-          <div className="mt-0.5 text-[11px] text-zinc-400">{t('observability:routing.dynamic_dispatch')}</div>
         </div>
 
         {/* 预估节省成本 */}
@@ -113,8 +110,22 @@ export default function RoutingAnalytics() {
           <div className="mt-1 text-2xl font-bold tabular-nums text-zinc-900">
             {loading ? '—' : `$${Number(summary.estSavingsUsd || 0).toFixed(2)}`}
           </div>
-          <div className="mt-0.5 text-[11px] text-zinc-400">
-            {t('observability:routing.total_spend', { amount: `$${Number(summary.totalSpendUsd || 0).toFixed(2)}` })}
+        </div>
+      </div>
+
+      {/* 模型改写：改写率 + 能力门槛升档 */}
+      <div>
+        <h2 className="text-sm font-semibold text-zinc-900">{t('observability:routing.model_rewrite')}</h2>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className={`${consoleCardClass} p-4`}>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{t('observability:routing.rewrite_rate')}</div>
+            <div className="mt-1 text-2xl font-bold tabular-nums text-zinc-900">
+              {loading ? '—' : `${Math.round((summary.rewriteRate || 0) * 100)}%`}
+            </div>
+          </div>
+          <div className={`${consoleCardClass} p-4`}>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{t('observability:routing.capability_upgrades')}</div>
+            <div className="mt-1 text-2xl font-bold tabular-nums text-zinc-900">{loading ? '—' : (summary.upgrades ?? 0)}</div>
           </div>
         </div>
       </div>

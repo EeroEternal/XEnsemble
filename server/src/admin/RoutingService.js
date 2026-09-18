@@ -104,6 +104,7 @@ async function getMyRoutingOverview(userId, { days } = {}) {
                 prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::bigint`,
                 completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::bigint`,
                 cached: sql`coalesce(sum(${schema.llmUsage.cachedTokens}), 0)::bigint`,
+                n: sql`count(*)::int`,
             })
             .from(schema.llmUsage)
             .where(and(
@@ -140,13 +141,22 @@ async function getMyRoutingOverview(userId, { days } = {}) {
 
     let estSavingsUsd = 0;
     let totalSpendUsd = 0;
+    let rewrites = 0;
+    let upgrades = 0;
     for (const row of modelPairs) {
         const tokens = { prompt: row.prompt, completion: row.completion, cached: row.cached };
         const chosen = usdCost(unitOf(row.chosenModel), tokens);
         if (chosen != null) totalSpendUsd += chosen;
         if (row.requestedModel !== row.chosenModel) {
+            const n = Number(row.n || 0);
+            // 改写：实际执行的模型 ≠ agent 原请求的模型
+            rewrites += n;
             const requested = usdCost(unitOf(row.requestedModel), tokens);
-            if (requested != null && chosen != null) estSavingsUsd += requested - chosen;
+            if (requested != null && chosen != null) {
+                estSavingsUsd += requested - chosen;
+                // 升档：选中模型成本高于原请求（能力硬门槛强制升档/原模型不合格被替换）
+                if (chosen > requested) upgrades += n;
+            }
         }
     }
 
@@ -158,6 +168,9 @@ async function getMyRoutingOverview(userId, { days } = {}) {
             highDifficultyShare: share(high),
             estSavingsUsd: Number(estSavingsUsd.toFixed(4)),
             totalSpendUsd: Number(totalSpendUsd.toFixed(4)),
+            rewrites,
+            rewriteRate: share(rewrites),
+            upgrades,
         },
         difficultyBuckets: { high, mid, low },
         tierRouting: { pro: tierPro, flash: tierFlash },
