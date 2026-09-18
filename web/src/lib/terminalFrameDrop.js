@@ -40,6 +40,14 @@ const SYNC_OPEN = '\x1b[?2026h';
 const SYNC_CLOSE = '\x1b[?2026l';
 const ERASE_LINE = '\x1b[2K';
 
+// DEC 私有模式序列（\x1b[?…h/l）：鼠标追踪（1000/1002/1003/1006）、alternate
+// screen（1049/47/1047）、光标显隐（25）等**终端模式状态**。它们一旦随被丢弃
+// 的前缀丢失，终端会永久停在错误模式——典型表现：「鼠标追踪卡在开启：滚轮/
+// 点击被转发给 TUI，终端既不滚动也不响应鼠标，但键盘照常」（曾由 44014b6
+// 修过一次非 sync 前缀的同类丢失）。因此裁剪时必须把被丢弃前缀里的模式序列
+// 回收并前置回放。sync 标记（2026）除外——它必须成对出现，单独回放会破坏同步。
+const DEC_MODE_RE = /\x1b\[\?[0-9;]*[hl]/g;
+
 /** 该 agent 是否使用全屏重绘裁剪路径。 */
 export function isFullRepaintDropAgent(agentId) {
   return FULL_REPAINT_DROP_AGENTS.includes(String(agentId || '').toLowerCase());
@@ -94,8 +102,18 @@ export function dropFullRepaintPrefix(pending, opts = {}) {
   }
   if (anchorStart < 0) return { data: pending, droppedBytes: 0 };
 
+  // 回收被丢弃前缀里的终端模式序列（见 DEC_MODE_RE 注释）：丢帧可以丢内容，
+  // 但不能丢「状态」——否则鼠标追踪/alt screen 会永久卡在错误状态。
+  const droppedPrefix = pending.slice(0, anchorStart);
+  let preservedModes = '';
+  DEC_MODE_RE.lastIndex = 0;
+  let m;
+  while ((m = DEC_MODE_RE.exec(droppedPrefix)) !== null) {
+    if (!m[0].includes('2026')) preservedModes += m[0];
+  }
+
   return {
-    data: nonSyncKept + pending.slice(anchorStart),
-    droppedBytes: anchorStart - nonSyncKept.length,
+    data: preservedModes + nonSyncKept + pending.slice(anchorStart),
+    droppedBytes: Math.max(0, anchorStart - nonSyncKept.length - preservedModes.length),
   };
 }

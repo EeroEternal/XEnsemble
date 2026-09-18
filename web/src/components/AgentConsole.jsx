@@ -858,7 +858,7 @@ function AgentConsole({
                 remaining = trimmed.data;
                 if (!fullRepaintDropLogged) {
                   fullRepaintDropLogged = true;
-                  console.warn(`[AgentConsole] full-repaint backlog trimmed (dropped ${trimmed.droppedBytes} bytes, agent=${agentId})`);
+                  console.warn(`[AgentConsole] full-repaint backlog trimmed (dropped ${trimmed.droppedBytes} bytes, agent=${agentId}, altScreen=${inAltScreen}, mouseTracking=${terminal.modes?.mouseTrackingMode ?? 'n/a'})`);
                 }
               }
             }
