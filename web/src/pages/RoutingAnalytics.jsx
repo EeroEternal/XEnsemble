@@ -7,7 +7,8 @@ import { consoleCardClass } from '../lib/consoleTokens';
 import { apiFetch } from '../lib/api';
 
 // 智能路由统计（结构对齐 SmartGate AnalyticsPage）：难度评分 D ∈ [0,1]，
-// D ≥ 0.55 → Pro 档，否则 Flash 档。数据来自 /api/v1/routing/me（self 过滤）。
+// D ≥ 0.55 → 高难；模型价格档按目录 USD 输出单价，达最高价 50% 记 Pro，其余 Flash。
+// 数据来自 /api/v1/routing/me（self 过滤）。
 
 const SPECTRUM = [
   { key: 'high', legendKey: 'legend_high', dotClass: 'bg-purple-600', barClass: 'bg-purple-600' },

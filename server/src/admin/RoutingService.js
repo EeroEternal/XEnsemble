@@ -5,8 +5,8 @@
  * - 「分析请求」= 发生了重评的请求：trigger <> 'sticky' 且 difficulty 非空
  *   （sticky 行沿用上次选择，不计入分析量；trigger 为空的行早于路由功能，不计）。
  * - 复杂度分桶：低 <0.35 / 中 0.35–0.55 / 高 ≥0.55（对齐 HARD_TASK_DIFFICULTY）。
- * - 档位：按模型目录 capability 判定，目录池顶带（max − 0.04）为 pro，其余 flash；
- *   目录外/无 capability 的模型不计入档位计数（与优化器判定同源）。
+ * - 档位（价格档）：按模型目录 USD 输出单价判定，达目录最高输出单价 50% 记 pro，
+ *   其余记 flash；目录外/无价的模型不计入档位计数。
  * - 节省/花费：模型目录 USD 单价（input/output/cache_read per 1M）token 加权估算；
  *   任一侧无价不计入。requested == chosen 的行只进花费，不进节省。
  */
@@ -20,7 +20,7 @@ const { HARD_TASK_DIFFICULTY } = require('../llm/router/evaluateDifficulty');
 const DAY_MS = 24 * 60 * 60 * 1000;
 const STICKY_TRIGGER = 'sticky';
 const MID_BOUNDARY = 0.35;
-const TOP_TIER_TOLERANCE = 0.04;
+const TOP_TIER_PRICE_RATIO = 0.5;
 
 function normalizeRange(days) {
     const parsed = Number(days);
@@ -28,22 +28,26 @@ function normalizeRange(days) {
     return { days: d, sinceTs: Date.now() - d * DAY_MS };
 }
 
-/** 模型 → 档位分类器（pro/flash）：目录池顶带（max − 0.04）为 pro。
- * 匹配必须走 findCatalogEntries 的 family/canonical 模糊匹配——llm_usage.model
- * 是路由后带 provider 前缀的完整串，与目录裸模型名精确比对永远 miss。 */
+/** 模型 → 价格档分类器（pro/flash）：按目录 USD 输出单价，达目录最高输出单价
+ * 50% 记 pro，其余 flash。匹配必须走 findCatalogEntries 的 family/canonical 模糊
+ * 匹配——llm_usage.model 是路由后带 provider 前缀的完整串，与目录裸模型名精确比对
+ * 永远 miss。目录外/无输出单价的模型返回 null，不计入档位计数。 */
 function buildTierClassifier(catalog) {
     const entries = catalog?.entries || [];
-    const caps = entries.map((e) => Number(e.capability)).filter((n) => Number.isFinite(n));
-    const maxCap = caps.length ? Math.max(...caps) : 1;
+    const outputs = entries
+        .map((e) => Number(usdEstimateFromEntry(e)?.output))
+        .filter((n) => Number.isFinite(n));
+    const maxOutput = outputs.length ? Math.max(...outputs) : 0;
+    const threshold = maxOutput * TOP_TIER_PRICE_RATIO;
     const cache = new Map();
     return (model) => {
         if (cache.has(model)) return cache.get(model);
         const matched = findCatalogEntries(catalog, { model });
-        const matchedCaps = matched
-            .map((e) => Number(e.capability))
+        const matchedOutputs = matched
+            .map((e) => Number(usdEstimateFromEntry(e)?.output))
             .filter((n) => Number.isFinite(n));
-        const tier = matchedCaps.length
-            ? (Math.max(...matchedCaps) >= maxCap - TOP_TIER_TOLERANCE ? 'pro' : 'flash')
+        const tier = matchedOutputs.length
+            ? (Math.max(...matchedOutputs) >= threshold ? 'pro' : 'flash')
             : null;
         cache.set(model, tier);
         return tier;
