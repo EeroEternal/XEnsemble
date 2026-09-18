@@ -321,7 +321,7 @@ export function buildEntries(steps, t) {
         errored ? 'error' : 'assistant',
         t('trajectory.role_assistant'),
         replyText,
-        { role: 'assistant', thinking: thinkingText || null, text: replyText },
+        respBlocks(step.response).slice(), // 原始 response.content 块：「原始内容」= 真原文
         step,
       );
       if (thinkingText) entry.thinking = thinkingText;
@@ -878,12 +878,12 @@ function DetailPanel({ entry, round = 0, entries = [], onNavigate }) {
   const step = entry.step;
   const usage = step.response?.usage;
   const style = KIND_STYLES[entry.kind] || KIND_STYLES.assistant;
+  // 「原始内容」= Agent 逐字原文：调用块 + 结果块（不做拍平/注入项目元数据）。
+  // seq/model/status/耗时等在「来源」tab。
   const raw = entry.name != null
     ? {
-        name: entry.name,
-        input: entry.payload?.input ?? entry.payload,
+        call: entry.payload,
         ...(entry.result ? { result: entry.result.payload } : {}),
-        step: { seq: step.seq, model: step.model, status: step.status, latency_ms: step.latencyMs },
       }
     : entry.payload;
   const srcLabel = entry.src === 'resp' ? t('trajectory.src_response') : t('trajectory.src_request');
