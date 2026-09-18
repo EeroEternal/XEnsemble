@@ -1,7 +1,12 @@
 const TRUSTED_PROXIES = process.env.TRUSTED_PROXIES
     ? process.env.TRUSTED_PROXIES.split(',').map((s) => s.trim()).filter(Boolean)
     : false;
-const fastify = require('fastify')({ logger: true, trustProxy: TRUSTED_PROXIES, bodyLimit: 10485760 });
+// 全局请求体上限。Agent CLI 每轮重发完整对话历史，长会话请求体远超 Fastify
+// 默认值；须与网关 DefaultBodyLimit 保持一致（gateway/src/main.rs）。
+// 16MiB ≈ 完整 1M 上下文（实测 ~4.5MiB）的 3.5x，含 tools / JSON 转义余量。
+// 文件读写另有 MAX_FILE_SIZE(5MB) 独立校验，不受此值放宽影响。
+const BODY_LIMIT_BYTES = 16 * 1024 * 1024;
+const fastify = require('fastify')({ logger: true, trustProxy: TRUSTED_PROXIES, bodyLimit: BODY_LIMIT_BYTES });
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');

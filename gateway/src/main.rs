@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Path, State},
+    extract::{DefaultBodyLimit, Path, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, patch, post},
@@ -29,6 +29,13 @@ use unigateway_sdk::protocol::{
     ProtocolResponseBody, anthropic_payload_to_chat_request,
     openai_model_object, openai_payload_to_chat_request, openai_payload_to_embed_request,
 };
+
+/// Max request body size accepted by the gateway. Agent CLIs resend the full
+/// conversation history every turn; long sessions exceed axum's 2MB default.
+/// 16 MiB covers a full 1M-token context (~4.5 MiB measured, see
+/// server/src/llm/modelContext.js) with ~3x headroom for tools + JSON escaping.
+/// Keep in sync with the control plane's Fastify `bodyLimit` (server.js).
+const GATEWAY_BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone)]
 struct AppState {
@@ -142,6 +149,11 @@ async fn main() -> Result<()> {
         .route("/api/admin/reload", post(admin_reload))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
+        // axum 默认 body 上限 2MB，长会话的 agent 请求（完整历史 + 工具输出）
+        // 轻易超过，会在 Json 提取阶段以 413
+        // "Failed to buffer the request body: length limit exceeded" 拒绝。
+        // 与控制面 Fastify bodyLimit 保持一致（见 server.js）。
+        .layer(DefaultBodyLimit::max(GATEWAY_BODY_LIMIT_BYTES))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(bind_addr)
