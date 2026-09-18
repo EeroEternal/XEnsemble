@@ -1,5 +1,9 @@
 {
   "title": "Observability",
+  "groups": {
+    "personal": "Personal",
+    "global": "Global"
+  },
   "tabs": {
     "quota": "Quota",
     "my_usage": "My usage",

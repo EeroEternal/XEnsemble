@@ -8,12 +8,30 @@ import {
 } from '../lib/consoleTokens';
 import { SidebarAccountMenu } from './AppSidebar';
 
-export const OBSERVABILITY_TABS = [
-  { id: 'quota', labelKey: 'observability:tabs.quota', icon: Gauge, adminOnly: false },
-  { id: 'my-usage', labelKey: 'observability:tabs.my_usage', icon: TrendingUp, adminOnly: false },
-  { id: 'usage', labelKey: 'observability:tabs.usage', icon: BarChart3, adminOnly: true },
-  { id: 'routing-analytics', labelKey: 'observability:tabs.routing_analytics', icon: Route, adminOnly: false },
+// 分组结构：admin 侧栏按「个人观测 / 全局观测」两级分组展示；
+// 非管理员不显示分组标题，平铺可见的非 admin 项。
+const OBSERVABILITY_GROUPS = [
+  {
+    id: 'personal',
+    labelKey: 'observability:groups.personal',
+    adminOnly: false,
+    tabs: [
+      { id: 'quota', labelKey: 'observability:tabs.quota', icon: Gauge, adminOnly: false },
+      { id: 'my-usage', labelKey: 'observability:tabs.my_usage', icon: TrendingUp, adminOnly: false },
+      { id: 'routing-analytics', labelKey: 'observability:tabs.routing_analytics', icon: Route, adminOnly: false },
+    ],
+  },
+  {
+    id: 'global',
+    labelKey: 'observability:groups.global',
+    adminOnly: true,
+    tabs: [
+      { id: 'usage', labelKey: 'observability:tabs.usage', icon: BarChart3, adminOnly: true },
+    ],
+  },
 ];
+
+const OBSERVABILITY_TABS = OBSERVABILITY_GROUPS.flatMap((group) => group.tabs);
 
 export function defaultObservabilitySection() {
   return OBSERVABILITY_TABS[0].id;
@@ -31,31 +49,44 @@ export default function ObservabilityTabSidebar({ activeTab, onSectionChange, us
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin';
 
-  const visibleTabs = OBSERVABILITY_TABS.filter((tab) => !tab.adminOnly || isAdmin);
+  const renderTab = (tab) => {
+    const Icon = tab.icon;
+    const isActive = tab.id === activeTab;
+    return (
+      <button
+        key={tab.id}
+        type="button"
+        onClick={() => onSectionChange?.(tab.id)}
+        className={cn(
+          'flex items-center gap-2 w-full px-3 py-2 rounded-md text-sm font-medium text-left transition-colors',
+          isActive
+            ? consoleSettingsTabActiveClass
+            : cn(consoleSettingsTabIdleClass, 'hover:bg-zinc-100'),
+        )}
+      >
+        <Icon className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
+        {t(tab.labelKey, { defaultValue: tab.id })}
+      </button>
+    );
+  };
+
+  const groupHeaderClass = 'px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-400';
 
   return (
     <aside className="h-full w-48 shrink-0 flex flex-col border-r border-zinc-200 bg-zinc-50 select-none">
       <nav className="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-0.5">
-        {visibleTabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = tab.id === activeTab;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => onSectionChange?.(tab.id)}
-              className={cn(
-                'flex items-center gap-2 w-full px-3 py-2 rounded-md text-sm font-medium text-left transition-colors',
-                isActive
-                  ? consoleSettingsTabActiveClass
-                  : cn(consoleSettingsTabIdleClass, 'hover:bg-zinc-100'),
-              )}
-            >
-              <Icon className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
-              {t(tab.labelKey, { defaultValue: tab.id })}
-            </button>
-          );
-        })}
+        {isAdmin ? (
+          OBSERVABILITY_GROUPS.map((group) => (
+            <div key={group.id}>
+              <div className={groupHeaderClass}>{t(group.labelKey)}</div>
+              {group.tabs.map((tab) => renderTab(tab))}
+            </div>
+          ))
+        ) : (
+          OBSERVABILITY_GROUPS.flatMap((group) => group.tabs)
+            .filter((tab) => !tab.adminOnly)
+            .map((tab) => renderTab(tab))
+        )}
       </nav>
       <div className="shrink-0 border-t border-zinc-200 px-2 py-2">
         <SidebarAccountMenu

@@ -1,6 +1,10 @@
 {
   "title": "设置",
   "close": "关闭设置",
+  "groups": {
+    "personal": "个人",
+    "global": "全局"
+  },
   "tabs": {
     "preferences": "偏好",
     "general": "通用",

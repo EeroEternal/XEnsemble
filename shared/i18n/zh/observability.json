@@ -1,5 +1,9 @@
 {
   "title": "观测",
+  "groups": {
+    "personal": "个人",
+    "global": "全局"
+  },
   "tabs": {
     "quota": "配额",
     "my_usage": "个人用量",

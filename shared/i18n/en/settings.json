@@ -1,6 +1,10 @@
 {
   "title": "Settings",
   "close": "Close settings",
+  "groups": {
+    "personal": "Personal",
+    "global": "Global"
+  },
   "tabs": {
     "preferences": "Preferences",
     "general": "General",
