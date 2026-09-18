@@ -1137,6 +1137,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   const [expandedGroups, setExpandedGroups] = useState({});
   const afterSeqRef = useRef(0);
   const loadingMoreRef = useRef(false);
+  const baseStepStatsRef = useRef(null); // Map<seq, {latency, tools}> at totals snapshot
   const listRef = useRef(null);
 
   const fetchSteps = useCallback(async ({ reset = false } = {}) => {
@@ -1163,7 +1164,18 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
       });
       setHasMore(Boolean(data.has_more));
       // totals 只在首屏（after_seq=0）由服务端返回：头部指标走全量口径
-      if (data.totals) setTotals(data.totals);
+      if (data.totals) {
+        setTotals(data.totals);
+        // 记录快照时各步的耗时/工具数，供响应晚到（在途调用）做差值补齐
+        const m = new Map();
+        for (const s of incoming) {
+          m.set(s.seq, {
+            latency: s.latencyMs || 0,
+            tools: respBlocks(s.response).filter((b) => b?.type === 'tool_use').length,
+          });
+        }
+        baseStepStatsRef.current = m;
+      }
     } catch (e) {
       setError(e?.message || 'load failed');
     } finally {
@@ -1175,6 +1187,7 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
 
   useEffect(() => {
     afterSeqRef.current = 0;
+    baseStepStatsRef.current = null;
     setSteps([]);
     setTotals(null);
     setSelectedId(null);
@@ -1398,12 +1411,26 @@ export default function TrajectoryViewer({ sessionId, live = false }) {
   // totals 缺失（旧接口 / 加载中）时回退到已加载步骤的本地计算。
   // totals 之后新到的步骤（WS 推送 / 分页）按 seq > totals.maxSeq 增量补上。
   const localRounds = useMemo(() => entries.reduce((n, e) => Math.max(n, e.round), 0), [entries]);
+  // 时长/调用：服务端 totals 为全量基准。totals 之后：
+  //  - seq > maxSeq 的新步整个计入；
+  //  - seq <= maxSeq 的步按「相对快照的差值」补齐（响应晚到的在途调用）。
   const baseMaxSeq = totals?.maxSeq ?? null;
-  const extraSteps = baseMaxSeq == null ? steps : steps.filter((s) => s.seq > baseMaxSeq);
-  const extraDurationMs = extraSteps.reduce((n, s) => n + (s.latencyMs || 0), 0);
-  // 工具调用总数（DeepSeek harness 语义）：全部调用 response 里的 tool_use 块，
-  // 与折叠开关「展开/收起工具调用」同一口径
-  const extraToolCalls = extraSteps.reduce((n, s) => n + respBlocks(s.response).filter((b) => b?.type === 'tool_use').length, 0);
+  const baseStats = baseStepStatsRef.current;
+  let extraDurationMs = 0;
+  let extraToolCalls = 0;
+  for (const s of steps) {
+    const latency = s.latencyMs || 0;
+    const tools = respBlocks(s.response).filter((b) => b?.type === 'tool_use').length;
+    if (baseMaxSeq == null || s.seq > baseMaxSeq) {
+      extraDurationMs += latency;
+      extraToolCalls += tools;
+      continue;
+    }
+    const base = baseStats?.get(s.seq);
+    if (!base) continue; // 快照时已计入且无差值信息
+    extraDurationMs += Math.max(0, latency - base.latency);
+    extraToolCalls += Math.max(0, tools - base.tools);
+  }
   const durationMs = (totals?.durationMs ?? 0) + extraDurationMs;
   const toolCallTotal = (totals?.toolCalls ?? 0) + extraToolCalls;
   // 轮次 = 列表实际渲染的轮次数（与可见「第 N 轮」严格一致；分页时也只算已加载）

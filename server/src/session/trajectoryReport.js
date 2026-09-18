@@ -11,6 +11,7 @@
  */
 
 const { extractFromTrajectory } = require('./conversationExtractor');
+const { countToolCalls } = require('../llm/trajectory');
 const { countCorrections } = require('../skills/skillScorer');
 const analyzeClient = require('../llm/analyzeClient');
 
@@ -107,10 +108,9 @@ function analyzeTrajectory(steps, { exitCode = null, stopped = false } = {}) {
         if (!seenInitialSnapshot) { seenInitialSnapshot = true; continue; }
         snapshotCount += 1;
     }
-    let toolCallCount = 0;
-    for (const turn of turns) {
-        if (turn.role === 'assistant' && Array.isArray(turn.tools)) toolCallCount += turn.tools.length;
-    }
+    // 工具调用统一走「响应口径」（与轨迹工具栏 totals 同一个函数），
+    // 不再用 extractor 的 turns（它含请求重放里、响应缺失的调用）
+    const toolCallCount = countToolCalls(rows);
     const userTurns = turns.filter((t) => t.role === 'user');
     const corrections = countCorrections(turns);
 

@@ -664,16 +664,12 @@ async function getAllSteps(sessionId) {
 function computeStats(steps) {
     const rows = Array.isArray(steps) ? steps : [];
     let durationMs = 0;
-    let toolCalls = 0;
     let maxSeq = 0;
     for (const s of rows) {
         if (Number.isFinite(s?.seq) && s.seq > maxSeq) maxSeq = s.seq;
         if (Number.isFinite(s?.latencyMs)) durationMs += s.latencyMs;
-        const content = Array.isArray(s?.response?.content) ? s.response.content : [];
-        for (const b of content) {
-            if (b && b.type === 'tool_use') toolCalls += 1;
-        }
     }
+    const toolCalls = countToolCalls(rows);
     let userTurns = 0;
     try {
         const { extractFromTrajectory } = require('../session/conversationExtractor');
@@ -683,6 +679,22 @@ function computeStats(steps) {
         }
     } catch (_) { /* extraction failure → keep 0, header degrades to local count */ }
     return { modelCalls: rows.length, durationMs, toolCalls, userTurns, maxSeq };
+}
+
+/**
+ * Count tool calls from model responses (one per `tool_use` block).
+ * Shared by the trajectory toolbar totals (computeStats) and the trajectory
+ * report (analyzeTrajectory) so both always show the same number.
+ */
+function countToolCalls(steps) {
+    let n = 0;
+    for (const s of Array.isArray(steps) ? steps : []) {
+        const content = Array.isArray(s?.response?.content) ? s.response.content : [];
+        for (const b of content) {
+            if (b && b.type === 'tool_use') n += 1;
+        }
+    }
+    return n;
 }
 
 async function getStats(sessionId) {
@@ -744,6 +756,7 @@ module.exports = {
     getSteps,
     getAllSteps,
     getStats,
+    countToolCalls,
     subscribe,
     // exported for tests / skill pipeline consumers
     buildRequestRecord,

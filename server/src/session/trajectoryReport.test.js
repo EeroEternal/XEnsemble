@@ -254,3 +254,26 @@ test('buildAdvicePrompt truncates flow to char budget and embeds issues JSON', (
     assert.ok(prompt.length < 14000);
     assert.ok(prompt.includes('loop_detected'));
 });
+
+test('report toolCallCount matches the toolbar totals (response-based) even for request-only calls', () => {
+    const trajectory = require('../llm/trajectory');
+    const a1 = { role: 'assistant', content: [textBlock('read'), toolUse('t1', 'Read', { path: 'a' })] };
+    const a2 = { role: 'assistant', content: [toolUse('t2', 'Edit', { path: 'b' })] }; // 其 response 未记录
+    const steps = [
+        snap(1, 1000, [{ role: 'user', content: 'go' }], { content: [textBlock('read'), toolUse('t1', 'Read', { path: 'a' })] }),
+        {
+            seq: 2, ts: 2000, snapshot: false, msgCount: 3,
+            request: { snapshot: false, params: {}, messages: [a1, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] }] },
+            response: { content: [textBlock('done')] }, status: 'ok', latencyMs: 1, error: null,
+        },
+        {
+            seq: 3, ts: 3000, snapshot: false, msgCount: 5,
+            request: { snapshot: false, params: {}, messages: [a2, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't2', content: 'ok' }] }] },
+            response: { content: [textBlock('end')] }, status: 'ok', latencyMs: 1, error: null,
+        },
+    ];
+    const report = trajectoryReport.analyzeTrajectory(steps).metrics.toolCallCount;
+    const toolbar = trajectory.computeStats(steps).toolCalls;
+    assert.equal(report, 1); // 只有 t1 有响应；t2 只在请求重放里，不再计入
+    assert.equal(report, toolbar);
+});
