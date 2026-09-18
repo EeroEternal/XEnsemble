@@ -5,6 +5,7 @@ const schema = require('../db/schema');
 const { getRuntime } = require('../runtime/registry');
 const { RuntimeError } = require('../runtime/interfaces');
 const { ensureProjectRuntime } = require('../runtime/RuntimeService');
+const { resolveDeployEnvironment } = require('../runtime/CustomImageService');
 const { recordEvent } = require('../events/recordEvent');
 const { singleflight } = require('../runtime/singleflight');
 const { createCheckpoint } = require('../repositories/RepositoryEnvironmentService');
@@ -95,6 +96,14 @@ async function createPreview(userId, project, opts = {}) {
     // Generate a unique runtime ID for this preview deployment to ensure unique blink session name
     const runtimeId = `rt_dep_${deploymentId}`;
     const ensureOpts = opts.runtimeId ? { runtimeId: opts.runtimeId, deploymentId } : { runtimeId, deploymentId };
+    // 环境就绪：镜像还在后台构建时在此等待（不计入部署/预览时间上限）。
+    const previewEnv = await resolveDeployEnvironment({
+        userId,
+        role: opts.role || null,
+        sessionId: opts.sessionId || null,
+        project,
+    });
+    Object.assign(ensureOpts, { image: previewEnv.image, customImageId: previewEnv.customImageId });
     const { runtime } = await ensureProjectRuntime(project, ensureOpts);
     const now = Date.now();
     const id = deploymentId;
@@ -165,6 +174,14 @@ async function startPreview(userId, project, deployment) {
             const ckId = deployment.revision.split(':')[1];
             ensureOpts = { ...ensureOpts, checkpointId: ckId };
         }
+        // 环境就绪：镜像还在后台构建时在此等待（不计入部署/预览时间上限）。
+        const previewEnv = await resolveDeployEnvironment({
+            userId,
+            sessionId: deployment.sessionId || null,
+            project,
+        });
+        // Keep this deployment's dedicated runtime; only borrow the environment image.
+        Object.assign(ensureOpts, { image: previewEnv.image, customImageId: previewEnv.customImageId });
         const { runtime, workspacePath } = await ensureProjectRuntime(project, ensureOpts);
         const now = Date.now();
         const rt = getRuntime();
@@ -353,6 +370,13 @@ async function ensurePreview(userId, project) {
         if (deployment.revision && deployment.revision.startsWith('checkpoint:')) {
             ensureOpts = { checkpointId: deployment.revision.split(':')[1] };
         }
+        const previewEnv = await resolveDeployEnvironment({
+            userId,
+            sessionId: deployment.sessionId || null,
+            project,
+        });
+        // Keep this deployment's dedicated runtime; only borrow the environment image.
+        Object.assign(ensureOpts, { image: previewEnv.image, customImageId: previewEnv.customImageId });
         const { workspacePath } = await ensureProjectRuntime(project, ensureOpts);
 
         if (deployment.status === 'pending' || deployment.status === 'failed') {

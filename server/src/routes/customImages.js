@@ -95,11 +95,12 @@ function registerCustomImageRoutes(fastify) {
   // queueing a build when no identical image has been built before.
   fastify.post('/api/v1/custom-images/resolve', { preValidation: authPre }, async (request, reply) => {
     try {
-      const { selection, name } = request.body || {};
+      const { selection, name, display_name } = request.body || {};
       const resolved = await resolveOrCreateImage({
         ownerUserId: request.user.id,
         selection,
         name,
+        displayName: display_name || null,
         role: request.user.role,
       });
       return redactForeignImageRef(resolved, request.user.id);

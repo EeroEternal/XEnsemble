@@ -12,11 +12,11 @@ const LANGUAGE_INSTALL = {
   python: {
     '3.11': { install: 'apt-get update && apt-get install -y python3.11 python3.11-venv python3.11-dev && rm -rf /var/lib/apt/lists/*', default: true, diskSizeMb: 200 },
     '3.12': {
-      install: 'apt-get update && apt-get install -y build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev && curl -fsSL https://mirrors.huaweicloud.com/python/3.12.9/Python-3.12.9.tar.xz | tar -xJ -C /tmp && cd /tmp/Python-3.12.9 && ./configure --enable-optimizations --with-ensurepip=install && make -j$(nproc) && make altinstall && cd / && rm -rf /tmp/Python-3.12.9 /var/lib/apt/lists/*',
+      install: 'apt-get update && apt-get install -y build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev && curl -fsSL https://mirrors.huaweicloud.com/python/3.12.9/Python-3.12.9.tar.xz | tar -xJ -C /tmp && cd /tmp/Python-3.12.9 && ./configure --with-ensurepip=install && make -j$(nproc) && make altinstall && cd / && rm -rf /tmp/Python-3.12.9 /var/lib/apt/lists/*',
       default: false, diskSizeMb: 500,
     },
     '3.13': {
-      install: 'apt-get update && apt-get install -y build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev && curl -fsSL https://mirrors.huaweicloud.com/python/3.13.3/Python-3.13.3.tar.xz | tar -xJ -C /tmp && cd /tmp/Python-3.13.3 && ./configure --enable-optimizations --with-ensurepip=install && make -j$(nproc) && make altinstall && cd / && rm -rf /tmp/Python-3.13.3 /var/lib/apt/lists/*',
+      install: 'apt-get update && apt-get install -y build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev && curl -fsSL https://mirrors.huaweicloud.com/python/3.13.3/Python-3.13.3.tar.xz | tar -xJ -C /tmp && cd /tmp/Python-3.13.3 && ./configure --with-ensurepip=install && make -j$(nproc) && make altinstall && cd / && rm -rf /tmp/Python-3.13.3 /var/lib/apt/lists/*',
       default: false, diskSizeMb: 500,
     },
   },

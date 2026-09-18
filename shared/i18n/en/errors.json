@@ -86,5 +86,11 @@
   "loop_field_required": "{{field}} is required",
   "loop_interval_invalid": "Interval must be between {{min}} minutes and {{max}} days.",
   "loop_schedule_past": "Scheduled time must be in the future.",
-  "custom_image_curated_readonly": "Curated images are read-only"
+  "custom_image_curated_readonly": "Curated images are read-only",
+  "custom_image_build_failed": "Environment image build failed; check the image build log",
+  "custom_image_build_timeout": "Timed out waiting for the environment image build",
+  "custom_image_not_ready": "Environment image is not ready",
+  "no_environment_to_install": "This session has no custom environment to install",
+  "session_not_running": "The session is not running yet",
+  "env_provision_failed": "Environment install failed"
 }

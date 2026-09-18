@@ -86,5 +86,11 @@
   "loop_field_required": "{{field}} 为必填项",
   "loop_interval_invalid": "执行间隔必须在 {{min}} 分钟到 {{max}} 天之间。",
   "loop_schedule_past": "执行时间必须是未来时间。",
-  "custom_image_curated_readonly": "精选镜像为只读，无法修改或删除"
+  "custom_image_curated_readonly": "精选镜像为只读，无法修改或删除",
+  "custom_image_build_failed": "环境镜像构建失败，请查看镜像构建日志",
+  "custom_image_build_timeout": "等待环境镜像构建超时",
+  "custom_image_not_ready": "环境镜像尚未就绪",
+  "no_environment_to_install": "该会话没有需要安装的自定义环境",
+  "session_not_running": "会话尚未运行",
+  "env_provision_failed": "环境安装失败"
 }

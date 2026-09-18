@@ -13,6 +13,8 @@ const path = require('path');
 const { eq, and, inArray, desc } = require('drizzle-orm');
 const { getRuntime } = require('../runtime/registry');
 const { ensureProjectRuntime } = require('../runtime/RuntimeService');
+const { resolveDeployEnvironment } = require('../runtime/CustomImageService');
+const { localizeDeployError } = require('./deployErrors');
 const { analyzeProjectDeploy, collectProjectContext } = require('./analyzeDeploy');
 const { analyzeProjectVerify } = require('./analyzeVerify');
 const { createTunnel, stopTunnel } = require('../preview/tunnelServer');
@@ -3877,7 +3879,7 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
     }
     let result;
     try {
-        result = await runDeployInner({ project, userId, projectId, sessionId, resume: Boolean(resume) || reclaimedOrphans > 0, report, startedAt, deployRef, isAborted: aborted, deployState });
+        result = await runDeployInner({ project, userId, role, projectId, sessionId, resume: Boolean(resume) || reclaimedOrphans > 0, report, startedAt, deployRef, isAborted: aborted, deployState });
         return result;
     } finally {
         unregisterDeploy(project.id, sessionId);
@@ -3930,7 +3932,7 @@ async function runAutoTwoStageDeploy({ projectId, userId, role, getProjectForUse
 }
 
 // 实际的两阶段部署逻辑（编排层负责并发闸门 + 注册表 + 持久化终态）
-async function runDeployInner({ project, userId, projectId, sessionId, resume, report, startedAt, deployRef, isAborted, deployState }) {
+async function runDeployInner({ project, userId, role, projectId, sessionId, resume, report, startedAt, deployRef, isAborted, deployState }) {
     const deployStart = Date.now();
     let stageAMs = 0;
     let verifyStart = 0;
@@ -3972,6 +3974,35 @@ async function runDeployInner({ project, userId, projectId, sessionId, resume, r
         } catch (e) {
             console.error('[twoStage] failed to resolve runtimeId from session:', e.message);
         }
+    }
+
+    // 环境就绪：预览/部署必须跑在会话（或工作区默认）的自定义镜像上。镜像若还在后台
+    // 构建则在此等待——该等待发生在部署计时器启动之前，因此不占用部署/预览的时间上限。
+    try {
+        const env = await resolveDeployEnvironment({
+            userId,
+            role,
+            sessionId,
+            project,
+            shouldContinue: () => !isAborted(),
+            onWaiting: () => report({
+                stage: 'A',
+                message: '等待镜像后台构建中…',
+                waitingImage: true,
+            }),
+        });
+        Object.assign(ensureOpts, env);
+    } catch (err) {
+        if (err && err.cancelled) {
+            return { ok: false, aborted: true, code: 'deploy_aborted', error: '部署已中止' };
+        }
+        // 失败原因由外层 finally 统一落库（status=failed + last_error_*）。
+        console.error(`[twoStage] environment not ready: ${err.message}`);
+        return {
+            ok: false,
+            code: err.code || 'custom_image_not_ready',
+            error: err.message,
+        };
     }
 
     // 让 sandbox projectDir 的 origin/main 跟上 IDE pull 的 main（让 stage A 看到最新代码）。
@@ -4796,7 +4827,7 @@ function registerAutoDeployRoutes(fastify, { getProjectForUser }) {
                 // 把 recoveredId 指向已有部署，回到进行中进度，而不是误报终态。
                 send({ type: 'started', deploymentId: result.deploymentId, reattached: true, stage: result.stage || null });
             } else {
-                send({ type: 'result', result });
+                send({ type: 'result', result: localizeDeployError(result, request.locale) });
             }
         } catch (err) {
             request.log.error(err);

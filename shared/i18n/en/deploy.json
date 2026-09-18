@@ -71,7 +71,8 @@
     "serve": "Start service",
     "check": "Health check",
     "fix": "Fix issues",
-    "preview": "Open preview"
+    "preview": "Open preview",
+    "analyze_waiting_image": "Waiting for the background image build…"
   },
   "steps_preview": {
     "analyze": "Analyze project",
@@ -129,8 +130,8 @@
   },
   "toast": {
     "finished": "Deployment finished",
-  "aborted": "Deployment aborted",
-  "timeout": "Deployment timed out",
+    "aborted": "Deployment aborted",
+    "timeout": "Deployment timed out",
     "failed": "Deployment failed",
     "finished_with": "Deployment finished for {{session}} in {{workspace}}",
     "aborted_with": "Deployment aborted for {{session}} in {{workspace}}",

@@ -22,13 +22,12 @@ const DEFAULTS = {
     session_ttl_hours: 24,
     default_terminal_theme_id: 'github-dark',
     disabled_terminal_theme_ids: [],
-    // 自定义镜像（环境配方）的平台级限额与 GC。
+    // 自定义镜像（环境配方）的平台级参数。
     // 用户可见的镜像数量配额在 default_user_quota.max_custom_images（设置 →
-    // 默认用户配置 / 观测 → 配额），此处只保留平台级参数。
+    // 默认用户配置 / 观测 → 配额）；配方本身不再限制组件数/磁盘（运行时按
+    // 组件的 diskSizeMb 自动扩 VM 磁盘）。
     custom_image_limits: {
         max_env_images_per_user: 50,
-        max_components_per_recipe: 6,
-        max_disk_gb: 20,
         gc_idle_days: Number(process.env.CUSTOM_IMAGE_GC_IDLE_DAYS) || 30,
         gc_grace_hours: Number(process.env.CUSTOM_IMAGE_GC_GRACE_HOURS) || 24,
     },

@@ -9,7 +9,7 @@ const { db } = require('../db/index');
 const schema = require('../db/schema');
 const { RuntimeError } = require('./interfaces');
 const { imageRegistry: getImageRegistry, resolveExplicitAgentImage } = require('./agentBoxImages');
-const { validateSelection, getComponentDiskSizeMb } = require('./customImageCatalog');
+const { validateSelection } = require('./customImageCatalog');
 const { renderDockerfile } = require('./customImageRenderer');
 
 const BUILD_LOG_DIR = process.env.CUSTOM_IMAGE_BUILD_LOG_DIR
@@ -213,13 +213,18 @@ async function findAutoRowByHash(ownerUserId, contentHash) {
 }
 
 /**
- * Default name for an auto-created recipe row: `env-<content hash>`. Identity is
- * the content hash, so the name is only a label — users can rename it later.
- * The DB constraint is (owner_user_id, name) across all rows, so the taken set
- * includes user-named images too and collisions get a numeric suffix.
+ * Display name for an auto-created recipe row. Identity is the content hash, so
+ * the name is only a label — users can rename it later. When the caller supplies
+ * a display name (e.g. "<workspace> · <time>") it is used, otherwise the
+ * `env-<content hash>` fallback. The DB constraint is (owner_user_id, name)
+ * across all rows, so collisions get a numeric suffix.
  */
-async function nextAutoImageName(ownerUserId, contentHash) {
-  const base = `env-${contentHash}`;
+async function nextAutoImageName(ownerUserId, contentHash, displayName = null) {
+  const cleaned = String(displayName || '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .trim()
+    .slice(0, 80);
+  const base = cleaned || `env-${contentHash}`;
   const takenRows = await db.select({ name: schema.customImages.name })
     .from(schema.customImages)
     .where(eq(schema.customImages.ownerUserId, ownerUserId));
@@ -258,29 +263,6 @@ async function getLimits() {
   _limitsCache = await platformSettings.getCustomImageLimits();
   _limitsCacheAt = now;
   return _limitsCache;
-}
-
-/** Reject recipes that exceed the configured component count / disk budget. */
-async function enforceRecipeLimits(selection) {
-  const limits = await getLimits();
-  const maxComponents = Number(limits.max_components_per_recipe) || 6;
-  if (selection.length > maxComponents) {
-    throw new RuntimeError(
-      `recipe has ${selection.length} components; the limit is ${maxComponents}`,
-      400,
-    );
-  }
-  const maxDiskMb = (Number(limits.max_disk_gb) || 20) * 1024;
-  const diskMb = selection.reduce(
-    (sum, s) => sum + getComponentDiskSizeMb(s.component_id, s.version),
-    0,
-  );
-  if (diskMb > maxDiskMb) {
-    throw new RuntimeError(
-      `recipe needs ${diskMb}MB of disk; the limit is ${maxDiskMb}MB`,
-      400,
-    );
-  }
 }
 
 /**
@@ -452,7 +434,6 @@ async function createImage({ ownerUserId, name, selection, role = null }) {
   if (!validation.ok) {
     throw new RuntimeError(`invalid selection: ${validation.error}`, 400);
   }
-  await enforceRecipeLimits(selection);
 
   const trimmedName = name.trim();
   const slug = slugify(trimmedName);
@@ -520,6 +501,8 @@ async function checkSelection(selection) {
   if (!validation.ok) {
     throw new RuntimeError(`invalid selection: ${validation.error}`, 400);
   }
+  // /check and /resolve share the same validation (validateSelection), so the
+  // dialog's readiness signal always matches what the launch would do.
   const baseImage = await resolveRecipeBaseImage(selection);
   const contentHash = selectionContentHash(selection, baseImage);
   const dup = await findReadyBuildByHash(contentHash);
@@ -539,7 +522,7 @@ async function checkSelection(selection) {
  * The returned row may still be `queued`/`building`; callers that need the
  * image now should await `waitForReadyImageRef`.
  */
-async function resolveOrCreateImage({ ownerUserId, selection, name = null, role = null }) {
+async function resolveOrCreateImage({ ownerUserId, selection, name = null, displayName = null, role = null }) {
   if (!ownerUserId || !Array.isArray(selection)) {
     throw new RuntimeError('ownerUserId and selection are required', 400);
   }
@@ -547,7 +530,6 @@ async function resolveOrCreateImage({ ownerUserId, selection, name = null, role 
   if (!validation.ok) {
     throw new RuntimeError(`invalid selection: ${validation.error}`, 400);
   }
-  await enforceRecipeLimits(selection);
 
   const baseImage = await resolveRecipeBaseImage(selection);
   const contentHash = selectionContentHash(selection, baseImage);
@@ -617,7 +599,7 @@ async function resolveOrCreateImage({ ownerUserId, selection, name = null, role 
     );
   }
 
-  const imageName = explicitName || await nextAutoImageName(ownerUserId, contentHash);
+  const imageName = explicitName || await nextAutoImageName(ownerUserId, contentHash, displayName);
   const slug = slugify(imageName);
 
   const dup = await findReadyBuildByHash(contentHash);
@@ -1297,6 +1279,12 @@ async function getReadyImageRef(customImageId, userId, role = null) {
  * BUILD_TIMEOUT_MS) plus semaphore queueing, so a valid build is not aborted
  * early. `shouldContinue` lets callers abort (e.g. the session was cancelled).
  */
+function waitError(message, statusCode, code) {
+  const err = new RuntimeError(message, statusCode);
+  err.code = code;
+  return err;
+}
+
 async function waitForReadyImageRef(imageId, userId, {
   timeoutMs = parseInt(
     process.env.CUSTOM_IMAGE_WAIT_TIMEOUT_MS || String(BUILD_TIMEOUT_MS * 2 + 10 * 60 * 1000),
@@ -1305,11 +1293,13 @@ async function waitForReadyImageRef(imageId, userId, {
   pollMs = parseInt(process.env.CUSTOM_IMAGE_WAIT_POLL_MS || '2000', 10),
   shouldContinue = null,
   role = null,
+  onWaiting = null,
 } = {}) {
   const image = await assertImageAccess(userId, imageId, { role, mode: 'view' });
   if (!image) throw new RuntimeError('custom image not found', 404);
 
   const deadline = Date.now() + timeoutMs;
+  let notified = false;
   for (;;) {
     const build = await getLatestBuild(imageId);
     if (build && build.state === 'ready') {
@@ -1317,24 +1307,124 @@ async function waitForReadyImageRef(imageId, userId, {
     }
     if (build && build.state === 'failed') {
       const reason = (build.failureReason || '').split('\n')[0];
-      throw new RuntimeError(
+      throw waitError(
         `custom image build failed${reason ? `: ${reason}` : ''}`,
         400,
+        'custom_image_build_failed',
       );
     }
     if (shouldContinue && !(await shouldContinue())) {
-      const cancelled = new RuntimeError('custom image wait cancelled', 499);
+      const cancelled = waitError('custom image wait cancelled', 499, 'custom_image_wait_cancelled');
       cancelled.cancelled = true;
       throw cancelled;
     }
     if (!enabled || !dockerAvailable) {
-      throw new RuntimeError('custom image builds are not available', 503);
+      throw waitError('custom image builds are not available', 503, 'custom_image_builds_unavailable');
     }
     if (Date.now() > deadline) {
-      throw new RuntimeError('custom image build timed out', 504);
+      throw waitError('custom image build timed out', 504, 'custom_image_build_timeout');
+    }
+    // Let the caller surface "waiting for the background build" to the user once.
+    if (!notified && onWaiting) {
+      notified = true;
+      try { await onWaiting(image); } catch (_) { /* reporting is best-effort */ }
     }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
+}
+
+const SESSION_ENV_WAIT_TIMEOUT_MS = () => parseInt(
+  process.env.SESSION_ENV_WAIT_TIMEOUT_MS || String(30 * 60 * 1000),
+  10,
+);
+
+/**
+ * Wait until the session is running and its in-sandbox environment install has
+ * settled. Returns the session's runtimeId so callers can reuse that exact
+ * sandbox (base agent image + installed components).
+ */
+async function waitForSessionEnvReady({ userId, sessionId, shouldContinue, onWaiting, pollMs = 3000 } = {}) {
+  const deadline = Date.now() + SESSION_ENV_WAIT_TIMEOUT_MS();
+  let notified = false;
+  for (;;) {
+    const rows = await db.select({
+      status: schema.sessions.status,
+      envProvisionState: schema.sessions.envProvisionState,
+      envProvisionError: schema.sessions.envProvisionError,
+      runtimeId: schema.sessions.runtimeId,
+    }).from(schema.sessions)
+      .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, userId)))
+      .limit(1);
+    const session = rows[0];
+    if (!session) throw waitError('session not found', 404, 'session_not_found');
+    if (session.status === 'failed') {
+      throw waitError('session failed to start', 400, 'session_failed');
+    }
+
+    const envState = session.envProvisionState;
+    const envSettled = envState !== 'pending' && envState !== 'installing';
+    if (session.status === 'running' && envSettled) {
+      if (envState === 'failed') {
+        throw waitError(
+          session.envProvisionError || 'environment install failed',
+          400,
+          'env_provision_failed',
+        );
+      }
+      return session.runtimeId || null;
+    }
+
+    if (shouldContinue && !(await shouldContinue())) {
+      const cancelled = waitError('session environment wait cancelled', 499, 'env_wait_cancelled');
+      cancelled.cancelled = true;
+      throw cancelled;
+    }
+    if (!notified && onWaiting) {
+      notified = true;
+      try { await onWaiting(); } catch (_) { /* reporting is best-effort */ }
+    }
+    if (Date.now() > deadline) {
+      throw waitError('environment provisioning timed out', 504, 'env_provision_timeout');
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+/**
+ * Resolve what a preview/deploy must run on.
+ *
+ * Session-scoped: wait for that session's environment (in-sandbox install) and
+ * return its runtimeId, so the deploy reuses the exact sandbox the user has.
+ * Project-scoped (no session): fall back to the workspace default image, waiting
+ * for its build when necessary.
+ *
+ * The wait happens before the deploy pipeline starts its own timers, so it is
+ * NOT charged against the deploy/preview budget.
+ */
+async function resolveDeployEnvironment({
+  userId,
+  role = null,
+  sessionId = null,
+  project = null,
+  shouldContinue = null,
+  onWaiting = null,
+} = {}) {
+  if (sessionId) {
+    const runtimeId = await waitForSessionEnvReady({ userId, sessionId, shouldContinue, onWaiting });
+    const rows = await db.select({ customImageId: schema.sessions.customImageId })
+      .from(schema.sessions)
+      .where(eq(schema.sessions.id, sessionId))
+      .limit(1);
+    return {
+      ...(runtimeId ? { runtimeId } : {}),
+      ...(rows[0]?.customImageId ? { customImageId: rows[0].customImageId } : {}),
+    };
+  }
+
+  const imageId = project?.defaultCustomImageId || null;
+  if (!imageId) return {};
+  const image = await waitForReadyImageRef(imageId, userId, { role, shouldContinue, onWaiting });
+  return { image, customImageId: imageId };
 }
 
 module.exports = {
@@ -1355,6 +1445,7 @@ module.exports = {
   deleteImage,
   getReadyImageRef,
   waitForReadyImageRef,
+  resolveDeployEnvironment,
   touchImageUsage,
   selectionContentHash,
   formatImageRow,

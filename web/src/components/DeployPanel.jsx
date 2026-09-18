@@ -90,6 +90,9 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
     // 步骤词汇表不同（build/fix vs mock/connect），互不能读对方的持久化步骤。
     const stepStoreKey = `xe_deploy_step_${mode}_${projectId || 'p'}_${sessionId || 's'}`;
     const [furthestStep, setFurthestStep] = useState(null);
+    // 后端在等待镜像后台构建时会发 waitingImage 事件：第一步「分析项目」追加提示，
+    // 不新增步骤、不影响原有进度展示。
+    const [waitingImage, setWaitingImage] = useState(false);
     const advanceTo = (id) => setFurthestStep((prev) => {
         const ni = stepIndex(id);
         if (ni < 0) return prev;
@@ -153,6 +156,7 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
         // 最后一步、整轮不再前进（表现为"进度条不对/卡住后直接出预览页"）。
         try { sessionStorage.removeItem(stepStoreKey); } catch { /* ignore */ }
         setFurthestStep(null);
+        setWaitingImage(false);
         setRunState('running');
         setResult(null);
         setPhase(null);
@@ -208,13 +212,16 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 if (evt.type === 'progress') {
                     if (evt.stage === 'A') {
                         advanceTo('analyze');
+                        setWaitingImage(Boolean(evt.waitingImage));
                     } else if (evt.stage === 'B') {
+                        setWaitingImage(false);
                         // 后端透传子阶段（prepare/build/serve/check/fix），驱动更细的步骤高亮。
                         // 预览模式映射到 5 步词汇表（install→prepare、proxy/preview→connect）。
                         // 单调前进：迟到/重放的事件不会把进度拉回去。
                         advanceTo(mapSubstage(evt.substage) || 'prepare');
                     } else if (evt.stage === 'preview') {
                         advanceTo(isPreview ? 'connect' : 'preview');
+                        setWaitingImage(false);
                     }
                 } else if (evt.type === 'result') {
                     finish(evt.result);
@@ -455,7 +462,11 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
                 {runState === 'running' && (
                     <div className="flex flex-col items-center justify-center gap-3 px-6 py-8">
                         <CreationProgress
-                            steps={deploySteps}
+                            steps={waitingImage
+                                ? deploySteps.map((s, i) => (i === 0
+                                    ? { ...s, note: t('deploy:steps.analyze_waiting_image') }
+                                    : s))
+                                : deploySteps}
                             currentStep={furthestStep || 'analyze'}
                         />
                     </div>

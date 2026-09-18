@@ -1,4 +1,4 @@
-const { eq } = require('drizzle-orm');
+const { eq, inArray } = require('drizzle-orm');
 const { registerSessionLifecycle } = require('./resumeSession');
 const { isSessionRecoverable } = require('../agents/agentResume');
 
@@ -22,6 +22,21 @@ async function recoverRunningSessions({
             updatedAt: Date.now(),
         }).where(eq(schema.sessions.id, session.id));
         fastifyLog.warn({ sessionId: session.id }, '[sessions] marked pending session as failed after restart');
+    }
+
+    // Mark interrupted in-sandbox environment installs as failed — the install
+    // ran in the old process and cannot be resumed. The UI offers a retry.
+    const interruptedEnv = await db.select({ id: schema.sessions.id })
+        .from(schema.sessions)
+        .where(inArray(schema.sessions.envProvisionState, ['pending', 'installing']));
+    for (const session of interruptedEnv) {
+        await db.update(schema.sessions).set({
+            envProvisionState: 'failed',
+            envProvisionError: 'Environment install interrupted by server restart',
+            envProvisionFinishedAt: Date.now(),
+            updatedAt: Date.now(),
+        }).where(eq(schema.sessions.id, session.id));
+        fastifyLog.warn({ sessionId: session.id }, '[sessions] marked interrupted env install as failed after restart');
     }
 
     const running = await db.select({

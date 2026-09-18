@@ -26,6 +26,8 @@ const path = require('path');
 const fs = require('fs');
 const { eq, and, inArray } = require('drizzle-orm');
 const { ensureProjectRuntime } = require('../runtime/RuntimeService');
+const { resolveDeployEnvironment } = require('../runtime/CustomImageService');
+const { localizeDeployError } = require('./deployErrors');
 const { getRuntime } = require('../runtime/registry');
 const { createTunnel, stopByProjectId } = require('../preview/tunnelServer');
 const { resolveControlPlanePublicUrlSync } = require('../llm/publicUrl');
@@ -144,6 +146,28 @@ async function runQuickPreviewInner({ project, userId, projectId, sessionId, rep
             quickLog(`resolve runtimeId from session failed: ${e.message}`);
         }
     }
+    // 环境就绪：镜像还在后台构建时在此等待（不计入预览时间上限）。
+    try {
+        const env = await resolveDeployEnvironment({
+            userId,
+            sessionId,
+            project,
+            shouldContinue: () => !deployState.cancelled,
+            onWaiting: () => report({
+                stage: 'A',
+                message: '等待镜像后台构建中…',
+                waitingImage: true,
+            }),
+        });
+        Object.assign(ensureOpts, env);
+    } catch (err) {
+        if (err && err.cancelled) {
+            return { ok: false, aborted: true, code: 'deploy_aborted', error: '预览已中止' };
+        }
+        console.error(`[quickPreview] environment not ready: ${err.message}`);
+        return { ok: false, code: err.code || 'custom_image_not_ready', error: err.message };
+    }
+
     const ready = await ensureProjectRuntime(project, ensureOpts);
     const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
     const wsPath = ready.workspacePath;
@@ -1341,7 +1365,7 @@ function registerQuickPreviewRoutes(fastify, { getProjectForUser }) {
             // 事件协议与 auto-deploy 对齐：终态必须是 type='result' + result 字段——
             // 前端 DeployPanel 只处理 started/progress/result/error，'done' 会被静默
             // 忽略 → SSE 正常关闭但 UI 永远停在 running（"卡在启动服务"实测根因之一）。
-            send({ type: 'result', result: { ok: !!result?.ok, ...result } });
+            send({ type: 'result', result: localizeDeployError({ ok: !!result?.ok, ...result }, request.locale) });
         } catch (e) {
             send({ type: 'result', result: { ok: false, error: e.message } });
         }

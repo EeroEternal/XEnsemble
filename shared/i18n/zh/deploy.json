@@ -71,7 +71,8 @@
     "serve": "启动服务",
     "check": "健康检查",
     "fix": "修复问题",
-    "preview": "开启预览"
+    "preview": "开启预览",
+    "analyze_waiting_image": "等待镜像后台构建中…"
   },
   "steps_preview": {
     "analyze": "分析项目",
@@ -129,8 +130,8 @@
   },
   "toast": {
     "finished": "部署完成",
-  "aborted": "部署已中止",
-  "timeout": "部署超时",
+    "aborted": "部署已中止",
+    "timeout": "部署超时",
     "failed": "部署失败",
     "finished_with": "「{{workspace}}」的「{{session}}」部署完成",
     "aborted_with": "「{{workspace}}」的「{{session}}」部署已中止",

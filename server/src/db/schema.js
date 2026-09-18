@@ -131,6 +131,12 @@ const sessions = pgTable('sessions', {
   titleManual: boolean('title_manual').default(false),
   customImageId: text('custom_image_id'),
   provisioningError: text('provisioning_error'),
+  // A+C: in-sandbox environment provisioning (base agent image + background install).
+  envProvisionState: text('env_provision_state'),
+  envProvisionError: text('env_provision_error'),
+  envProvisionStartedAt: bigint('env_provision_started_at', { mode: 'number' }),
+  envProvisionFinishedAt: bigint('env_provision_finished_at', { mode: 'number' }),
+  envProvisionLogRef: text('env_provision_log_ref'),
   exitCode: integer('exit_code'),
   exitedAt: bigint('exited_at', { mode: 'number' }),
   // 0018: P3 技能提炼——该会话已被漏斗处理过（extracted/rejected/expired 均算），防重复入池

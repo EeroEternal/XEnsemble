@@ -1,4 +1,4 @@
-import { Loader2, Check, GitBranch, Rocket, AlertCircle, ArrowLeft, Boxes } from 'lucide-react';
+import { Loader2, Check, GitBranch, Rocket, AlertCircle, ArrowLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
 import {
@@ -13,7 +13,6 @@ import { buttonClass } from '../lib/buttonStyles';
 
 const DEFAULT_STEPS = [
   { id: 'import', labelKey: 'sessions:creation.import_repository', icon: GitBranch },
-  { id: 'build', labelKey: 'sessions:creation.build_image', icon: Boxes },
   { id: 'session', labelKey: 'sessions:creation.start_session', icon: Rocket },
 ];
 
@@ -75,6 +74,9 @@ export default function CreationProgress({ currentStep, error, onDismiss, steps 
                   >
                     {label}
                   </span>
+                  {step.note && (
+                    <span className="text-xs text-zinc-400 truncate">· {step.note}</span>
+                  )}
                 </div>
               </div>
               {showConnector && (

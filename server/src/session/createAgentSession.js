@@ -239,32 +239,54 @@ async function createAgentSession({
         let workspacePath;
         let runtimeId;
 
-        // Inline recipe from the launch dialog: the image may still be queued or
-        // building, so wait for it before creating the sandbox. Abort the wait as
-        // soon as the session is cancelled so we neither poll nor provision.
+        // A+C: never block the agent on the environment image build. Use the
+        // built image when it is already available (fast path); otherwise start
+        // on the base agent image and install the selected components inside the
+        // sandbox after the agent is up.
         let resolvedImageRef = customImageRef;
+        let envProvisionComponents = null;
         if (!resolvedImageRef && customImageId) {
             try {
-                const { waitForReadyImageRef } = require('../runtime/CustomImageService');
-                resolvedImageRef = await waitForReadyImageRef(customImageId, userId, {
-                    shouldContinue: () => isSessionStillPending(sessionId),
-                    role: user.role || null,
-                });
-            } catch (err) {
-                if (err && err.cancelled) {
-                    log.info({ sessionId }, '[sessions] session cancelled while waiting for custom image build');
-                    return;
+                const { getImage, getBuild } = require('../runtime/CustomImageService');
+                const image = await getImage(userId, customImageId, user.role || null);
+                let buildState = null;
+                try {
+                    const build = await getBuild(userId, customImageId, user.role || null);
+                    buildState = build?.state || null;
+                    if (buildState === 'ready') {
+                        resolvedImageRef = build.image_ref || image.image_ref || null;
+                    }
+                } catch (_) { /* no build row yet */ }
+
+                if (!resolvedImageRef) {
+                    envProvisionComponents = image.components || [];
+                    log.info(
+                        { sessionId, customImageId, buildState },
+                        '[sessions] environment image not ready; starting on the base agent image and provisioning in the sandbox',
+                    );
                 }
-                log.error({ err, sessionId }, '[sessions] custom image build failed');
+            } catch (err) {
+                log.error({ err, sessionId }, '[sessions] failed to resolve custom image');
                 await markSessionFailed(
                     sessionId,
-                    err instanceof RuntimeError ? err.message : (err.message || 'Custom image build failed'),
+                    err instanceof RuntimeError ? err.message : (err.message || 'Failed to resolve custom image'),
                 );
                 return;
             }
         }
 
-        // Guard: the user may have cancelled the session while the image built.
+        // Base agent image for the in-sandbox install path (explicit so a stale
+        // custom image from a previous session is not silently reused).
+        if (!resolvedImageRef && envProvisionComponents) {
+            try {
+                const { resolveBoxImage } = require('../runtime/agentBoxImages');
+                resolvedImageRef = await resolveBoxImage({ agentId: agentMeta.id });
+            } catch (err) {
+                log.warn({ err, sessionId }, '[sessions] resolveBoxImage failed; using default runtime image');
+            }
+        }
+
+        // Guard: the user may have cancelled the session while resolving.
         if (!(await isSessionStillPending(sessionId))) {
             log.info({ sessionId }, '[sessions] session cancelled before runtime prepare');
             return;
@@ -426,6 +448,7 @@ async function createAgentSession({
         const sessionUpdate = {
             cwd: workspacePath,
             runtimeId,
+            envProvisionState: envProvisionComponents ? 'pending' : 'skipped',
             updatedAt: Date.now(),
         };
         if (sessionStateDir?.stateDirRef) {
@@ -633,6 +656,21 @@ async function createAgentSession({
             updatedAt: Date.now(),
         }).where(eq(schema.sessions.id, sessionId));
         broadcastSse({ type: 'session_status', sessionId, status: 'running', userId });
+
+        // Environment components are installed in the sandbox in the background;
+        // the agent is already usable while this runs.
+        if (envProvisionComponents) {
+            const { startSessionEnvProvision } = require('../runtime/sessionEnvProvision');
+            startSessionEnvProvision({
+                sessionId,
+                runtime,
+                runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
+                workspacePath,
+                hostWorkspacePath: ready.hostWorkspacePath,
+                components: envProvisionComponents,
+                log,
+            });
+        }
     })().catch((err) => {
         log.error({ err, sessionId }, '[sessions] async provisioning uncaught error');
         markSessionFailed(sessionId, err.message || 'Unexpected error during session provisioning').catch(() => {});

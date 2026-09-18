@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, ChevronRight, Loader2, X, Plus, Check, Star, SlidersHorizontal } from 'lucide-react';
+import { ChevronDown, ChevronRight, Loader2, X, Plus, Check, SlidersHorizontal } from 'lucide-react';
 import { ConsoleDialogShell } from './ConsoleDialog';
 import SelectMenu from './SelectMenu';
 import ProjectSourceSelect from './git/ProjectSourceSelect';
@@ -71,7 +71,8 @@ export default function OnboardingWizard({
   // --- Environment (recipe) ------------------------------------------------
   const [envMode, setEnvMode] = useState(() => (customImageId ? 'saved' : 'default'));
   const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
-  const [envCheck, setEnvCheck] = useState(null); // { ready, image_ref } | null
+  const [envCheck, setEnvCheck] = useState(null); // { ready } | null
+  const [envCheckError, setEnvCheckError] = useState(null);
   const [envChecking, setEnvChecking] = useState(false);
 
   // Component display names come from the catalog; load it up-front so saved
@@ -106,7 +107,7 @@ export default function OnboardingWizard({
       return !agentId || (agents || []).some((a) => a.id === agentId);
     };
     // The image name is the label; the concrete components + versions are the
-    // hover title. Curated presets are marked with a trailing star icon.
+    // hover title. Curated presets are listed first (no marker in the dialog).
     const seen = new Set();
     const curated = (presets || []).filter(agentAvailable).map((img) => {
       seen.add(img.id);
@@ -114,7 +115,6 @@ export default function OnboardingWizard({
         value: `custom:${img.id}`,
         label: img.name,
         title: describeComponents(img.components) || img.name,
-        badgeIcon: <Star className="h-3.5 w-3.5" fill="currentColor" strokeWidth={0} />,
       };
     });
     const saved = (customImages || [])
@@ -249,6 +249,7 @@ export default function OnboardingWizard({
   useEffect(() => {
     if (envMode !== 'customize' || !recipeKey) {
       setEnvCheck(null);
+      setEnvCheckError(null);
       setEnvChecking(false);
       return;
     }
@@ -265,9 +266,14 @@ export default function OnboardingWizard({
           body: JSON.stringify({ selection }),
         });
         const data = await res.json().catch(() => ({}));
-        if (!cancelled) setEnvCheck(res.ok ? data : null);
+        if (!cancelled) {
+          // Rejections (e.g. component/disk limit) carry a localized message —
+          // show it instead of pretending the recipe just needs a build.
+          setEnvCheck(res.ok ? data : null);
+          setEnvCheckError(res.ok ? null : (data.error || null));
+        }
       } catch {
-        if (!cancelled) setEnvCheck(null);
+        if (!cancelled) { setEnvCheck(null); setEnvCheckError(null); }
       } finally {
         if (!cancelled) setEnvChecking(false);
       }
@@ -428,6 +434,8 @@ export default function OnboardingWizard({
               <div className="border-t border-zinc-100 px-3 py-2 text-xs">
                 {envComponents.length === 0 ? (
                   <span className="text-zinc-400">{t('sessions:launch.env_pick_hint')}</span>
+                ) : envCheckError ? (
+                  <span className="text-red-600">{envCheckError}</span>
                 ) : envChecking ? (
                   <span className="inline-flex items-center gap-1.5 text-zinc-400">
                     <Loader2 className="h-3 w-3 animate-spin" />
@@ -438,6 +446,7 @@ export default function OnboardingWizard({
                 ) : (
                   <span className="text-amber-600">{t('sessions:launch.env_needs_build')}</span>
                 )}
+
               </div>
             </div>
           )}

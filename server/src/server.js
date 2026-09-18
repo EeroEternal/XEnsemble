@@ -55,6 +55,7 @@ const { registerAdminRoutes } = require('./routes/admin');
 const { registerUserRoutes } = require('./routes/user');
 const { registerWorkspaceRoutes } = require('./routes/workspace');
 const { registerAutoDeployRoutes, runAutoTwoStageDeploy } = require('./deployments/twoStage');
+const { localizeDeployError } = require('./deployments/deployErrors');
 const { runQuickPreview, stopQuickPreview, registerQuickPreviewRoutes } = require('./deployments/quickPreview');
 const { registerTerminalHttpRoutes } = require('./routes/terminalHttp');
 const { registerGitHubRoutes } = require('./routes/github');
@@ -998,6 +999,10 @@ function mapSessionRow(row) {
         recoverable: Boolean(row.recoverable),
         customImageId: row.custom_image_id || null,
         provisioningError: row.provisioning_error || null,
+        envProvisionState: row.env_provision_state || null,
+        envProvisionError: row.env_provision_error || null,
+        envProvisionStartedAt: row.env_provision_started_at ? Number(row.env_provision_started_at) : null,
+        envProvisionFinishedAt: row.env_provision_finished_at ? Number(row.env_provision_finished_at) : null,
         shellOnly: row.agent_id === 'shell' || undefined,
         memoryStatus: sessionManager.getSession(row.id)?.status ?? row.status,
         alive: sessionManager.isAlive(row.id),
@@ -1029,6 +1034,8 @@ fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async
             SELECT s.id, s.project_id, s.agent_id, s.status, s.recoverable,
                    s.custom_image_id, s.title, s.title_manual, s.created_at,
                    s.exit_code, s.exited_at,
+                   s.env_provision_state, s.env_provision_error,
+                   s.env_provision_started_at, s.env_provision_finished_at,
                    p.name AS project_name,
                    s.provisioning_error
             FROM sessions s
@@ -1073,6 +1080,8 @@ fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async
         SELECT s.id, s.project_id, s.agent_id, s.status, s.recoverable,
                s.custom_image_id, s.title, s.title_manual, s.created_at,
                s.exit_code, s.exited_at,
+               s.env_provision_state, s.env_provision_error,
+               s.env_provision_started_at, s.env_provision_finished_at,
                p.name AS project_name, s.provisioning_error
                ${statsSelect}
         FROM sessions s
@@ -1611,6 +1620,50 @@ fastify.put('/api/v1/sessions/:sessionId/config', { preValidation: [fastify.auth
             ? 'Configuration updated. Restart the session for changes to take effect.'
             : 'Configuration updated.',
     };
+});
+
+// Retry the in-sandbox environment install (A+C). The agent stays usable.
+fastify.post('/api/v1/sessions/:sessionId/env/retry', { preValidation: [fastify.authenticate] }, async (request, reply) => {
+    const rows = await db.select().from(schema.sessions)
+        .where(and(eq(schema.sessions.id, request.params.sessionId), eq(schema.sessions.userId, request.user.id)));
+    if (rows.length === 0) {
+        return reply.code(404).send({ error: t('errors:session_not_found', {}, request.locale || 'en'), code: 'session_not_found' });
+    }
+    const session = rows[0];
+    if (!session.customImageId) {
+        return reply.code(400).send({ error: t('errors:no_environment_to_install', {}, request.locale || 'en'), code: 'no_environment_to_install' });
+    }
+    if (!session.runtimeId) {
+        return reply.code(409).send({ error: t('errors:session_not_running', {}, request.locale || 'en'), code: 'session_not_running' });
+    }
+
+    const project = await getProjectForUser(request.user.id, session.projectId);
+    if (!project) {
+        return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
+    }
+
+    try {
+        const { getImage } = require('./runtime/CustomImageService');
+        const image = await getImage(request.user.id, session.customImageId, request.user.role);
+        const ready = await ensureProjectRuntime(project, { runtimeId: session.runtimeId });
+        const { provisionSessionEnvironment } = require('./runtime/sessionEnvProvision');
+        const result = await provisionSessionEnvironment({
+            sessionId: session.id,
+            runtime: getRuntime(),
+            runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
+            workspacePath: ready.workspacePath || session.cwd,
+            hostWorkspacePath: ready.hostWorkspacePath,
+            components: image.components || [],
+            log: request.log,
+        });
+        if (!result.ok && !result.skipped) {
+            return reply.code(500).send({ error: result.error || 'environment install failed', code: 'env_provision_failed' });
+        }
+        return { ok: true, state: result.skipped ? 'skipped' : 'ready' };
+    } catch (err) {
+        const statusCode = err instanceof RuntimeError ? err.statusCode : 500;
+        return sendPublicError(reply, err, 'Failed to install environment', statusCode);
+    }
 });
 
 fastify.post('/api/v1/sessions/:sessionId/resume', { preValidation: [fastify.authenticate] }, async (request, reply) => {
@@ -2378,10 +2431,11 @@ fastify.post('/api/v1/projects/:projectId/preview', { preValidation: [fastify.au
             sessionId: request.query?.session_id || request.body?.session_id,
         });
         if (!result?.ok) {
+            const localized = localizeDeployError(result, request.locale);
             const code = result?.statusCode || 503;
             return reply.code(code).send({
-                error: result?.error || 'Preview deploy failed',
-                code: result?.errorCode || 'preview_deploy_failed',
+                error: localized?.error || 'Preview deploy failed',
+                code: localized?.code || result?.errorCode || 'preview_deploy_failed',
             });
         }
         return reply.code(201).send({
@@ -2408,7 +2462,10 @@ fastify.post('/api/v1/deployments', { preValidation: [fastify.authenticate] }, a
     const previewQuota = await policy.checkQuota(request.user.id, 'previews', request.user.role);
     if (!previewQuota.ok) return policy.quotaErrorReply(reply, previewQuota);
 
-    const dep = await deploymentService.createPreview(request.user.id, project);
+    const dep = await deploymentService.createPreview(request.user.id, project, {
+        sessionId: request.query?.session_id || request.body?.session_id || null,
+        role: request.user.role,
+    });
     return reply.code(201).send(dep);
 });
 

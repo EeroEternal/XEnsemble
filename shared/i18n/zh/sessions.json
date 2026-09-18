@@ -21,7 +21,7 @@
     "env_pick_hint": "至少选择一个组件来自定义运行环境。",
     "env_checking": "正在检查可用性…",
     "env_ready": "已就绪 — 可立即启动",
-    "env_needs_build": "尚未构建 — 将在启动时构建镜像",
+    "env_needs_build": "会话可立即启动，环境将在后台安装",
     "env_no_components": "暂无可选组件，将使用默认运行环境。",
     "env_resolve_failed": "所选运行环境准备失败"
   },
@@ -67,10 +67,13 @@
   },
   "state": {
     "preparing_environment": "正在准备你的环境…",
-    "preparing_environment_desc": "正在拉取镜像并启动虚拟机。通常不到一分钟。",
+    "preparing_environment_desc": "正在启动虚拟机并连接 Agent。",
     "session_failed": "会话启动失败",
     "provisioning_error": "配置过程中发生意外错误。",
-    "exited": "已退出"
+    "exited": "已退出",
+    "building_image": "正在后台构建环境镜像…",
+    "building_image_desc": "首次构建可能需要几分钟。构建完成后会自动启动 Agent，期间你可以先切换到其他会话或工作区。",
+    "building_image_elapsed": "已用时 {{time}}"
   },
   "error": {
     "no_workspace": "无法为此会话创建工作空间。",
@@ -264,11 +267,19 @@
   },
   "creation": {
     "import_repository": "导入仓库",
-    "start_session": "启动会话",
-    "build_image": "构建镜像",
-    "build_failed": "镜像构建失败",
-    "build_timeout": "镜像构建超时"
+    "start_session": "启动会话"
   },
   "count_one": "{{count}} 个会话",
-  "count_other": "{{count}} 个会话"
+  "count_other": "{{count}} 个会话",
+  "env": {
+    "installing": "正在安装环境（{{components}}）…",
+    "installing_generic": "正在安装环境…",
+    "elapsed": "已用时 {{time}}",
+    "ready": "环境已就绪",
+    "failed": "环境安装失败",
+    "retry": "重试",
+    "retrying": "重试中…",
+    "retry_failed": "环境安装失败",
+    "agent_hint": "Agent 已可用；依赖这些工具的命令会在安装完成后正常工作。"
+  }
 }

@@ -21,7 +21,7 @@
     "env_pick_hint": "Pick at least one component to customize this environment.",
     "env_checking": "Checking availability…",
     "env_ready": "Ready — starts instantly",
-    "env_needs_build": "Not built yet — the image will be built on start",
+    "env_needs_build": "Session starts instantly; the environment installs in the background",
     "env_no_components": "No components available. The default environment will be used.",
     "env_resolve_failed": "Failed to prepare the selected environment"
   },
@@ -67,10 +67,13 @@
   },
   "state": {
     "preparing_environment": "Preparing your environment…",
-    "preparing_environment_desc": "Pulling image and starting virtual machine. This usually takes less than a minute.",
+    "preparing_environment_desc": "Starting the virtual machine and connecting the agent.",
     "session_failed": "Session failed to start",
     "provisioning_error": "An unexpected error occurred during provisioning.",
-    "exited": "Exited"
+    "exited": "Exited",
+    "building_image": "Building the environment image in the background…",
+    "building_image_desc": "The first build can take several minutes. The agent starts automatically once it is ready — you can switch to another session or workspace meanwhile.",
+    "building_image_elapsed": "Elapsed {{time}}"
   },
   "error": {
     "no_workspace": "Could not create workspace for this session.",
@@ -264,11 +267,19 @@
   },
   "creation": {
     "import_repository": "Import repository",
-    "start_session": "Start session",
-    "build_image": "Build image",
-    "build_failed": "Image build failed",
-    "build_timeout": "Image build timed out"
+    "start_session": "Start session"
   },
   "count_one": "{{count}} session",
-  "count_other": "{{count}} sessions"
+  "count_other": "{{count}} sessions",
+  "env": {
+    "installing": "Installing environment ({{components}})…",
+    "installing_generic": "Installing environment…",
+    "elapsed": "Elapsed {{time}}",
+    "ready": "Environment ready",
+    "failed": "Environment install failed",
+    "retry": "Retry",
+    "retrying": "Retrying…",
+    "retry_failed": "Failed to install the environment",
+    "agent_hint": "The agent is already usable; commands that need these tools will work once the install finishes."
+  }
 }
