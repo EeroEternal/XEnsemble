@@ -133,6 +133,16 @@ function getTaskRunArgs(agentId, prompt, { autoApprove = false } = {}) {
 }
 
 /**
+ * 交互式会话的自动批准追加参数（LoopTask 人工复核模式拉起用：无一次性
+ * prompt，但仍需工具审批自动放行，否则交互 TUI 停在审批处等输入）。
+ * @returns {string[]}
+ */
+function getAutoApproveArgs(agentId) {
+    const mode = TASK_RUN_MODES[agentId];
+    return mode && Array.isArray(mode.autoApproveArgs) ? [...mode.autoApproveArgs] : [];
+}
+
+/**
  * 一次性模式下需从 Agent 基础参数中剔除的项（如 cline 的 -i）。
  * @returns {string[]}
  */
@@ -141,4 +151,4 @@ function getTaskRunRemoveArgs(agentId) {
     return Array.isArray(mode?.removeBaseArgs) ? mode.removeBaseArgs : [];
 }
 
-module.exports = { isTaskRunSupported, getTaskRunArgs, getTaskRunRemoveArgs };
+module.exports = { isTaskRunSupported, getTaskRunArgs, getTaskRunRemoveArgs, getAutoApproveArgs };

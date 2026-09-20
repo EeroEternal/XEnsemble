@@ -30,7 +30,7 @@ const { applyProjectGitEnv } = require('../agents/projectGitEnv');
 const { ensureSessionStateDir, prepareHomeRedirect } = require('./stateDir');
 const { resolveRuntimeProvider } = require('../config/runtimeProvider');
 const { injectForSession: injectSkillsForSession, isEnabled: skillInjectEnabled } = require('../skills/skillInjector');
-const { getTaskRunArgs, getTaskRunRemoveArgs, isTaskRunSupported } = require('../agents/taskRunModes');
+const { getTaskRunArgs, getTaskRunRemoveArgs, getAutoApproveArgs, isTaskRunSupported } = require('../agents/taskRunModes');
 const { assembleSpawnArgs } = require('./assembleSpawnArgs');
 const { registerSessionLifecycle } = require('./resumeSession');
 
@@ -528,6 +528,12 @@ async function createAgentSession({
             // 剔除与一次性模式冲突的基础参数（如 cline 的 -i 强制 TUI）
             const taskRunArgs = taskPrompt ? getTaskRunArgs(agentMeta.id, taskPrompt, { autoApprove: taskAutoApprove }) : null;
             const taskRemoveArgs = taskPrompt ? getTaskRunRemoveArgs(agentMeta.id) : [];
+            // 人工复核模式（LoopTask requireReview）：无一次性 prompt 的交互式拉起，
+            // 但任务配置了自动批准 → 注入交互式自动批准 flag，否则交互 TUI 停在
+            // 工具审批处等输入，无人值守场景会一直挂住。
+            const interactiveAutoApproveArgs = (!taskPrompt && taskAutoApprove)
+                ? getAutoApproveArgs(agentMeta.id)
+                : [];
             const baseAgentArgs = taskRemoveArgs.length
                 ? agentMeta.args.filter((a) => !taskRemoveArgs.includes(a))
                 : agentMeta.args;
@@ -539,7 +545,7 @@ async function createAgentSession({
                     stateArgs,
                     baseArgs: baseAgentArgs,
                     append: spawnArgs.append,
-                    taskArgs: taskRunArgs || [],
+                    taskArgs: [...(taskRunArgs || []), ...interactiveAutoApproveArgs],
                 }),
                 resolved.env,
                 spawnOpts,
