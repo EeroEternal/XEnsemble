@@ -93,7 +93,8 @@ const TASK_TEMPLATES = [
   { id: 'standup', icon: Target, kind: 'weekdays', time: '09:00' },
   { id: 'risk_scan', icon: Activity, kind: 'daily', time: '10:00' },
   { id: 'release_notes', icon: FileText, kind: 'weekly', weekdays: [5], time: '16:00' },
-  { id: 'nightly_cleanup', icon: MoonStar, kind: 'daily', time: '03:00' },
+  // 代码改动类任务：预填「完成后等待人工」——变更不直接提交，人工复核后才落 commit
+  { id: 'nightly_cleanup', icon: MoonStar, kind: 'daily', time: '03:00', requireReview: true },
 ];
 
 function timeToCronMMHH(time) {
@@ -230,6 +231,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
       kind: tpl.kind,
       time: tpl.time,
       weekdays: tpl.weekdays ? [...tpl.weekdays] : [...emptyForm.weekdays],
+      requireReview: tpl.requireReview === true,
       timezone: loadTimezonePref(),
     });
     setEditing(null);
