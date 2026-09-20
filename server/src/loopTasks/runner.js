@@ -108,9 +108,12 @@ async function extractRunResult(sessionId) {
 
 /**
  * 终止任务会话（镜像 /exit 语义）：beginHibernate 防 onExit 覆盖状态 → kill →
- * 标记 exited → 从内存表清理。对已退出的会话幂等。
+ * 标记 exited → 从内存表清理。对已退出的会话幂等（进程已死则跳过 kill，
+ * 仅补写 DB 终态并清内存）。
+ * @param {number|null} [exitCode] 进程退出码；成功/失败路径由 onExit 传入，
+ *   供但尸回收 reapZombieRuns 按 exit_code===0 判 succeeded。
  */
-async function stopTaskSession(sessionId, log = console) {
+async function stopTaskSession(sessionId, log = console, exitCode = null) {
     try {
         const live = sessionManager.getSession(sessionId);
         if (live?.handle) {
@@ -120,7 +123,7 @@ async function stopTaskSession(sessionId, log = console) {
             }
         }
         await db.update(schema.sessions)
-            .set({ status: 'exited', exitedAt: Date.now(), updatedAt: Date.now() })
+            .set({ status: 'exited', exitCode, exitedAt: Date.now(), updatedAt: Date.now() })
             .where(eq(schema.sessions.id, sessionId));
         sessionManager.deleteSession(sessionId);
     } catch (err) {
@@ -258,10 +261,15 @@ async function executeRun(task, run, log = console) {
             await sleep(ALIVE_POLL_MS);
         }
 
-        // 订阅退出：headless Agent 跑完即退出进程，exitCode 即任务结果
+        // 订阅退出：headless Agent 跑完即退出进程，exitCode 即任务结果。
+        // finalize 只更新 run 行；会话行必须显式落 exited（否则 DB 停留 running，
+        // 重启后被 reconcile 误标为可恢复的 idle —— 任务会话永远进不了「已退出」）。
         offExit = sessionManager.onExit(sessionId, (exitCode) => {
             const ok = Number(exitCode) === 0;
-            void finalize(ok ? 'succeeded' : 'failed', ok ? null : `agent exited with code ${exitCode}`);
+            void (async () => {
+                await finalize(ok ? 'succeeded' : 'failed', ok ? null : `agent exited with code ${exitCode}`);
+                await stopTaskSession(sessionId, log, exitCode);
+            })();
         });
 
         // 超时兜底：到点判 timeout 并终止会话（finalize 幂等，与 exit 竞争首个终态）
