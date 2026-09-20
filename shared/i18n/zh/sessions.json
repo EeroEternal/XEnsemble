@@ -3,6 +3,8 @@
   "new_session": "新建会话",
   "search": "搜索",
   "exited_sessions": "已退出会话",
+  "clear_exited": "清除已退出会话",
+  "clear_exited_confirm_message": "已退出会话及其轨迹记录将被删除，不可恢复。",
   "loop_tag": "任务",
   "loop_session": "循环任务会话",
   "loop_capped_hint": "仅显示最近 {{n}} 条任务会话 · 全部历史见循环任务页",
@@ -100,7 +102,8 @@
     "path_copied": "路径已复制。",
     "config_saved": "配置已保存。",
     "session_deleted": "会话已删除。",
-    "workspace_deleted": "工作空间已删除。"
+    "workspace_deleted": "工作空间已删除。",
+    "exited_cleared": "已清除 {{count}} 个已退出会话。"
   },
   "dialog": {
     "agent_configuration": "Agent 配置",

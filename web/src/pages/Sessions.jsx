@@ -1412,14 +1412,29 @@ export default React.forwardRef(function Sessions({
     setImportedProject(null);
   }, []);
 
+  const handleClearExitedSessions = async (projectId) => {
+    try {
+      const qs = new URLSearchParams({ status: 'exited' });
+      if (projectId) qs.append('projectId', projectId);
+      const res = await apiFetch(`/api/v1/sessions?${qs.toString()}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || t('sessions:error.delete_session_failed', { defaultValue: 'Failed to delete session' }));
+      showToast('success', t('sessions:toast.exited_cleared', { count: data.deleted ?? 0, defaultValue: `Cleared ${data.deleted ?? 0} exited sessions` }));
+      fetchWorkspaces();
+    } catch (err) {
+      showToast('error', err.message);
+    }
+  };
+
   React.useImperativeHandle(ref, () => ({
     openLaunchModal,
     closeLaunchModal,
     openImportDialog: () => setShowImportDialog(true),
     requestDeleteSession,
     requestDeleteWorkspace,
+    clearExitedSessions: handleClearExitedSessions,
     restartSession: handleRestartSession,
-  }), [openLaunchModal, closeLaunchModal, requestDeleteSession, requestDeleteWorkspace, handleRestartSession]);
+  }), [openLaunchModal, closeLaunchModal, requestDeleteSession, requestDeleteWorkspace, handleClearExitedSessions, handleRestartSession]);
 
   const activeProject = useMemo(
     () => projects.find((p) => p.id === activeSession?.projectId) || null,

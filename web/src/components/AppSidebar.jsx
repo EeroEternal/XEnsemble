@@ -26,6 +26,7 @@ import {
 } from '../lib/sidebarPrefs';
 import BrandMark from './BrandMark';
 import RowActionsMenu from './RowActionsMenu';
+import { confirm } from './ConfirmDialog';
 import {
   textPrimary,
   textSecondary,
@@ -37,6 +38,7 @@ import {
   bgSecondary,
   bgCanvas,
   consoleButtonFocusClass,
+  consoleIconButtonDangerClass,
   consoleMenuDropdownZClass,
   consoleDropdownPanelClass,
 } from '../lib/consoleTokens';
@@ -223,6 +225,7 @@ export default function AppSidebar({
   onSelectSession,
   onNewSession,
   onRequestDeleteSession,
+  onClearExitedSessions,
   user,
   onOpenSettings,
   onOpenObservability,
@@ -248,6 +251,7 @@ export default function AppSidebar({
   const [renameValue, setRenameValue] = useState('');
   const [renaming, setRenaming] = useState(false);
   const renameInputRef = useRef(null);
+  const [clearingExited, setClearingExited] = useState(false);
 
   useEffect(() => {
     if (renamingId && renameInputRef.current) {
@@ -419,6 +423,24 @@ export default function AppSidebar({
         </div>
       </div>
     );
+  };
+
+  const handleClearExited = async () => {
+    if (clearingExited || !onClearExitedSessions) return;
+    const ok = await confirm({
+      title: t('sessions:clear_exited', { defaultValue: 'Clear exited sessions' }),
+      message: t('sessions:clear_exited_confirm_message', { defaultValue: 'Exited sessions and their trajectory records will be permanently deleted.' }),
+      confirmLabel: t('sessions:clear_exited', { defaultValue: 'Clear exited sessions' }),
+      cancelLabel: t('common:action.cancel', { defaultValue: 'Cancel' }),
+      variant: 'danger',
+    });
+    if (!ok) return;
+    setClearingExited(true);
+    try {
+      await onClearExitedSessions(activeWorkspaceId);
+    } finally {
+      setClearingExited(false);
+    }
   };
 
   const visibleSessions = useMemo(() => {
@@ -655,18 +677,32 @@ export default function AppSidebar({
 
               {filteredExited.length > 0 && (
                 <>
-                  <button
-                    type="button"
-                    onClick={() => setExitedExpanded((v) => !v)}
-                    className={`mt-2 flex items-center gap-1.5 px-2.5 py-1 text-xs ${textPlaceholder} ${hoverTextPrimary} text-left ${transitionBase} ${consoleButtonFocusClass}`}
-                    aria-expanded={exitedExpanded || Boolean(searchQuery.trim())}
-                  >
-                    <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${exitedExpanded || searchQuery.trim() ? '' : '-rotate-90'}`} />
-                    <span className="flex-1 truncate">
-                      {t('sessions:exited_sessions', { defaultValue: 'Exited sessions' })}
-                    </span>
-                    <span className="shrink-0 tabular-nums">{filteredExited.length}</span>
-                  </button>
+                  <div className="group/exited mt-2 flex items-center">
+                    <button
+                      type="button"
+                      onClick={() => setExitedExpanded((v) => !v)}
+                      className={`flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-1 text-xs ${textPlaceholder} ${hoverTextPrimary} text-left ${transitionBase} ${consoleButtonFocusClass}`}
+                      aria-expanded={exitedExpanded || Boolean(searchQuery.trim())}
+                    >
+                      <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${exitedExpanded || searchQuery.trim() ? '' : '-rotate-90'}`} />
+                      <span className="flex-1 truncate">
+                        {t('sessions:exited_sessions', { defaultValue: 'Exited sessions' })}
+                      </span>
+                      <span className="shrink-0 tabular-nums">{filteredExited.length}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearExited}
+                      disabled={clearingExited}
+                      title={t('sessions:clear_exited', { defaultValue: 'Clear exited sessions' })}
+                      aria-label={t('sessions:clear_exited', { defaultValue: 'Clear exited sessions' })}
+                      className={`mr-1 shrink-0 ${consoleIconButtonDangerClass} [&_svg]:w-3.5 [&_svg]:h-3.5`}
+                    >
+                      {clearingExited
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={1.75} />
+                        : <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />}
+                    </button>
+                  </div>
                   {(exitedExpanded || searchQuery.trim()) && displayedExited.map((s) => renderSessionRow(s))}
                   {exitedExpanded && !searchQuery.trim() && displayedExited.length < filteredExited.length && (
                     onOpenLoopTasks ? (

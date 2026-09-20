@@ -115,6 +115,7 @@ function AuthenticatedLayout({
         onSelectSession={onSelectSession}
         onNewSession={() => { setLaunchPanelOpen(true); sessionsRef.current?.openLaunchModal?.('session'); }}
         onRequestDeleteSession={(session, ws, action) => sessionsRef.current?.requestDeleteSession?.(session, ws, action)}
+        onClearExitedSessions={(projectId) => sessionsRef.current?.clearExitedSessions?.(projectId)}
         user={user}
         onOpenSettings={() => navigate('/settings')}
         onOpenObservability={() => navigate('/observability')}

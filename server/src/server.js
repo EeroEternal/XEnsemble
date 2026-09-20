@@ -1402,6 +1402,41 @@ fastify.delete('/api/v1/sessions/:sessionId', { preValidation: [fastify.authenti
     return { ok: true };
 });
 
+// 批量删除已退出会话（侧栏「已退出」组一键清空）。必须显式 status=exited
+// 防误删运行中/可恢复会话；projectId 可选收窄到单个工作区。逐个走
+// teardownSession 复用单删的资源回收（对已退出会话幂等），单次上限 500。
+fastify.delete('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async (request, reply) => {
+    const query = request.query || {};
+    if (query.status !== 'exited') {
+        return reply.code(400).send({
+            error: t('errors:invalid_status', {}, request.locale || 'en'),
+            code: 'invalid_status',
+        });
+    }
+    const conditions = [
+        eq(schema.sessions.userId, request.user.id),
+        eq(schema.sessions.status, 'exited'),
+    ];
+    if (query.projectId) conditions.push(eq(schema.sessions.projectId, String(query.projectId)));
+
+    const targets = await db.select().from(schema.sessions)
+        .where(and(...conditions))
+        .orderBy(sql`updated_at DESC`)
+        .limit(500);
+
+    let deleted = 0;
+    for (const session of targets) {
+        try {
+            await teardownSession(session, session.id, request.log);
+            await db.delete(schema.sessions).where(eq(schema.sessions.id, session.id));
+            deleted += 1;
+        } catch (err) {
+            request.log.warn({ err, sessionId: session.id }, '[sessions] batch delete item failed');
+        }
+    }
+    return { ok: true, deleted };
+});
+
 // 停止/删除共用的资源回收：杀进程、清理 preview/deploy、回收 runtime VM。
 // 对已 exited 的会话幂等（进程已停、deployment 已 stopped、runtime 已销毁）。
 async function teardownSession(session, sessionId, log) {

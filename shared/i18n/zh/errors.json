@@ -50,6 +50,7 @@
   "no_base_url_configured": "提供商未配置 Base URL。",
   "user_not_found": "用户不存在",
   "invalid_registration_mode": "无效的 registration_mode",
+  "invalid_status": "无效的状态筛选",
   "invalid_llm_auth_mode": "无效的 llm_auth_mode",
   "invalid_default_terminal_theme_id": "无效的 default_terminal_theme_id",
   "disabled_theme_ids_must_be_array": "disabled_terminal_theme_ids 必须是数组",

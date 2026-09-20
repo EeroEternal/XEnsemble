@@ -50,6 +50,7 @@
   "no_base_url_configured": "Provider has no Base URL configured.",
   "user_not_found": "User not found",
   "invalid_registration_mode": "Invalid registration_mode",
+  "invalid_status": "Invalid status filter",
   "invalid_llm_auth_mode": "Invalid llm_auth_mode",
   "invalid_default_terminal_theme_id": "Invalid default_terminal_theme_id",
   "disabled_theme_ids_must_be_array": "disabled_terminal_theme_ids must be an array",
