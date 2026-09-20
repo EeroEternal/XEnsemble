@@ -336,6 +336,8 @@ export default function AppSidebar({
     // 可退出（结束会话、释放配额、可 resume）：running/pending/idle。
     // failed 会话仅提供物理删除。
     const canExit = isLive || isPending || s.status === 'idle';
+    // 循环任务会话（source=loop_task）：标题跟随任务定义，生命周期归 Loop Tasks 管。
+    const isLoopTask = s.source === 'loop_task';
     const label = s.title?.trim() || getAgentLabel(s.agentId);
     const timestamp = s.createdAt ? formatRelativeTime(s.createdAt) : '';
     const isRenaming = renamingId === s.id;
@@ -368,27 +370,26 @@ export default function AppSidebar({
           <button
             type="button"
             onClick={() => selectSession(s)}
-            onDoubleClick={() => startRename(s)}
+            onDoubleClick={isLoopTask ? undefined : () => startRename(s)}
             className="flex flex-1 min-w-0 items-center gap-2 text-left"
             title={label}
           >
             <span className={`flex-1 truncate text-[13px] ${isActive ? 'font-medium text-zinc-900' : isExited ? 'text-zinc-400' : 'text-zinc-700'}`}>
               {label}
             </span>
+            {isLoopTask && (
+              <span
+                className="shrink-0 rounded border border-zinc-200 bg-zinc-100 px-1 py-px text-[10px] leading-3 text-zinc-500"
+                title={t('sessions:loop_session', { defaultValue: 'Loop task session' })}
+              >
+                {t('sessions:loop_tag', { defaultValue: 'Loop' })}
+              </span>
+            )}
             {isPending && (
               <Loader2 className="w-3 h-3 shrink-0 animate-spin text-amber-500" />
             )}
             {isFailed && (
               <span className="w-1.5 h-1.5 rounded-full bg-red-600 shrink-0" />
-            )}
-            {s.source === 'loop_task' && (
-              <ListTodo
-                className="w-3 h-3 shrink-0 text-zinc-400"
-                strokeWidth={1.75}
-                role="img"
-                title={t('sessions:loop_session', { defaultValue: 'Loop task session' })}
-                aria-label={t('sessions:loop_session', { defaultValue: 'Loop task session' })}
-              />
             )}
             {s.status === 'exited' && (
               <span
@@ -406,8 +407,8 @@ export default function AppSidebar({
             <RowActionsMenu
               label={t('sessions:action.more_actions', { defaultValue: 'Session actions' })}
               items={[
-                { icon: PenSquare, label: t('sessions:action.rename_session', { defaultValue: 'Rename' }), onClick: () => startRename(s) },
-                ...(canExit ? [{ icon: Square, label: t('sessions:action.exit'), onClick: () => onRequestDeleteSession?.(s, { name: s.projectName || activeWorkspaceName }, 'exit') }] : []),
+                ...(!isLoopTask ? [{ icon: PenSquare, label: t('sessions:action.rename_session', { defaultValue: 'Rename' }), onClick: () => startRename(s) }] : []),
+                ...(canExit && !isLoopTask ? [{ icon: Square, label: t('sessions:action.exit'), onClick: () => onRequestDeleteSession?.(s, { name: s.projectName || activeWorkspaceName }, 'exit') }] : []),
                 { icon: Trash2, label: t('sessions:action.delete'), danger: true, onClick: () => onRequestDeleteSession?.(s, { name: s.projectName || activeWorkspaceName }, 'delete') },
               ]}
             />

@@ -3,6 +3,7 @@
   "new_session": "New Session",
   "search": "Search",
   "exited_sessions": "Exited sessions",
+  "loop_tag": "Loop",
   "loop_session": "Loop task session",
   "launch": {
     "title": "New Session",
