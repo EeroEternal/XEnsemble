@@ -5,6 +5,7 @@
   "exited_sessions": "已退出会话",
   "loop_tag": "任务",
   "loop_session": "循环任务会话",
+  "loop_capped_hint": "仅显示最近 {{n}} 条任务会话 · 全部历史见循环任务页",
   "launch": {
     "title": "新建会话",
     "repository": "仓库",

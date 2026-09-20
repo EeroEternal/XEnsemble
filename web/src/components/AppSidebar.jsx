@@ -44,6 +44,9 @@ import {
 const SIDEBAR_COLLAPSED_KEY = 'xensemble.sidebar.collapsed';
 
 const SESSION_PREVIEW_LIMIT = 12;
+// 「已退出」组内任务会话的浏览限流：无搜索时只展示最近 N 条，
+// 全量历史档案在 Loop Tasks 执行历史（高频 cron 任务一天可产生几十条）
+const LOOP_EXITED_DISPLAY_LIMIT = 20;
 
 function sortSessions(list, prefs) {
   return [...list].sort((a, b) => {
@@ -446,6 +449,21 @@ export default function AppSidebar({
     [exitedSessions, sessionMatchesQuery],
   );
 
+  // 任务会话高频机器生成（如每 30 分钟一次 = 48 条/天），无搜索时只展示最近
+  // N 条；搜索不受限（全量可检索）。全量历史档案在 Loop Tasks 执行历史。
+  const displayedExited = useMemo(() => {
+    if (searchQuery.trim()) return filteredExited; // 搜索：全量可检索，不限流
+    const times = exitedSessions
+      .filter((s) => s.source === 'loop_task')
+      .map((s) => s.createdAt || 0)
+      .sort((a, b) => b - a);
+    if (times.length <= LOOP_EXITED_DISPLAY_LIMIT) return filteredExited;
+    const cutoff = times[LOOP_EXITED_DISPLAY_LIMIT - 1];
+    return filteredExited.filter(
+      (s) => s.source !== 'loop_task' || (s.createdAt || 0) >= cutoff,
+    );
+  }, [filteredExited, exitedSessions, searchQuery]);
+
   const sidebarNavItemClass =
     `flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-zinc-700 ${hoverBgTertiary} ${transitionBase}`;
 
@@ -649,7 +667,23 @@ export default function AppSidebar({
                     </span>
                     <span className="shrink-0 tabular-nums">{filteredExited.length}</span>
                   </button>
-                  {(exitedExpanded || searchQuery.trim()) && filteredExited.map((s) => renderSessionRow(s))}
+                  {(exitedExpanded || searchQuery.trim()) && displayedExited.map((s) => renderSessionRow(s))}
+                  {exitedExpanded && !searchQuery.trim() && displayedExited.length < filteredExited.length && (
+                    onOpenLoopTasks ? (
+                      <button
+                        type="button"
+                        onClick={onOpenLoopTasks}
+                        className={`px-2.5 py-1 text-xs ${textPlaceholder} ${hoverTextPrimary} text-left ${transitionBase} ${consoleButtonFocusClass}`}
+                        title={t('sessions:loop_capped_hint', { n: LOOP_EXITED_DISPLAY_LIMIT, defaultValue: `Showing latest ${LOOP_EXITED_DISPLAY_LIMIT} task sessions` })}
+                      >
+                        {t('sessions:loop_capped_hint', { n: LOOP_EXITED_DISPLAY_LIMIT, defaultValue: `Showing latest ${LOOP_EXITED_DISPLAY_LIMIT} task sessions` })}
+                      </button>
+                    ) : (
+                      <p className={`px-2.5 py-1 text-xs ${textPlaceholder}`}>
+                        {t('sessions:loop_capped_hint', { n: LOOP_EXITED_DISPLAY_LIMIT, defaultValue: `Showing latest ${LOOP_EXITED_DISPLAY_LIMIT} task sessions` })}
+                      </p>
+                    )
+                  )}
                 </>
               )}
             </>

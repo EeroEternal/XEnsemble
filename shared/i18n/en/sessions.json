@@ -5,6 +5,7 @@
   "exited_sessions": "Exited sessions",
   "loop_tag": "Loop",
   "loop_session": "Loop task session",
+  "loop_capped_hint": "Showing latest {{n}} task sessions · full history in Loop Tasks",
   "launch": {
     "title": "New Session",
     "repository": "Repository",
