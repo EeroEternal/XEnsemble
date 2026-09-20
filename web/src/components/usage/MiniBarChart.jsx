@@ -1,26 +1,38 @@
-﻿import { formatTokens } from '../../lib/formatTokens';
+import { formatTokens } from '../../lib/formatTokens';
+
+/** 多段堆叠默认配色（按 series 顺序取用；图例圆点与柱内分段共用同一 class） */
+export const SERIES_COLORS = [
+  'bg-blue-500',
+  'bg-emerald-400',
+  'bg-amber-400',
+  'bg-violet-500',
+  'bg-rose-400',
+  'bg-cyan-500',
+];
 
 /**
  * 迷你堆叠柱状图（纯 CSS，无图表库依赖）。
  *
- * @param {Array<{label:string, primary:number, secondary?:number, tip?:string}>} data
- *        primary/compression 两段堆叠：primary=Prompt（蓝），secondary=Completion（绿）。
+ * @param {Array<{key:string, label:string, color:string}>} series
+ *        堆叠段定义（自下而上）：key 对应 data 各项 values 中的字段名，
+ *        color 为 Tailwind 背景 class（柱内分段与 tooltip 圆点共用）。
+ * @param {Array<{label:string, tip?:string, values:Record<string,number>}>} data
+ *        每个数据点的分段数值按 series.key 从 values 取。
  * @param {number} [height] 像素高度，默认 96
- * @param {string} [primaryLabel] tooltip 中 primary 段的名称
- * @param {string} [secondaryLabel] tooltip 中 secondary 段的名称
  * @param {boolean} [showAxes=false] 显示横纵坐标（Y 轴刻度 + 网格线 + X 轴起止日期）
  * @param {(v:number)=>string} [formatValue] 刻度与 tooltip 数值格式化（默认 token 缩写）
+ * @param {string} [totalLabel] tooltip 合计行名称（如「合计」）；提供时在分段明细下展示
  */
 export default function MiniBarChart({
   data = [],
+  series = [],
   height = 96,
-  primaryLabel = 'Prompt',
-  secondaryLabel = 'Completion',
   showAxes = false,
   formatValue = formatTokens,
+  totalLabel,
 }) {
-  if (!data.length) return null;
-  const totals = data.map((d) => (Number(d.primary) || 0) + (Number(d.secondary) || 0));
+  if (!data.length || !series.length) return null;
+  const totals = data.map((d) => series.reduce((sum, s) => sum + (Number(d.values?.[s.key]) || 0), 0));
   const max = Math.max(...totals, 1);
 
   const bars = (
@@ -32,11 +44,9 @@ export default function MiniBarChart({
         </>
       )}
       {data.map((d, i) => {
-        const p = Number(d.primary) || 0;
-        const s = Number(d.secondary) || 0;
-        const total = p + s;
+        const total = totals[i];
         const hPct = (total / max) * 100;
-        const pPct = total > 0 ? (p / total) * 100 : 0;
+        const nonzero = series.filter((s) => (Number(d.values?.[s.key]) || 0) > 0);
         return (
           <div key={`${d.label}-${i}`} className="group relative flex h-full flex-1 items-end justify-center">
             <div
@@ -44,25 +54,32 @@ export default function MiniBarChart({
               style={{ height: `${Math.max(hPct, 1.5)}%` }}
             >
               {total > 0 && (
-                <>
-                  <div className="w-full bg-emerald-400" style={{ height: `${100 - pPct}%` }} />
-                  <div className="w-full bg-blue-500" style={{ height: `${pPct}%` }} />
-                </>
+                // 自下而上按 series 顺序堆叠（flex-col-reverse：首个 series 贴底）
+                <div className="flex h-full w-full flex-col-reverse">
+                  {nonzero.map((s) => (
+                    <div
+                      key={s.key}
+                      className={`w-full ${s.color}`}
+                      style={{ height: `${((Number(d.values[s.key]) || 0) / total) * 100}%` }}
+                    />
+                  ))}
+                </div>
               )}
             </div>
             {total > 0 && (
               <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-zinc-200 bg-surface px-2 py-1 text-[11px] leading-relaxed shadow-lg group-hover:block">
                 <div className="text-zinc-400">{d.tip ?? d.label}</div>
-                {s > 0 && (
-                  <div className="text-zinc-600">
-                    <span className="mr-1 inline-block h-1.5 w-1.5 rounded-sm bg-emerald-400 align-middle" />
-                    {secondaryLabel} {formatValue(s)}
+                {nonzero.map((s) => (
+                  <div key={s.key} className="text-zinc-600">
+                    <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-sm ${s.color} align-middle`} />
+                    {s.label} {formatValue(Number(d.values[s.key]))}
+                  </div>
+                ))}
+                {totalLabel && (
+                  <div className="font-medium text-zinc-800">
+                    {totalLabel} {formatValue(total)}
                   </div>
                 )}
-                <div className="font-medium text-zinc-800">
-                  <span className="mr-1 inline-block h-1.5 w-1.5 rounded-sm bg-blue-500 align-middle" />
-                  {primaryLabel} {formatValue(p)}
-                </div>
               </div>
             )}
           </div>

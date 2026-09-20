@@ -102,8 +102,9 @@ async function getMyUsageByProject(userId, { days } = {}) {
 }
 
 /**
- * 按模型分组的日桶行 → 按天聚合 tokens + 目录 USD 单价估算费用。
+ * 按模型+agent 分组的日桶行 → 按天聚合 tokens + 目录 USD 单价估算费用。
  * 未定价模型（目录无该 model）计 0，不影响其他模型。
+ * 返回每日附 costByAgent：agent → 当日估算费用（USD），供费用日趋势按 agent 堆叠展示。
  */
 function trendFromModelRows(rows, { days: d }) {
     const catalog = fetchModelCatalog();
@@ -119,16 +120,20 @@ function trendFromModelRows(rows, { days: d }) {
         const prompt = Number(r.prompt || 0);
         const completion = Number(r.completion || 0);
         const cached = Number(r.cached || 0);
-        const acc = byBucket.get(bucket) || { prompt: 0, completion: 0, total: 0, requests: 0, costUsd: 0 };
+        const acc = byBucket.get(bucket) || { prompt: 0, completion: 0, total: 0, requests: 0, costUsd: 0, costByAgent: {} };
         acc.prompt += prompt;
         acc.completion += completion;
         acc.total += Number(r.total || 0);
         acc.requests += Number(r.requests || 0);
         const unit = unitOf(r.model);
         if (unit) {
-            acc.costUsd += (prompt / 1e6) * (unit.input ?? 0)
+            const cost = (prompt / 1e6) * (unit.input ?? 0)
                 + (completion / 1e6) * (unit.output ?? 0)
                 + (cached / 1e6) * (unit.cache_read ?? 0);
+            acc.costUsd += cost;
+            // agent 维度费用拆分（agentId 为 null 的历史行归入 (unknown)，与 getUsageByAgent 口径一致）
+            const agentKey = r.agent ?? '(unknown)';
+            acc.costByAgent[agentKey] = (acc.costByAgent[agentKey] || 0) + cost;
         }
         byBucket.set(bucket, acc);
     }
@@ -144,14 +149,18 @@ function trendFromModelRows(rows, { days: d }) {
             totalTokens: Number(r?.total || 0),
             requests: Number(r?.requests || 0),
             costUsd: Number((r?.costUsd || 0).toFixed(4)),
+            costByAgent: Object.fromEntries(
+                Object.entries(r?.costByAgent || {}).map(([k, v]) => [k, Number(v.toFixed(4))]),
+            ),
         });
     }
     return out;
 }
 
 /**
- * 本人按天趋势（补齐无数据日为 0，便于前端直接画图）。含目录单价估算的 USD 费用。
- * @returns {Promise<Array<{ day:string, totalTokens:number, requests:number, costUsd:number }>>}
+ * 本人按天趋势（补齐无数据日为 0，便于前端直接画图）。含目录单价估算的 USD 费用
+ * （costUsd 总量 + costByAgent 按 agent 拆分）。
+ * @returns {Promise<Array<{ day:string, totalTokens:number, requests:number, costUsd:number, costByAgent:Record<string,number> }>>}
  */
 async function getMyUsageTrend(userId, { days } = {}) {
     const { days: d, sinceTs } = normalizeRange(days);
@@ -162,6 +171,7 @@ async function getMyUsageTrend(userId, { days } = {}) {
         .select({
             bucket: bucketExpr,
             model: schema.llmUsage.model,
+            agent: schema.llmUsage.agentId,
             prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
             completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
             total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
@@ -170,7 +180,7 @@ async function getMyUsageTrend(userId, { days } = {}) {
         })
         .from(schema.llmUsage)
         .where(and(eq(schema.llmUsage.userId, userId), gte(schema.llmUsage.createdAt, sinceTs)))
-        .groupBy(bucketExpr, schema.llmUsage.model);
+        .groupBy(bucketExpr, schema.llmUsage.model, schema.llmUsage.agentId);
     return trendFromModelRows(rows, { days: d });
 }
 
@@ -338,6 +348,7 @@ async function getPlatformOverview({ days } = {}) {
             .select({
                 bucket: bucketExpr,
                 model: schema.llmUsage.model,
+                agent: schema.llmUsage.agentId,
                 prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
                 completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
                 total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
@@ -346,7 +357,7 @@ async function getPlatformOverview({ days } = {}) {
             })
             .from(schema.llmUsage)
             .where(gte(schema.llmUsage.createdAt, sinceTs))
-            .groupBy(bucketExpr, schema.llmUsage.model),
+            .groupBy(bucketExpr, schema.llmUsage.model, schema.llmUsage.agentId),
         getUsageByUser({ days }),
         getUsageByAgent({ days }),
     ]);

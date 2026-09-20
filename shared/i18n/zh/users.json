@@ -80,6 +80,7 @@
     "tokens_per_user": "人均 Token",
     "trend": "日趋势",
     "cost_trend": "费用日趋势",
+    "cost_total": "合计",
     "ranking": "用户排行",
     "user": "用户",
     "share": "占比",

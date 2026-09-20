@@ -7,7 +7,7 @@ import PageHeader from '../components/PageHeader';
 import SelectMenu from '../components/SelectMenu';
 import MultiSelectMenu from '../components/MultiSelectMenu';
 import UserUsageDialog from '../components/usage/UserUsageDialog';
-import MiniBarChart from '../components/usage/MiniBarChart';
+import MiniBarChart, { SERIES_COLORS } from '../components/usage/MiniBarChart';
 import {
   consoleAdminPageClass,
   consoleAdminTableScrollClass,
@@ -127,11 +127,32 @@ export default function UsageAdmin() {
     () => (overview?.trend || []).map((d) => ({
       label: d.day,
       tip: d.day,
-      primary: d.promptTokens || 0,
-      secondary: d.completionTokens || 0,
+      values: { prompt: d.promptTokens || 0, completion: d.completionTokens || 0 },
     })),
     [overview],
   );
+
+  // 费用日趋势按 agent 堆叠：取区间内累计费用 Top N（= SERIES_COLORS 长度）的 agent
+  const agentCostSeries = useMemo(() => {
+    const totals = new Map();
+    for (const d of overview?.trend || []) {
+      for (const [k, v] of Object.entries(d.costByAgent || {})) {
+        totals.set(k, (totals.get(k) || 0) + (Number(v) || 0));
+      }
+    }
+    return [...totals.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, SERIES_COLORS.length)
+      .map(([key], i) => ({ key, label: key, color: SERIES_COLORS[i] }));
+  }, [overview]);
+
+  // 兜底：后端未返回 costByAgent（旧版服务端）时退回单一总量序列，仅展示合计
+  const hasCostByAgent = (overview?.trend || []).some((d) => d.costByAgent && Object.keys(d.costByAgent).length > 0);
+  const costSeries = hasCostByAgent
+    ? agentCostSeries
+    : (overview?.trend || []).some((d) => (d.costUsd || 0) > 0)
+      ? [{ key: 'total', label: t('users:usage.cost_total'), color: SERIES_COLORS[0] }]
+      : [];
 
   const toggleExpand = (userId) => setExpandedUserId((prev) => (prev === userId ? null : userId));
 
@@ -187,28 +208,52 @@ export default function UsageAdmin() {
             />
           </div>
 
-          {/* 平台日趋势：左 Token（含横纵坐标）/ 右 费用 */}
+          {/* 平台日趋势：左 Token（输入/输出两段）/ 右 费用（按 agent 堆叠） */}
           <section>
-            <div className="mb-2 flex items-center gap-4">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.trend')}</h2>
-              <span className="flex items-center gap-1 text-[11px] text-zinc-400">
-                <span className="inline-block h-1.5 w-1.5 rounded-sm bg-blue-500" /> {t('users:usage.prompt')}
-              </span>
-              <span className="flex items-center gap-1 text-[11px] text-zinc-400">
-                <span className="inline-block h-1.5 w-1.5 rounded-sm bg-emerald-400" /> {t('users:usage.completion')}
-              </span>
-            </div>
+            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.trend')}</h2>
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               <div className="rounded-lg border border-zinc-200 bg-surface px-3 py-4">
-                <MiniBarChart data={trendData} height={104} showAxes formatValue={formatTokens} />
+                <div className="mb-2 flex items-center gap-3">
+                  <span className="flex items-center gap-1 text-[11px] text-zinc-400">
+                    <span className="inline-block h-1.5 w-1.5 rounded-sm bg-blue-500" /> {t('users:usage.prompt')}
+                  </span>
+                  <span className="flex items-center gap-1 text-[11px] text-zinc-400">
+                    <span className="inline-block h-1.5 w-1.5 rounded-sm bg-emerald-400" /> {t('users:usage.completion')}
+                  </span>
+                </div>
+                <MiniBarChart
+                  data={trendData}
+                  height={104}
+                  showAxes
+                  formatValue={formatTokens}
+                  series={[
+                    { key: 'prompt', label: t('users:usage.prompt'), color: 'bg-blue-500' },
+                    { key: 'completion', label: t('users:usage.completion'), color: 'bg-emerald-400' },
+                  ]}
+                />
               </div>
               <div className="rounded-lg border border-zinc-200 bg-surface px-3 py-4">
+                {agentCostSeries.length > 0 && (
+                  <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {agentCostSeries.map((s) => (
+                      <span key={s.key} className="flex items-center gap-1 text-[11px] text-zinc-400">
+                        <span className={`inline-block h-1.5 w-1.5 rounded-sm ${s.color}`} /> {s.label}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <MiniBarChart
-                  data={(overview?.trend || []).map((d) => ({ label: d.day, tip: d.day, primary: d.costUsd || 0 }))}
+                  data={(overview?.trend || []).map((d) => ({
+                    label: d.day,
+                    tip: d.day,
+                    // 旧版服务端无 costByAgent → 退回单一总量段
+                    values: d.costByAgent || { total: d.costUsd || 0 },
+                  }))}
                   height={104}
                   showAxes
                   formatValue={(v) => `$${Number(v).toFixed(2)}`}
-                  primaryLabel={t('users:usage.cost_trend')}
+                  series={costSeries}
+                  totalLabel={hasCostByAgent ? t('users:usage.cost_total') : undefined}
                 />
               </div>
             </div>
@@ -216,7 +261,7 @@ export default function UsageAdmin() {
 
           {/* 用户排行 */}
           <section className="flex min-h-48 flex-1 flex-col">
-            <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.ranking')}</h2>
               <div className="relative w-56">
                 <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
@@ -281,7 +326,7 @@ export default function UsageAdmin() {
                           {q ? t('users:empty.no_match', { defaultValue: 'No users match your search.' }) : t('users:usage.no_data')}
                         </td>
                       </tr>
-                    ) : visibleRows.map((u, idx) => {
+                    ) : visibleRows.map((u) => {
                       const share = platformTotal > 0 ? Math.round((u.totalTokens / platformTotal) * 100) : 0;
                       const expanded = expandedUserId === u.userId;
                       return (
@@ -332,9 +377,10 @@ export default function UsageAdmin() {
             </div>
           </section>
 
-          {/* Agent 分布（含缓存命中率） */}
-          <section className="shrink-0">
-            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.by_agent')}</h2>
+          {/* Agent 分布（含缓存命中率）：与上方用户排行等权重平分剩余高度，
+              行数多时在表体滚动，避免 agent 表挤占排行表空间 */}
+          <section className="flex min-h-48 flex-1 flex-col">
+            <h2 className="mb-2 shrink-0 text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.by_agent')}</h2>
             <div className={consoleAdminTableShellClass}>
               <div className={consoleTableHeadBandClass}>
                 <table className="w-full table-fixed border-collapse text-left text-sm">
@@ -358,7 +404,7 @@ export default function UsageAdmin() {
                   </thead>
                 </table>
               </div>
-              <div className={`${consoleAdminTableScrollClass} max-h-64`}>
+              <div className={consoleAdminTableScrollClass}>
                 <table className="w-full table-fixed border-collapse text-left text-sm">
                   <colgroup>
                     <col className="w-1/6" />

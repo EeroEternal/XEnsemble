@@ -76,10 +76,14 @@ export default function UserUsageDialog({ userId, days = 30, onClose }) {
                   data={(detail.trend || []).map((d) => ({
                     label: d.day,
                     tip: d.day,
-                    primary: d.promptTokens || 0,
-                    secondary: d.completionTokens || 0,
+                    values: { prompt: d.promptTokens || 0, completion: d.completionTokens || 0 },
                   }))}
                   height={88}
+                  series={[
+                    { key: 'prompt', label: t('users:usage.prompt'), color: 'bg-blue-500' },
+                    { key: 'completion', label: t('users:usage.completion'), color: 'bg-emerald-400' },
+                  ]}
+                  totalLabel={t('users:usage.total_tokens')}
                 />
               </div>
             </div>
