@@ -15,8 +15,12 @@ const schema = require('../db/schema');
 const analyzeClient = require('../llm/analyzeClient');
 const { slugify } = require('./skillInjector');
 
-const EXTRACT_MAX_TOKENS = 1500;
-const DEDUP_MAX_TOKENS = 10;
+// 推理模型（如 GLM-5）的思维链与正文共享 max_tokens，预算过小会导致正文 JSON 被截断。
+// 实测长会话下 1500 必截断、4096 稳定；chatJson 另有截断放大重试兜底。
+const EXTRACT_MAX_TOKENS = 4096;
+// 判重只需输出极短 JSON；但 10 个 token 会被思维链耗尽导致 content 为空，
+// 使判重静默失效，故给足余量。
+const DEDUP_MAX_TOKENS = 256;
 const TITLE_SIMILARITY_THRESHOLD = 0.85;
 const MAX_TAGS = 10;
 const MAX_TITLE = 100;
@@ -32,19 +36,53 @@ const SCRIPT_EXT_RE = /\.(sh|bash|py|js|mjs|ts|ps1|sql)$/;
 // 判定为"命令型工具"的 tool 名（转小写比对）
 const COMMAND_TOOLS = new Set(['bash', 'shell', 'terminal', 'run_shell', 'command']);
 
+// turns 渲染预算：工具入参/结果单条截断，整体按字节预算保留最近若干 turn。
+// 只渲染工具名会丢失真实操作细节（edit 改了什么、read 读到什么、grep 命中什么），
+// 使提炼出的 skill 沦为"摘要的摘要"；补全后再用预算裁剪控制 prompt 规模。
+const TOOL_ARG_CHARS = 1200;
+const TOOL_RESULT_CHARS = 1200;
+// 实测：24K 与 48K 均能成功，但 48K 单次时延约 15-20s，24K 更稳更快，
+// 且足以覆盖最近的关键操作（更早的 turn 已被"从最早丢弃"策略省略）。
+const PROMPT_CHAR_BUDGET = 24000;
+
 // ---------------------------------------------------------------------------
 // Prompt construction
 // ---------------------------------------------------------------------------
 
-function renderTurns(turns) {
-    return (turns || [])
-        .map((t, i) => {
-            const tools = t.tools && t.tools.length
-                ? ` [tools: ${t.tools.map((x) => (typeof x === 'string' ? x : x.tool || 'tool')).join(', ')}]`
-                : '';
-            return `#${i + 1} ${t.role}${tools}: ${t.text}`;
-        })
-        .join('\n');
+function clip(text, max) {
+    const s = String(text ?? '').replace(/\r\n/g, '\n').trim();
+    return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+function renderTurn(turn, index) {
+    const tools = Array.isArray(turn.tools) ? turn.tools : [];
+    const head = `#${index + 1} ${turn.role}: ${turn.text}`;
+    if (!tools.length) return head;
+    const rendered = tools.map((t) => {
+        const name = typeof t === 'string' ? t : (t.tool || 'tool');
+        if (typeof t === 'string') return `  [tool ${name}]`;
+        const args = t.args ? `\n    args: ${clip(typeof t.args === 'string' ? t.args : JSON.stringify(t.args), TOOL_ARG_CHARS)}` : '';
+        const result = t.result ? `\n    result: ${clip(t.result, TOOL_RESULT_CHARS)}` : '';
+        return `  [tool ${name}]${args}${result}`;
+    });
+    return `${head}\n${rendered.join('\n')}`;
+}
+
+/**
+ * 渲染 turns，并保证总长不超过 budget（超出则从最早 turn 开始丢弃，
+ * 保留最近的上下文）。
+ */
+function renderTurns(turns, budget = PROMPT_CHAR_BUDGET) {
+    const list = turns || [];
+    const rendered = list.map((t, i) => renderTurn(t, i));
+    let total = rendered.reduce((n, s) => n + s.length + 1, 0);
+    let start = 0;
+    while (start < rendered.length - 1 && total > budget) {
+        total -= rendered[start].length + 1;
+        start += 1;
+    }
+    const omitted = start > 0 ? `… (${start} earlier turns omitted)\n` : '';
+    return omitted + rendered.slice(start).join('\n');
 }
 
 /**
@@ -82,14 +120,7 @@ function collectCommands(turns) {
 }
 
 function buildExtractPrompt({ overview, keyDecisions = [], filesTouched = [], turns = [], commands = [] }) {
-    const commandLines = commands.length > 0
-        ? [
-            '',
-            'Executed commands (in order, with output snippets; decide which are reproducible and package them into scripts):',
-            ...commands.map((c, i) => `  #${i + 1} $ ${c.command}${c.result ? `\n  → ${c.result}` : ''}`),
-        ]
-        : [];
-    return [
+    const header = [
         'You are extracting a reusable skill from a coding session.',
         'Produce a concise, actionable skill that another user could follow to reproduce this procedure.',
         '',
@@ -97,9 +128,9 @@ function buildExtractPrompt({ overview, keyDecisions = [], filesTouched = [], tu
         keyDecisions.length ? `Key decisions: ${keyDecisions.join('; ')}` : '',
         filesTouched.length ? `Files touched: ${filesTouched.join(', ')}` : '',
         '',
-        'Conversation turns:',
-        renderTurns(turns),
-        ...commandLines,
+    ].filter(Boolean);
+
+    const footer = [
         '',
         'Respond with ONLY a JSON object:',
         '{',
@@ -110,7 +141,37 @@ function buildExtractPrompt({ overview, keyDecisions = [], filesTouched = [], tu
         '  "confidence": 0.0-1.0',
         '}',
         'Rules: write in the SAME LANGUAGE as the conversation; no markdown fences around the JSON.',
-    ].join('\n');
+    ];
+
+    // 固定段落（header/footer）先占额，剩余预算按 commands : turns = 1 : 2 分配，
+    // 保证整条 prompt 不超 PROMPT_CHAR_BUDGET。
+    const fixedLen = header.concat(footer).join('\n').length;
+    const remaining = Math.max(4000, PROMPT_CHAR_BUDGET - fixedLen);
+    const commandBudget = Math.floor(remaining / 3);
+    const turnsBudget = remaining - commandBudget;
+
+    const commandLines = [];
+    if (commands.length > 0) {
+        const lines = [
+            '',
+            'Executed commands (in order, with output snippets; decide which are reproducible and package them into scripts):',
+        ];
+        let used = 0;
+        for (let i = 0; i < commands.length; i += 1) {
+            const c = commands[i];
+            const line = `  #${i + 1} $ ${c.command}${c.result ? `\n  → ${c.result}` : ''}`;
+            if (used + line.length > commandBudget) break;
+            used += line.length + 1;
+            lines.push(line);
+        }
+        if (lines.length > 2) commandLines.push(...lines);
+    }
+
+    return header.concat(
+        ['Conversation turns:', renderTurns(turns, turnsBudget)],
+        commandLines,
+        footer,
+    ).join('\n');
 }
 
 /**

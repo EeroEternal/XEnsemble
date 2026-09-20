@@ -20,8 +20,13 @@
  * 每 session 保留的最大事件条数（内存 buffer 与 DB 历史读取共用）。
  * 超出后丢最旧、保留最新——对话视图按 HISTORY_PAGE_SIZE=50/页游标翻页，
  * 500 条 ≈ 10 页完整历史，足够回溯且控制首屏/传输体积。
+ *
+ * 可用 CHAT_TRANSCRIPT_MAX_EVENTS 调高（如长会话需更完整的历史用于 skill 提炼）；
+ * trajectory 是更完整的源（无此上限），提炼路径已优先使用它。
  */
-const MAX_EVENTS_PER_SESSION = 500;
+const MAX_EVENTS_PER_SESSION = Number(process.env.CHAT_TRANSCRIPT_MAX_EVENTS) > 0
+    ? Math.floor(Number(process.env.CHAT_TRANSCRIPT_MAX_EVENTS))
+    : 500;
 
 const buffers = new Map(); // sessionId -> { events: [], subscribers: Set<fn>, nextSeq, seeded }
 const globalSubscribers = new Set(); // 进程级订阅（attentionService 挂 L1 钩子用）

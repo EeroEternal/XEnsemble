@@ -1,13 +1,16 @@
 /**
  * Skill classifier (L3) —— 轻量 LLM 分类，过滤闲聊 / 一次性任务。
  *
- * 设计对齐 02-技术设计规格 §4：max_tokens ≈ 10，输出 {"reusable":bool,"type":"..."}。
+ * 设计对齐 02-技术设计规格 §4：输出 {"reusable":bool,"type":"..."}。
  * reusable=true 才进入 L4；否则候选标记 rejected(low_value)。
+ *
+ * 注意：max_tokens 不能取规格里"≈10"的字面值——推理模型的思维链与正文共享该额度，
+ * 10 个 token 会被思维链耗尽导致 content 为空，使分类静默失效。
  */
 
 const analyzeClient = require('../llm/analyzeClient');
 
-const CLASSIFY_MAX_TOKENS = 10;
+const CLASSIFY_MAX_TOKENS = 256;
 
 function buildClassifyPrompt({ overview, keyDecisions = [], filesTouched = [] }) {
     return [

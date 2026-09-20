@@ -21,7 +21,12 @@ const chatTranscript = require('../llm/chatTranscript');
 const extractor = require('./conversationExtractor');
 
 const MAX_FILES_TOUCHED = 20;
-const SUMMARY_MAX_TOKENS = 2000;
+// 推理模型的思维链与正文共享 max_tokens，2000 在长会话下易被思维链吃光导致截断。
+const SUMMARY_MAX_TOKENS = 4096;
+// 摘要 prompt 的 turns 渲染预算：单条 turn 文本最长 TURN_MAX_BYTES(8KB)，
+// 100 条理论可达 ~800KB，会直接撑爆上下文。超出则从最早 turn 开始丢弃，
+// 保留最近的对话（与 skillExtractor 的 renderTurns 同策略）。
+const SUMMARY_PROMPT_CHAR_BUDGET = 24000;
 
 // ---------------------------------------------------------------------------
 // Prompt construction
@@ -41,14 +46,20 @@ const OUTPUT_SPEC = [
 ].join('\n');
 
 function renderTurns(turns) {
-    return turns
-        .map((t, i) => {
-            const tools = t.tools && t.tools.length
-                ? ` [tools: ${t.tools.map((x) => (typeof x === 'string' ? x : x.tool || 'tool')).join(', ')}]`
-                : '';
-            return `#${i + 1} ${t.role}${tools}: ${t.text}`;
-        })
-        .join('\n');
+    const rendered = turns.map((t, i) => {
+        const tools = t.tools && t.tools.length
+            ? ` [tools: ${t.tools.map((x) => (typeof x === 'string' ? x : x.tool || 'tool')).join(', ')}]`
+            : '';
+        return `#${i + 1} ${t.role}${tools}: ${t.text}`;
+    });
+    let total = rendered.reduce((n, s) => n + s.length + 1, 0);
+    let start = 0;
+    while (start < rendered.length - 1 && total > SUMMARY_PROMPT_CHAR_BUDGET) {
+        total -= rendered[start].length + 1;
+        start += 1;
+    }
+    const omitted = start > 0 ? `… (${start} earlier turns omitted)\n` : '';
+    return omitted + rendered.slice(start).join('\n');
 }
 
 function buildFullPrompt(turns) {
@@ -342,10 +353,10 @@ async function persistTurns(sessionId, turns, lastSummarizedSeq, source) {
 /**
  * Read the conversation view for API responses.
  *
- * Turns are served live from the structured chat transcript (A) and only
- * fall back to the stored turns when no chat transcript exists (e.g. old
- * sessions). The summary (overview / keyDecisions / filesTouched) comes from
- * the stored row (B).
+ * Turns are served live, preferring the trajectory (0029) — the same source
+ * summarizeSession uses — so the summary (overview/keyDecisions/filesTouched)
+ * and the turns handed to skill extraction describe the same facts. Falls back
+ * to the structured chat transcript, then to the stored turns.
  *
  * P3：真正分页——offset/limit 对 turns 切片，返回 total/hasMore，前端可逐页加载。
  *
@@ -361,17 +372,31 @@ async function getConversation(sessionId, { offset = 0, limit = null } = {}) {
     let turns = [];
     let source = row?.source || 'transcript';
     try {
-        const history = await chatTranscript.getHistory(sessionId);
-        if (Array.isArray(history) && history.length > 0) {
-            // 不在此处截断（maxTurns=null 关闭 100 条 cap），分页由下方统一处理
-            const chat = extractor.extractFromChat(history, 0, { maxTurns: null });
-            if (chat.turns.length > 0) {
-                turns = chat.turns;
-                source = 'chat';
+        const steps = await require('../llm/trajectory').getAllSteps(sessionId);
+        if (Array.isArray(steps) && steps.length > 0) {
+            // 不在此处截断（maxTurns=null），分页由下方统一处理
+            const traj = extractor.extractFromTrajectory(steps, { maxTurns: null });
+            if (traj.turns.length > 0) {
+                turns = traj.turns;
+                source = 'trajectory';
             }
         }
     } catch (_) {
-        // fall through to stored turns below
+        // fall through to chat transcript below
+    }
+    if (turns.length === 0) {
+        try {
+            const history = await chatTranscript.getHistory(sessionId);
+            if (Array.isArray(history) && history.length > 0) {
+                const chat = extractor.extractFromChat(history, 0, { maxTurns: null });
+                if (chat.turns.length > 0) {
+                    turns = chat.turns;
+                    source = 'chat';
+                }
+            }
+        } catch (_) {
+            // fall through to stored turns below
+        }
     }
     if (turns.length === 0 && row && Array.isArray(row.turns)) {
         turns = row.turns;
