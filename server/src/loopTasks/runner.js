@@ -308,47 +308,69 @@ async function executeRun(task, run, log = console) {
 
         if (reviewMode) {
             // 注入任务指令（镜像 /terminal/input：写 PTY + 落转录 + 触碰活动戳）。
-            // 延迟 3s 等 CLI 就绪；PTY 行缓冲会兜住时序抖动。
-            setTimeout(() => {
-                if (settled) return;
-                try {
-                    const live = sessionManager.getSession(sessionId);
-                    const text = `${task.prompt}\r`;
-                    if (live?.transcriptRef) {
-                        transcriptStore.append(live.transcriptRef, { kind: 'in', data: text });
+            // 等 TUI 首帧绘制（lastOutputAt 非空）再等 2s 才写入——过早写入会被
+            // 未就绪的输入框整个吞掉；多行指令压成单行，裸换行会被 TUI 当回车
+            // 逐行提交，任务会被拆碎。
+            let injectedAt = null;
+            const injectDeadline = Date.now() + 30_000;
+            const injectPoll = setInterval(() => {
+                if (settled) { clearInterval(injectPoll); return; }
+                const live = sessionManager.getSession(sessionId);
+                if (!live) { clearInterval(injectPoll); return; }
+                if (!live.lastOutputAt && Date.now() < injectDeadline) return; // 等 TUI 首帧
+                clearInterval(injectPoll);
+                setTimeout(() => {
+                    if (settled) return;
+                    try {
+                        const cur = sessionManager.getSession(sessionId);
+                        const text = `${String(task.prompt).replace(/\r?\n+/g, " ")}\r`;
+                        if (cur?.transcriptRef) {
+                            transcriptStore.append(cur.transcriptRef, { kind: "in", data: text });
+                        }
+                        cur?.handle?.write(text);
+                        sessionManager.touchActivity(sessionId, "input");
+                        injectedAt = Date.now();
+                    } catch (err) {
+                        log.warn?.({ err, sessionId }, "[loop-task-runner] failed to inject review prompt");
                     }
-                    live?.handle?.write(text);
-                    sessionManager.touchActivity(sessionId, 'input');
-                } catch (err) {
-                    log.warn?.({ err, sessionId }, '[loop-task-runner] failed to inject review prompt');
-                }
-            }, 3_000);
+                }, 2_000);
+            }, 1_000);
 
-            // 静默检测本轮任务结束：进程存活且输出静默 TURN_IDLE_MS（至少跑满
-            // TURN_MIN_MS）即认为干完活 → run 进入 awaiting_review（结果落库、
-            // finishedAt 不写、不算终态不占并发闸），会话保持存活等人。
-            // 人工通过/打回走 completeReviewRun；超过 REVIEW_TIMEOUT_MS 由
-            // tick 的 sweepReviewTimeouts 自动按 succeeded 收口。
-            const injectedAt = Date.now();
+            // 静默检测本轮任务结束（headless 靠进程退出，交互式只能靠静默启发式）：
+            //   ① 注入之后必须出现过新的 agent 输出（lastOutputAt > injectedAt）——
+            //      TUI 首帧的静默不算开工；注入被吞/agent 没真正启动时保持 running
+            //      直到执行超时，超时会抓终端尾打进 error，便于定位。
+            //   ② 开工后输出静默 TURN_IDLE_MS（至少距注入 TURN_MIN_MS）→ 认为干完
+            //      活，进入 awaiting_review 等人。
+            let warnedNoStart = false;
             reviewPoll = setInterval(() => {
                 if (settled) { clearInterval(reviewPoll); reviewPoll = null; return; }
+                if (injectedAt == null) return;
                 const live = sessionManager.getSession(sessionId);
                 if (!live) return;
                 const now = Date.now();
                 if (now - injectedAt < TURN_MIN_MS) return;
+                const started = Number(live.lastOutputAt || 0) > injectedAt;
                 const lastOut = Number(live.lastOutputAt || live.lastActivityAt || injectedAt);
                 if (now - lastOut < TURN_IDLE_MS) return;
+                if (!started) {
+                    if (!warnedNoStart) {
+                        warnedNoStart = true;
+                        log.warn?.(`[loop-task-runner] run ${runId}: no agent output after prompt injection — keep running until timeout (terminal tail will be captured)`);
+                    }
+                    return;
+                }
                 clearInterval(reviewPoll);
                 reviewPoll = null;
                 void (async () => {
                     try {
                         const result = await extractRunResult(sessionId);
                         if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
-                        await updateRun(runId, { status: 'awaiting_review', result, reviewStartedAt: Date.now() });
-                        broadcastRun(run, { status: 'awaiting_review' });
+                        await updateRun(runId, { status: "awaiting_review", result, reviewStartedAt: Date.now() });
+                        broadcastRun(run, { status: "awaiting_review" });
                         log.log?.(`[loop-task-runner] run ${runId} (task "${task.title}") → awaiting_review (session ${sessionId} kept alive for human review)`);
                     } catch (err) {
-                        log.warn?.({ err, runId }, '[loop-task-runner] failed to enter awaiting_review');
+                        log.warn?.({ err, runId }, "[loop-task-runner] failed to enter awaiting_review");
                     }
                 })();
             }, TURN_POLL_MS);
