@@ -615,6 +615,11 @@ async function createAgentSession({
                     });
                     const retryTaskRunArgs = taskPrompt ? getTaskRunArgs(agentMeta.id, taskPrompt, { autoApprove: taskAutoApprove }) : null;
                     const retryRemoveArgs = taskPrompt ? getTaskRunRemoveArgs(agentMeta.id) : [];
+                    // 与主路径一致：复核模式（无 taskPrompt + taskAutoApprove）交互式
+                    // 拉起也要带自动批准 flag，否则重试拉起的会话丢权限配置
+                    const retryInteractiveAutoApproveArgs = (!taskPrompt && taskAutoApprove)
+                        ? getAutoApproveArgs(agentMeta.id)
+                        : [];
                     const retryBaseAgentArgs = retryRemoveArgs.length
                         ? agentMeta.args.filter((a) => !retryRemoveArgs.includes(a))
                         : agentMeta.args;
@@ -626,7 +631,7 @@ async function createAgentSession({
                             stateArgs: retryStateArgs,
                             baseArgs: retryBaseAgentArgs,
                             append: retrySpawnArgs.append,
-                            taskArgs: retryTaskRunArgs || [],
+                            taskArgs: [...(retryTaskRunArgs || []), ...retryInteractiveAutoApproveArgs],
                         }),
                         resolved.env,
                         spawnOpts,
