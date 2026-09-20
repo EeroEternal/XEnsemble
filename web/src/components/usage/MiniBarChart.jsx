@@ -39,8 +39,13 @@ export default function MiniBarChart({
     <div className="relative flex items-end gap-[2px]" style={{ height }}>
       {showAxes && (
         <>
+          {/* 横向网格线：顶部 / 1/2 处（与左轴 max、max/2 刻度对齐，虚线弱化） */}
           <div className="pointer-events-none absolute inset-x-0 top-0 border-t border-dashed border-zinc-200" />
           <div className="pointer-events-none absolute inset-x-0 top-1/2 border-t border-dashed border-zinc-100" />
+          {/* X 轴基线：柱底水平实线（与左轴 0 刻度对齐） */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 border-t border-zinc-200" />
+          {/* Y 轴：左侧竖线，与刻度数字列相接 */}
+          <div className="pointer-events-none absolute inset-y-0 left-0 border-l border-zinc-200" />
         </>
       )}
       {data.map((d, i) => {
