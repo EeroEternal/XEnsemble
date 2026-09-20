@@ -88,6 +88,7 @@ function serializeTask(row, locale = 'en', lastRun = null) {
         prompt: row.prompt,
         agentId: row.agentId ?? null,
         autoApprove: row.autoApprove !== false,
+        requireReview: row.requireReview === true,
         holidayAware: row.holidayAware === true,
         scheduleKind: row.scheduleKind || 'cron',
         cronExpr: row.cronExpr,
