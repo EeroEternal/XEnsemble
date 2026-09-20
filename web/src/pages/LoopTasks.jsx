@@ -246,7 +246,8 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
       projectId: task.projectId,
       prompt: task.prompt,
       agentId: task.agentId || '',
-      autoApprove: task.autoApprove !== false,
+      // 旧数据可能存在「自动结束 + 手动确认」的非法组合，预填时归一化为自动批准
+      autoApprove: task.requireReview === false ? true : (task.autoApprove !== false),
       requireReview: task.requireReview === true,
       ...scheduleToForm(task),
       timezone: TIMEZONES.includes(task.timezone) ? task.timezone : 'UTC',
@@ -636,29 +637,28 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                   <SelectMenu value={form.agentId} onChange={(v) => setForm((f) => ({ ...f, agentId: v }))}
                     options={agentOptions} placeholder={t('loopTasks:field.agent_placeholder')} />
                   <div className="flex items-center justify-between gap-4">
-                    <span className="text-xs text-zinc-500">{t('loopTasks:field.auto_approve')}</span>
-                    <div className="w-36">
-                      <SelectMenu value={form.autoApprove ? 'yes' : 'no'}
-                        onChange={(v) => setForm((f) => ({ ...f, autoApprove: v === 'yes' }))}
-                        options={[{ value: 'yes', label: t('loopTasks:auto_approve.yes') }, { value: 'no', label: t('loopTasks:auto_approve.no') }]} />
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
                     <span className="text-xs text-zinc-500">{t('loopTasks:field.require_review')}</span>
                     <div className="w-36">
                       <SelectMenu value={form.requireReview ? 'yes' : 'no'}
-                        onChange={(v) => setForm((f) => ({ ...f, requireReview: v === 'yes' }))}
+                        onChange={(v) => setForm((f) => ({ ...f, requireReview: v === 'yes', autoApprove: v === 'yes' ? f.autoApprove : true }))}
                         options={[{ value: 'yes', label: t('loopTasks:require_review.yes') }, { value: 'no', label: t('loopTasks:require_review.no') }]} />
+                    </div>
+                  </div>
+                  <div
+                    className="flex items-center justify-between gap-4"
+                    title={!form.requireReview ? t('loopTasks:auto_approve.headless_locked') : undefined}
+                  >
+                    <span className="text-xs text-zinc-500">{t('loopTasks:field.auto_approve')}</span>
+                    <div className="w-36">
+                      <SelectMenu value={form.autoApprove ? 'yes' : 'no'}
+                        disabled={!form.requireReview}
+                        onChange={(v) => setForm((f) => ({ ...f, autoApprove: v === 'yes' }))}
+                        options={[{ value: 'yes', label: t('loopTasks:auto_approve.yes') }, { value: 'no', label: t('loopTasks:auto_approve.no') }]} />
                     </div>
                   </div>
                   {form.requireReview && (
                     <p className="text-xs text-zinc-400 leading-relaxed">
                       {t('loopTasks:require_review.hint')}
-                    </p>
-                  )}
-                  {!form.requireReview && !form.autoApprove && (
-                    <p className="text-xs text-amber-600 leading-relaxed">
-                      {t('loopTasks:auto_approve.headless_hint')}
                     </p>
                   )}
                 </div>
