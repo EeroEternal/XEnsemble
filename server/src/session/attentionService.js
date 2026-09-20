@@ -29,6 +29,9 @@ const config = {
     scanThrottleMs: Number(process.env.ATTENTION_SCAN_THROTTLE_MS) || 2000,
     // L3 需要连续几轮扫描都看到 prompt 才通知（稳定窗口，滤掉一闪而过的重绘）
     promptStableScans: Number(process.env.ATTENTION_PROMPT_STABLE_SCANS) || 2,
+    // L3 只在 PTY 输出静止这么久后才开始等待判定：滚动中的正文（编号总结、
+    // 问号句尾、y/n 字样）不是提示。输出帧会不断把扫描推迟到静止点之后。
+    scanQuietMs: Number(process.env.ATTENTION_SCAN_QUIET_MS) || 4000,
     // 参与扫描的 transcript 尾部字节数
     tailBytes: Number(process.env.ATTENTION_SCAN_TAIL_BYTES) || 4096,
     // reason 截断
@@ -276,19 +279,32 @@ function observeOutput(sessionId, transcriptRef) {
     st.lastActivityAt = Date.now();
     clearCompletedTimer(st); // 输出 = agent 还在跑，不算安静完成
     if (transcriptRef) st.transcriptRef = transcriptRef;
+    scheduleScan(sessionId, st, Math.max(0, config.scanThrottleMs - (Date.now() - st.lastScanAt)));
+}
+
+/** 排队一次扫描（scanQueued 防重入；delay 到点后跑 runScan）。 */
+function scheduleScan(sessionId, st, delayMs) {
     if (st.scanQueued) return;
     st.scanQueued = true;
-    const delay = Math.max(0, config.scanThrottleMs - (Date.now() - st.lastScanAt));
     setTimeout(() => {
         st.scanQueued = false;
         runScan(sessionId).catch(() => {});
-    }, delay);
+    }, Math.max(0, delayMs));
 }
 
 async function runScan(sessionId) {
     const st = states.get(sessionId);
     if (!st || !st.transcriptRef) return;
     st.lastScanAt = Date.now();
+    // 输出仍在滚动（或刚停）：尾部是流式正文——编号总结、问号句尾、y/n 字样
+    // 都只是内容，不是等待提示。丢弃半程稳定计数（输出间隙不能跨轮凑满），
+    // 并把本轮扫描推迟到静止点之后；静止后的命中才参与稳定窗口。
+    const elapsedSinceOutput = Date.now() - (st.lastActivityAt || 0);
+    if (config.scanQuietMs > 0 && elapsedSinceOutput < config.scanQuietMs) {
+        st.stableHits = 0;
+        scheduleScan(sessionId, st, config.scanQuietMs - elapsedSinceOutput + config.scanThrottleMs);
+        return;
+    }
     const read = deps.readTailLines || defaultReadTailLines;
     let lines;
     try {
@@ -297,6 +313,15 @@ async function runScan(sessionId) {
         return; // transcript 不可达 → 本轮跳过
     }
     await evaluateLines(sessionId, lines);
+    // 静止后没有新的输出帧来驱动下一轮扫描；命中但稳定窗口未满时续排一轮，
+    // 否则 promptStableScans 永远凑不满（等待中 / 已解除则不续排）。
+    const after = states.get(sessionId);
+    if (after
+        && after.state === 'working'
+        && after.stableHits > 0
+        && after.stableHits < config.promptStableScans) {
+        scheduleScan(sessionId, after, config.scanThrottleMs);
+    }
 }
 
 /** 测试入口：直接喂屏幕行，跑一轮 L3 判定。 */

@@ -160,6 +160,39 @@ test("L3': 无问句上下文的屏幕内容不误报", isolated(async (notifica
     assert.equal(notifications.length, 0);
 }));
 
+test("L3': PTY 输出滚动中不判等待；静止后才累计稳定命中并通知", isolated(async (notifications) => {
+    const promptLines = ['Do you want to proceed?', '1. Yes', '2. No', '❯'];
+    const restoreQuiet = attentionService.__configure({
+        config: { scanQuietMs: 30 },
+        deps: { readTailLines: async () => promptLines },
+    });
+    try {
+        // 场景A：持续输出（每个输出帧都刷新 lastActivityAt）→ 扫描被推迟到静止点，
+        // 半程计数被丢弃，正文里的 prompt 形状不产生等待通知。
+        attentionService.observeOutput('s12', 'local:pty:s12');
+        await tick(10);
+        attentionService.observeOutput('s12', 'local:pty:s12');
+        await tick(10);
+        attentionService.observeOutput('s12', 'local:pty:s12');
+        await tick(5);
+        const during = attentionService.getState('s12');
+        assert.equal(during.state, 'working', '输出滚动中不应判等待');
+        assert.equal(during.stableHits, 0, '滚动中的命中应被丢弃');
+        assert.equal(notifications.length, 0);
+
+        // 场景B：输出停止 ≥ scanQuietMs → 扫描执行，连续两轮命中 → waiting。
+        await tick(120);
+        await tick(); // 通知发射是异步 void,等 flush
+        const st = attentionService.getState('s12');
+        assert.equal(st.state, 'waiting_user');
+        assert.equal(st.source, 'L3');
+        assert.equal(notifications.length, 1);
+        assert.equal(notifications[0].type, 'session_waiting');
+    } finally {
+        restoreQuiet();
+    }
+}));
+
 test("L3': L1 来源的等待不被屏幕扫描解除（生命周期归 L1）", isolated(async (notifications) => {
     attentionService.observeChatEntry('s11', { role: 'tool_call', tool: 'AskUserQuestion', content: QUESTION_ARGS });
     await tick();
