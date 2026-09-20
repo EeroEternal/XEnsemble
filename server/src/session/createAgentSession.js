@@ -315,6 +315,10 @@ async function createAgentSession({
                 cwd: workspacePath,
                 warn: (msg) => log.warn(msg),
             });
+            // 网关自定义模型名（如 personal_glm/glm-5.3-flash）不被 Claude Code 识别，
+            // 新版会对未知模型强制本地 200k 上下文限制并改变请求行为（卡住不发起请求）。
+            // 关掉该强制，恢复「等 API 响应」的旧语义；上下文窗口由真实模型能力决定。
+            resolved.env.CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT = '1';
         }
 
         // Backfill built-in git if create-time initRepo failed (e.g. BoxLite).

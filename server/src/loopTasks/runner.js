@@ -308,38 +308,57 @@ async function executeRun(task, run, log = console) {
 
         if (reviewMode) {
             // 注入任务指令（镜像 /terminal/input：写 PTY + 落转录 + 触碰活动戳）。
-            // 等 TUI 首帧绘制（lastOutputAt 非空）再等 2s 才写入——过早写入会被
-            // 未就绪的输入框整个吞掉；多行指令压成单行，裸换行会被 TUI 当回车
-            // 逐行提交，任务会被拆碎。
+            // 时序：① 等 TUI 首帧（lastOutputAt 非空，60s 强制兜底）；② 等输出静默
+            // ≥3s（启动 spinner 停止 = 引导完成——ink 系 TUI 启动期会丢弃 stdin，
+            // 盲写必被吞，实测 claude-code 停在首页任务不出现）；③ 写入单行指令
+            // + \r（裸换行会被 TUI 当回车逐行提交，任务拆碎）；④ 8s 内无新输出视
+            // 为被吞，重试至多 3 次。
             let injectedAt = null;
-            const injectDeadline = Date.now() + 30_000;
-            const injectPoll = setInterval(() => {
-                if (settled) { clearInterval(injectPoll); return; }
-                const live = sessionManager.getSession(sessionId);
-                if (!live) { clearInterval(injectPoll); return; }
-                if (!live.lastOutputAt && Date.now() < injectDeadline) return; // 等 TUI 首帧
-                clearInterval(injectPoll);
+            let injectAttempts = 0;
+            const bootStart = Date.now();
+            const injectTry = () => {
+                if (settled || injectAttempts >= 3) return;
+                injectAttempts += 1;
+                const cur = sessionManager.getSession(sessionId);
+                if (!cur) return;
+                const text = `${String(task.prompt).replace(/\r?\n+/g, ' ')}\r`;
+                if (cur.transcriptRef) {
+                    transcriptStore.append(cur.transcriptRef, { kind: 'in', data: text });
+                }
+                cur?.handle?.write(text);
+                sessionManager.touchActivity(sessionId, 'input');
+                const before = Number(cur.lastOutputAt || 0);
+                injectedAt = Date.now();
+                // 验证：8s 内出现新输出 → TUI 已接受；否则重试
                 setTimeout(() => {
-                    if (settled) return;
-                    try {
-                        const cur = sessionManager.getSession(sessionId);
-                        const text = `${String(task.prompt).replace(/\r?\n+/g, " ")}\r`;
-                        if (cur?.transcriptRef) {
-                            transcriptStore.append(cur.transcriptRef, { kind: "in", data: text });
-                        }
-                        cur?.handle?.write(text);
-                        sessionManager.touchActivity(sessionId, "input");
-                        injectedAt = Date.now();
-                    } catch (err) {
-                        log.warn?.({ err, sessionId }, "[loop-task-runner] failed to inject review prompt");
-                    }
-                }, 2_000);
+                    if (settled || injectAttempts >= 3) return;
+                    const cur2 = sessionManager.getSession(sessionId);
+                    if (!cur2) return;
+                    if (Number(cur2.lastOutputAt || 0) > before) return;
+                    log.warn?.(`[loop-task-runner] run ${runId}: prompt injection appeared swallowed (no output in 8s), retrying (${injectAttempts}/3)`);
+                    injectTry();
+                }, 8_000);
+            };
+            const bootPoll = setInterval(() => {
+                if (settled) { clearInterval(bootPoll); return; }
+                const live = sessionManager.getSession(sessionId);
+                if (!live) return;
+                const now = Date.now();
+                if (!live.lastOutputAt) {
+                    // 迟迟无首帧也兜底试一次（静默 spawn 场景）
+                    if (now - bootStart > 60_000) { clearInterval(bootPoll); injectTry(); }
+                    return;
+                }
+                if (now - Number(live.lastOutputAt) >= 3_000) {
+                    clearInterval(bootPoll);
+                    injectTry();
+                }
             }, 1_000);
 
             // 静默检测本轮任务结束（headless 靠进程退出，交互式只能靠静默启发式）：
             //   ① 注入之后必须出现过新的 agent 输出（lastOutputAt > injectedAt）——
-            //      TUI 首帧的静默不算开工；注入被吞/agent 没真正启动时保持 running
-            //      直到执行超时，超时会抓终端尾打进 error，便于定位。
+            //      TUI 首帧/启动期的静默不算开工；注入始终被吞时保持 running 直到
+            //      执行超时，超时会抓终端尾打进 error 便于定位。
             //   ② 开工后输出静默 TURN_IDLE_MS（至少距注入 TURN_MIN_MS）→ 认为干完
             //      活，进入 awaiting_review 等人。
             let warnedNoStart = false;
@@ -366,11 +385,11 @@ async function executeRun(task, run, log = console) {
                     try {
                         const result = await extractRunResult(sessionId);
                         if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
-                        await updateRun(runId, { status: "awaiting_review", result, reviewStartedAt: Date.now() });
-                        broadcastRun(run, { status: "awaiting_review" });
+                        await updateRun(runId, { status: 'awaiting_review', result, reviewStartedAt: Date.now() });
+                        broadcastRun(run, { status: 'awaiting_review' });
                         log.log?.(`[loop-task-runner] run ${runId} (task "${task.title}") → awaiting_review (session ${sessionId} kept alive for human review)`);
                     } catch (err) {
-                        log.warn?.({ err, runId }, "[loop-task-runner] failed to enter awaiting_review");
+                        log.warn?.({ err, runId }, '[loop-task-runner] failed to enter awaiting_review');
                     }
                 })();
             }, TURN_POLL_MS);
