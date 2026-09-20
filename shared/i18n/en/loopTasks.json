@@ -45,7 +45,8 @@
     "schedule": "Schedule",
     "time": "Time",
     "timezone": "Timezone",
-    "cron_placeholder": "0 9 * * *"
+    "cron_placeholder": "0 9 * * *",
+    "require_review": "Wait for human on completion"
   },
   "status": {
     "active": "Active",
@@ -94,7 +95,10 @@
     "result": "Result",
     "error": "Error",
     "duration": "Duration",
-    "started": "Started"
+    "started": "Started",
+    "status_awaiting_review": "Awaiting review",
+    "approve": "Approve",
+    "reject": "Reject"
   },
   "run_detail": {
     "back_to_tasks": "Back to tasks",
@@ -116,7 +120,9 @@
     "deleted": "Loop task deleted.",
     "run_started": "Run started.",
     "run_in_progress": "Previous run is still in progress.",
-    "action_failed": "Action failed."
+    "action_failed": "Action failed.",
+    "approved": "Approved. Session closed.",
+    "rejected": "Rejected. Session closed."
   },
   "error": {
     "agent_required": "Please select an agent.",
@@ -126,5 +132,10 @@
     "time_invalid": "Please enter a valid time (HH:mm).",
     "weekday_required": "Select at least one weekday.",
     "required": "Title, workspace, prompt and schedule are required."
+  },
+  "require_review": {
+    "yes": "Wait for human",
+    "no": "Auto-finish",
+    "hint": "The session stays alive after the task finishes instead of exiting. Open it from the sidebar to review, then approve or reject here. Auto-closes as succeeded after 24 hours."
   }
 }

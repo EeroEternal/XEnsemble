@@ -93,5 +93,6 @@
   "custom_image_not_ready": "环境镜像尚未就绪",
   "no_environment_to_install": "该会话没有需要安装的自定义环境",
   "session_not_running": "会话尚未运行",
-  "env_provision_failed": "环境安装失败"
+  "env_provision_failed": "环境安装失败",
+  "not_awaiting_review": "该执行不处于等待人工状态"
 }

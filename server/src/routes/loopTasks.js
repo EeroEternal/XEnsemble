@@ -124,6 +124,7 @@ function serializeRun(row) {
         error: row.error ?? null,
         startedAt: row.startedAt ?? null,
         finishedAt: row.finishedAt ?? null,
+        reviewStartedAt: row.reviewStartedAt ?? null,
     };
 }
 
@@ -331,6 +332,7 @@ function registerLoopTaskRoutes(fastify) {
                 prompt,
                 agentId,
                 autoApprove,
+                requireReview: body.requireReview === true,
                 holidayAware: schedule.holidayAware === true,
                 scheduleKind: schedule.scheduleKind,
                 cronExpr: schedule.cronExpr,
@@ -381,6 +383,9 @@ function registerLoopTaskRoutes(fastify) {
             if (body.autoApprove !== undefined) {
                 patch.autoApprove = Boolean(body.autoApprove);
             }
+            if (body.requireReview !== undefined) {
+                patch.requireReview = Boolean(body.requireReview);
+            }
 
             // 调度字段变更（含工作日感知开关），或恢复 active → 重算 next_run_at
             const scheduleChanged = body.kind !== undefined || body.cronExpr !== undefined || body.cron_expr !== undefined
@@ -408,6 +413,47 @@ function registerLoopTaskRoutes(fastify) {
         } catch (err) {
             return sendPublicError(reply, err, 'Failed to update loop task', 500, locale);
         }
+    });
+
+    /** 人工复核收口（通过/打回）：校验归属与状态后委托 runner。 */
+    async function handleReviewDecision(request, reply, approved) {
+        const locale = request.locale || 'en';
+        try {
+            const rows = await db.select({
+                id: schema.loopTaskRuns.id,
+                status: schema.loopTaskRuns.status,
+                userId: schema.loopTasks.userId,
+            })
+                .from(schema.loopTaskRuns)
+                .innerJoin(schema.loopTasks, eq(schema.loopTaskRuns.taskId, schema.loopTasks.id))
+                .where(eq(schema.loopTaskRuns.id, request.params.runId))
+                .limit(1);
+            const row = rows[0] || null;
+            if (!row || row.userId !== request.user.id) {
+                return reply.code(404).send({ error: t('errors:session_not_found', {}, locale), code: 'run_not_found' });
+            }
+            if (row.status !== 'awaiting_review') {
+                return reply.code(409).send({
+                    error: t('errors:not_awaiting_review', {}, locale),
+                    code: 'not_awaiting_review',
+                });
+            }
+            const result = await runner.completeReviewRun(request.params.runId, approved, request.log);
+            if (!result.ok) {
+                return reply.code(409).send({ error: result.error, code: 'not_awaiting_review' });
+            }
+            return { ok: true, status: result.status };
+        } catch (err) {
+            return sendPublicError(reply, err, 'Failed to complete review', 500, locale);
+        }
+    }
+
+    fastify.post('/api/v1/loop-tasks/runs/:runId/approve', { preValidation: authPre }, async (request, reply) => {
+        return handleReviewDecision(request, reply, true);
+    });
+
+    fastify.post('/api/v1/loop-tasks/runs/:runId/reject', { preValidation: authPre }, async (request, reply) => {
+        return handleReviewDecision(request, reply, false);
     });
 
     fastify.delete('/api/v1/loop-tasks/:id', { preValidation: authPre }, async (request, reply) => {

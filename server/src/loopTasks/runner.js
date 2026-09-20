@@ -36,6 +36,15 @@ const SPAWN_WAIT_MS = Number(process.env.LOOP_TASK_SPAWN_WAIT_MS) || 5 * 60_000;
 const ALIVE_POLL_MS = 2000;
 const MAX_CONCURRENT_PER_USER = Number(process.env.LOOP_TASK_MAX_CONCURRENT_PER_USER) || 2;
 const ZOMBIE_BUFFER_MS = 10 * 60_000;
+// 人工复核（requireReview=true）模式：
+//   TURN_MIN_MS / TURN_IDLE_MS：注入指令后至少跑满 1min 且输出静默 45s 才认为本轮
+//   干完活（headless 靠进程退出判定，交互式只能靠静默启发式；过早误判无害——
+//   awaiting_review 只是把会话标记为等人，人打开会话能看到 agent 还在跑）
+const TURN_MIN_MS = Number(process.env.LOOP_TASK_TURN_MIN_MS) || 60_000;
+const TURN_IDLE_MS = Number(process.env.LOOP_TASK_TURN_IDLE_MS) || 45_000;
+const TURN_POLL_MS = 10_000;
+// 复核超时：awaiting_review 停留超过此时长由 tick sweep 自动按 succeeded 收口
+const REVIEW_TIMEOUT_MS = Number(process.env.LOOP_TASK_REVIEW_TIMEOUT_MS) || 24 * 60 * 60_000;
 
 function newId(prefix) {
     return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
@@ -169,6 +178,25 @@ async function reapZombieRuns(now, log = console) {
     return reaped;
 }
 
+/** 复核超时清扫：awaiting_review 停留超过 REVIEW_TIMEOUT_MS → 自动按
+ *  succeeded 收口并退出会话。覆盖进程内定时器无法覆盖的场景（服务重启后
+ *  定时器丢失、run 在另一实例进入复核）。 */
+async function sweepReviewTimeouts(now, log = console) {
+    const cutoff = now - REVIEW_TIMEOUT_MS;
+    const stale = await db.select().from(schema.loopTaskRuns)
+        .where(and(eq(schema.loopTaskRuns.status, 'awaiting_review'), lt(schema.loopTaskRuns.reviewStartedAt, cutoff)))
+        .limit(50);
+    let swept = 0;
+    for (const run of stale) {
+        await updateRun(run.id, { status: 'succeeded', finishedAt: now });
+        broadcastRun(run, { status: 'succeeded' });
+        if (run.sessionId) await stopTaskSession(run.sessionId, log);
+        log.warn?.(`[loop-task-runner] review timeout run ${run.id} (task ${run.taskId}) → succeeded (auto-closed)`);
+        swept += 1;
+    }
+    return swept;
+}
+
 /** 每用户并发闸：running run 数（跨该用户全部任务） */
 async function runningCountByUser() {
     const rows = await db.select({
@@ -188,12 +216,14 @@ async function executeRun(task, run, log = console) {
     let settled = false; // 首个终态（exit / 超时 / 创建失败）胜出，其余忽略
     let sessionId = null;
     let deadlineTimer = null;
+    let reviewPoll = null;
     let offExit = null;
 
     const finalize = async (status, error) => {
         if (settled) return;
         settled = true;
         if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
+        if (reviewPoll) { clearInterval(reviewPoll); reviewPoll = null; }
         try { offExit?.(); } catch { /* ignore */ }
 
         // 失败/超时：把 agent 终端输出末尾落进 run.error，否则 CLI 级报错（exit 1）
@@ -238,14 +268,17 @@ async function executeRun(task, run, log = console) {
         const project = projects[0];
         if (!task.agentId) throw new Error('task has no agent configured — edit the task and pick an agent');
 
-        // 创建 headless Agent 会话（source=loop_task；豁免配额由调用方不检查实现）
+        // 创建 Agent 会话（source=loop_task；豁免配额由调用方不检查实现）。
+        // requireReview=true 时不走 headless 一次性参数：以交互式拉起，任务指令
+        // 由 runner 就绪后注入 PTY——agent 干完活进程不退出，会话挂起等人复核。
+        const reviewMode = task.requireReview === true;
         const created = await createAgentSession({
             user: { id: task.userId, role: 'member' },
             project,
             agentId: task.agentId,
             source: 'loop_task',
             title: task.title,
-            taskPrompt: task.prompt,
+            taskPrompt: reviewMode ? null : task.prompt,
             taskAutoApprove: task.autoApprove !== false,
             log,
         });
@@ -261,18 +294,68 @@ async function executeRun(task, run, log = console) {
             await sleep(ALIVE_POLL_MS);
         }
 
-        // 订阅退出：headless Agent 跑完即退出进程，exitCode 即任务结果。
-        // finalize 只更新 run 行；会话行必须显式落 exited（否则 DB 停留 running，
-        // 重启后被 reconcile 误标为可恢复的 idle —— 任务会话永远进不了「已退出」）。
+        // 订阅退出：headless 模式下 exitCode 即任务结果；复核模式下进程中途退出
+        // 属异常崩溃 → failed。finalize 只更新 run 行；会话行必须显式落 exited
+        //（否则 DB 停留 running，重启后被 reconcile 误标为可恢复的 idle——
+        // 任务会话永远进不了「已退出」）。
         offExit = sessionManager.onExit(sessionId, (exitCode) => {
-            const ok = Number(exitCode) === 0;
+            const ok = !reviewMode && Number(exitCode) === 0;
             void (async () => {
                 await finalize(ok ? 'succeeded' : 'failed', ok ? null : `agent exited with code ${exitCode}`);
                 await stopTaskSession(sessionId, log, exitCode);
             })();
         });
 
-        // 超时兜底：到点判 timeout 并终止会话（finalize 幂等，与 exit 竞争首个终态）
+        if (reviewMode) {
+            // 注入任务指令（镜像 /terminal/input：写 PTY + 落转录 + 触碰活动戳）。
+            // 延迟 3s 等 CLI 就绪；PTY 行缓冲会兜住时序抖动。
+            setTimeout(() => {
+                if (settled) return;
+                try {
+                    const live = sessionManager.getSession(sessionId);
+                    const text = `${task.prompt}\r`;
+                    if (live?.transcriptRef) {
+                        transcriptStore.append(live.transcriptRef, { kind: 'in', data: text });
+                    }
+                    live?.handle?.write(text);
+                    sessionManager.touchActivity(sessionId, 'input');
+                } catch (err) {
+                    log.warn?.({ err, sessionId }, '[loop-task-runner] failed to inject review prompt');
+                }
+            }, 3_000);
+
+            // 静默检测本轮任务结束：进程存活且输出静默 TURN_IDLE_MS（至少跑满
+            // TURN_MIN_MS）即认为干完活 → run 进入 awaiting_review（结果落库、
+            // finishedAt 不写、不算终态不占并发闸），会话保持存活等人。
+            // 人工通过/打回走 completeReviewRun；超过 REVIEW_TIMEOUT_MS 由
+            // tick 的 sweepReviewTimeouts 自动按 succeeded 收口。
+            const injectedAt = Date.now();
+            reviewPoll = setInterval(() => {
+                if (settled) { clearInterval(reviewPoll); reviewPoll = null; return; }
+                const live = sessionManager.getSession(sessionId);
+                if (!live) return;
+                const now = Date.now();
+                if (now - injectedAt < TURN_MIN_MS) return;
+                const lastOut = Number(live.lastOutputAt || live.lastActivityAt || injectedAt);
+                if (now - lastOut < TURN_IDLE_MS) return;
+                clearInterval(reviewPoll);
+                reviewPoll = null;
+                void (async () => {
+                    try {
+                        const result = await extractRunResult(sessionId);
+                        if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
+                        await updateRun(runId, { status: 'awaiting_review', result, reviewStartedAt: Date.now() });
+                        broadcastRun(run, { status: 'awaiting_review' });
+                        log.log?.(`[loop-task-runner] run ${runId} (task "${task.title}") → awaiting_review (session ${sessionId} kept alive for human review)`);
+                    } catch (err) {
+                        log.warn?.({ err, runId }, '[loop-task-runner] failed to enter awaiting_review');
+                    }
+                })();
+            }, TURN_POLL_MS);
+        }
+
+        // 超时兜底（两种模式共用；复核模式若已进入 awaiting_review 会提前清除本定时器，
+        // 改由 REVIEW_TIMEOUT_MS 清扫收口）：到点判 timeout 并终止会话
         deadlineTimer = setTimeout(() => {
             void (async () => {
                 const mins = Math.round(TIMEOUT_MS / 60_000);
@@ -292,6 +375,7 @@ async function executeRun(task, run, log = console) {
 async function tick({ log = console } = {}) {
     const now = Date.now();
     await reapZombieRuns(now, log);
+    await sweepReviewTimeouts(now, log);
 
     const due = await db.select().from(schema.loopTasks)
         .where(and(eq(schema.loopTasks.status, 'active'), lte(schema.loopTasks.nextRunAt, now)))
@@ -359,4 +443,24 @@ async function tick({ log = console } = {}) {
     }
 }
 
-module.exports = { tick, executeRun };
+/** 人工复核收口：通过 → succeeded；打回 → failed。仅对 awaiting_review 生效，
+ *  收口后终止会话（镜像 /exit，任务会话生命周期就此结束）。 */
+async function completeReviewRun(runId, approved, log = console) {
+    const rows = await db.select().from(schema.loopTaskRuns).where(eq(schema.loopTaskRuns.id, runId)).limit(1);
+    const run = rows[0] || null;
+    if (!run || run.status !== 'awaiting_review') {
+        return { ok: false, error: 'run is not awaiting review' };
+    }
+    const status = approved ? 'succeeded' : 'failed';
+    await updateRun(runId, {
+        status,
+        error: approved ? null : 'rejected by user',
+        finishedAt: Date.now(),
+    });
+    broadcastRun(run, { status });
+    if (run.sessionId) await stopTaskSession(run.sessionId, log);
+    log.log?.(`[loop-task-runner] run ${runId} review → ${status} (by human)`);
+    return { ok: true, status };
+}
+
+module.exports = { tick, executeRun, completeReviewRun };

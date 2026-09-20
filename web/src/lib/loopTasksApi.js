@@ -24,11 +24,11 @@ export async function listLoopTasks() {
   return Array.isArray(data?.tasks) ? data.tasks : [];
 }
 
-export async function createLoopTask({ title, prompt, projectId, agentId, autoApprove, schedule, timezone }) {
+export async function createLoopTask({ title, prompt, projectId, agentId, autoApprove, requireReview, schedule, timezone }) {
   const res = await apiFetch('/api/v1/loop-tasks', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, prompt, projectId, agentId, autoApprove, ...schedule, timezone }),
+    body: JSON.stringify({ title, prompt, projectId, agentId, autoApprove, requireReview, ...schedule, timezone }),
   });
   if (!res.ok) await throwApiError(res, 'Failed to create loop task');
   return res.json();
@@ -64,6 +64,12 @@ export async function previewSchedule(schedule) {
   });
   if (!res.ok) throw new Error('Failed to preview schedule');
   return res.json(); // { description } | { description: null, valid: false, error }
+}
+
+export async function reviewLoopTaskRun(runId, approved) {
+  const res = await apiFetch(`/api/v1/loop-tasks/runs/${encodeURIComponent(runId)}/${approved ? 'approve' : 'reject'}`, { method: 'POST' });
+  if (!res.ok) await throwApiError(res, 'Failed to complete review');
+  return res.json();
 }
 
 export async function listLoopTaskRuns(id) {

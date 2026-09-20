@@ -36,7 +36,7 @@ import { TIMEZONES } from '../lib/timezones';
 import { loadTimezonePref } from '../lib/timezonePref';
 import DateTimeField from '../components/DateTimeField';
 import {
-  listLoopTasks, createLoopTask, updateLoopTask, deleteLoopTask, runLoopTaskNow, listLoopTaskRuns, previewSchedule, TASK_RUN_AGENTS,
+  listLoopTasks, createLoopTask, updateLoopTask, deleteLoopTask, runLoopTaskNow, listLoopTaskRuns, reviewLoopTaskRun, previewSchedule, TASK_RUN_AGENTS,
 } from '../lib/loopTasksApi';
 
 const UNIT_MS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
@@ -49,6 +49,7 @@ const TASK_STATUS_META = {
 
 const RUN_STATUS_META = {
   running: { tone: 'info', spinning: true },
+  awaiting_review: { tone: 'warning' },
   succeeded: { tone: 'success' },
   failed: { tone: 'danger' },
   timeout: { tone: 'danger' },
@@ -74,7 +75,7 @@ function fmtClock(ts) {
 
 const emptyForm = {
   title: '', projectId: '', prompt: '',
-  agentId: '', autoApprove: true,
+  agentId: '', autoApprove: true, requireReview: false,
   // GLM/Coze 风格调度预设：自然预设优先，cron 折叠为"自定义"。
   // daily/weekly/weekdays 在前端生成标准 5 段 cron，后端仍只认 cron/every/at。
   // weekdays（工作日）附带 holidayAware：按中国法定日历调度（节假日跳过、调休补班照跑）。
@@ -182,6 +183,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
   const [runs, setRuns] = useState([]);
   const [runsLoading, setRunsLoading] = useState(false);
   const [selectedRun, setSelectedRun] = useState(null);
+  const [reviewingRunId, setReviewingRunId] = useState(null);
 
   const fetchProjects = useCallback(() => {
     apiFetch('/api/v1/projects')
@@ -243,6 +245,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
       prompt: task.prompt,
       agentId: task.agentId || '',
       autoApprove: task.autoApprove !== false,
+      requireReview: task.requireReview === true,
       ...scheduleToForm(task),
       timezone: TIMEZONES.includes(task.timezone) ? task.timezone : 'UTC',
     });
@@ -273,6 +276,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
           projectId: form.projectId,
           agentId: form.agentId,
           autoApprove: form.autoApprove,
+          requireReview: form.requireReview === true,
           holidayAware,
           schedule,
           timezone: form.timezone,
@@ -284,6 +288,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
           prompt: form.prompt.trim(),
           agentId: form.agentId,
           autoApprove: form.autoApprove,
+          requireReview: form.requireReview === true,
           holidayAware,
           ...schedule,
           timezone: form.timezone,
@@ -345,6 +350,20 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
 
   // 执行历史：打开时拉取；有 running run 时 5s 轮询（runsRef 避免闭包过期）
   const runsRef = useRef([]);
+  // 人工复核：通过 → run succeeded；打回 → run failed。会话同步退出。
+  const handleReview = async (runId, approved) => {
+    setReviewingRunId(runId);
+    try {
+      await reviewLoopTaskRun(runId, approved);
+      showToast('success', t(approved ? 'loopTasks:toast.approved' : 'loopTasks:toast.rejected'));
+      if (runsOpenFor) fetchRuns(runsOpenFor.id);
+    } catch (err) {
+      showToast('error', err.message);
+    } finally {
+      setReviewingRunId(null);
+    }
+  };
+
   const fetchRuns = useCallback((taskId) => {
     listLoopTaskRuns(taskId)
       .then((list) => {
@@ -361,7 +380,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
     setRunsLoading(true);
     fetchRuns(runsOpenFor.id);
     const timer = setInterval(() => {
-      if (runsRef.current.some((r) => r.status === 'running')) fetchRuns(runsOpenFor.id);
+      if (runsRef.current.some((r) => r.status === 'running' || r.status === 'awaiting_review')) fetchRuns(runsOpenFor.id);
     }, 5000);
     return () => clearInterval(timer);
   }, [runsOpenFor, fetchRuns]);
@@ -622,6 +641,19 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                         options={[{ value: 'yes', label: t('loopTasks:auto_approve.yes') }, { value: 'no', label: t('loopTasks:auto_approve.no') }]} />
                     </div>
                   </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-xs text-zinc-500">{t('loopTasks:field.require_review')}</span>
+                    <div className="w-36">
+                      <SelectMenu value={form.requireReview ? 'yes' : 'no'}
+                        onChange={(v) => setForm((f) => ({ ...f, requireReview: v === 'yes' }))}
+                        options={[{ value: 'yes', label: t('loopTasks:require_review.yes') }, { value: 'no', label: t('loopTasks:require_review.no') }]} />
+                    </div>
+                  </div>
+                  {form.requireReview && (
+                    <p className="text-xs text-zinc-400 leading-relaxed">
+                      {t('loopTasks:require_review.hint')}
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <FormLabel htmlFor="loop-task-prompt">{t('loopTasks:field.prompt')}</FormLabel>
@@ -816,6 +848,21 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                             >
                               {t('loopTasks:run.view_trajectory')}
                             </button>
+                          )}
+                          {selectedRun.status === 'awaiting_review' && (
+                            <span className="ml-auto inline-flex items-center gap-1.5">
+                              <Button variant="primary" size="sm" disabled={reviewingRunId === selectedRun.id}
+                                onClick={() => handleReview(selectedRun.id, true)}>
+                                {reviewingRunId === selectedRun.id
+                                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  : <CheckCircle className="w-3.5 h-3.5" />}
+                                {t('loopTasks:run.approve')}
+                              </Button>
+                              <Button variant="secondary" size="sm" disabled={reviewingRunId === selectedRun.id}
+                                onClick={() => handleReview(selectedRun.id, false)}>
+                                {t('loopTasks:run.reject')}
+                              </Button>
+                            </span>
                           )}
                         </div>
                         {selectedRun.result && (

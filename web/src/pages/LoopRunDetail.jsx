@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Clock, Loader2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Clock, Loader2 } from 'lucide-react';
 
+import Button from '../components/Button';
 import StatusBadge from '../components/StatusBadge';
 import TrajectoryViewer from '../components/trajectory/TrajectoryViewer';
 import { consoleButtonFocusClass, textPlaceholder } from '../lib/consoleTokens';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
-import { listLoopTasks, listLoopTaskRuns } from '../lib/loopTasksApi';
+import { listLoopTasks, listLoopTaskRuns, reviewLoopTaskRun } from '../lib/loopTasksApi';
+import { useToast } from '../components/Toast';
 
 const RUN_STATUS_TONE = {
   running: 'info',
+  awaiting_review: 'warning',
   succeeded: 'success',
   failed: 'danger',
   timeout: 'danger',
@@ -34,11 +37,33 @@ export default function LoopRunDetail({ className = '', 'aria-hidden': ariaHidde
   const { taskId, runId } = useParams();
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const { showToast } = useToast();
 
   const [task, setTask] = useState(null);
   const [run, setRun] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+
+  // 复核收口后刷新 run 状态（徽章从 awaiting_review 翻转到终态）
+  const refreshRun = () => {
+    listLoopTaskRuns(taskId)
+      .then((runs) => { setRun(runs.find((x) => x.id === runId) || null); })
+      .catch(() => {});
+  };
+
+  const handleReview = async (approved) => {
+    setReviewing(true);
+    try {
+      await reviewLoopTaskRun(runId, approved);
+      showToast('success', t(approved ? 'loopTasks:toast.approved' : 'loopTasks:toast.rejected'));
+      refreshRun();
+    } catch (err) {
+      showToast('error', err.message);
+    } finally {
+      setReviewing(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -83,6 +108,19 @@ export default function LoopRunDetail({ className = '', 'aria-hidden': ariaHidde
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-4 text-xs text-zinc-500 tabular-nums">
+          {run?.status === 'awaiting_review' && (
+            <span className="flex items-center gap-1.5">
+              <Button variant="primary" size="sm" disabled={reviewing}
+                onClick={() => handleReview(true)}>
+                {reviewing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+                {t('loopTasks:run.approve')}
+              </Button>
+              <Button variant="secondary" size="sm" disabled={reviewing}
+                onClick={() => handleReview(false)}>
+                {t('loopTasks:run.reject')}
+              </Button>
+            </span>
+          )}
           {run?.startedAt && <span>{formatRelativeTime(run.startedAt)}</span>}
           {dur && (
             <span className="inline-flex items-center gap-1">

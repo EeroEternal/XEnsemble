@@ -45,7 +45,8 @@
     "schedule": "执行计划",
     "time": "执行时间",
     "timezone": "时区",
-    "cron_placeholder": "0 9 * * *"
+    "cron_placeholder": "0 9 * * *",
+    "require_review": "完成后等待人工"
   },
   "status": {
     "active": "已启用",
@@ -94,7 +95,10 @@
     "result": "运行结果",
     "error": "错误",
     "duration": "时长",
-    "started": "开始"
+    "started": "开始",
+    "status_awaiting_review": "等待人工",
+    "approve": "通过",
+    "reject": "打回"
   },
   "run_detail": {
     "back_to_tasks": "返回任务列表",
@@ -116,7 +120,9 @@
     "deleted": "循环任务已删除。",
     "run_started": "执行已启动。",
     "run_in_progress": "上一次执行仍在进行中。",
-    "action_failed": "操作失败。"
+    "action_failed": "操作失败。",
+    "approved": "已通过，会话已结束。",
+    "rejected": "已打回，会话已结束。"
   },
   "error": {
     "agent_required": "请选择执行 Agent。",
@@ -126,5 +132,10 @@
     "time_invalid": "请输入有效的执行时间（HH:mm）。",
     "weekday_required": "请至少选择一个星期。",
     "required": "任务名称、工作空间、任务描述和执行计划为必填项。"
+  },
+  "require_review": {
+    "yes": "等待人工",
+    "no": "自动结束",
+    "hint": "执行完毕后会话保持活跃（不退出），请在侧栏打开该会话复核，再回到此处通过或打回。超过 24 小时未处理将自动按成功收口。"
   }
 }

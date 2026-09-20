@@ -670,6 +670,9 @@ const loopTasks = pgTable('loop_tasks', {
   agentId: text('agent_id'),
   // 无人值守自动批准工具调用（Agent 支持的前提下注入对应 flag）；false = 只读保守执行
   autoApprove: boolean('auto_approve').notNull().default(true),
+  // 人工复核模式：true = 执行完毕不自动终态，会话保持存活进入 awaiting_review，
+  // 由人工在 Loop Tasks 中通过/打回（超时自动按 succeeded 收口）
+  requireReview: boolean('require_review').notNull().default(false),
   // 工作日感知（仅 cron 周一至周五形态生效）：按中国法定日历过滤——节假日跳过、调休补班照跑
   holidayAware: boolean('holiday_aware').notNull().default(false),
   scheduleKind: text('schedule_kind').notNull().default('cron'), // cron / every / at
@@ -701,6 +704,8 @@ const loopTaskRuns = pgTable('loop_task_runs', {
   error: text('error'),
   startedAt: bigint('started_at', { mode: 'number' }),
   finishedAt: bigint('finished_at', { mode: 'number' }),
+  // 进入 awaiting_review 的时刻（人工复核模式超时判定依据）
+  reviewStartedAt: bigint('review_started_at', { mode: 'number' }),
 }, (table) => ({
   unqSlot: unique('uq_loop_task_runs_slot').on(table.taskId, table.scheduledFor),
   taskIdx: index('idx_loop_task_runs_task').on(table.taskId, table.startedAt),
