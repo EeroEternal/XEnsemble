@@ -654,6 +654,11 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                       {t('loopTasks:require_review.hint')}
                     </p>
                   )}
+                  {!form.requireReview && !form.autoApprove && (
+                    <p className="text-xs text-amber-600 leading-relaxed">
+                      {t('loopTasks:auto_approve.headless_hint')}
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <FormLabel htmlFor="loop-task-prompt">{t('loopTasks:field.prompt')}</FormLabel>

@@ -72,7 +72,8 @@
   },
   "auto_approve": {
     "yes": "Auto",
-    "no": "Manual confirm"
+    "no": "Manual confirm",
+    "headless_hint": "In auto-finish mode nobody is present to answer tool approvals, so tool calls run with restricted/read-only behavior. For step-by-step manual confirmation, turn on \"Wait for human\"."
   },
   "unit": {
     "minutes": "Minutes",
