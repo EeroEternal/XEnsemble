@@ -299,6 +299,31 @@ async function resumeSession({
             });
         }
 
+        // Pre-approve custom API key(s) for claude-code on the resume path too.
+        // 创建路径会批准当时 env 里的 key，但每会话独立 stateDir 的 .claude.json
+        // 初始为空，且用户可能换过 key（BYOK/customEnv 重新注入）——旧值不在
+        // approved 列表时 claude 启动即弹 "Detected a custom API key" 确认屏，
+        // --continue 被阻塞（TUI 表现为卡住不动）。与 create 路径一致：批准
+        // API_KEY + AUTH_TOKEN 两个值，且在 customEnv 合并之后执行。
+        if (agentMeta.id === 'claude-code' && stateDirPath && resolvedSpawnEnv?.env) {
+            const claudeKeys = [resolvedSpawnEnv.env.ANTHROPIC_API_KEY, resolvedSpawnEnv.env.ANTHROPIC_AUTH_TOKEN]
+                .filter((k) => typeof k === 'string' && k.trim());
+            if (claudeKeys.length) {
+                try {
+                    const { ensureClaudeApiKeyApproved } = require('../workspace/claudeConfigBootstrap');
+                    await ensureClaudeApiKeyApproved({
+                        runtime,
+                        runtimeRef,
+                        stateDirPath,
+                        apiKeys: claudeKeys,
+                    });
+                } catch (err) {
+                    if (fastifyLog?.warn) fastifyLog.warn({ err, sessionId: session.id }, '[sessions] resume claude api key approval failed');
+                    else if (requestLog?.warn) requestLog.warn({ err, sessionId: session.id }, '[sessions] resume claude api key approval failed');
+                }
+            }
+        }
+
         let sessionToken = null;
         if (authMode === 'gateway') {
             const gwCfg = await agentGatewayConfig.getForAgent(agentMeta.id);

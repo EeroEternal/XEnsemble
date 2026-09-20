@@ -63,7 +63,11 @@ const TASK_RUN_MODES = {
         // 与官方文档一致更稳）；prompt 固定为最后一个元素——createAgentSession
         // 依赖该约定把 BYOK 的 --model 插到它前面。
         args: (prompt) => ['exec', '--auto', 'high', prompt],
+        // 交互式（人工复核模式）同样默认 Auto (Off)，TUI 内每个动作都弹审批。
+        // --auto 是全局 flag（官方 CLI Reference「Global CLI Flags」表），
+        // 顶层 `droid --auto high` 拉起 TUI 即 High 自治，无需手动切档。
         autoApproveArgs: [],
+        interactiveAutoApproveArgs: ['--auto', 'high'],
     },
     'cline': {
         args: (prompt) => [prompt],

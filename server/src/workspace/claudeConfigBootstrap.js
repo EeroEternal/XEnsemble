@@ -1,13 +1,24 @@
 const path = require('path');
 
 /**
- * Pre-approve a custom API key in claude-code's .claude.json so that
+ * Pre-approve custom API key(s) in claude-code's .claude.json so that
  * claude does not show the "Detected a custom API key" confirmation
  * prompt on startup.  Without this, --continue is blocked because
  * claude waits for user input on the confirmation screen.
+ *
+ * 批准 ANTHROPIC_API_KEY 之外，还会把 ANTHROPIC_AUTH_TOKEN 的值一并写入
+ * approved：环境里两者并存时（gateway 织入 / 用户 customEnv），claude 会
+ * 对两个值分别弹确认，漏一个就卡在确认屏。
+ *
+ * @param {string|string[]} [apiKeys] 单个 key 或多个（调用方把实际生效的
+ *   凭证值都传进来；值可能相同，函数内部去重）。
  */
-async function ensureClaudeApiKeyApproved({ runtime, runtimeRef, stateDirPath, apiKey }) {
-    if (!stateDirPath || !apiKey) return;
+async function ensureClaudeApiKeyApproved({ runtime, runtimeRef, stateDirPath, apiKeys, apiKey }) {
+    if (!stateDirPath) return;
+    // 兼容旧签名 apiKey（单值）；新代码统一传 apiKeys 数组
+    const keys = [...new Set([apiKey, ...(Array.isArray(apiKeys) ? apiKeys : [apiKeys])]
+        .filter((k) => typeof k === 'string' && k.trim()))];
+    if (keys.length === 0) return;
     const configPath = path.join(stateDirPath, '.claude.json');
 
     // Read current .claude.json via VM exec
@@ -22,23 +33,21 @@ async function ensureClaudeApiKeyApproved({ runtime, runtimeRef, stateDirPath, a
         config = {};
     }
 
-    // Check if already approved
-    const approved = config.customApiKeyResponses?.approved || [];
-    if (approved.includes(apiKey)) return;
-
-    // Add to approved list
     if (!config.customApiKeyResponses) {
         config.customApiKeyResponses = { approved: [], rejected: [] };
     }
     if (!Array.isArray(config.customApiKeyResponses.approved)) {
         config.customApiKeyResponses.approved = [];
     }
-    if (!config.customApiKeyResponses.approved.includes(apiKey)) {
-        config.customApiKeyResponses.approved.push(apiKey);
-    }
+
+    const approved = config.customApiKeyResponses.approved;
+    const missing = keys.filter((k) => !approved.includes(k));
+    if (missing.length === 0) return;
+
+    // Add to approved list
+    approved.push(...missing);
 
     // Write back
-    const jsonStr = JSON.stringify(config).replace(/'/g, "'\\''");
     const writeScript = `cat > '${configPath}' << 'CLAUDE_JSON_EOF'
 ${JSON.stringify(config, null, 2)}
 CLAUDE_JSON_EOF`;

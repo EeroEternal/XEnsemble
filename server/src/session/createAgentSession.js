@@ -393,21 +393,6 @@ async function createAgentSession({
 
         if (sessionStateDir?.stateDirPath) {
             resolved.env = applyStateDirEnv(resolved.env, resumeSpec, sessionStateDir.stateDirPath);
-            // Pre-approve custom API key for claude-code to skip the "Detected
-            // a custom API key" confirmation prompt that blocks --continue.
-            if (agentMeta.id === 'claude-code' && resolved.env.ANTHROPIC_API_KEY) {
-                try {
-                    const { ensureClaudeApiKeyApproved } = require('../workspace/claudeConfigBootstrap');
-                    await ensureClaudeApiKeyApproved({
-                        runtime,
-                        runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
-                        stateDirPath: sessionStateDir.stateDirPath,
-                        apiKey: resolved.env.ANTHROPIC_API_KEY,
-                    });
-                } catch (err) {
-                    log.warn({ err, sessionId }, '[sessions] claude api key approval failed');
-                }
-            }
             // 跳过首次交互引导（主题选择/信任目录）：每会话独立状态目录意味着每个
             // 新会话都会重新走 onboarding——无人值守的复核模式会被引导页挡住，
             // 注入的任务指令被吞（实测 claude-code 卡在主题选择页）。
@@ -493,6 +478,30 @@ async function createAgentSession({
             resolved.env = applyCustomEnv(resolved.env, userSessionConfig.customEnv, {
                 blockedKeys: authMode === 'gateway' ? GATEWAY_MANAGED_ENV_KEYS : [],
             });
+        }
+
+        // Pre-approve custom API key(s) for claude-code to skip the "Detected
+        // a custom API key" confirmation prompt that blocks startup/--continue.
+        // 必须在 customEnv 合并之后执行——用户自带的 ANTHROPIC_API_KEY/
+        // ANTHROPIC_AUTH_TOKEN 走 byok/customEnv 注入，提前执行会拿到旧值。
+        // ANTHROPIC_AUTH_TOKEN 与 API_KEY 并存时 claude 对两个值分别弹确认，
+        // 漏一个就卡在确认屏，故一并写入 approved。
+        if (agentMeta.id === 'claude-code' && sessionStateDir?.stateDirPath) {
+            const claudeKeys = [resolved.env.ANTHROPIC_API_KEY, resolved.env.ANTHROPIC_AUTH_TOKEN]
+                .filter((k) => typeof k === 'string' && k.trim());
+            if (claudeKeys.length) {
+                try {
+                    const { ensureClaudeApiKeyApproved } = require('../workspace/claudeConfigBootstrap');
+                    await ensureClaudeApiKeyApproved({
+                        runtime,
+                        runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
+                        stateDirPath: sessionStateDir.stateDirPath,
+                        apiKeys: claudeKeys,
+                    });
+                } catch (err) {
+                    log.warn({ err, sessionId }, '[sessions] claude api key approval failed');
+                }
+            }
         }
 
         // P4：spawn 前把 active skills 注入 workspace 指令文件（AGENTS.md / CLAUDE.md）。
