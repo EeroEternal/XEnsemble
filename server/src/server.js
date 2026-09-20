@@ -1001,6 +1001,7 @@ function mapSessionRow(row) {
         projectId: row.project_id,
         agentId: row.agent_id,
         status: row.status,
+        source: row.source === 'loop_task' ? 'loop_task' : 'interactive',
         recoverable: Boolean(row.recoverable),
         customImageId: row.custom_image_id || null,
         provisioningError: row.provisioning_error || null,
@@ -1033,10 +1034,14 @@ fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async
     const hasQuery = ['status', 'agentId', 'projectId', 'q', 'page', 'pageSize', 'sort', 'withStats']
         .some((key) => query[key] !== undefined && query[key] !== '');
 
+    // include_loop_tasks 只放开 source 过滤，不改变响应形状（仍走数组快路径）。
+    const includeLoopTasks = query.include_loop_tasks === '1' || query.include_loop_tasks === 'true';
+
     // Backward-compatible fast path: no query params → existing response shape.
     if (!hasQuery) {
         const result = await db.execute(sql`
             SELECT s.id, s.project_id, s.agent_id, s.status, s.recoverable,
+                   s.source,
                    s.custom_image_id, s.title, s.title_manual, s.created_at,
                    s.exit_code, s.exited_at,
                    s.env_provision_state, s.env_provision_error,
@@ -1045,8 +1050,8 @@ fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async
                    s.provisioning_error
             FROM sessions s
             LEFT JOIN projects p ON p.id = s.project_id
-            WHERE s.user_id = ${request.user.id}
-              AND s.source = 'interactive'
+            WHERE s.user_id = ${request.user.id}${includeLoopTasks ? sql`` : sql`
+              AND s.source = 'interactive'`}
         `);
         const rawRows = result.rows || result;
         return rawRows.map(mapSessionRow);
@@ -1083,6 +1088,7 @@ fastify.get('/api/v1/sessions', { preValidation: [fastify.authenticate] }, async
 
     const listResult = await db.execute(sql`
         SELECT s.id, s.project_id, s.agent_id, s.status, s.recoverable,
+               s.source,
                s.custom_image_id, s.title, s.title_manual, s.created_at,
                s.exit_code, s.exited_at,
                s.env_provision_state, s.env_provision_error,

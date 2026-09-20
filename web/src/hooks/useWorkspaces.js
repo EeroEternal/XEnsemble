@@ -15,6 +15,16 @@ const PENDING_INTERVAL_MS = 2000;
 const NORMAL_INTERVAL_MS = 15000;
 const PENDING_MAX_DURATION_MS = 5 * 60 * 1000; // cap 2s mode at 5 minutes
 const DEBOUNCE_MS = 300;
+// 侧栏「显示循环任务会话」开关的持久化 key（开启后列表并入 source=loop_task 会话）
+const SHOW_LOOP_SESSIONS_KEY = 'xe_show_loop_sessions';
+
+function loadShowLoopSessions() {
+    try {
+        return window.localStorage.getItem(SHOW_LOOP_SESSIONS_KEY) === '1';
+    } catch {
+        return false;
+    }
+}
 
 function getSseUrl() {
   const base = import.meta.env.VITE_API_BASE_URL
@@ -43,6 +53,17 @@ export function useWorkspaces(user) {
   // True after the first workspaces fetch resolves, so consumers can tell an
   // genuinely-empty workspace list apart from the initial pre-fetch state.
   const [projectsLoaded, setProjectsLoaded] = useState(false);
+
+  // 循环任务会话默认不进列表（与后端 source 过滤对齐）；开关持久化到 localStorage。
+  const [showLoopSessions, setShowLoopSessionsState] = useState(loadShowLoopSessions);
+  const setShowLoopSessions = useCallback((v) => {
+    setShowLoopSessionsState(Boolean(v));
+    try {
+      window.localStorage.setItem(SHOW_LOOP_SESSIONS_KEY, v ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // SPA 登录/登出不会整页刷新，bootstrap 单例在上一账号会话期就已生成。
   // 账号切换时必须用当前用户自己的缓存桶重新播种，否则会带着上一账号的
@@ -107,13 +128,13 @@ export function useWorkspaces(user) {
 
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await apiFetch('/api/v1/sessions');
+      const res = await apiFetch(showLoopSessions ? '/api/v1/sessions?include_loop_tasks=1' : '/api/v1/sessions');
       const data = await res.json();
       if (Array.isArray(data)) setSessions(data);
     } catch {
       // ignore transient errors
     }
-  }, []);
+  }, [showLoopSessions]);
 
   // Debounced fetch: coalesces burst calls (e.g. multiple state updates
   // firing fetchWorkspaces within 300ms) into a single network round-trip.
@@ -246,9 +267,10 @@ export function useWorkspaces(user) {
     // User just switched workspace: leave the view empty for them to pick.
     if (userSwitchedWorkspaceRef.current) return;
     const prefs = loadSidebarPrefs();
-    const scoped = activeWorkspaceId
+    const scoped = (activeWorkspaceId
       ? sessions.filter((s) => s.projectId === activeWorkspaceId)
-      : sessions;
+      : sessions
+    ).filter((s) => s.source !== 'loop_task');
     const candidate = pickSessionToRestore(scoped, prefs);
     if (!candidate || candidate.alive !== true) return;
     // 会话所属工作区必须仍存在：项目在 API 之外被删/环境重置后，sessions 列表
@@ -342,6 +364,8 @@ export function useWorkspaces(user) {
     setActiveSession,
     activeWorkspaceId,
     switchWorkspace,
+    showLoopSessions,
+    setShowLoopSessions,
     fetchWorkspaces,
     fetchAgents,
   };

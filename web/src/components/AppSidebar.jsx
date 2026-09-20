@@ -217,6 +217,8 @@ export default function AppSidebar({
   activeSession,
   activeWorkspaceId,
   activeWorkspaceName,
+  showLoopSessions,
+  onToggleLoopSessions,
   onSelectSession,
   onNewSession,
   onRequestDeleteSession,
@@ -380,6 +382,15 @@ export default function AppSidebar({
             )}
             {isFailed && (
               <span className="w-1.5 h-1.5 rounded-full bg-red-600 shrink-0" />
+            )}
+            {s.source === 'loop_task' && (
+              <ListTodo
+                className="w-3 h-3 shrink-0 text-zinc-400"
+                strokeWidth={1.75}
+                role="img"
+                title={t('sessions:loop_session', { defaultValue: 'Loop task session' })}
+                aria-label={t('sessions:loop_session', { defaultValue: 'Loop task session' })}
+              />
             )}
             {s.status === 'exited' && (
               <span
@@ -575,6 +586,18 @@ export default function AppSidebar({
             </button>
           )}
         </div>
+        {/* 循环任务会话筛选：勾选后列表并入 source=loop_task 会话（跑完归入「已退出」组） */}
+        <label
+          className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12.5px] text-zinc-500 ${hoverBgTertiary} cursor-pointer select-none ${transitionBase} ${consoleButtonFocusClass}`}
+        >
+          <input
+            type="checkbox"
+            checked={showLoopSessions}
+            onChange={(e) => onToggleLoopSessions?.(e.target.checked)}
+            className="w-3.5 h-3.5 shrink-0 accent-zinc-900"
+          />
+          {t('sessions:show_loop_sessions', { defaultValue: 'Show loop task sessions' })}
+        </label>
         {/* 二级页面导航：轻一档，与主动作分区 */}
         <div className="space-y-0.5">
           {onOpenLoopTasks && (
