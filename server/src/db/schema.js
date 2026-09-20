@@ -348,6 +348,26 @@ const skills = pgTable('skills', {
   marketIdx: index('idx_skills_market').on(table.visibility, table.status, table.publishedAt),
 }));
 
+// 0034: 铃铛通知中心（docs/proposals/agent-attention-notification.md §4）
+// 未读红点 / 角标数需跨刷新、跨标签存活 → PG 持久化（不引入 Redis）。
+const notifications = pgTable('notifications', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  // 'session_completed' | 'session_waiting' | 'skill_created'
+  type: text('type').notNull(),
+  // 结构化快照 { sessionId, sessionTitle, agentName, projectName, skillId, skillTitle, reason }：
+  // 文案由前端 t() 渲染（正文不落库）；名称存时间点快照，防改名/删除后悬空。
+  payload: jsonb('payload').notNull().default({}),
+  // NULL = 未读（红点依据）
+  readAt: bigint('read_at', { mode: 'number' }),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+}, (table) => ({
+  // 角标轮询：count where userId=? and readAt is null
+  userUnreadIdx: index('idx_notifications_user_unread').on(table.userId, table.readAt, table.createdAt),
+  // 列表分页：order by userId, createdAt desc
+  userCreatedIdx: index('idx_notifications_user_created').on(table.userId, table.createdAt),
+}));
+
 // 0018: 技能提炼候选池（P3 漏斗 L1-L4 中间产物）
 // stage: scored | clustered | classified | extracted | rejected | expired
 // signals: { correctionCount, filesTouched, successExit, turnCount, userMarked }
@@ -730,6 +750,7 @@ module.exports = {
   schedulerJobs,
   skills,
   skillCandidates,
+  notifications,
   agents,
   runtimes,
   deployments,

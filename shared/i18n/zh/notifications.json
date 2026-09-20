@@ -1,0 +1,28 @@
+{
+  "bell": {
+    "label": "通知",
+    "unread_aria": "{{count}} 条未读通知"
+  },
+  "panel": {
+    "title": "通知",
+    "mark_all_read": "全部已读",
+    "marking_all": "标记中…",
+    "empty": "暂无新通知",
+    "load_more": "加载更多",
+    "loading": "加载中…"
+  },
+  "item": {
+    "session_waiting": "{{agent}} 等待你的输入 · {{project}} / {{session}}",
+    "session_completed": "{{agent}} 已完成任务 · {{project}} / {{session}}",
+    "skill_created": "提炼出新技能：《{{name}}》",
+    "fallback_agent": "Agent",
+    "fallback_workspace": "—",
+    "read": "标为已读"
+  },
+  "time": {
+    "just_now": "刚刚",
+    "minutes_ago": "{{count}}分钟前",
+    "hours_ago": "{{count}}小时前",
+    "days_ago": "{{count}}天前"
+  }
+}

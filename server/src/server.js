@@ -71,6 +71,8 @@ const { registerRepoRoutes } = require('./routes/repos');
 const { registerCustomImageRoutes } = require('./routes/customImages');
 const { registerSkillRoutes } = require('./routes/skills');
 const { registerLoopTaskRoutes } = require('./routes/loopTasks');
+const { registerNotificationsRoutes } = require('./routes/notifications');
+const attentionService = require('./session/attentionService');
 const { LocalGitService } = require('./git/LocalGitService');
 const { applyTerminalMessage, subscribeTerminal } = require('./session/terminalBridge');
 const { createAgentSession } = require('./session/createAgentSession');
@@ -180,6 +182,10 @@ registerGitHubAppRoutes(fastify);
 registerCustomImageRoutes(fastify);
 registerSkillRoutes(fastify);
 registerLoopTaskRoutes(fastify);
+registerNotificationsRoutes(fastify);
+
+// 铃铛通知：L1 事件流 → attentionService（L3' 扫描由 SessionManager 输出钩子驱动）。
+attentionService.subscribeL1(chatTranscript);
 
 // -- API Routes --
 

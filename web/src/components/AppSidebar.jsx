@@ -25,6 +25,7 @@ import {
   selectActiveSession,
 } from '../lib/sidebarPrefs';
 import BrandMark from './BrandMark';
+import NotificationBell from './NotificationBell';
 import RowActionsMenu from './RowActionsMenu';
 import { confirm } from './ConfirmDialog';
 import {
@@ -39,6 +40,7 @@ import {
   bgCanvas,
   consoleButtonFocusClass,
   consoleIconButtonDangerClass,
+  consoleIconButtonClass,
   consoleMenuDropdownZClass,
   consoleDropdownPanelClass,
 } from '../lib/consoleTokens';
@@ -179,23 +181,23 @@ export function SidebarAccountMenu({ user, onOpenSettings, onOpenObservability, 
   ) : null;
 
   return (
-    <div ref={rootRef} className="relative min-w-0">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label={isAdmin ? t('users:role.admin') : t('common:action.account_menu', { defaultValue: 'Account menu' })}
-        title={isAdmin ? t('users:role.admin') : (user?.username || t('users:role.user', { defaultValue: 'User' }))}
-        className={`flex w-full items-center rounded-lg text-left ${transitionBase} hover:bg-zinc-50 ${
-          open ? 'bg-zinc-50' : ''
-        } ${collapsed ? `justify-center p-2 ${consoleButtonFocusClass}` : 'gap-2 px-2 py-2'}`}
-      >
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-600 text-xs font-semibold">
-          {(user?.username || 'U').charAt(0).toUpperCase()}
-        </div>
-        {!collapsed && (
-          <>
+    <div className="flex items-center gap-1 min-w-0">
+      <div ref={rootRef} className="relative flex min-w-0 flex-1 items-center gap-1">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-haspopup="menu"
+          aria-label={isAdmin ? t('users:role.admin') : t('common:action.account_menu', { defaultValue: 'Account menu' })}
+          title={isAdmin ? t('users:role.admin') : (user?.username || t('users:role.user', { defaultValue: 'User' }))}
+          className={`flex min-w-0 flex-1 items-center rounded-lg text-left ${transitionBase} hover:bg-zinc-50 ${
+            open ? 'bg-zinc-50' : ''
+          } ${consoleButtonFocusClass} ${collapsed ? 'justify-center p-2' : 'gap-2 px-2 py-2'}`}
+        >
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-600 text-xs font-semibold">
+            {(user?.username || 'U').charAt(0).toUpperCase()}
+          </div>
+          {!collapsed && (
             <div className="min-w-0 flex-1">
               <p className="truncate text-[13px] font-medium text-zinc-900">
                 {isAdmin ? t('users:role.admin') : (user?.username || t('users:role.user', { defaultValue: 'User' }))}
@@ -204,14 +206,27 @@ export function SidebarAccountMenu({ user, onOpenSettings, onOpenObservability, 
                 <p className="truncate text-[10px] text-zinc-400">{user?.username || 'User'}</p>
               )}
             </div>
+          )}
+        </button>
+        {/* 铃铛通知：头像右侧、下拉按钮左侧（App/Settings/Observability 侧栏共用同一挂载点） */}
+        <NotificationBell collapsed={collapsed} />
+        {!collapsed && (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-haspopup="menu"
+            aria-label={t('common:action.account_menu', { defaultValue: 'Account menu' })}
+            className={`shrink-0 ${consoleIconButtonClass}`}
+          >
             <ChevronDown
-              className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+              className={`h-4 w-4 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
               strokeWidth={2}
             />
-          </>
+          </button>
         )}
-      </button>
-      {menu && createPortal(menu, document.body)}
+        {menu && createPortal(menu, document.body)}
+      </div>
     </div>
   );
 }

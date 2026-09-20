@@ -227,6 +227,14 @@ async function createSkill({ userId, title, content, tags = [], category = null,
     });
     const skill = await getSkill(userId, id);
     if (scriptWarnings.length > 0) skill.scriptWarnings = scriptWarnings;
+    // 铃铛通知：自动提炼产出新 skill（fire-and-forget，绝不阻塞创建路径）。
+    if (source === 'auto') {
+        try {
+            void require('../session/notificationsService')
+                .notifySkillCreated({ userId, skill })
+                .catch(() => {});
+        } catch (_) { /* 通知绝不影响主链路 */ }
+    }
     return skill;
 }
 

@@ -1,0 +1,28 @@
+{
+  "bell": {
+    "label": "Notifications",
+    "unread_aria": "{{count}} unread notifications"
+  },
+  "panel": {
+    "title": "Notifications",
+    "mark_all_read": "Mark all read",
+    "marking_all": "Marking…",
+    "empty": "You're all caught up",
+    "load_more": "Load more",
+    "loading": "Loading…"
+  },
+  "item": {
+    "session_waiting": "{{agent}} is waiting for your input · {{project}} / {{session}}",
+    "session_completed": "{{agent}} completed the task · {{project}} / {{session}}",
+    "skill_created": "New skill distilled: {{name}}",
+    "fallback_agent": "Agent",
+    "fallback_workspace": "—",
+    "read": "Mark as read"
+  },
+  "time": {
+    "just_now": "just now",
+    "minutes_ago": "{{count}}m ago",
+    "hours_ago": "{{count}}h ago",
+    "days_ago": "{{count}}d ago"
+  }
+}

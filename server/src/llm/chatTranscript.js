@@ -24,6 +24,7 @@
 const MAX_EVENTS_PER_SESSION = 500;
 
 const buffers = new Map(); // sessionId -> { events: [], subscribers: Set<fn>, nextSeq, seeded }
+const globalSubscribers = new Set(); // 进程级订阅（attentionService 挂 L1 钩子用）
 
 function getBuffer(sessionId) {
     let buf = buffers.get(sessionId);
@@ -108,6 +109,9 @@ async function appendInner(sessionId, event) {
     for (const cb of buf.subscribers) {
         try { cb(entry); } catch (_) { /* ignore subscriber errors */ }
     }
+    for (const cb of globalSubscribers) {
+        try { cb(sessionId, entry); } catch (_) { /* ignore */ }
+    }
     persist(sessionId, entry).catch((err) => {
         // eslint-disable-next-line no-console
         console.error('[chat-transcript] persist failed:', err?.message || err);
@@ -128,6 +132,16 @@ async function persist(sessionId, entry) {
         tool: entry.tool ?? null,
         model: entry.model ?? null,
     }).onConflictDoNothing();
+}
+
+/**
+ * Subscribe to chat events for ALL sessions (process-wide). Used by the
+ * attention service to tap L1 protocol signals without knowing session ids
+ * up front. cb(sessionId, entry). Returns an unsubscribe fn.
+ */
+function subscribeAll(cb) {
+    globalSubscribers.add(cb);
+    return () => globalSubscribers.delete(cb);
 }
 
 /** Subscribe to new chat events for a session. Returns an unsubscribe fn. */
@@ -257,4 +271,4 @@ async function getHistoryForSessions(sessionIds) {
     return result;
 }
 
-module.exports = { append, subscribe, getHistory, getHistoryForSessions };
+module.exports = { append, subscribe, subscribeAll, getHistory, getHistoryForSessions };

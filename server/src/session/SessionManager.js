@@ -1,6 +1,7 @@
 const { readScrollback, removeScrollback } = require('../runtime/LocalScrollbackBuffer');
 const transcriptStore = require('../runtime/TranscriptStore');
 const titleService = require('./titleService');
+const attentionService = require('./attentionService');
 
 const TITLE_HISTORY_THRESHOLD = Number(process.env.SESSION_TITLE_HISTORY_THRESHOLD) || 2000;
 const TITLE_DEBOUNCE_MS = Number(process.env.SESSION_TITLE_DEBOUNCE_MS) || 5000;
@@ -75,6 +76,8 @@ class SessionManager {
             const frame = session.transcriptRef
                 ? transcriptStore.append(session.transcriptRef, { kind: 'out', data, rseq })
                 : null;
+            // 铃铛通知：L3' 信号源 —— PTY 输出帧驱动 transcript 尾部扫描（best-effort，绝不影响会话）。
+            try { attentionService.observeOutput(session.id, session.transcriptRef); } catch (_) { /* ignore */ }
             session.history += data;
             // Keep only the most recent 32 KB in memory. The TranscriptStore
             // is the durable source of truth; this buffer only serves title

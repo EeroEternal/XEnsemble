@@ -102,6 +102,26 @@ function AuthenticatedLayout({
     if (location.pathname !== '/sessions') navigate('/sessions');
   }, [setActiveSession, agents, navigate, location.pathname]);
 
+  // 铃铛通知跳转桥接（docs/proposals/agent-attention-notification.md §4）：
+  // /sessions?focus=<sessionId> → 选中该会话（sessions 列表就绪后生效），
+  // 命中后清掉 query（刷新后仍可直达）。会话属于其他 workspace 时顺带切换。
+  useEffect(() => {
+    if (!isSessions) return;
+    const focusId = new URLSearchParams(location.search).get('focus');
+    if (!focusId) return;
+    const target = (sessions || []).find((s) => s.id === focusId);
+    if (target) {
+      if (target.projectId && activeWorkspaceId && target.projectId !== activeWorkspaceId) {
+        switchWorkspace(target.projectId);
+      }
+      onSelectSession(target);
+      navigate('/sessions', { replace: true });
+    } else if ((sessions || []).length > 0) {
+      // 列表已就绪但没有该会话（已删除/越权）→ 清掉残留 query
+      navigate('/sessions', { replace: true });
+    }
+  }, [isSessions, location.search, sessions, activeWorkspaceId, switchWorkspace, onSelectSession, navigate]);
+
   return (
     <div className={`h-full flex ${bgCanvas}`}>
       {/* 侧边栏独占全高列（分隔线贯穿到顶），logo 与折叠按钮锚在侧栏头部（Claude.ai/Notion 模式）。 */}
