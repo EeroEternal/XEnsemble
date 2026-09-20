@@ -1,6 +1,6 @@
 {
   "name": "xensemble",
-  "version": "2.1.2",
+  "version": "3.0.0",
   "private": true,
   "scripts": {
     "dev:server": "cd server && npm run dev",

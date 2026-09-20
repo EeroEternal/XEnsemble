@@ -1,6 +1,6 @@
 [package]
 name = "xensemble-unigateway"
-version = "0.2.0"
+version = "3.0.0"
 edition = "2024"
 rust-version = "1.92"
 description = "XEnsemble built-in LLM gateway (embeds UniGateway)"
