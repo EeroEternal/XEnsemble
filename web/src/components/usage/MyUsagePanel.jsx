@@ -5,6 +5,7 @@ import { consoleSectionLabelClass, consoleCardClass } from '../../lib/consoleTok
 import { apiFetch } from '../../lib/api';
 import { formatTokens, formatTokensFull } from '../../lib/formatTokens';
 import MiniBarChart, { SERIES_COLORS } from './MiniBarChart';
+import { buildAgentCostChart } from './costSeries';
 import SelectMenu from '../SelectMenu';
 
 /** 个人 LLM Token 用量：汇总 / 日趋势 / 按项目分解 / 按 Agent。无配额上限，独立于配额页。 */
@@ -29,27 +30,23 @@ export default function MyUsagePanel() {
   const prevTotal = usage?.prevTotalTokens ?? 0;
   const deltaPct = s && prevTotal > 0 ? Math.round(((s.totalTokens - prevTotal) / prevTotal) * 100) : null;
 
-  // 费用日趋势按 agent 堆叠：取区间内累计费用 Top N（= SERIES_COLORS 长度）的 agent
-  const agentCostSeries = useMemo(() => {
-    const totals = new Map();
-    for (const d of usage?.trend || []) {
-      for (const [k, v] of Object.entries(d.costByAgent || {})) {
-        totals.set(k, (totals.get(k) || 0) + (Number(v) || 0));
-      }
-    }
-    return [...totals.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, SERIES_COLORS.length)
-      .map(([key], i) => ({ key, label: key, color: SERIES_COLORS[i] }));
-  }, [usage]);
+  // 费用日趋势按 agent 堆叠：Top N 各自成段，超出的合并为「其他」，
+  // 保证柱高 = 当日真实合计（否则尾部 agent 费用被静默丢弃，费用预估偏低）。
+  const costChart = useMemo(
+    () => buildAgentCostChart(usage?.trend || [], t('observability:my_usage.cost_other')),
+    [usage, t],
+  );
 
   // 兜底：后端未返回 costByAgent（旧版服务端）时退回单一总量序列，仅展示合计
   const hasCostByAgent = (usage?.trend || []).some((d) => d.costByAgent && Object.keys(d.costByAgent).length > 0);
   const costSeries = hasCostByAgent
-    ? agentCostSeries
+    ? costChart.series
     : (usage?.trend || []).some((d) => (d.costUsd || 0) > 0)
       ? [{ key: 'total', label: t('observability:my_usage.cost_total'), color: SERIES_COLORS[0] }]
       : [];
+  const costData = hasCostByAgent
+    ? costChart.data
+    : (usage?.trend || []).map((d) => ({ label: d.day, tip: d.day, values: { total: d.costUsd || 0 } }));
 
   return (
     <div className="space-y-4">
@@ -113,22 +110,17 @@ export default function MyUsagePanel() {
                 />
               </div>
               <div className={`${consoleCardClass} px-3 py-4`}>
-                {agentCostSeries.length > 0 && (
+                {costSeries.length > 0 && (
                   <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-                    {agentCostSeries.map((sr) => (
+                    {costSeries.map((sr) => (
                       <span key={sr.key} className="flex items-center gap-1 text-[11px] text-zinc-400">
-                        <span className={`inline-block h-1.5 w-1.5 rounded-sm ${sr.color}`} /> {sr.key}
+                        <span className={`inline-block h-1.5 w-1.5 rounded-sm ${sr.color}`} /> {sr.label}
                       </span>
                     ))}
                   </div>
                 )}
                 <MiniBarChart
-                  data={(usage.trend || []).map((d) => ({
-                    label: d.day,
-                    tip: d.day,
-                    // 旧版服务端无 costByAgent → 退回单一总量段
-                    values: d.costByAgent || { total: d.costUsd || 0 },
-                  }))}
+                  data={costData}
                   height={80}
                   showAxes
                   formatValue={(v) => `$${Number(v).toFixed(2)}`}

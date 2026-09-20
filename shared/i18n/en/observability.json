@@ -20,6 +20,7 @@
     "trend": "Daily trend",
     "cost_trend": "Cost trend",
     "cost_total": "Total",
+    "cost_other": "Other",
     "by_project": "By workspace",
     "by_agent": "By agent",
     "agent": "Agent",

@@ -20,6 +20,7 @@
     "trend": "日趋势",
     "cost_trend": "费用日趋势",
     "cost_total": "合计",
+    "cost_other": "其他",
     "by_project": "按项目分解",
     "by_agent": "按 Agent",
     "agent": "Agent",

@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp, Loader2, RefreshCw, Search } from 'lucide-react';
@@ -8,6 +8,7 @@ import SelectMenu from '../components/SelectMenu';
 import MultiSelectMenu from '../components/MultiSelectMenu';
 import UserUsageDialog from '../components/usage/UserUsageDialog';
 import MiniBarChart, { SERIES_COLORS } from '../components/usage/MiniBarChart';
+import { buildAgentCostChart } from '../components/usage/costSeries';
 import {
   consoleAdminPageClass,
   consoleAdminTableScrollClass,
@@ -132,27 +133,23 @@ export default function UsageAdmin() {
     [overview],
   );
 
-  // 费用日趋势按 agent 堆叠：取区间内累计费用 Top N（= SERIES_COLORS 长度）的 agent
-  const agentCostSeries = useMemo(() => {
-    const totals = new Map();
-    for (const d of overview?.trend || []) {
-      for (const [k, v] of Object.entries(d.costByAgent || {})) {
-        totals.set(k, (totals.get(k) || 0) + (Number(v) || 0));
-      }
-    }
-    return [...totals.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, SERIES_COLORS.length)
-      .map(([key], i) => ({ key, label: key, color: SERIES_COLORS[i] }));
-  }, [overview]);
+  // 费用日趋势按 agent 堆叠：Top N 各自成段，超出的合并为「其他」，
+  // 保证柱高 = 当日真实合计（否则尾部 agent 费用被静默丢弃，费用预估偏低）。
+  const costChart = useMemo(
+    () => buildAgentCostChart(overview?.trend || [], t('users:usage.cost_other')),
+    [overview, t],
+  );
 
   // 兜底：后端未返回 costByAgent（旧版服务端）时退回单一总量序列，仅展示合计
   const hasCostByAgent = (overview?.trend || []).some((d) => d.costByAgent && Object.keys(d.costByAgent).length > 0);
   const costSeries = hasCostByAgent
-    ? agentCostSeries
+    ? costChart.series
     : (overview?.trend || []).some((d) => (d.costUsd || 0) > 0)
       ? [{ key: 'total', label: t('users:usage.cost_total'), color: SERIES_COLORS[0] }]
       : [];
+  const costData = hasCostByAgent
+    ? costChart.data
+    : (overview?.trend || []).map((d) => ({ label: d.day, tip: d.day, values: { total: d.costUsd || 0 } }));
 
   const toggleExpand = (userId) => setExpandedUserId((prev) => (prev === userId ? null : userId));
 
@@ -233,9 +230,9 @@ export default function UsageAdmin() {
                 />
               </div>
               <div className="rounded-lg border border-zinc-200 bg-surface px-3 py-4">
-                {agentCostSeries.length > 0 && (
+                {costSeries.length > 0 && (
                   <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-                    {agentCostSeries.map((s) => (
+                    {costSeries.map((s) => (
                       <span key={s.key} className="flex items-center gap-1 text-[11px] text-zinc-400">
                         <span className={`inline-block h-1.5 w-1.5 rounded-sm ${s.color}`} /> {s.label}
                       </span>
@@ -243,12 +240,7 @@ export default function UsageAdmin() {
                   </div>
                 )}
                 <MiniBarChart
-                  data={(overview?.trend || []).map((d) => ({
-                    label: d.day,
-                    tip: d.day,
-                    // 旧版服务端无 costByAgent → 退回单一总量段
-                    values: d.costByAgent || { total: d.costUsd || 0 },
-                  }))}
+                  data={costData}
                   height={104}
                   showAxes
                   formatValue={(v) => `$${Number(v).toFixed(2)}`}
