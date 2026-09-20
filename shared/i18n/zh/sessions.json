@@ -131,7 +131,8 @@
     "select_workspace": "选择一个工作空间以打开终端。",
     "reconnecting_shell": "正在重连工作空间终端… ({{attempt}}/{{max}})",
     "restore_shell_failed": "终端无法恢复{{reason}}。切换标签页以重试。",
-    "system_prefix": "[系统]"
+    "system_prefix": "[系统]",
+    "input_stalled": "输入可能未送达 Agent——若持续无法输入，请重启会话。"
   },
   "conversation": {
     "refresh": "刷新",

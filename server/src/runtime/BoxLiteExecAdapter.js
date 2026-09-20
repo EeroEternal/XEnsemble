@@ -53,7 +53,17 @@ class BoxLiteStreamHandle extends StreamHandle {
         this._reattachMaxAttempts = options.reattachMaxAttempts || 3;
         this._reattachAttempts = 0;
         this._heartbeatTimer = null;
-        this._heartbeatTimeoutMs = options.heartbeatTimeoutMs || 600000;
+        // 半开连接检测窗口。此前默认 600000（10 分钟）：boxlite exec WS 僵死
+        // （对端丢失但 TCP 未断）时，输入最长静默丢失 10 分钟才被发现，用户
+        // 侧表现即「输入框打字无反应，刷新无效，重启会话才恢复」。ping 每
+        // 10s 一次，60s 无 pong 即判定链路死亡并走重连/exit 流程。
+        this._heartbeatTimeoutMs = options.heartbeatTimeoutMs || 60000;
+        // Reattach 窗口内的输入缓冲（有界）：exec WS 断开重连期间（1~15s）
+        // 键盘输入不再静默丢弃，重连成功后按序补发；超限丢弃并让 write()
+        // 返回 false，由 terminalBridge → server 向客户端发 input_stalled。
+        this._pendingInput = [];
+        this._pendingInputBytes = 0;
+        this._pendingInputLimit = options.pendingInputLimitBytes || 64 * 1024;
 
         this._setupWsListeners(ws);
     }
@@ -147,6 +157,8 @@ class BoxLiteStreamHandle extends StreamHandle {
         this._exited = true;
         this._exitCode = exitCode;
         this._stopHeartbeat();
+        this._pendingInput = [];
+        this._pendingInputBytes = 0;
         for (const cb of this._exitCbs) {
             try { cb({ exitCode }); } catch (_) {}
         }
@@ -191,6 +203,8 @@ class BoxLiteStreamHandle extends StreamHandle {
                     this._ws = newWs;
                     this._reattaching = false;
                     this._reattachAttempts = 0;
+                    // 补发重连窗口内排队的键盘输入。
+                    this._flushPendingInput();
                     // Don't clear _decoders: TextDecoder internal buffer may hold
                     // incomplete multi-byte bytes from the last frame before disconnect.
                     // Clearing would lose them and cause FFFD on the next frame.
@@ -222,14 +236,47 @@ class BoxLiteStreamHandle extends StreamHandle {
         return { dispose: () => { this._exitCbs = this._exitCbs.filter((c) => c !== callback); } };
     }
 
+    // 返回 true = 输入已送达（或已在重连窗口内排队）；false = 被丢弃。此前
+    // WS 非 OPEN 时输入被静默丢弃、无任何反馈，TUI 输入框表现为「打字无
+    // 反应」。返回值供 terminalBridge → server 向客户端发 input_stalled 提示。
     write(data) {
+        if (this._closed || this._exited) return false;
         if (this._ws && this._ws.readyState === 1) {
-            if (typeof data === 'string' || data instanceof Uint8Array) {
-                this._ws.send(Buffer.from(data));
-            } else {
-                this._ws.send(data);
+            const payload = (typeof data === 'string' || data instanceof Uint8Array)
+                ? Buffer.from(data)
+                : data;
+            try {
+                this._ws.send(payload);
+                return true;
+            } catch (_) {
+                return false;
             }
         }
+        // WS 非 OPEN（正在重连）：有界排队，重连成功后按序补发。
+        const buf = Buffer.isBuffer(data) ? data : Buffer.from(data || '');
+        if (buf.length === 0) return true;
+        if (this._pendingInputBytes + buf.length > this._pendingInputLimit) {
+            return false;
+        }
+        this._pendingInput.push(buf);
+        this._pendingInputBytes += buf.length;
+        return true;
+    }
+
+    _flushPendingInput() {
+        if (!this._ws || this._ws.readyState !== 1 || this._pendingInput.length === 0) return;
+        const pending = this._pendingInput.splice(0);
+        for (const buf of pending) {
+            try {
+                this._ws.send(buf);
+            } catch (_) {
+                // 发送中途新连接又断了：剩余部分（含当前帧）退回队列。
+                const idx = pending.indexOf(buf);
+                this._pendingInput = pending.slice(idx);
+                break;
+            }
+        }
+        this._pendingInputBytes = this._pendingInput.reduce((n, b) => n + b.length, 0);
     }
 
     resize(cols, rows) {
@@ -252,6 +299,8 @@ class BoxLiteStreamHandle extends StreamHandle {
         // from running its graceful shutdown (SQLite WAL checkpoint).
         // waitForAgentExit (VM exec kill -INT) handles process termination.
         this._closed = true;
+        this._pendingInput = [];
+        this._pendingInputBytes = 0;
     }
 
     get pid() { return null; }

@@ -104,3 +104,57 @@ test('BoxLiteExecAdapter.spawn injects IS_SANDBOX=1 and lets caller env override
     });
     assert.equal(captured.env.IS_SANDBOX, '0');
 });
+
+// 回归：exec WS 断开重连期间（reattach 窗口）输入曾被静默丢弃——用户侧
+// 表现为 TUI 输入框「打字无反应，刷新无效，重启会话才恢复」。现在输入
+// 有界排队，重连成功后按序补发；无法送达时 write() 返回 false 供上层反馈。
+test('BoxLiteStreamHandle.write queues input during reattach and flushes on reconnect', () => {
+    const deadWs = makeWs();
+    deadWs.readyState = 3; // CLOSED — reattach in flight
+    const handle = new BoxLiteStreamHandle(deadWs, 'boxlite:p_proj:exec_3', { preferSeqFrames: true });
+
+    const sent = [];
+    const reconnected = makeWs();
+    reconnected.readyState = 1;
+    reconnected.send = (buf) => sent.push(Buffer.from(buf).toString());
+
+    // While the exec WS is down, keystrokes are queued (not silently dropped).
+    assert.equal(handle.write('a'), true);
+    assert.equal(handle.write('\x1b[B'), true);
+    assert.equal(sent.length, 0);
+
+    handle._ws = reconnected;
+    handle._flushPendingInput();
+    assert.deepEqual(sent, ['a', '\x1b[B']);
+
+    // After the flush the queue is empty; writes on the live socket go direct.
+    assert.equal(handle.write('b'), true);
+    assert.deepEqual(sent, ['a', '\x1b[B', 'b']);
+    handle.kill();
+});
+
+test('BoxLiteStreamHandle.write returns false when input must be dropped', () => {
+    // Closed handle: input can never be delivered.
+    const ws = makeWs();
+    const handle = new BoxLiteStreamHandle(ws, 'boxlite:p_proj:exec_4', { preferSeqFrames: true });
+    handle.kill();
+    assert.equal(handle.write('x'), false);
+
+    // Bounded queue: overflowing the limit drops the chunk and reports it.
+    const deadWs = makeWs();
+    deadWs.readyState = 3;
+    const handle2 = new BoxLiteStreamHandle(deadWs, 'boxlite:p_proj:exec_5', {
+        preferSeqFrames: true,
+        pendingInputLimitBytes: 8,
+    });
+    assert.equal(handle2.write('12345678'), true);
+    assert.equal(handle2.write('9'), false);
+    handle2.kill();
+});
+
+test('BoxLiteStreamHandle detects a half-open exec channel in 60s (not 10 min)', () => {
+    const ws = makeWs();
+    const handle = new BoxLiteStreamHandle(ws, 'boxlite:p_proj:exec_6', { preferSeqFrames: true });
+    assert.equal(handle._heartbeatTimeoutMs, 60000);
+    handle.kill();
+});

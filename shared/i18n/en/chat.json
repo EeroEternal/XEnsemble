@@ -8,6 +8,7 @@
   "session_ended": "Session ended",
   "session_ended_hint": "The agent is no longer running. Start a new session to continue.",
   "tui_command_hint": "TUI commands like /model and /vim aren't supported here — switch to the Agent view to use them.",
+  "input_stalled_hint": "Your last input may not have reached the agent (channel reconnecting). If typing stays unresponsive, restart the session.",
   "you": "You",
   "agent": "Agent",
   "tool_unknown": "Tool",
