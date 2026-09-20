@@ -195,7 +195,9 @@ export default React.forwardRef(function Sessions({
     [sessions, activeSession?.sessionId],
   );
   const sessionAlive = activeSessionMeta?.alive === true;
-  // 已退出会话：只读档案（可看轨迹/历史/文件），不能重启/部署/运行终端
+  // 已退出会话：只读档案（轨迹/历史不依赖 runtime，始终可看）。文件区能否
+  // 浏览取决于该会话的 runtime VM 是否仍存活：交互式 /exit 会销毁 VM → 文件
+  // 不可看；循环任务会话退出不销毁 runtime → 存活期间可看。不能重启/部署/运行终端。
   const sessionExited = activeSessionMeta?.status === 'exited';
 
   // Sync session context so all API calls (git, files, deploy) include session_id
