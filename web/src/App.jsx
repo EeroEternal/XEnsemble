@@ -42,8 +42,6 @@ function AuthenticatedLayout({
   setActiveSession,
   activeWorkspaceId,
   switchWorkspace,
-  showLoopSessions,
-  onToggleLoopSessions,
   fetchWorkspaces,
   fetchAgents,
   logout,
@@ -114,8 +112,6 @@ function AuthenticatedLayout({
         activeSession={activeSession}
         activeWorkspaceId={activeWorkspaceId}
         activeWorkspaceName={activeWorkspaceName}
-        showLoopSessions={showLoopSessions}
-        onToggleLoopSessions={onToggleLoopSessions}
         onSelectSession={onSelectSession}
         onNewSession={() => { setLaunchPanelOpen(true); sessionsRef.current?.openLaunchModal?.('session'); }}
         onRequestDeleteSession={(session, ws, action) => sessionsRef.current?.requestDeleteSession?.(session, ws, action)}
@@ -341,8 +337,6 @@ function App() {
     setActiveSession,
     activeWorkspaceId,
     switchWorkspace,
-    showLoopSessions,
-    setShowLoopSessions,
     fetchWorkspaces,
     fetchAgents,
   } = useWorkspaces(user);
@@ -458,8 +452,6 @@ function App() {
                     setActiveSession={setActiveSession}
                     activeWorkspaceId={activeWorkspaceId}
                     switchWorkspace={switchWorkspace}
-                    showLoopSessions={showLoopSessions}
-                    onToggleLoopSessions={setShowLoopSessions}
                     fetchWorkspaces={fetchWorkspaces}
                     fetchAgents={fetchAgents}
                     logout={logout}

@@ -3,7 +3,6 @@
   "new_session": "新建会话",
   "search": "搜索",
   "exited_sessions": "已退出会话",
-  "show_loop_sessions": "显示循环任务会话",
   "loop_session": "循环任务会话",
   "launch": {
     "title": "新建会话",
