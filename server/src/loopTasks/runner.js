@@ -26,7 +26,6 @@ const { broadcastSse } = require('../session/sseManager');
 const { recordEvent } = require('../events/recordEvent');
 const { computeNextRunAt } = require('./cron');
 const { createAgentSession } = require('../session/createAgentSession');
-const { supportsTuiAutoFinish } = require('../agents/taskRunModes');
 const transcriptStore = require('../runtime/TranscriptStore');
 const trajectory = require('../llm/trajectory');
 
@@ -275,9 +274,11 @@ async function executeRun(task, run, log = console) {
         //   复核模式：干完活 → awaiting_review 挂起等人
         //   TUI 自动收口：干完活 → 静默后自动按 succeeded 收口并退出会话
         //  （终端全程已渲染，回放即历史；退出码语义让位于过程可视化）
+        // 所有循环任务一律【交互式】拉起（TUI 可见可回放）；手动批准场景由
+        // TUI 逐个审批，自动批准场景由 runner 注入各 CLI 免审批 flag。
+        // 成败以「本轮完整走完」为准，不再依赖退出码（过程可视化优先）。
         const reviewMode = task.requireReview === true;
-        const tuiAutoFinish = !reviewMode && supportsTuiAutoFinish(task.agentId);
-        const interactive = reviewMode || tuiAutoFinish;
+        const interactive = true;
         const created = await createAgentSession({
             user: { id: task.userId, role: 'member' },
             project,
@@ -305,19 +306,19 @@ async function executeRun(task, run, log = console) {
         //（否则 DB 停留 running，重启后被 reconcile 误标为可恢复的 idle——
         // 任务会话永远进不了「已退出」）。
         offExit = sessionManager.onExit(sessionId, (exitCode) => {
-            const ok = !interactive && Number(exitCode) === 0;
+            // 交互模式下 agent 进程不应自行退出：提前退出即异常（崩溃/被杀），无论退出码一律判 failed
             void (async () => {
-                await finalize(ok ? 'succeeded' : 'failed', ok ? null : `agent exited with code ${exitCode}`);
+                await finalize('failed', `agent exited unexpectedly with code ${exitCode}`);
                 await stopTaskSession(sessionId, log, exitCode);
             })();
         });
 
-        if (reviewMode) {
-            // 注入任务指令（镜像 /terminal/input：写 PTY + 落转录 + 触碰活动戳）。
-            // 两段式写入：先写文本、间隔 400ms 再单独写 \r（回车）。同一次 write
-            // 里的「text + \r」会被部分 TUI（实测 codebuddy）当作普通文本填进输入
-            // 框而不提交——回车必须是独立的写入事件。多行指令压成单行（裸换行会
-            // 被 TUI 当回车逐行提交）。
+        {
+            // 注入任务指令（所有模式均交互式拉起：镜像 /terminal/input：写 PTY +
+            // 落转录 + 触碰活动戳）。两段式写入：先写文本、间隔 400ms 再单独写
+            // \r（回车）。同一次 write 里的「text + \r」会被部分 TUI（实测
+            // codebuddy）当作普通文本填进输入框而不提交——回车必须是独立的写入
+            // 事件。多行指令压成单行（裸换行会被 TUI 当回车逐行提交）。
             // 时序：① 等 TUI 首帧（lastOutputAt 非空，60s 强制兜底）；② 等输出静默
             // ≥3s（启动 spinner 停止，ink 系 TUI 启动期会丢弃 stdin）；③ 注入；
             // ④ 8s 内无新输出视为未提交，重试至多 3 次（重试先补 \r 提交可能残留
@@ -379,7 +380,8 @@ async function executeRun(task, run, log = console) {
             //      TUI 首帧/启动期的静默不算开工；注入始终被吞时保持 running 直到
             //      执行超时，超时会抓终端尾打进 error 便于定位。
             //   ② 开工后输出静默 TURN_IDLE_MS（至少距注入 TURN_MIN_MS）→ 认为干完
-            //      活，进入 awaiting_review 等人。
+            //      活：复核模式进入 awaiting_review 挂起等人；自动结束模式自动按
+            //      成功收口并退出会话。
             let warnedNoStart = false;
             reviewPoll = setInterval(() => {
                 if (settled) { clearInterval(reviewPoll); reviewPoll = null; return; }

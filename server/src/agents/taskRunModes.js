@@ -38,14 +38,10 @@ const TASK_RUN_MODES = {
     'claude-code': {
         args: (prompt) => ['-p', prompt],
         autoApproveArgs: ['--dangerously-skip-permissions'],
-        // TUI 自动收口模式：自动结束时也以交互式拉起（终端全程渲染、可回放），
-        // 静默判定干完活后自动收口。需配合 onboarding/bypass 种子（claudeConfigBootstrap）。
-        tuiAutoFinish: true,
     },
     'codebuddy': {
         args: (prompt) => ['-p', prompt],
         autoApproveArgs: ['--dangerously-skip-permissions'],
-        tuiAutoFinish: true,
     },
     'qwen-code': {
         args: (prompt) => ['-p', prompt],
@@ -106,6 +102,8 @@ const TASK_RUN_MODES = {
         // 关闭其余确认门（三者组合即官方 --yolo 语义）。
         args: (prompt) => ['-p', prompt],
         autoApproveArgs: ['--allow-all-tools', '--allow-all-paths', '--allow-all-urls'],
+        // 交互式（复核/等待人工场景）同样需要三件套，否则逐个审批无人应答
+        interactiveAutoApproveArgs: ['--allow-all-tools', '--allow-all-paths', '--allow-all-urls'],
     },
     'openclaw': {
         // --local 强制本地嵌入式运行时（跳过 Gateway daemon），适配沙箱一次性执行。
@@ -143,15 +141,12 @@ function getTaskRunArgs(agentId, prompt, { autoApprove = false } = {}) {
  */
 function getAutoApproveArgs(agentId) {
     const mode = TASK_RUN_MODES[agentId];
-    return mode && Array.isArray(mode.autoApproveArgs) ? [...mode.autoApproveArgs] : [];
-}
-
-/**
- * TUI 自动收口模式（自动结束但保留终端全过程渲染/回放）。
- * 仅对已解决交互式首启（onboarding/审批）问题的 agent 开启。
- */
-function supportsTuiAutoFinish(agentId) {
-    return Boolean(TASK_RUN_MODES[agentId]?.tuiAutoFinish);
+    if (!mode) return [];
+    // 交互式批准参数可与一次性模式不同（如 copilot 的三件套），显式配置优先
+    if (Array.isArray(mode.interactiveAutoApproveArgs)) {
+        return [...mode.interactiveAutoApproveArgs];
+    }
+    return Array.isArray(mode.autoApproveArgs) ? [...mode.autoApproveArgs] : [];
 }
 
 /**
@@ -163,4 +158,4 @@ function getTaskRunRemoveArgs(agentId) {
     return Array.isArray(mode?.removeBaseArgs) ? mode.removeBaseArgs : [];
 }
 
-module.exports = { isTaskRunSupported, getTaskRunArgs, getTaskRunRemoveArgs, getAutoApproveArgs, supportsTuiAutoFinish };
+module.exports = { isTaskRunSupported, getTaskRunArgs, getTaskRunRemoveArgs, getAutoApproveArgs };
