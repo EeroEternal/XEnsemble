@@ -308,36 +308,49 @@ async function executeRun(task, run, log = console) {
 
         if (reviewMode) {
             // 注入任务指令（镜像 /terminal/input：写 PTY + 落转录 + 触碰活动戳）。
+            // 两段式写入：先写文本、间隔 400ms 再单独写 \r（回车）。同一次 write
+            // 里的「text + \r」会被部分 TUI（实测 codebuddy）当作普通文本填进输入
+            // 框而不提交——回车必须是独立的写入事件。多行指令压成单行（裸换行会
+            // 被 TUI 当回车逐行提交）。
             // 时序：① 等 TUI 首帧（lastOutputAt 非空，60s 强制兜底）；② 等输出静默
-            // ≥3s（启动 spinner 停止 = 引导完成——ink 系 TUI 启动期会丢弃 stdin，
-            // 盲写必被吞，实测 claude-code 停在首页任务不出现）；③ 写入单行指令
-            // + \r（裸换行会被 TUI 当回车逐行提交，任务拆碎）；④ 8s 内无新输出视
-            // 为被吞，重试至多 3 次。
+            // ≥3s（启动 spinner 停止，ink 系 TUI 启动期会丢弃 stdin）；③ 注入；
+            // ④ 8s 内无新输出视为未提交，重试至多 3 次（重试先补 \r 提交可能残留
+            // 在输入框里的文本，再重新写一遍）。
             let injectedAt = null;
             let injectAttempts = 0;
             const bootStart = Date.now();
             const injectTry = () => {
                 if (settled || injectAttempts >= 3) return;
                 injectAttempts += 1;
+                if (injectAttempts > 1) {
+                    // 重试：先补一个回车提交可能残留在输入框里的文本
+                    sessionManager.getSession(sessionId)?.handle?.write('\r');
+                }
                 const cur = sessionManager.getSession(sessionId);
                 if (!cur) return;
-                const text = `${String(task.prompt).replace(/\r?\n+/g, ' ')}\r`;
+                const text = `${String(task.prompt).replace(/\r?\n+/g, ' ')}`;
                 if (cur.transcriptRef) {
-                    transcriptStore.append(cur.transcriptRef, { kind: 'in', data: text });
+                    transcriptStore.append(cur.transcriptRef, { kind: 'in', data: `${text}\r` });
                 }
                 cur?.handle?.write(text);
                 sessionManager.touchActivity(sessionId, 'input');
-                const before = Number(cur.lastOutputAt || 0);
-                injectedAt = Date.now();
-                // 验证：8s 内出现新输出 → TUI 已接受；否则重试
                 setTimeout(() => {
-                    if (settled || injectAttempts >= 3) return;
+                    if (settled) return;
                     const cur2 = sessionManager.getSession(sessionId);
                     if (!cur2) return;
-                    if (Number(cur2.lastOutputAt || 0) > before) return;
-                    log.warn?.(`[loop-task-runner] run ${runId}: prompt injection appeared swallowed (no output in 8s), retrying (${injectAttempts}/3)`);
-                    injectTry();
-                }, 8_000);
+                    const before = Number(cur2.lastOutputAt || 0);
+                    cur2?.handle?.write('\r');
+                    injectedAt = Date.now();
+                    // 验证：8s 内出现新输出 → 已提交；否则重试
+                    setTimeout(() => {
+                        if (settled || injectAttempts >= 3) return;
+                        const cur3 = sessionManager.getSession(sessionId);
+                        if (!cur3) return;
+                        if (Number(cur3.lastOutputAt || 0) > before) return;
+                        log.warn?.(`[loop-task-runner] run ${runId}: prompt injection appeared swallowed (no output in 8s), retrying (${injectAttempts}/3)`);
+                        injectTry();
+                    }, 8_000);
+                }, 400);
             };
             const bootPoll = setInterval(() => {
                 if (settled) { clearInterval(bootPoll); return; }
