@@ -408,6 +408,23 @@ async function createAgentSession({
                     log.warn({ err, sessionId }, '[sessions] claude api key approval failed');
                 }
             }
+            // 跳过首次交互引导（主题选择/信任目录）：每会话独立状态目录意味着每个
+            // 新会话都会重新走 onboarding——无人值守的复核模式会被引导页挡住，
+            // 注入的任务指令被吞（实测 claude-code 卡在主题选择页）。
+            if (agentMeta.id === 'claude-code' && sessionStateDir?.stateDirPath) {
+                try {
+                    const { ensureClaudeOnboardingCompleted } = require('../workspace/claudeConfigBootstrap');
+                    await ensureClaudeOnboardingCompleted({
+                        runtime,
+                        runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
+                        stateDirPath: sessionStateDir.stateDirPath,
+                        cwd: workspacePath,
+                        log,
+                    });
+                } catch (err) {
+                    log.warn({ err, sessionId }, '[sessions] claude onboarding seed failed (non-fatal)');
+                }
+            }
             if (resumeSpec?.redirectHome && sessionStateDir.stateDirRef) {
                 const runtimeRef = ready.runtime ? ready.runtime.runtimeRef : undefined;
                 await prepareHomeRedirect(runtime.fs, {
