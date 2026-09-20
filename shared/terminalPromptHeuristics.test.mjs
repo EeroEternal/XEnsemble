@@ -74,6 +74,43 @@ describe('detectTuiPrompt', () => {
     assert.equal(detectTuiPrompt([]), null);
   });
 
+  it('does not flag idle completion screens (footer "?" + bare input cursor)', () => {
+    const r = detectTuiPrompt([
+      '⏺ Task completed successfully',
+      '⏺ All 12 tests passing',
+      '⏺ Updated src/login.ts',
+      '',
+      'Total cost:            $0.42',
+      'Total duration (API):  1m 23.4s',
+      '',
+      '? for shortcuts',
+      '❯',
+    ]);
+    assert.equal(r, null);
+  });
+
+  it('does not flag numbered completion summaries without a question line', () => {
+    const r = detectTuiPrompt([
+      '⏺ Done! Here is what I did:',
+      '  1. Fixed the login redirect loop',
+      '  2. Updated tests for the new flow',
+      '  3. Cleaned up unused imports',
+      '? for shortcuts',
+      '❯',
+    ]);
+    assert.equal(r, null);
+  });
+
+  it('does not flag summaries whose prose merely contains question-ish words', () => {
+    const r = detectTuiPrompt([
+      '任务完成。',
+      '1. 修复了登录重定向',
+      '2. 后续可继续优化性能',
+      '❯',
+    ]);
+    assert.equal(r, null);
+  });
+
   it('works on ANSI-laden transcript lines after stripAnsi', () => {
     const raw = ['\x1b[32m✓ Done\x1b[0m', '\x1b[1mAllow execution? (y/n)\x1b[0m'];
     const r = detectTuiPrompt(raw.map((l) => stripAnsi(l)));

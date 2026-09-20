@@ -99,6 +99,19 @@ export function parseQuestionTool(toolName, argsContent) {
 // (spinners, footers, command palettes) doesn't trip the detector.
 const TUI_QUESTION_RE = /\?|？|\ballow\b|\bapprove\b|\bproceed\b|\bconfirm\b|\bpermission\b|选择|确认|允许|是否|批准|继续/i;
 
+// Persistent status-bar / footer chrome on Cline / Claude Code style TUIs —
+// never a question. The bare "?" in "? for shortcuts" used to satisfy the
+// question-context check on idle completion screens (false "waiting" pings
+// every time a task finished), so these lines are dropped before scanning.
+const TUI_CHROME_RE =
+  /\?\s*for\s+(?:shortcuts|context|commands|help|keys)|esc\s+to\s+\w+|ctrl\+[a-z]|auto-accept|bypass\s+permissions|plan\s+mode\b|(?:total\s+)?(?:cost|duration)\s*[·:]|\d[\d,.]*\s+tokens?\b/i;
+
+// A line that itself asks something: ends with "?" (or fullwidth ？) or starts
+// with an explicit question verb. Loose keyword hits anywhere in the scrollback
+// ("继续" inside a completion summary) no longer count as question context.
+const QUESTION_LINE_RE =
+  /(?:\?|？)\s*$|^(?:choose|select|pick|approve|proceed|confirm|permission|是否|允许|确认|批准|选择|请选)/i;
+
 /**
  * Detect a TUI confirmation / selection prompt from screen text lines.
  * Returns { kind: 'yesno'|'select'|'continue', lines } with the trailing
@@ -107,7 +120,8 @@ const TUI_QUESTION_RE = /\?|？|\ballow\b|\bapprove\b|\bproceed\b|\bconfirm\b|\b
 export function detectTuiPrompt(allLines) {
   const tail = (allLines || [])
     .map((l) => String(l).replace(/\s+$/g, ''))
-    .filter((l) => l.trim());
+    .filter((l) => l.trim())
+    .filter((l) => !TUI_CHROME_RE.test(l));
   if (tail.length === 0) return null;
   const context = tail.slice(-10);
   const joined = context.join('\n');
@@ -115,8 +129,9 @@ export function detectTuiPrompt(allLines) {
   if (/(?:\(|\[)?y\/n(?:\)|\])?|是\/否|Yes\s*\/\s*No/i.test(joined)) {
     return { kind: 'yesno', lines: snapshot };
   }
+  const questionLine = context.some((l) => QUESTION_LINE_RE.test(l));
   const numbered = context.filter((l) => /^[❯›>*·\s]*\d{1,2}[.、)）]\s*\S/.test(l));
-  if (numbered.length >= 2 && TUI_QUESTION_RE.test(joined)) {
+  if (numbered.length >= 2 && questionLine) {
     return { kind: 'select', lines: snapshot };
   }
   // "Press Enter"-style gates also require question-like context so idle TUI
@@ -124,7 +139,10 @@ export function detectTuiPrompt(allLines) {
   if (/(?:press|hit)\s+enter|enter\s+to|按回车|回车继续|回车确认/i.test(joined) && TUI_QUESTION_RE.test(joined)) {
     return { kind: 'continue', lines: snapshot };
   }
-  if (/❯|›/.test(joined) && TUI_QUESTION_RE.test(joined)) {
+  // ❯/› must carry option text ("❯ 1. Yes") — a bare "❯" is the idle input
+  // cursor every Cline/Claude Code screen shows, not a picker.
+  const optionCursor = context.some((l) => /^[❯›]\s*\S/.test(l));
+  if (optionCursor && questionLine) {
     return { kind: 'select', lines: snapshot };
   }
   return null;
