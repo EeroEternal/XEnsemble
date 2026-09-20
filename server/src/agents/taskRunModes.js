@@ -38,10 +38,14 @@ const TASK_RUN_MODES = {
     'claude-code': {
         args: (prompt) => ['-p', prompt],
         autoApproveArgs: ['--dangerously-skip-permissions'],
+        // TUI 自动收口模式：自动结束时也以交互式拉起（终端全程渲染、可回放），
+        // 静默判定干完活后自动收口。需配合 onboarding/bypass 种子（claudeConfigBootstrap）。
+        tuiAutoFinish: true,
     },
     'codebuddy': {
         args: (prompt) => ['-p', prompt],
         autoApproveArgs: ['--dangerously-skip-permissions'],
+        tuiAutoFinish: true,
     },
     'qwen-code': {
         args: (prompt) => ['-p', prompt],
@@ -143,6 +147,14 @@ function getAutoApproveArgs(agentId) {
 }
 
 /**
+ * TUI 自动收口模式（自动结束但保留终端全过程渲染/回放）。
+ * 仅对已解决交互式首启（onboarding/审批）问题的 agent 开启。
+ */
+function supportsTuiAutoFinish(agentId) {
+    return Boolean(TASK_RUN_MODES[agentId]?.tuiAutoFinish);
+}
+
+/**
  * 一次性模式下需从 Agent 基础参数中剔除的项（如 cline 的 -i）。
  * @returns {string[]}
  */
@@ -151,4 +163,4 @@ function getTaskRunRemoveArgs(agentId) {
     return Array.isArray(mode?.removeBaseArgs) ? mode.removeBaseArgs : [];
 }
 
-module.exports = { isTaskRunSupported, getTaskRunArgs, getTaskRunRemoveArgs, getAutoApproveArgs };
+module.exports = { isTaskRunSupported, getTaskRunArgs, getTaskRunRemoveArgs, getAutoApproveArgs, supportsTuiAutoFinish };

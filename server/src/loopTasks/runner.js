@@ -26,6 +26,7 @@ const { broadcastSse } = require('../session/sseManager');
 const { recordEvent } = require('../events/recordEvent');
 const { computeNextRunAt } = require('./cron');
 const { createAgentSession } = require('../session/createAgentSession');
+const { supportsTuiAutoFinish } = require('../agents/taskRunModes');
 const transcriptStore = require('../runtime/TranscriptStore');
 const trajectory = require('../llm/trajectory');
 
@@ -269,16 +270,21 @@ async function executeRun(task, run, log = console) {
         if (!task.agentId) throw new Error('task has no agent configured — edit the task and pick an agent');
 
         // 创建 Agent 会话（source=loop_task；豁免配额由调用方不检查实现）。
-        // requireReview=true 时不走 headless 一次性参数：以交互式拉起，任务指令
-        // 由 runner 就绪后注入 PTY——agent 干完活进程不退出，会话挂起等人复核。
+        // interactive = 复核模式或 TUI 自动收口模式：不走 headless 一次性参数，
+        // 以交互式拉起，任务指令由 runner 就绪后注入 PTY。
+        //   复核模式：干完活 → awaiting_review 挂起等人
+        //   TUI 自动收口：干完活 → 静默后自动按 succeeded 收口并退出会话
+        //  （终端全程已渲染，回放即历史；退出码语义让位于过程可视化）
         const reviewMode = task.requireReview === true;
+        const tuiAutoFinish = !reviewMode && supportsTuiAutoFinish(task.agentId);
+        const interactive = reviewMode || tuiAutoFinish;
         const created = await createAgentSession({
             user: { id: task.userId, role: 'member' },
             project,
             agentId: task.agentId,
             source: 'loop_task',
             title: task.title,
-            taskPrompt: reviewMode ? null : task.prompt,
+            taskPrompt: interactive ? null : task.prompt,
             taskAutoApprove: task.autoApprove !== false,
             log,
         });
@@ -299,7 +305,7 @@ async function executeRun(task, run, log = console) {
         //（否则 DB 停留 running，重启后被 reconcile 误标为可恢复的 idle——
         // 任务会话永远进不了「已退出」）。
         offExit = sessionManager.onExit(sessionId, (exitCode) => {
-            const ok = !reviewMode && Number(exitCode) === 0;
+            const ok = !interactive && Number(exitCode) === 0;
             void (async () => {
                 await finalize(ok ? 'succeeded' : 'failed', ok ? null : `agent exited with code ${exitCode}`);
                 await stopTaskSession(sessionId, log, exitCode);
@@ -396,13 +402,22 @@ async function executeRun(task, run, log = console) {
                 reviewPoll = null;
                 void (async () => {
                     try {
-                        const result = await extractRunResult(sessionId);
-                        if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
-                        await updateRun(runId, { status: 'awaiting_review', result, reviewStartedAt: Date.now() });
-                        broadcastRun(run, { status: 'awaiting_review' });
-                        log.log?.(`[loop-task-runner] run ${runId} (task "${task.title}") → awaiting_review (session ${sessionId} kept alive for human review)`);
+                        if (reviewMode) {
+                            const result = await extractRunResult(sessionId);
+                            if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
+                            await updateRun(runId, { status: 'awaiting_review', result, reviewStartedAt: Date.now() });
+                            broadcastRun(run, { status: 'awaiting_review' });
+                            log.log?.(`[loop-task-runner] run ${runId} (task "${task.title}") → awaiting_review (session ${sessionId} kept alive for human review)`);
+                        } else {
+                            // TUI 自动收口：干完活自动按成功收口并退出会话；
+                            // 全过程已写入终端转录，回放即可查看
+                            if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
+                            await finalize('succeeded', null);
+                            await stopTaskSession(sessionId, log);
+                            log.log?.(`[loop-task-runner] run ${runId} (task "${task.title}") → succeeded (tui auto-finish, session closed)`);
+                        }
                     } catch (err) {
-                        log.warn?.({ err, runId }, '[loop-task-runner] failed to enter awaiting_review');
+                        log.warn?.({ err, runId }, '[loop-task-runner] failed to complete interactive turn');
                     }
                 })();
             }, TURN_POLL_MS);
