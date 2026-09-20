@@ -68,21 +68,39 @@ async function ensureClaudeOnboardingCompleted({ runtime, runtimeRef, stateDirPa
         config = {};
     }
 
-    // 已完成过则不动，避免覆盖用户在 TUI 里手动选择的主题
-    if (config.hasCompletedOnboarding) return;
-
-    config.hasCompletedOnboarding = true;
-    if (!config.theme) config.theme = theme;
+    // 逐项按需补齐：已手动完成 onboarding 的目录不覆盖用户选的主题，
+    // 但缺失的 bypass 接受标记/信任标记仍要补写
+    let changed = false;
+    if (!config.hasCompletedOnboarding) {
+        config.hasCompletedOnboarding = true;
+        changed = true;
+    }
+    if (!config.theme) {
+        config.theme = theme;
+        changed = true;
+    }
+    // --dangerously-skip-permissions 首次使用的一次性接受对话框：新状态目录没有
+    // 这个标记，交互式首启会弹「Bypass Permissions … Yes, I accept」等确认，
+    // 无人值守场景会卡住。任务配置自动批准时由调用方注入该 flag，这里预接受。
+    if (!config.bypassPermissionsModeAccepted) {
+        config.bypassPermissionsModeAccepted = true;
+        changed = true;
+    }
     // 工作区信任对话框按 cwd 记忆
     if (!config.projects || typeof config.projects !== 'object') config.projects = {};
     const projectEntry = (config.projects[cwd] && typeof config.projects[cwd] === 'object')
         ? config.projects[cwd]
         : {};
+    if (projectEntry.hasTrustDialogAccepted !== true) {
+        changed = true;
+    }
     config.projects[cwd] = {
         ...projectEntry,
         hasTrustDialogAccepted: true,
         allowedTools: projectEntry.allowedTools || [],
     };
+
+    if (!changed) return;
 
     const writeScript = `cat > '${configPath}' << 'CLAUDE_JSON_EOF'\n${JSON.stringify(config, null, 2)}\nCLAUDE_JSON_EOF`;
     await runtime.exec.exec(
