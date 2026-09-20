@@ -66,9 +66,6 @@ export default function ChatView({ sessionId, agentId, onSessionEnd }) {
   const [messages, setMessages] = useState([]);
   const [connected, setConnected] = useState(false);
   const [ended, setEnded] = useState(false);
-  // 服务端反馈「输入未送达 agent」（boxlite exec 通道断开等）时置位：
-  // 在输入框上方显示提示，直到有新输出/chat 事件（通道恢复）自动消除。
-  const [inputStalled, setInputStalled] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
   // 游标分页：true = 更早的历史已取完（某一页不足 PAGE_SIZE 或为空）；
   // loadingOlder = 「加载更早」请求进行中（按钮转 spinner 防重复点击）。
@@ -254,7 +251,6 @@ export default function ChatView({ sessionId, agentId, onSessionEnd }) {
         try { msg = JSON.parse(event.data); } catch (_) { return; }
         if (msg.type === 'ready') {
           setConnected(true);
-          setInputStalled(false);
           // Fresh stream after (re)connect: drop any stale screen state so
           // detection starts from what the TUI paints next.
           try { termRef.current?.reset(); } catch { /* ignore */ }
@@ -262,8 +258,6 @@ export default function ChatView({ sessionId, agentId, onSessionEnd }) {
           return;
         }
         if (msg.type === 'output' && typeof msg.data === 'string') {
-          // 有输出说明通道仍能送达 → 清除 input_stalled 提示。
-          setInputStalled(false);
           // Feed the live PTY stream into the headless terminal (batched +
           // backpressured, see enqueueOutput), then scan the screen
           // (debounced) for confirmation/selection prompts.
@@ -286,13 +280,6 @@ export default function ChatView({ sessionId, agentId, onSessionEnd }) {
           lastChatEventAtRef.current = Date.now();
           // The agent resumed work — any pending terminal prompt is gone.
           setTuiPrompt(null);
-          setInputStalled(false);
-          return;
-        }
-        if (msg.type === 'input_stalled') {
-          // Server reports the last input could not be delivered to the agent
-          // (exec channel down). Show a hint until output/chat resumes.
-          setInputStalled(true);
           return;
         }
         if (msg.type === 'exit') {
@@ -415,31 +402,8 @@ export default function ChatView({ sessionId, agentId, onSessionEnd }) {
   // Auto-scroll to bottom on new messages — but NOT when an older page was
   // just prepended (first seq moved backward): that would yank the viewport
   // away from the freshly loaded history. handleLoadOlder restores the exact
-  // scroll offset itself. Also NOT when the user has scrolled up to read:
-  // during streaming an unconditional snap reverts every wheel-up within
-  // ~100ms, so the mouse wheel feels dead. stickToBottomRef tracks the
-  // pinned state from real scroll/wheel events; the follow write itself
-  // lands back at the bottom, whose scroll event restores stick=true.
+  // scroll offset itself.
   const prevFirstSeqRef = useRef(null);
-  const stickToBottomRef = useRef(true);
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el) return undefined;
-    const syncStick = () => {
-      stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    };
-    const onWheel = (e) => {
-      // Optimistically unpin on wheel-up: the scroll event lags one frame,
-      // but a stream chunk may commit in between and would read stale state.
-      if (e.deltaY < 0) stickToBottomRef.current = false;
-    };
-    el.addEventListener('scroll', syncStick, { passive: true });
-    el.addEventListener('wheel', onWheel, { passive: true });
-    return () => {
-      el.removeEventListener('scroll', syncStick);
-      el.removeEventListener('wheel', onWheel);
-    };
-  }, []);
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
@@ -447,7 +411,7 @@ export default function ChatView({ sessionId, agentId, onSessionEnd }) {
     const prevFirst = prevFirstSeqRef.current;
     prevFirstSeqRef.current = firstSeq;
     if (prevFirst != null && firstSeq != null && firstSeq < prevFirst) return;
-    if (stickToBottomRef.current) el.scrollTop = el.scrollHeight;
+    el.scrollTop = el.scrollHeight;
   }, [messages, loadingHistory]);
 
   // Track the message list's scroll geometry so the custom scrollbar thumb
@@ -857,11 +821,6 @@ export default function ChatView({ sessionId, agentId, onSessionEnd }) {
 
       {/* Input */}
       <div className="border-t border-zinc-200 bg-surface px-4 py-3">
-        {inputStalled && !ended && (
-          <div className="mx-auto max-w-3xl pb-2 text-[12px] leading-relaxed text-amber-700">
-            {t('chat:input_stalled_hint', { defaultValue: 'Your last input may not have reached the agent (channel reconnecting). If typing stays unresponsive, restart the session.' })}
-          </div>
-        )}
         <div className="mx-auto flex max-w-3xl items-end gap-2">
           <textarea
             ref={inputRef}

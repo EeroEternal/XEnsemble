@@ -84,10 +84,8 @@ async function resolveLiveSession(sessionId, options = {}) {
 
 function applyTerminalMessage(handle, msg) {
     if (msg.type === 'input') {
-        // write() 返回 false = 输入未能送达（如 boxlite exec 通道断开且输入
-        // 缓冲已超限）。undefined（本地 pty 的 write 无返回值）视为已送达，
-        // 保持向后兼容。server 侧据此向客户端发 input_stalled 反馈帧。
-        return handle.write(msg.data) !== false;
+        handle.write(msg.data);
+        return;
     }
     if (msg.type === 'resize') {
         try {

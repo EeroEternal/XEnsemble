@@ -131,8 +131,7 @@
     "select_workspace": "Select a workspace to open a shell.",
     "reconnecting_shell": "Reconnecting workspace shell… ({{attempt}}/{{max}})",
     "restore_shell_failed": "Terminal could not be restored{{reason}}. Switch tabs to retry.",
-    "system_prefix": "[System]",
-    "input_stalled": "Input may not have reached the agent — if typing stays unresponsive, restart the session."
+    "system_prefix": "[System]"
   },
   "conversation": {
     "refresh": "Refresh",

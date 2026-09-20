@@ -2107,15 +2107,8 @@ fastify.register(async function terminalWsRoutes(app) {
                 return;
             }
 
-            let stalledInputLogged = false;
             const processTerminalClientMessage = (parsed) => {
-                if (!sessionManager.isAlive(sessionId)) {
-                    if (!stalledInputLogged && parsed?.type === 'input') {
-                        stalledInputLogged = true;
-                        req.log.warn({ sessionId }, '[terminal] input dropped: session not alive');
-                    }
-                    return;
-                }
+                if (!sessionManager.isAlive(sessionId)) return;
                 if (parsed?.type === 'input' || parsed?.type === 'resize') {
                     const live = sessionManager.getSession(sessionId);
                     if (parsed?.type === 'input') {
@@ -2131,16 +2124,7 @@ fastify.register(async function terminalWsRoutes(app) {
                         });
                     }
                 }
-                const delivered = applyTerminalMessage(sub.handle, parsed);
-                if (parsed?.type === 'input' && delivered === false) {
-                    if (!stalledInputLogged) {
-                        stalledInputLogged = true;
-                        req.log.warn({ sessionId }, '[terminal] input dropped: agent exec channel not writable');
-                    }
-                    // 非致命反馈帧：客户端据此提示「输入可能未送达」。
-                    // 不要复用 'error' 类型——error 会触发 ws.close()。
-                    sendJson({ type: 'input_stalled' });
-                }
+                applyTerminalMessage(sub.handle, parsed);
             };
 
             // Replay messages buffered while the session was provisioning

@@ -8,7 +8,6 @@
   "session_ended": "会话已结束",
   "session_ended_hint": "Agent 不再运行，请新建会话继续。",
   "tui_command_hint": "TUI 命令（如 /model、/vim）在对话模式不可用，请切换到 Agent 视图使用。",
-  "input_stalled_hint": "刚才的输入可能未送达 Agent（通道重连中）。若持续无法输入，请重启会话。",
   "you": "我",
   "agent": "Agent",
   "tool_unknown": "工具",

@@ -20,7 +20,7 @@ import {
 import { shouldNotifyTuiTheme } from '../lib/terminalThemeNotify';
 import { useTerminalTheme } from '../hooks/useTerminalTheme.jsx';
 import { XTERM_MINIMUM_CONTRAST_RATIO } from '../lib/terminalThemes.js';
-import { Loader2, AlertTriangle } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import {
   createTerminalReconnectState,
   isTerminalAuthFailure,
@@ -203,9 +203,6 @@ function AgentConsole({
   const [connected, setConnected] = useState(false);
   // eslint-disable-next-line no-unused-vars
   const [ended, setEnded] = useState(!shouldConnect && !shouldReplayIdle);
-  // 服务端反馈「输入未送达 agent」（boxlite exec 通道断开等）时置位：
-  // 显示常驻提示条，直到有新输出（通道恢复）或重连自动消除。
-  const [inputStalled, setInputStalled] = useState(false);
   // First-use guide card: shown only for a fresh live session with no output yet.
   const [guideVisible, setGuideVisible] = useState(false);
   const guideVisibleRef = useRef(guideVisible);
@@ -973,17 +970,7 @@ function AgentConsole({
             if (hoverMouseDowngrade) processed = downgradeHoverMouseMode(processed);
             if (processed.trim()) dismissGuide();
             const buf = terminal.buffer.active;
-            // Follow output only while the user's viewport is on the bottom
-            // page. baseY is the buffer line where the bottom page starts
-            // (= max(0, length - rows)), so "baseY + rows >= length" was a
-            // tautology — atBottom was always true and every chunk ended with
-            // scrollToBottom(), making the mouse wheel feel dead whenever the
-            // TUI kept repainting (spinner/status line) or the agent was
-            // streaming: each wheel-up got reverted within ~100ms. viewportY
-            // is where the viewport actually sits; once the user scrolls up
-            // it drops below baseY and we stop pinning until they return to
-            // the bottom (typing already re-follows via scrollOnUserInput).
-            const atBottom = buf.viewportY >= buf.baseY;
+            const atBottom = buf.baseY + terminal.rows >= buf.length;
             pendingWrites++;
             terminal.write(processed, () => {
               pendingWrites = Math.max(0, pendingWrites - 1);
@@ -1029,7 +1016,6 @@ function AgentConsole({
             const msg = parseMessage(event.data);
             if (msg.type === 'ready') {
               markAuthenticated();
-              setInputStalled(false);
               // The TUI (e.g. opencode) boots inside the sandbox slightly
               // after the session handle becomes alive; resend the fitted
               // size so it initializes at the right dimensions even when the
@@ -1044,7 +1030,6 @@ function AgentConsole({
               return;
             }
             if (msg.type === 'output') {
-              setInputStalled(false);
               if (msg.seq != null) pendingSeq = msg.seq;
               // 重放阶段的终端查询不交给 xterm：解析器会再次触发回包，
               // 而提问的 TUI 已不再等待 → 回包变成打进它 stdin 的按键。
@@ -1086,12 +1071,6 @@ function AgentConsole({
                 const delay = pendingWrites > 4 ? 64 : pendingWrites > 1 ? 32 : 16;
                 writeRafId = setTimeout(flushWriteBuffer, delay);
               }
-              return;
-            }
-            if (msg.type === 'input_stalled') {
-              // Agent 执行通道断开（如 boxlite exec WS 僵死），键入内容未送达。
-              // 显示提示条；下次 output/ready（通道恢复）自动消除。
-              setInputStalled(true);
               return;
             }
             if (msg.type === 'error') {
@@ -1224,12 +1203,6 @@ function AgentConsole({
           全部置为透明，露出 host 的主题背景色兜底。 */}
       <style>{`.xterm{width:100%!important;height:100%!important}.xterm-screen{width:100%!important;height:100%!important}.xterm-viewport{width:100%!important;height:100%!important;background-color:transparent!important}.xterm-scrollable-element{background-color:transparent!important}`}</style>
       <div ref={hostRef} className="min-h-0 w-full flex-1" style={{ backgroundColor: xtermTheme.background }} />
-      {inputStalled && (
-        <div className="flex items-center gap-2 border-t border-amber-300/60 bg-amber-50 px-3 py-1.5 text-[12px] text-amber-900">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600" />
-          <span className="flex-1">{t('sessions:terminal.input_stalled', { defaultValue: 'Input may not have reached the agent — if typing stays unresponsive, restart the session.' })}</span>
-        </div>
-      )}
       {guideVisible && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-6">
           <div className="pointer-events-auto w-full max-w-md rounded-xl border border-zinc-700/60 bg-zinc-900/95 p-5 shadow-2xl backdrop-blur">
