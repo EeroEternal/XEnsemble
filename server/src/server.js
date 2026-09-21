@@ -1350,7 +1350,13 @@ fastify.get('/api/v1/sessions/:sessionId/report', { preValidation: [fastify.auth
     let llmError = null;
     // 有轨迹就尝试生成建议（未配置 LLM 时 generateAdvice 同步抛错快速降级，不阻塞）。
     try {
-        advice = await trajectoryReport.generateAdvice(insight.turns, insight.issues);
+        advice = await trajectoryReport.generateAdvice(insight.turns, insight.issues, {
+            // 0043：内部计量归属（feature='trajectory_report'），userId 以 sessions 行为准。
+            feature: 'trajectory_report',
+            userId: session.userId,
+            sessionId,
+            projectId: session.projectId,
+        });
         if (advice) engine = 'rules+llm';
     } catch (err) {
         llmError = String(err?.message || err).slice(0, 300);

@@ -14,6 +14,7 @@ const { extractFromTrajectory } = require('./conversationExtractor');
 const { countToolCalls } = require('../llm/trajectory');
 const { countCorrections } = require('../skills/skillScorer');
 const analyzeClient = require('../llm/analyzeClient');
+const { resolveSessionMetering } = require('../llm/sessionMetering');
 
 // --- 检测器阈值（导出便于测试与调参） ---
 const LOOP_MIN_REPEAT = 3;
@@ -296,9 +297,10 @@ function validateAdvice(raw) {
 
 /**
  * 生成 LLM 建议。未配置/失败时抛错由调用方降级（或返回 null 表示无建议）。
+ * @param {object} metering 0043 内部计量归属 { feature, userId, sessionId?, projectId? }
  * @returns {object|null} { overall, promptSuggestions, agentNotes }
  */
-async function generateAdvice(turns, issues) {
+async function generateAdvice(turns, issues, metering) {
     if (!analyzeClient.isConfigured()) {
         const err = new Error('LLM analyze API key is not configured');
         err.code = 'llm_not_configured';
@@ -308,6 +310,7 @@ async function generateAdvice(turns, issues) {
     const base = {
         system: ADVICE_SYSTEM,
         user,
+        metering,
         options: { maxTokens: ADVICE_MAX_TOKENS, temperature: 0.3 },
     };
     let raw;

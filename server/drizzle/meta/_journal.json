@@ -302,6 +302,13 @@
       "when": 1789914000000,
       "tag": "0042_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1790000000000,
+      "tag": "0043_llm_usage_internal",
+      "breakpoints": true
     }
   ]
 }

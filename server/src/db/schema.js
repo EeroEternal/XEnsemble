@@ -628,6 +628,13 @@ const llmUsage = pgTable('llm_usage', {
   seq: integer('seq'),
   // 0035: 静态启发式任务难度 D ∈ [0,1]；路由 skip 时为 null
   difficulty: doublePrecision('difficulty'),
+  // 0043: 流量性质。'session' = agent 会话流量（proxy 写入）；'internal' = 服务端内置
+  // AI 功能（analyzeClient 写入）。存量行为 NULL，查询侧 COALESCE(source, 'session')。
+  source: text('source'),
+  // source='internal' 时必填的功能标识：session_title / conversation_summary /
+  // trajectory_report / skill_extract / skill_classify / deploy_analyze /
+  // deploy_verify / quick_preview / git_pr_fill
+  feature: text('feature'),
 }, (table) => ({
   userCreatedIdx: index('idx_llm_usage_user_created').on(table.userId, table.createdAt),
   userProjectIdx: index('idx_llm_usage_user_project').on(table.userId, table.projectId, table.createdAt),

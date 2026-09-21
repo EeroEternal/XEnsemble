@@ -129,7 +129,7 @@ function registerWorkspaceRoutes(fastify, { getProjectForUser }) {
         try {
             const ready = await ensureProjectRuntime(project, { deploymentId: process.env.XENSEMBLE_DEPLOYMENT_ID || null });
             const ref = ready.runtime ? ready.runtime.runtimeRef : undefined;
-            const result = await analyzeProjectDeploy({ workspacePath: ready.workspacePath, hostWorkspacePath: ready.hostWorkspacePath, runtimeRef: ref });
+            const result = await analyzeProjectDeploy({ workspacePath: ready.workspacePath, hostWorkspacePath: ready.hostWorkspacePath, runtimeRef: ref, userId: request.user.id, projectId: request.params.projectId });
             return result;
         } catch (err) {
             request.log.error(err);

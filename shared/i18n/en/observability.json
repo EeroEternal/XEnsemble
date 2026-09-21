@@ -30,7 +30,20 @@
     "period_30d": "Last 30 days",
     "vs_prev": "{{pct}}% vs previous period",
     "no_data": "No usage data yet",
-    "deleted_project": "Deleted workspace"
+    "deleted_project": "Deleted workspace",
+    "internal_by_feature": "Built-in AI features",
+    "source_session": "Agent sessions",
+    "source_internal": "Built-in AI",
+    "feature": "Feature",
+    "feature_session_title": "Session titles",
+    "feature_conversation_summary": "Conversation summaries",
+    "feature_trajectory_report": "Trajectory advice",
+    "feature_skill_extract": "Skill extraction",
+    "feature_skill_classify": "Skill classification",
+    "feature_deploy_analyze": "Deploy plan analysis",
+    "feature_deploy_verify": "Deploy verification",
+    "feature_quick_preview": "Quick preview",
+    "feature_git_pr_fill": "Git commit/PR messages"
   },
   "routing": {
     "title": "Routing Analysis",

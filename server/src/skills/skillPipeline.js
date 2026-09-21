@@ -359,6 +359,8 @@ async function runExtract({ log = console } = {}) {
                     overview: summary.overview || '',
                     keyDecisions: summary.keyDecisions || [],
                     filesTouched: summary.filesTouched || [],
+                    // 0043：内部计量归属，userId 随候选行（源自 sessions.user_id）
+                    metering: { feature: 'skill_classify', userId: cand.userId, sessionId: cand.sessionId },
                 });
                 if (!cl.reusable) {
                     await db.update(schema.skillCandidates)
@@ -380,7 +382,7 @@ async function runExtract({ log = console } = {}) {
         // L4 提炼
         let extracted;
         try {
-            extracted = await extractor.extract({ summary, turns });
+            extracted = await extractor.extract({ summary, turns, metering: { feature: 'skill_extract', userId: cand.userId, sessionId: cand.sessionId } });
         } catch (err) {
             safeLog(log, `[skill-pipeline] extract skip ${cand.sessionId}: ${err?.message || err}`);
             results.push({ sessionId: cand.sessionId, outcome: 'extract_deferred' });
@@ -397,6 +399,7 @@ async function runExtract({ log = console } = {}) {
                     existingContent: existing.content,
                     newTitle: extracted.title,
                     newContent: extracted.content,
+                    metering: { feature: 'skill_extract', userId: cand.userId, sessionId: cand.sessionId },
                 });
                 if (dup) {
                     duplicateOf = existing.id;
@@ -509,7 +512,7 @@ async function extractFromSession(sessionId, { userId, log = console } = {}) {
     const summary = (conversation && conversation.summary) || {};
     const turns = (conversation && Array.isArray(conversation.turns)) ? conversation.turns : [];
 
-    const extracted = await extractor.extract({ summary, turns });
+    const extracted = await extractor.extract({ summary, turns, metering: { feature: 'skill_extract', userId: session.userId, sessionId } });
 
     let duplicateOf = null;
     try {
@@ -520,6 +523,7 @@ async function extractFromSession(sessionId, { userId, log = console } = {}) {
                 existingContent: existing.content,
                 newTitle: extracted.title,
                 newContent: extracted.content,
+                metering: { feature: 'skill_extract', userId: session.userId, sessionId },
             });
             if (dup) { duplicateOf = existing.id; break; }
         }

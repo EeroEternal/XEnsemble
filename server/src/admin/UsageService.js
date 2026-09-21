@@ -61,6 +61,74 @@ async function getMyUsageSummary(userId, { days } = {}) {
     };
 }
 
+// 0043：内置 AI 用量归属展示。存量行 source 为 NULL（proxy 写入的 agent 会话流量），
+// 查询统一 COALESCE(source, 'session')，前端无需感知历史空值。
+function emptySourceBucket() {
+    return { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+}
+
+/**
+ * 本人按流量性质分解：session（agent 会话流量）vs internal（内置 AI 功能）。
+ * @returns {Promise<{ session:{requests:number,promptTokens:number,completionTokens:number,totalTokens:number}, internal:{requests:number,promptTokens:number,completionTokens:number,totalTokens:number} }>}
+ */
+async function getMyUsageBySource(userId, { days } = {}) {
+    const { sinceTs } = normalizeRange(days);
+    const sourceExpr = sql`coalesce(${schema.llmUsage.source}, 'session')`;
+    const rows = await db
+        .select({
+            source: sourceExpr,
+            requests: sql`count(*)::int`,
+            prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
+            completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
+            total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
+        })
+        .from(schema.llmUsage)
+        .where(and(eq(schema.llmUsage.userId, userId), gte(schema.llmUsage.createdAt, sinceTs)))
+        .groupBy(sourceExpr);
+    const out = { session: emptySourceBucket(), internal: emptySourceBucket() };
+    for (const r of rows) {
+        const key = r.source === 'internal' ? 'internal' : 'session';
+        out[key] = {
+            requests: Number(r.requests || 0),
+            promptTokens: Number(r.prompt || 0),
+            completionTokens: Number(r.completion || 0),
+            totalTokens: Number(r.total || 0),
+        };
+    }
+    return out;
+}
+
+/**
+ * 本人内置 AI（source='internal'）按功能分解（session_title / deploy_verify / …）。
+ * @returns {Promise<Array<{ feature:string, requests:number, promptTokens:number, completionTokens:number, totalTokens:number }>>}
+ */
+async function getMyInternalByFeature(userId, { days } = {}) {
+    const { sinceTs } = normalizeRange(days);
+    const rows = await db
+        .select({
+            feature: schema.llmUsage.feature,
+            requests: sql`count(*)::int`,
+            prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
+            completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
+            total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
+        })
+        .from(schema.llmUsage)
+        .where(and(
+            eq(schema.llmUsage.userId, userId),
+            gte(schema.llmUsage.createdAt, sinceTs),
+            eq(schema.llmUsage.source, 'internal'),
+        ))
+        .groupBy(schema.llmUsage.feature)
+        .orderBy(sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0) desc`);
+    return rows.map((r) => ({
+        feature: r.feature ?? '(unknown)',
+        requests: Number(r.requests || 0),
+        promptTokens: Number(r.prompt || 0),
+        completionTokens: Number(r.completion || 0),
+        totalTokens: Number(r.total || 0),
+    }));
+}
+
 /**
  * 本人按项目分解（含已删除项目，projectName 为 null 时由调用方兜底展示）。
  * 每项目附缓存命中率（分母只计上报了缓存信息的请求，与 getUsageByAgent 口径一致）。
@@ -292,17 +360,19 @@ async function getUsageByAgent({ days, userId } = {}) {
 }
 
 /**
- * 单用户详情：汇总 + 日趋势 + 模型分布 + 项目分布 + agent 分布。
+ * 单用户详情：汇总 + 日趋势 + 模型分布 + 项目分布 + agent 分布 + 内置 AI 功能分布（0043）。
  */
 async function getUserUsageDetail(userId, { days } = {}) {
-    const [summary, trend, byModel, byProject, byAgent] = await Promise.all([
+    const [summary, trend, byModel, byProject, byAgent, bySource, internalByFeature] = await Promise.all([
         getMyUsageSummary(userId, { days }),
         getMyUsageTrend(userId, { days }),
         getUsageByModel(userId, { days }),
         getMyUsageByProject(userId, { days }),
         getUsageByAgent({ days, userId }),
+        getMyUsageBySource(userId, { days }),
+        getMyInternalByFeature(userId, { days }),
     ]);
-    return { summary, trend, byModel, byProject, byAgent };
+    return { summary, trend, byModel, byProject, byAgent, bySource, internalByFeature };
 }
 
 /**
@@ -408,6 +478,8 @@ async function getUserRecentRequests(userId, { days = 7, limit = 20 } = {}) {
 module.exports = {
     normalizeRange,
     getMyUsageSummary,
+    getMyUsageBySource,
+    getMyInternalByFeature,
     getMyUsageByProject,
     getMyUsageTrend,
     getTotalBetween,

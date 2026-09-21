@@ -17,6 +17,7 @@ const { eq } = require('drizzle-orm');
 const { db } = require('../db');
 const schema = require('../db/schema');
 const analyzeClient = require('../llm/analyzeClient');
+const { resolveSessionMetering } = require('../llm/sessionMetering');
 const chatTranscript = require('../llm/chatTranscript');
 const extractor = require('./conversationExtractor');
 
@@ -235,9 +236,12 @@ async function summarizeSession(sessionId, { force = false } = {}) {
 
     let summary;
     try {
+        // 0043：内部计量归属（feature='conversation_summary'），userId 以 sessions 行为准。
+        const metering = await resolveSessionMetering(sessionId, 'conversation_summary');
         const raw = await analyzeClient.chatJson({
             system,
             user,
+            metering,
             options: { maxTokens: SUMMARY_MAX_TOKENS, temperature: 0.3 },
         });
         summary = validateSummary(raw);

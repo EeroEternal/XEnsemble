@@ -244,10 +244,80 @@ export default function MyUsagePanel() {
               </div>
             </div>
           </div>
+
+          {/* 0043：内置 AI 用量归属 —— 流量性质二分 + 按功能明细（旧版服务端无 bySource 时整段隐藏） */}
+          {usage.bySource && (usage.internalByFeature || []).length > 0 && (
+            <div>
+              <div className={`${consoleSectionLabelClass} mb-2`}>{t('observability:my_usage.internal_by_feature')}</div>
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                <span className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2 py-1">
+                  {t('observability:my_usage.source_session')}
+                  <span className="font-mono tabular-nums text-zinc-900">{formatTokens(usage.bySource.session?.totalTokens || 0)}</span>
+                  <span className="text-zinc-400">· {usage.bySource.session?.requests || 0}</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2 py-1">
+                  {t('observability:my_usage.source_internal')}
+                  <span className="font-mono tabular-nums text-zinc-900">{formatTokens(usage.bySource.internal?.totalTokens || 0)}</span>
+                  <span className="text-zinc-400">· {usage.bySource.internal?.requests || 0}</span>
+                </span>
+              </div>
+              <div className={`${consoleCardClass} overflow-hidden`}>
+                <div className="shrink-0 overflow-x-hidden overflow-y-auto">
+                <table className="w-full table-fixed border-collapse text-left text-sm">
+                  <colgroup>
+                    <col className="w-[40%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-[15%]" />
+                  </colgroup>
+                  <thead>
+                    <tr className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-400">
+                      <th className="px-4 py-2 font-medium">{t('observability:my_usage.feature')}</th>
+                      <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.requests')}</th>
+                      <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.prompt_tokens')}</th>
+                      <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.completion_tokens')}</th>
+                      <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.total_tokens')}</th>
+                    </tr>
+                  </thead>
+                </table>
+                </div>
+                <div className="max-h-48 overflow-y-auto overflow-x-hidden console-scroll-hidden">
+                <table className="w-full table-fixed border-collapse text-left text-sm">
+                  <colgroup>
+                    <col className="w-[40%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-[15%]" />
+                  </colgroup>
+                  <tbody className="divide-y divide-zinc-100">
+                    {usage.internalByFeature.map((f) => (
+                      <tr key={f.feature} className="text-zinc-600">
+                        <td className="px-4 py-2.5 font-medium text-zinc-900">{featureLabel(f.feature, t)}</td>
+                        <td className="px-4 py-2.5 text-right font-mono tabular-nums">{f.requests}</td>
+                        <td className="px-4 py-2.5 text-right font-mono tabular-nums">{formatTokens(f.promptTokens)}</td>
+                        <td className="px-4 py-2.5 text-right font-mono tabular-nums">{formatTokens(f.completionTokens)}</td>
+                        <td className="px-4 py-2.5 text-right font-mono font-semibold tabular-nums text-zinc-900">{formatTokens(f.totalTokens)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
   );
+}
+
+// 内置功能标识 → 本地化名称；未知 feature 原样展示（向前兼容新功能）。
+function featureLabel(feature, t) {
+  const key = `observability:my_usage.feature_${feature}`;
+  const label = t(key);
+  return label === key ? feature : label;
 }
 
 function UsageStatCard({ label, value, full, deltaPct, deltaText }) {

@@ -8,6 +8,8 @@ const { getProjectForUser } = require('../projects/getProjectForUser');
 const { withProjectGitLock } = require('../git/gitMutationLock');
 const userPreferences = require('../admin/UserPreferences');
 const { t } = require('../i18n');
+// 0043：commit/PR 描述生成统一走 analyzeClient（feature='git_pr_fill'，内部计量归属）。
+const llm = require('../llm/analyzeClient');
 
 function newId(prefix) {
     return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
@@ -201,12 +203,12 @@ async function aggregateGitStatus(project, multi, mode) {
 
 // Generate a commit message from the working-tree diff using the configured
 // DeepSeek-compatible LLM (same env as session titleService).
-async function generateCommitMessage(project, gitOperationService, { locale } = {}) {
-    const result = await generateAIDescription(project, gitOperationService, 'commit', { locale });
+async function generateCommitMessage(project, gitOperationService, { locale, metering } = {}) {
+    const result = await generateAIDescription(project, gitOperationService, 'commit', { locale, metering });
     return result;
 }
 
-async function generatePRDescription(project, gitOperationService, { sourceBranch, targetBranch, locale } = {}) {
+async function generatePRDescription(project, gitOperationService, { sourceBranch, targetBranch, locale, metering } = {}) {
     const base = targetBranch || 'main';
     // Fetch the target branch so origin/<base> is up-to-date for the
     // three-dot diff. Non-fatal if fetch fails (fall back to stale refs).
@@ -215,7 +217,7 @@ async function generatePRDescription(project, gitOperationService, { sourceBranc
     } catch { /* non-fatal */ }
     // Use three-dot diff (origin/<base>...HEAD) so we only capture commits
     // unique to the source branch, not the full divergence from base.
-    const result = await generateAIDescription(project, gitOperationService, 'pr', { base, locale });
+    const result = await generateAIDescription(project, gitOperationService, 'pr', { base, locale, metering: opts.metering });
     return result;
 }
 
@@ -240,10 +242,10 @@ async function generateAIDescription(project, gitOperationService, type, opts = 
     }
     if (!diff) return type === 'pr' ? { title: '', body: '' } : { message: '' };
 
-    const apiKey = process.env.LLM_ANALYZE_API_KEY;
-    const apiUrl = process.env.LLM_ANALYZE_API_URL || 'https://api.deepseek.com/chat/completions';
+    // 0043：经 analyzeClient 统一入口（feature='git_pr_fill'），消耗以 source='internal'
+    // 计量归属到发起用户。模型沿用 LLM_VERIFY_MODEL || LLM_ANALYZE_MODEL 的既有优先级。
+    if (!llm.isConfigured()) return type === 'pr' ? { title: '', body: '', error: 'AI not configured' } : { message: '', error: 'AI not configured' };
     const model = process.env.LLM_VERIFY_MODEL || process.env.LLM_ANALYZE_MODEL || 'deepseek-chat';
-    if (!apiKey) return type === 'pr' ? { title: '', body: '', error: 'AI not configured' } : { message: '', error: 'AI not configured' };
 
     const truncated = diff.slice(0, 8000);
     const locale = opts.locale || 'en';
@@ -306,27 +308,28 @@ async function generateAIDescription(project, gitOperationService, type, opts = 
     const reasoningEffort = process.env.LLM_ANALYZE_REASONING_EFFORT === undefined
         ? 'low'
         : String(process.env.LLM_ANALYZE_REASONING_EFFORT).trim();
-    const res = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({
-            model,
+    let data;
+    try {
+        data = await llm.chatRaw({
+            metering: opts.metering,
+            options: {
+                model,
+                maxTokens: 8192,
+                temperature: 0.4,
+                // reasoningEffort 为空串 → undefined → 不发送（兼容严格校验未知字段的端点）
+                reasoningEffort: reasoningEffort || undefined,
+                timeoutMs: 120000,
+            },
             messages: [
                 { role: 'system', content: prompts[type] || prompts.commit },
                 { role: 'user', content: truncated },
             ],
-            // 推理模型（如 glm-5.3-flash 等）会把大量输出 token 花在
-            // reasoning_content 思考上，800/2000 常被思考耗尽导致
-            // message.content 为空（finish_reason=length），前端误报
-            // 「无更改可描述」。提到 8192 给「思考 + 正文」留足空间，
-            // 兼顾最坏情况（长 diff 下 prompt/reasoning 均更大）。
-            max_tokens: 8192,
-            temperature: 0.4,
-            ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-        }),
-    });
-    if (!res.ok) throw new Error(`AI error ${res.status}`);
-    const data = await res.json();
+        });
+    } catch (err) {
+        // 保持与原 !res.ok → throw `AI error ${status}` 相同的路由侧错误通道
+        if (err instanceof llm.LlmAttributionError) throw err;
+        throw new Error(err instanceof llm.LlmRequestError && err.status ? `AI error ${err.status}` : `AI error: ${err.message}`);
+    }
     const content = (data.choices?.[0]?.message?.content || '').trim();
 
     // content 为空：AI 未返回有效结果（多半是推理 token 耗尽 / 模型异常）。
@@ -510,7 +513,10 @@ function registerProjectGitRoutes(fastify) {
         if (!project) return reply.code(404).send({ error: t('errors:project_not_found', {}, request.locale || 'en'), code: 'project_not_found' });
         const gitOperationService = await getGitService(request);
         try {
-            const result = await generateCommitMessage(project, gitOperationService, { locale: request.locale });
+            const result = await generateCommitMessage(project, gitOperationService, {
+                locale: request.locale,
+                metering: { feature: 'git_pr_fill', userId: request.user.id, projectId: project.id },
+            });
             return result;
         } catch (err) {
             request.log.error(err);
@@ -529,6 +535,7 @@ function registerProjectGitRoutes(fastify) {
                 sourceBranch: request.body?.source_branch,
                 targetBranch: request.body?.target_branch,
                 locale: request.locale,
+                metering: { feature: 'git_pr_fill', userId: request.user.id, projectId: project.id },
             });
             return result;
         } catch (err) {

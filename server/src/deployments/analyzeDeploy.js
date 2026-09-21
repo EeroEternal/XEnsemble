@@ -10,22 +10,10 @@ const {
     normalizeCmdForCompare,
 } = require('./detectStack');
 
-const API_KEY = process.env.LLM_ANALYZE_API_KEY;
-// OpenAI 兼容端点：配置可能给 base URL（如 …/api/v1）或完整 chat/completions URL；
-// 统一归一化为完整端点，否则这里直接 POST 到 base URL 会 404，部署必挂。
-function chatCompletionsUrl(url) {
-    const u = String(url || '').trim().replace(/\/+$/, '');
-    if (/\/chat\/completions\/?$/i.test(u)) return u;
-    return `${u}/chat/completions`;
-}
-const API_URL = chatCompletionsUrl(process.env.LLM_ANALYZE_API_URL || 'https://api.deepseek.com/chat/completions');
-const MODEL = process.env.LLM_ANALYZE_MODEL || 'deepseek-chat';
+// 0043：LLM 调用统一走 analyzeClient —— 端点/模型/超时/名单收口，token 消耗以
+// source='internal' 落 llm_usage，归属到发起用户（feature='deploy_analyze'）。
+const llm = require('../llm/analyzeClient');
 const LLM_TIMEOUT_MS = 180000;
-// 不支持 thinking 字段的模型（与 analyzeVerify.js 同一份名单；400 自愈降级）。
-const noThinkingModels = new Set([
-    'deepseek-chat', 'deepseek-reasoner',
-    ...(String(process.env.LLM_NO_THINKING_MODELS || '').split(',').map((s) => s.trim()).filter(Boolean)),
-]);
 
 const KEY_FILES = [
     'package.json',
@@ -530,50 +518,47 @@ function fallbackSteps(fileContentsText, detected = null) {
 
 // 对 LLM API 的瞬时故障（5xx / 429 / 网络错误）自动重试，避免一次网关抖动直接让部署失败。
 // 不主动传 thinking 参数：由供应商默认行为决定（reasoning 模型默认思考——慢但质量高）。
-async function callLlm(messages) {
+// 0043：每个成功请求经 analyzeClient 记量（fire-and-forget），归属 metering 携带的用户。
+async function callLlm(messages, metering) {
     const retries = 2;
     let lastWarning = '';
     for (let attempt = 0; attempt <= retries; attempt++) {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
         try {
             // response_format json_object 默认关闭：glm-5.3-flash 的 json_object 模式
             // 有服务端 bug——输出里所有 "json" token 被剥掉（详见 analyzeVerify.js
             // callLlm 注释）。LLM_JSON_MODE=1 可为行为良好的模型重新开启。
-            const bodyObj = { model: MODEL, messages, max_tokens: 16000, temperature: 0.2 };
-            if (process.env.LLM_JSON_MODE === '1') bodyObj.response_format = { type: 'json_object' };
-            if (!noThinkingModels.has(MODEL)) bodyObj.thinking = { type: 'disabled' };
-            const res = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
-                body: JSON.stringify(bodyObj),
-                signal: controller.signal,
+            const model = llm.getLlmConfig().model;
+            const data = await llm.chatRaw({
+                messages,
+                metering,
+                options: {
+                    maxTokens: 16000,
+                    temperature: 0.2,
+                    timeoutMs: LLM_TIMEOUT_MS,
+                    responseFormat: process.env.LLM_JSON_MODE === '1' ? 'json' : undefined,
+                    disableThinking: !llm.noThinkingModels.has(model),
+                },
             });
-            if (!res.ok) {
-                const text = await res.text().catch(() => '');
-                lastWarning = `LLM error ${res.status}: ${text.slice(0, 120)}`;
-                if ((res.status >= 500 || res.status === 429) && attempt < retries) {
-                    console.error(`[analyzeDeploy] LLM error ${res.status}, retry ${attempt + 1}/${retries}`);
-                    await new Promise((r) => setTimeout(r, attempt === 0 ? 1500 : 4000));
-                    continue;
-                }
-                return { ok: false, warning: lastWarning };
-            }
-            const data = await res.json();
             const choice = data.choices?.[0];
             const content = choice?.message?.content;
             console.error('[analyzeDeploy] finish_reason:', choice?.finish_reason, 'usage:', JSON.stringify(data.usage), 'content_len:', String(content || '').length, 'content:', String(content || '').slice(0, 500));
             return { ok: true, content };
         } catch (e) {
-            lastWarning = `LLM unavailable: ${e.message}`;
-            if (attempt < retries) {
-                console.error(`[analyzeDeploy] LLM unavailable (${e.message}), retry ${attempt + 1}/${retries}`);
+            // 归属缺失是实现 bug，静默降级会把「无归属」问题掩盖掉——直接抛。
+            if (e instanceof llm.LlmAttributionError) throw e;
+            const isLlmErr = e instanceof llm.LlmRequestError;
+            lastWarning = (isLlmErr && e.status)
+                ? `LLM error ${e.status}: ${String(e.body || '').slice(0, 120)}`
+                : `LLM unavailable: ${e.message}`;
+            const retryable = !isLlmErr || !e.status || e.status >= 500 || e.status === 429;
+            if (retryable && attempt < retries) {
+                console.error(isLlmErr && e.status
+                    ? `[analyzeDeploy] LLM error ${e.status}, retry ${attempt + 1}/${retries}`
+                    : `[analyzeDeploy] LLM unavailable (${e.message}), retry ${attempt + 1}/${retries}`);
                 await new Promise((r) => setTimeout(r, attempt === 0 ? 1500 : 4000));
                 continue;
             }
             return { ok: false, warning: lastWarning };
-        } finally {
-            clearTimeout(timer);
         }
     }
     return { ok: false, warning: lastWarning };
@@ -815,13 +800,13 @@ async function resolveOpencodePlan(opencodeResult, { workspacePath, hostWorkspac
 
 // 轻量 ReAct 分析（LLM + 只读工具循环，数十秒出 plan）：无 opencode 或 opencode
 // 未胜出时使用；也参与与 opencode 的竞速（两条路径并行，谁先交付可用 plan 用谁）。
-async function analyzeWithReact({ workspacePath, hostWorkspacePath, runtimeRef, isAborted }) {
+async function analyzeWithReact({ workspacePath, hostWorkspacePath, runtimeRef, isAborted, metering }) {
     if (isAborted?.()) return { ok: false, aborted: true };
 
     const fsAdapter = getRuntime().fs;
     const { treeText, fileContentsText } = await collectProjectContext(fsAdapter, workspacePath, runtimeRef);
 
-    if (!API_KEY) {
+    if (!llm.isConfigured()) {
         const detected = detectStack(workspacePath);
         return { steps: normalizeSteps(fallbackSteps(fileContentsText, detected)), configFiles: [], source: 'fallback', contextTree: treeText };
     }
@@ -848,7 +833,7 @@ async function analyzeWithReact({ workspacePath, hostWorkspacePath, runtimeRef, 
     let repeatCount = 0;
     for (let round = 0; round < MAX_AGENT_ROUNDS; round++) {
         if (isAborted?.()) return { ok: false, aborted: true };
-        const llmResult = await callLlm(messages);
+        const llmResult = await callLlm(messages, metering);
         if (!llmResult.ok) {
             if (round === 0) {
                 const detected = detectStack(workspacePath);
@@ -905,8 +890,10 @@ async function analyzeWithReact({ workspacePath, hostWorkspacePath, runtimeRef, 
     };
 }
 
-async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeRef, isAborted }) {
+async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeRef, isAborted, userId, projectId }) {
     if (isAborted?.()) return { ok: false, aborted: true };
+    // 0043：内部计量归属 —— 本模块全部 LLM 消耗记到发起用户名下。
+    const metering = { feature: 'deploy_analyze', userId, projectId };
     const opencodeWs = hostWorkspacePath || workspacePath;
 
     // 并行竞争：opencode（完整 agent，质量高但慢）与 ReAct（轻量，数十秒出 plan）
@@ -917,7 +904,7 @@ async function analyzeProjectDeploy({ workspacePath, hostWorkspacePath, runtimeR
     let superseded = false;
     const checkAbort = () => (isAborted?.() ? true : superseded);
     const taggedOpencode = async () => ({ tag: 'opencode', result: await analyzeProjectWithOpencode(opencodeWs, checkAbort) });
-    const taggedReact = async () => ({ tag: 'react', result: await analyzeWithReact({ workspacePath, hostWorkspacePath, runtimeRef, isAborted: checkAbort }) });
+    const taggedReact = async () => ({ tag: 'react', result: await analyzeWithReact({ workspacePath, hostWorkspacePath, runtimeRef, isAborted: checkAbort, metering }) });
 
     const first = await Promise.race([taggedOpencode(), taggedReact()]);
     let chosen = planUsable(first) ? first : null;

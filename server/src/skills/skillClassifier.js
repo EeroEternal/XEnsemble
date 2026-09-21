@@ -35,11 +35,12 @@ function buildClassifyPrompt({ overview, keyDecisions = [], filesTouched = [] })
  * @returns {Promise<{ reusable: boolean, type: string | null }>}
  *   LLM 未配置 / 调用失败时抛出（由 skillPipeline 统一降级处理）。
  */
-async function classify({ overview, keyDecisions = [], filesTouched = [] }) {
+async function classify({ overview, keyDecisions = [], filesTouched = [], metering }) {
     const user = buildClassifyPrompt({ overview, keyDecisions, filesTouched });
     const raw = await analyzeClient.chatJson({
         system: 'You are a precise skill classifier. Always respond with valid JSON only.',
         user,
+        metering, // 0043：内部计量归属（feature='skill_classify'）
         options: { maxTokens: CLASSIFY_MAX_TOKENS, temperature: 0 },
     });
     const reusable = raw && typeof raw === 'object' ? Boolean(raw.reusable) : false;

@@ -30,7 +30,7 @@ function sanitizeTitle(raw) {
         .trim();
 }
 
-async function fetchSummary(history, agentName) {
+async function fetchSummary(history, agentName, metering) {
     if (!llm.isConfigured()) return null;
 
     const prompt = [
@@ -43,6 +43,7 @@ async function fetchSummary(history, agentName) {
     const content = await llm.chat({
         system: prompt,
         user: history,
+        metering, // 0043：内部计量归属（feature='session_title'）
         // 推理模型（如 GLM-5）的思维链会占用输出 token，60 会被思维链耗尽导致 content 为空，
         // 因此给足余量；sanitizeTitle 最终仍截断到 MAX_TITLE_LENGTH。
         options: { maxTokens: 512, temperature: 0.6 },
@@ -83,7 +84,12 @@ async function generateSessionTitle(sessionId) {
     if (filteredHistory.length < 10) return null;
 
     const agentName = await loadAgentName(sessionRow[0].agentId);
-    const title = await fetchSummary(filteredHistory, agentName);
+    // 0043：内部计量归属（feature='session_title'），userId 直接取自会话行。
+    const title = await fetchSummary(
+        filteredHistory,
+        agentName,
+        { feature: 'session_title', userId: sessionRow[0].userId, sessionId },
+    );
     if (!title) return null;
 
     await db

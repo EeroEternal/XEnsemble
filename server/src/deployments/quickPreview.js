@@ -35,6 +35,9 @@ const { analyzeProjectDeploy: analyzeProject } = require('./analyzeDeploy');
 const { loadVerifyState, saveVerifyState, issuePreviewToken: _ipt } = require('./twoStage');
 const deploymentService = require('./DeploymentService');
 const { registerDeploy, peekDeploy, unregisterDeploy, deployKey } = require('./activeDeploys');
+// 0043：LLM 调用统一走 analyzeClient —— 端点归一化/thinking 名单收口，token 消耗
+// 以 source='internal' 落 llm_usage，归属到发起用户（feature='quick_preview'）。
+const llm = require('../llm/analyzeClient');
 
 const issuePreviewToken = (id) => deploymentService.issuePreviewToken(id);
 
@@ -74,20 +77,8 @@ async function buildOccupants(projectId, userId) {
     }
 }
 
-// LLM 端点归一化：env 可能给 base URL（…/api/v1）或完整 chat/completions URL，
-// 直接拼接会产生 …/chat/completions/chat/completions → 405 Method Not Allowed
-// （analyzeDeploy.chatCompletionsUrl 同款逻辑，此处独立复制避免引依赖环）。
-function chatCompletionsUrl(url) {
-    const u = String(url || '').trim().replace(/\/+$/, '');
-    if (/\/chat\/completions\/?$/i.test(u)) return u;
-    return `${u}/chat/completions`;
-}
-
-// 不支持 thinking 字段的模型（与 analyzeDeploy/analyzeVerify 同一份名单）。
-const NO_THINKING_MODELS = new Set([
-    'deepseek-chat', 'deepseek-reasoner',
-    ...(String(process.env.LLM_NO_THINKING_MODELS || '').split(',').map((s) => s.trim()).filter(Boolean)),
-]);
+// LLM 端点归一化（chatCompletionsUrl）与 thinking 不支持名单（NO_THINKING_MODELS）
+// 已收口到 analyzeClient：本文件的 LLM 调用全部改走 llm.chatRaw（0043 内部计量）。
 
 // dev 目标选择：根 dev script 是 concurrently 聚合（web+server+desktop）时，electron
 // 桌面包在无 GUI 沙箱必崩（libglib 等共享库缺失 → exit 127）， concurrently 全队退出
@@ -129,6 +120,8 @@ function pickBrowserDevTarget(detected, hostPath) {
 // ── 阶段 B：确定性执行 ─────────────────────────────────────────────
 async function runQuickPreviewInner({ project, userId, projectId, sessionId, report, startedAt, deployRef, deployState }) {
     const runtime = getRuntime();
+    // 0043：内部计量归属 —— 本流程全部 LLM 消耗（plan / heal / mock factory）记到发起用户名下。
+    const metering = { feature: 'quick_preview', userId, sessionId, projectId };
     // 锁定会话的 worktree runtime（与部署 twoStage 同规则）：不传 runtimeId 时
     // ensureProjectRuntime 会落到 project.defaultRuntimeId（基础目录），而基础目录带
     // 平台占位 index.html → detectStack 误判 static → buildCmd 为空、devKind 为 null
@@ -211,7 +204,7 @@ async function runQuickPreviewInner({ project, userId, projectId, sessionId, rep
         plan = saved && saved.plan && Array.isArray(saved.plan.steps) && saved.plan.steps.length ? saved.plan : null;
     } catch { /* no cache */ }
     if (!plan) {
-        const analyzed = await analyzeProject({ workspacePath: wsPath, hostWorkspacePath: hostPath, runtimeRef: ref, isAborted: () => deployState.cancelled });
+        const analyzed = await analyzeProject({ workspacePath: wsPath, hostWorkspacePath: hostPath, runtimeRef: ref, isAborted: () => deployState.cancelled, userId, projectId });
         if (!analyzed || analyzed.ok === false || !Array.isArray(analyzed.steps) || !analyzed.steps.length) {
             return { ok: false, code: 'analyze_failed', error: '项目分析失败，无法确定启动方式。建议先执行完整部署。' };
         }
@@ -295,7 +288,7 @@ async function runQuickPreviewInner({ project, userId, projectId, sessionId, rep
         if (forceRegen) quickLog('mock factory regenerate forced (MOCK_FACTORY_REGENERATE=1)');
         try {
             await runtime.exec.exec('sh', ['-c', `cp ${GEN} ${BAK} 2>/dev/null; rm -f ${GEN}`], {}, { runtimeRef: ref, cwd: wsPath, timeoutMs: 5000 }).catch(() => null);
-            const generated = await generateMockFactory({ workspacePath: wsPath, hostWorkspacePath: hostPath, runtimeRef: ref });
+            const generated = await generateMockFactory({ workspacePath: wsPath, hostWorkspacePath: hostPath, runtimeRef: ref, metering });
             if (generated) {
                 plan.mockDataFactory = true;
                 factoryOk = true;
@@ -381,7 +374,7 @@ async function runQuickPreviewInner({ project, userId, projectId, sessionId, rep
     // 根目录跑 `npm run dev` 会因根无 package.json 而 ENOENT（多仓库布局实测）。
     let live = { ok: false, reason: 'no live-capable dev target', logTail: '' };
     if (detected.devKind) {
-        const attempt = await attemptLiveDevServer({ ref, wsPath, hostPath, detected, recipe, base: basePath, report });
+        const attempt = await attemptLiveDevServer({ ref, wsPath, hostPath, detected, recipe, base: basePath, report, metering });
         live = attempt.live;
         detected = attempt.detected; // electron 救场可能改写 devKind/devDir
         recipe = attempt.recipe;
@@ -514,7 +507,7 @@ async function getGuestFreePortCompat(ref) {
 // live dev server 启动 + 失败自愈（≤2 轮 LLM 修复）。
 // 返回最终 live 结果，以及可能被改写的 detected（electron 确定性救场会换子目录前端）
 // 与 recipe（自愈/回写 plan 缓存用）——调用方后续代理需要最新的 devKind。
-async function attemptLiveDevServer({ ref, wsPath, hostPath, detected: detectedIn, recipe: recipeIn, base, report }) {
+async function attemptLiveDevServer({ ref, wsPath, hostPath, detected: detectedIn, recipe: recipeIn, base, report, metering }) {
     const runtime = getRuntime();
     let detected = detectedIn;
     let recipe = recipeIn;
@@ -537,7 +530,7 @@ async function attemptLiveDevServer({ ref, wsPath, hostPath, detected: detectedI
         }
         report({ stage: 'B', substage: 'serve', message: `启动失败，AI 修复中（第 ${healRound + 1} 轮）` });
         quickLog(`heal round ${healRound + 1}: feeding live-dev.log to LLM`);
-        const healed = await healDevRecipe({ ref, hostPath, detected, logTail, previousRecipe: recipe });
+        const healed = await healDevRecipe({ ref, hostPath, detected, logTail, previousRecipe: recipe, metering });
         if (!healed) { quickLog('heal: LLM unavailable or no better recipe'); break; }
         recipe = { ...healed, source: `heal-${healRound + 1}` };
         quickLog(`heal round ${healRound + 1} recipe: ${recipe.cmd.slice(0, 120)}`);
@@ -760,11 +753,8 @@ Rules:
 live-dev.log tail:
 `;
 
-async function healDevRecipe({ ref, hostPath, detected, logTail, previousRecipe }) {
-    const API_KEY = process.env.LLM_ANALYZE_API_KEY;
-    const API_URL = process.env.LLM_ANALYZE_API_URL;
-    const MODEL = process.env.LLM_ANALYZE_MODEL || 'deepseek-chat';
-    if (!API_KEY || !API_URL) return null;
+async function healDevRecipe({ ref, hostPath, detected, logTail, previousRecipe, metering }) {
+    if (!llm.isConfigured()) return null;
     // 根/子包 scripts 清单注入：防止 LLM 推荐不存在的脚本（multica 实测两轮都给
     // `npm run dev`，而根 scripts 只有 dev:web/dev:desktop/turbo 系列 → 死循环）。
     let scriptsHint = '';
@@ -777,28 +767,22 @@ async function healDevRecipe({ ref, hostPath, detected, logTail, previousRecipe 
         }
         scriptsHint = parts.join('\n');
     } catch { /* hint is best-effort */ }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 90000);
     let content = '';
     try {
-        const resp = await fetch(chatCompletionsUrl(API_URL), {
-            method: 'POST', signal: controller.signal,
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
-            body: JSON.stringify({
-                model: MODEL, temperature: 0.1, max_tokens: 1500,
-                messages: [
-                    { role: 'system', content: 'Output raw JSON only.' },
-                    { role: 'user', content: HEAL_PROMPT + logTail.slice(0, 1500) + `\n\nAvailable package.json scripts (ONLY reference these; do NOT invent script names):\n${scriptsHint}\n\nprevious command: ${previousRecipe ? previousRecipe.cmd : '(platform default ' + (detected.devKind || 'npm') + ' dev in ' + (detected.devDir || '.') + ')'}` },
-                ],
-            }),
+        // 0043：经 analyzeClient 统一入口，消耗以 source='internal' 计量归属；
+        // 端点归一化（base/完整 URL）由 client 处理。
+        const data = await llm.chatRaw({
+            metering,
+            options: { maxTokens: 1500, temperature: 0.1, timeoutMs: 90000 },
+            messages: [
+                { role: 'system', content: 'Output raw JSON only.' },
+                { role: 'user', content: HEAL_PROMPT + logTail.slice(0, 1500) + `\n\nAvailable package.json scripts (ONLY reference these; do NOT invent script names):\n${scriptsHint}\n\nprevious command: ${previousRecipe ? previousRecipe.cmd : '(platform default ' + (detected.devKind || 'npm') + ' dev in ' + (detected.devDir || '.') + ')'}` },
+            ],
         });
-        const data = await resp.json();
         content = String(data?.choices?.[0]?.message?.content || '');
     } catch (e) {
         quickLog(`heal LLM call failed: ${e.message?.slice(0, 100)}`);
         return null;
-    } finally {
-        clearTimeout(timer);
     }
     content = content.replace(/^```[a-z]*\n?/, '').replace(/\n?```\s*$/, '').trim();
     const jsonStart = content.indexOf('{');
@@ -869,7 +853,7 @@ Module contract:
 Routes, handler returns, and models (verbatim excerpts):
 `;
 
-async function generateMockFactory({ workspacePath, hostWorkspacePath, runtimeRef }) {
+async function generateMockFactory({ workspacePath, hostWorkspacePath, runtimeRef, metering }) {
     const runtime = getRuntime();
     // 收集路由/模型摘要（guest 侧）。两级来源：
     //   1) grep 路由注册行（Express/Koa router.get / NestJS @Get 装饰器 / Flask @app.route）
@@ -982,46 +966,42 @@ async function generateMockFactory({ workspacePath, hostWorkspacePath, runtimeRe
     }
     // LLM 单次调用（现成 analyze 配置）+ 1 次重试：空响应/5xx 常态偶发，静默放弃
     // 会把整条拟真数据链路打回空壳兜底（实测 len=0 两次）。
-    const API_KEY = process.env.LLM_ANALYZE_API_KEY;
-    const API_URL = process.env.LLM_ANALYZE_API_URL;
-    const MODEL = process.env.LLM_ANALYZE_MODEL || 'deepseek-chat';
-    if (!API_KEY || !API_URL) {
+    if (!llm.isConfigured()) {
         quickLog('no LLM config; skip mock factory');
         return false;
     }
     for (let attempt = 1; attempt <= 2; attempt++) {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 120000);
         let content = '';
         try {
             // 调用姿势与 analyzeDeploy.callLlm 对齐：thinking disabled（glm 等推理
             // 模型不关 thinking 会把 max_tokens 烧在 reasoning 上 → content 为空——
             // 实测 19:26 两次 len=0 的根因）；finish_reason/usage 落日志可观测。
-            const bodyObj = { model: MODEL, temperature: 0.2, max_tokens: 16000, messages: [
-                { role: 'system', content: 'Output raw JavaScript only. No markdown, no explanation.' },
-                { role: 'user', content: MOCK_FACTORY_PROMPT + excerpts.slice(0, 65000) },
-            ] };
-            if (!NO_THINKING_MODELS.has(MODEL)) bodyObj.thinking = { type: 'disabled' };
-            const resp = await fetch(chatCompletionsUrl(API_URL), {
-                method: 'POST',
-                signal: controller.signal,
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
-                body: JSON.stringify(bodyObj),
+            // 0043：经 analyzeClient 统一入口，消耗以 source='internal' 计量归属。
+            const model = llm.getLlmConfig().model;
+            const data = await llm.chatRaw({
+                metering,
+                options: {
+                    maxTokens: 16000,
+                    temperature: 0.2,
+                    timeoutMs: 120000,
+                    disableThinking: !llm.noThinkingModels.has(model),
+                },
+                messages: [
+                    { role: 'system', content: 'Output raw JavaScript only. No markdown, no explanation.' },
+                    { role: 'user', content: MOCK_FACTORY_PROMPT + excerpts.slice(0, 65000) },
+                ],
             });
-            if (!resp.ok) {
-                const errBody = await resp.text().catch(() => '');
-                quickLog(`mock factory LLM http ${resp.status} (attempt ${attempt}): ${errBody.slice(0, 150)}`);
-                continue; // 重试
-            }
-            const data = await resp.json();
             const choice = data?.choices?.[0];
             quickLog(`mock factory LLM finish_reason=${choice?.finish_reason} usage=${JSON.stringify(data?.usage || {}).slice(0, 120)}`);
             content = String(choice?.message?.content || '');
         } catch (e) {
-            quickLog(`mock factory LLM call failed (attempt ${attempt}): ${e.message?.slice(0, 120)}`);
+            if (e instanceof llm.LlmRequestError && e.status) {
+                const errBody = String(e.body || '').slice(0, 150);
+                quickLog(`mock factory LLM http ${e.status} (attempt ${attempt}): ${errBody}`);
+            } else {
+                quickLog(`mock factory LLM call failed (attempt ${attempt}): ${e.message?.slice(0, 120)}`);
+            }
             continue;
-        } finally {
-            clearTimeout(timer);
         }
         // 剥掉可能的 ``` 包裹；前导空白/换行也剥掉（glm 有时先输出空行再 module.exports，
         // 严格 startsWith 会误杀 17837B 的合格产物——实测 19:41 attempt 1）。

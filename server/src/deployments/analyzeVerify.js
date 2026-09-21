@@ -9,16 +9,13 @@ const { getRuntime } = require('../runtime/registry');
 const { detectRuntimeToolchain, renderToolchainBlock } = require('./runtimeToolchain');
 const { detectBackendSignature } = require('./detectStack');
 
-const API_KEY = process.env.LLM_ANALYZE_API_KEY;
-const API_URL = process.env.LLM_ANALYZE_API_URL || 'https://api.deepseek.com/chat/completions';
-const MODEL = process.env.LLM_VERIFY_MODEL || process.env.LLM_ANALYZE_MODEL || 'deepseek-chat';
+// 0043：LLM 调用统一走 analyzeClient —— token 消耗以 source='internal' 落
+// llm_usage，归属到发起用户（feature='deploy_verify'）。thinking 不支持名单
+// 也收口在 client（noThinkingModels）。
+const llm = require('../llm/analyzeClient');
 const LLM_TIMEOUT_MS = 240000;
-// 不支持 thinking 字段的模型（400 自愈后自动降级为不带 thinking）：
-// deepseek 系不认识 anthropic 风格的 thinking 参数；glm-4 系（-9b/-32b）会 400。
-const noThinkingModels = new Set([
-    'deepseek-chat', 'deepseek-reasoner',
-    ...(String(process.env.LLM_NO_THINKING_MODELS || '').split(',').map((s) => s.trim()).filter(Boolean)),
-]);
+// verify 模型可独立于 stage-1 分析模型（LLM_VERIFY_MODEL 优先）。
+const VERIFY_MODEL = process.env.LLM_VERIFY_MODEL || process.env.LLM_ANALYZE_MODEL || '';
 const MAX_AGENT_ROUNDS = Number(process.env.OPENCODE_VERIFY_MAX_ROUNDS) || 60;
 // 同一条命令（install/build/start/su 等）被"去重拦截"累计达到该次数 → 直接 break 进兜底，
 // 不再让 LLM 反复重跑同一命令空转（xensemble 实测 LLM 连续 55 轮决定重跑 su 死循环，
@@ -63,58 +60,52 @@ const LLM_RETRIES = 2;
 // 之前显式 { type: "disabled" } 关思考导致弱模型输出 35-88 tokens/轮 的退化空转（实测）。
 
 // 对 LLM API 的瞬时故障（5xx / 429 / 网络错误）自动重试，避免一次网关抖动直接让部署失败。
-async function callLlm(messages, abortSignal) {
+async function callLlm(messages, abortSignal, metering) {
     let lastWarning = '';
     for (let attempt = 0; attempt <= LLM_RETRIES; attempt++) {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
-        // If an external abort signal is provided, link it to our controller
-        if (abortSignal) {
-            abortSignal.addEventListener('abort', () => controller.abort());
-        }
         try {
             // thinking disabled：reasoning 模型输出慢，显式关闭。部分模型不支持该字段
-            // （见 noThinkingModels）——400 自愈后自动降级为不带。
+            // （见 client 的 noThinkingModels）——400 自愈后自动降级为不带。
             // response_format json_object 默认关闭：实测 glm-5.3-flash 的 json_object
             // 模式有服务端 bug——输出里所有 "json" token 被剥掉（package.json→package.、
             // application/json→application/、import json→import ），agent 每条命令都被
             // 隐形截肢，60 轮全部烧在与幻影搏斗上（curl 一直 415 Unsupported Media
             // Type）。提示词已强制纯 JSON 输出，解析侧有围栏/括号平衡/action 提取三层
             // 容错，去掉该参数不影响其他模型；行为良好的模型可用 LLM_JSON_MODE=1 开启。
-            const bodyObj = { model: MODEL, messages, max_tokens: 16000, temperature: 0.2 };
-            if (process.env.LLM_JSON_MODE === '1') bodyObj.response_format = { type: 'json_object' };
-            if (!noThinkingModels.has(MODEL)) bodyObj.thinking = { type: 'disabled' };
-            const res = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
-                body: JSON.stringify(bodyObj),
-                signal: controller.signal,
+            const model = VERIFY_MODEL || llm.getLlmConfig().model;
+            const data = await llm.chatRaw({
+                messages,
+                metering,
+                options: {
+                    model: VERIFY_MODEL || undefined,
+                    maxTokens: 16000,
+                    temperature: 0.2,
+                    timeoutMs: LLM_TIMEOUT_MS,
+                    responseFormat: process.env.LLM_JSON_MODE === '1' ? 'json' : undefined,
+                    disableThinking: !llm.noThinkingModels.has(model),
+                    signal: abortSignal,
+                },
             });
-            if (!res.ok) {
-                const text = await res.text().catch(() => '');
-                lastWarning = `LLM error ${res.status}: ${text.slice(0, 160)}`;
-                if ((res.status >= 500 || res.status === 429) && attempt < LLM_RETRIES) {
-                    console.error(`[analyzeVerify] LLM error ${res.status}, retry ${attempt + 1}/${LLM_RETRIES}`);
-                    await new Promise((r) => setTimeout(r, attempt === 0 ? 1500 : 4000));
-                    continue;
-                }
-                return { ok: false, warning: lastWarning };
-            }
-            const data = await res.json();
             const choice = data.choices?.[0];
             const content = choice?.message?.content;
-            console.error('[analyzeVerify] model:', MODEL, 'finish_reason:', choice?.finish_reason, 'usage:', JSON.stringify(data.usage), 'content_len:', String(content || '').length);
+            console.error('[analyzeVerify] model:', model, 'finish_reason:', choice?.finish_reason, 'usage:', JSON.stringify(data.usage), 'content_len:', String(content || '').length);
             return { ok: true, content, finishReason: choice?.finish_reason, usage: data.usage || null };
         } catch (e) {
-            lastWarning = `LLM unavailable: ${e.message}`;
-            if (attempt < LLM_RETRIES) {
-                console.error(`[analyzeVerify] LLM unavailable (${e.message}), retry ${attempt + 1}/${LLM_RETRIES}`);
+            // 归属缺失是实现 bug，静默降级会把「无归属」问题掩盖掉——直接抛。
+            if (e instanceof llm.LlmAttributionError) throw e;
+            const isLlmErr = e instanceof llm.LlmRequestError;
+            lastWarning = (isLlmErr && e.status)
+                ? `LLM error ${e.status}: ${String(e.body || '').slice(0, 160)}`
+                : `LLM unavailable: ${e.message}`;
+            const retryable = !isLlmErr || !e.status || e.status >= 500 || e.status === 429;
+            if (retryable && attempt < LLM_RETRIES) {
+                console.error(isLlmErr && e.status
+                    ? `[analyzeVerify] LLM error ${e.status}, retry ${attempt + 1}/${LLM_RETRIES}`
+                    : `[analyzeVerify] LLM unavailable (${e.message}), retry ${attempt + 1}/${LLM_RETRIES}`);
                 await new Promise((r) => setTimeout(r, attempt === 0 ? 1500 : 4000));
                 continue;
             }
             return { ok: false, warning: lastWarning };
-        } finally {
-            clearTimeout(timer);
         }
     }
     return { ok: false, warning: lastWarning };
@@ -1238,7 +1229,7 @@ function buildCompressedResumeSummary(trail, roundsUsed) {
     ].join('\n');
 }
 
-async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted }) {
+async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted, metering }) {
     const defaultPort = projectType?.defaultPort || 3000;
     // 确定性后端签名（宿主侧毫秒级文件扫描，只算一次）：final 通过时用于校验
     // "agent 上报的 API 面"与"项目实际含后端"的一致性，防止后端死掉仍判成功。
@@ -1390,7 +1381,7 @@ async function runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef
             return { ok: false, source: 'ai', aborted: true, warning: '部署已中止', finalStderr: '', tested: [], trail, messages: trimContext(messages), roundsUsed: round };
         }
         const llmStart = Date.now();
-        const llmResult = await callLlm(messages, abortSignal);
+        const llmResult = await callLlm(messages, abortSignal, metering);
         const llmMs = Date.now() - llmStart;
         console.error(`[analyzeVerify] round ${round}: LLM ${llmMs}ms prompt=${llmResult.usage?.prompt_tokens} completion=${llmResult.usage?.completion_tokens} reasoning=${llmResult.usage?.completion_tokens_details?.reasoning_tokens} finish=${llmResult.finishReason}`);
         if (checkAborted()) {
@@ -1936,11 +1927,13 @@ function resolveFallbackOutcome({ frontendOk, needsBackend, backendAlive }) {
     return frontendOk ? 'ok' : 'no_app';
 }
 
-async function analyzeProjectVerify({ workspacePath, hostWorkspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted }) {
-    if (!API_KEY || !API_URL) {
+async function analyzeProjectVerify({ workspacePath, hostWorkspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted, userId, projectId }) {
+    if (!llm.isConfigured()) {
         return runVerifyWithoutLlm({ workspacePath, runtimeRef, plan, projectType });
     }
-    return runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted });
+    // 0043：内部计量归属 —— verify agent 的全部 LLM 轮次记到发起用户名下。
+    const metering = { feature: 'deploy_verify', userId, projectId };
+    return runVerifyWithAgent({ workspacePath, hostWorkspacePath, runtimeRef, plan, projectType, onRound, onSubstage, resume, isAborted, metering });
 }
 
 module.exports = { analyzeProjectVerify, assertAppIsServed, resolveFallbackOutcome, isWaitPollCommand };

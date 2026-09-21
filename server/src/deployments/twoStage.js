@@ -4109,7 +4109,7 @@ async function runDeployInner({ project, userId, role, projectId, sessionId, res
         // 而 host 的 /workspace 是平台 seed 的欢迎页目录（index.html "Workspace ready"），
         // 会把任意项目误判成 static（startCmd=python3 -m http.server），生成的 fallback
         // plan serve 步骤变成 python3，verify 阶段误判工具链缺失（AgentHarness/multica 实测）。
-        const planResult = await analyzeProjectDeploy({ workspacePath: wsPath, hostWorkspacePath: hostPath, runtimeRef: ref, isAborted: () => isAborted() });
+        const planResult = await analyzeProjectDeploy({ workspacePath: wsPath, hostWorkspacePath: hostPath, runtimeRef: ref, isAborted: () => isAborted(), userId, projectId });
         if (planResult?.aborted) {
             return { ok: false, aborted: true, error: '部署已中止', elapsedMs: Date.now() - startedAt };
         }
@@ -4386,6 +4386,8 @@ async function runDeployInner({ project, userId, role, projectId, sessionId, res
             runtimeRef: ref,
             plan,
             projectType: detected,
+            userId,
+            projectId,
             resume: resumeState ? { messages: resumeState.messages, trail: resumeState.trail, roundsUsed: resumeState.roundsUsed } : undefined,
             isAborted: () => isAborted(),
             // 阶段 B 子阶段透传：前端分步展示（prepare/build/serve/check/fix）。

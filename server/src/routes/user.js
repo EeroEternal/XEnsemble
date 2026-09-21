@@ -47,7 +47,7 @@ function registerUserRoutes(fastify) {
         try {
             const { days } = request.query || {};
             const range = usageService.normalizeRange(days);
-            const [summary, byProject, trend, prevTotal, byAgent] = await Promise.all([
+            const [summary, byProject, trend, prevTotal, byAgent, bySource, internalByFeature] = await Promise.all([
                 usageService.getMyUsageSummary(request.user.id, { days }),
                 usageService.getMyUsageByProject(request.user.id, { days }),
                 usageService.getMyUsageTrend(request.user.id, { days }),
@@ -59,8 +59,11 @@ function registerUserRoutes(fastify) {
                 ),
                 // agent 粒度（getUsageByAgent 强制 userId self 过滤）
                 usageService.getUsageByAgent({ days, userId: request.user.id }),
+                // 0043：流量性质（agent 会话 vs 内置 AI）与内置功能明细
+                usageService.getMyUsageBySource(request.user.id, { days }),
+                usageService.getMyInternalByFeature(request.user.id, { days }),
             ]);
-            return { summary, byProject, trend, byAgent, prevTotalTokens: prevTotal, days: range.days };
+            return { summary, byProject, trend, byAgent, bySource, internalByFeature, prevTotalTokens: prevTotal, days: range.days };
         } catch (err) {
             return sendPublicError(reply, err, 'Failed to query usage', 500, request.locale || 'en');
         }

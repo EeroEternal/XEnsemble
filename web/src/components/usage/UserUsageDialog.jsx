@@ -8,6 +8,13 @@ import { formatTokens, formatTokensFull } from '../../lib/formatTokens';
 import MiniBarChart from './MiniBarChart';
 import UsageBarList from './UsageBarList';
 
+// 内置功能标识 → 本地化名称；未知 feature 原样展示（向前兼容新功能）。
+function featureLabel(feature, t) {
+  const key = `observability:my_usage.feature_${feature}`;
+  const label = t(key);
+  return label === key ? feature : label;
+}
+
 /**
  * Admin 单用户 Token 用量详情弹窗（ConsoleDialogShell 体系）。
  * @param {string} userId
@@ -111,6 +118,45 @@ export default function UserUsageDialog({ userId, days = 30, onClose }) {
                 />
               </div>
             </div>
+
+            {/* 0043：内置 AI 用量（按功能）；旧版服务端无 internalByFeature 时隐藏 */}
+            {(detail.internalByFeature || []).length > 0 && (
+              <div>
+                <p className="mb-2.5 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                  {t('observability:my_usage.internal_by_feature')}
+                </p>
+                <div className="overflow-hidden rounded-lg border border-zinc-200">
+                  <table className="w-full table-fixed border-collapse text-left text-xs">
+                    <colgroup>
+                      <col className="w-[40%]" />
+                      <col className="w-[15%]" />
+                      <col className="w-[15%]" />
+                      <col className="w-[30%]" />
+                    </colgroup>
+                    <thead>
+                      <tr className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-400">
+                        <th className="px-3 py-2 font-medium">{t('observability:my_usage.feature')}</th>
+                        <th className="px-3 py-2 text-right font-medium">{t('users:usage.requests')}</th>
+                        <th className="px-3 py-2 text-right font-medium">{t('users:usage.total_tokens')}</th>
+                        <th className="px-3 py-2 text-right font-medium">{t('observability:my_usage.source_internal')}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-100">
+                      {detail.internalByFeature.map((f) => (
+                        <tr key={f.feature} className="text-zinc-600">
+                          <td className="px-3 py-2 font-medium text-zinc-900">{featureLabel(f.feature, t)}</td>
+                          <td className="px-3 py-2 text-right font-mono tabular-nums">{f.requests}</td>
+                          <td className="px-3 py-2 text-right font-mono tabular-nums">{formatTokensFull(f.totalTokens)}</td>
+                          <td className="px-3 py-2 text-right font-mono tabular-nums text-zinc-400">
+                            {formatTokens(f.promptTokens)} / {formatTokens(f.completionTokens)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {/* 最近请求 */}
             <div>

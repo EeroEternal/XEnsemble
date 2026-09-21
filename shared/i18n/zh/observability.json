@@ -30,7 +30,20 @@
     "period_30d": "近 30 天",
     "vs_prev": "较上一周期 {{pct}}%",
     "no_data": "暂无用量数据",
-    "deleted_project": "已删除项目"
+    "deleted_project": "已删除项目",
+    "internal_by_feature": "内置 AI 用量",
+    "source_session": "Agent 会话",
+    "source_internal": "内置 AI",
+    "feature": "功能",
+    "feature_session_title": "会话标题生成",
+    "feature_conversation_summary": "会话摘要",
+    "feature_trajectory_report": "轨迹报告建议",
+    "feature_skill_extract": "技能提炼",
+    "feature_skill_classify": "技能分类",
+    "feature_deploy_analyze": "部署计划分析",
+    "feature_deploy_verify": "部署验证",
+    "feature_quick_preview": "快速预览",
+    "feature_git_pr_fill": "Git 提交/PR 描述"
   },
   "routing": {
     "title": "路由分析",

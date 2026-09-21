@@ -253,7 +253,7 @@ async function findSimilarTitles(userId, title, { excludeId = null } = {}) {
  * LLM 二次判定（§3.4 步骤 2）：已有 skill 全文 + 新提炼内容 → {"duplicate":bool}。
  * @returns {Promise<boolean>}
  */
-async function confirmDuplicate({ existingTitle, existingContent, newTitle, newContent }) {
+async function confirmDuplicate({ existingTitle, existingContent, newTitle, newContent, metering }) {
     const user = [
         `Existing skill title: ${existingTitle}`,
         `Existing skill content:\n${String(existingContent || '').slice(0, 4000)}`,
@@ -266,6 +266,7 @@ async function confirmDuplicate({ existingTitle, existingContent, newTitle, newC
     const raw = await analyzeClient.chatJson({
         system: 'You are a precise dedup judge. Always respond with valid JSON only.',
         user,
+        metering, // 0043：内部计量归属（feature='skill_extract'）
         options: { maxTokens: DEDUP_MAX_TOKENS, temperature: 0 },
     });
     return Boolean(raw && raw.duplicate === true);
@@ -317,7 +318,7 @@ function validateExtracted(raw) {
  *   title = skill name；content = 完整 SKILL.md（YAML frontmatter + markdown body）。
  *   LLM 未配置/失败/非法 JSON 时抛出（由调用方处理）。
  */
-async function extract({ summary, turns = [] }) {
+async function extract({ summary, turns = [], metering }) {
     // 0020：先收集会话中的命令序列，作为脚本提炼的上下文
     const commands = collectCommands(turns);
     const user = buildExtractPrompt({
@@ -330,6 +331,7 @@ async function extract({ summary, turns = [] }) {
     const raw = await analyzeClient.chatJson({
         system: 'You are a precise skill extractor. Always respond with valid JSON only.',
         user,
+        metering, // 0043：内部计量归属（feature='skill_extract'）
         options: { maxTokens: EXTRACT_MAX_TOKENS, temperature: 0.3 },
     });
     const validated = validateExtracted(raw);
