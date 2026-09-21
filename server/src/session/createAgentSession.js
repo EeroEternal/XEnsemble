@@ -632,7 +632,11 @@ async function createAgentSession({
             // -e <gate>（原生无审批门，见 taskRunModes.getManualApprovalArgs）。
             // 交互式拉起 && taskAutoApprove=false（手动审批象限）时加载 gate。
             // runner 一律交互式拉起（taskPrompt=null），taskAutoApprove 即象限。
-            const piApprovalGatePath = agentMeta.id === 'pi' && !taskPrompt && !taskAutoApprove
+            // 与上方 bootstrap 同样必须判 source==='loop_task'：交互会话的
+            // piGatePath 恒为 null，此判断是第二道门，防止未来 bootstrap
+            // 条件变动时审批 gate 再次泄漏进交互会话。
+            const piApprovalGatePath = source === 'loop_task'
+                && agentMeta.id === 'pi' && !taskPrompt && !taskAutoApprove
                 ? piGatePath
                 : null;
             const manualApprovalArgs = piApprovalGatePath
