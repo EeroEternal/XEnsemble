@@ -13,6 +13,7 @@ import {
   FULL_REPAINT_DROP_MIN_KEEP_BYTES,
 } from '../lib/terminalFrameDrop';
 import { stripTerminalQueries } from '../lib/terminalQueries';
+import { record as termRecord, isEnabled as termDebugOn } from '../lib/terminalDebug';
 import {
   isHoverMouseDowngradeAgent,
   downgradeHoverMouseMode,
@@ -429,6 +430,8 @@ function AgentConsole({
     let lastSentRows = 0;
     let writeRafId = null;
     const resizeTimers = [];
+    // 诊断节流（仅启用时使用，见 lib/terminalDebug）
+    let vsDebugWidthLastAt = 0;
 
     // Virtual screen for ANSI diff: declared at useEffect scope so fitTerminal
     // (outside connect) can resize vsScreen/vsRows on terminal resize, and
@@ -451,6 +454,9 @@ function AgentConsole({
       if (cols <= 0 || rows <= 0) return;
       // Update virtual screen dimensions when terminal is resized
       if (rows !== vsRows) {
+        if (termDebugOn()) {
+          termRecord({ kind: 'resize', cols, rows, prevVsRows: vsRows, vsScreenLen: vsScreen.length });
+        }
         vsRows = rows;
         if (vsScreen.length < vsRows) {
           for (let y = vsScreen.length; y < vsRows; y++) vsScreen[y] = '';
@@ -699,6 +705,23 @@ function AgentConsole({
               out += ch;
               if (isWideCharCode(ch.charCodeAt(0))) out += '\u0000';
             }
+            // 诊断（门控）：手写宽度表 vs xterm 实际 wcwidth。
+            // 两者不一致时，虚拟屏幕的列模型与真实终端错位——含该字符的行会
+            // 被误判「未变」而跳过重写（残留旧字），或误判「已变」而写回旧内容，
+            // 表现为「某个字符反复跳变」。只在启用时抽样，最多每 200ms 一次。
+            if (termDebugOn() && out !== bare && (vsDebugWidthLastAt === 0 || Date.now() - vsDebugWidthLastAt > 200)) {
+              vsDebugWidthLastAt = Date.now();
+              try {
+                for (const ch of bare) {
+                  const code = ch.charCodeAt(0);
+                  const ours = isWideCharCode(code) ? 2 : 1;
+                  const real = terminal.unicode ? terminal.unicode.wcwidth(code) : undefined;
+                  if (real !== undefined && real !== ours) {
+                    termRecord({ kind: 'width', char: ch, code: `U+${code.toString(16).toUpperCase()}`, ours, xterm: real });
+                  }
+                }
+              } catch { /* 诊断失败不影响渲染 */ }
+            }
             return out;
           }
 
@@ -790,12 +813,24 @@ function AgentConsole({
               && downJumps.every((j) => j === '\x1b[1B')
               && (rest.match(/\x1b\[2K/g) || []).length >= downJumps.length;
             if (downJumps.length > 0 && !isRowRedraw) {
+              // 诊断：passthrough 分支不更新 vsScreen/vsCursorY，但真实光标已移动。
+              if (termDebugOn()) {
+                let n2k = 0, si = rest.indexOf('\x1b[2K');
+                while (si !== -1) { n2k++; si = rest.indexOf('\x1b[2K', si + 4); }
+                termRecord({
+                  kind: 'vs', branch: 'passthrough-downjump', upCount, startRow,
+                  vsCursorY, downJumps: downJumps.length, has2K: n2k,
+                });
+              }
               return data;
             }
             // Split rows on \x1b[2K, stripping a trailing \x1b[1B separator
             // from each row so the raw content is clean for the vsScreen diff.
             const segments = rest.split(/\x1b\[2K/).slice(1);
             if (!segments || segments.length === 0) {
+              if (termDebugOn()) {
+                termRecord({ kind: 'vs', branch: 'no-segments', upCount, startRow, vsCursorY });
+              }
               vsCursorY = startRow;
               return data;
             }
@@ -814,6 +849,19 @@ function AgentConsole({
               currentRow++;
             }
             vsCursorY = currentRow - 1;
+            if (termDebugOn()) {
+              termRecord({
+                kind: 'vs', branch: anyChanged ? 'row-diff' : 'row-diff-nochange',
+                upCount, startRow, endRow: currentRow - 1,
+                segs: segments.length, changed: anyChanged,
+                // 记录本帧重绘的行内容（截断），用于人工比对是否写回了旧内容
+                rows: segments.slice(0, 6).map((s) => {
+                  // 去掉行尾的 \x1b[1B 行分隔符（用 endsWith 避免控制字符正则）
+                  const r = s.endsWith('\x1b[1B') ? s.slice(0, -4) : s;
+                  return r.length > 60 ? `${r.slice(0, 60)}…(${r.length})` : r;
+                }),
+              });
+            }
             return anyChanged ? output : prefix + '\x1b[H';
           }
 
@@ -877,6 +925,28 @@ function AgentConsole({
             syncTermPending = '';
             writeBuffer = '';
 
+            // 诊断（门控）：记录每次 flush 的输入特征。用于判断跳变帧是否
+            // 集中在某类输入（sync 块 / 纯非 sync / alt screen）。
+            if (termDebugOn()) {
+              // 用 indexOf 计数，避免在诊断代码里引入控制字符正则（保持 lint 干净）。
+              const countOf = (hay, needle) => {
+                let n = 0, i = hay.indexOf(needle);
+                while (i !== -1) { n++; i = hay.indexOf(needle, i + needle.length); }
+                return n;
+              };
+              termRecord({
+                kind: 'flush',
+                bytes: remaining.length,
+                hasSync: remaining.includes('\x1b[?2026h'),
+                syncBlocks: countOf(remaining, '\x1b[?2026h'),
+                has2K: countOf(remaining, '\x1b[2K'),
+                has2J: countOf(remaining, '\x1b[2J'),
+                hasCUP: countOf(remaining, '\x1b[H'),
+                altScreen: inAltScreen,
+                vsCursorY,
+              });
+            }
+
             // 全屏重绘型 TUI（qwen-code）专用积压裁剪：超阈值时丢弃最旧前缀，
             // 切点落在「满整屏重绘帧」的**起始**处并保留该锚点帧——锚点帧重画
             // 整屏，被丢弃的更早帧在屏幕上被其完全覆盖。其他 agent 不进入此分支。
@@ -909,6 +979,9 @@ function AgentConsole({
               const before = remaining.slice(0, altEnterIdx);
               const transitionAndAfter = remaining.slice(altEnterIdx);
               inAltScreen = true;
+              if (termDebugOn()) {
+                termRecord({ kind: 'alt', action: 'enter', vsCursorY, beforeBytes: before.length });
+              }
               let output = '';
               let hasOutput = false;
               if (before) {
@@ -934,6 +1007,9 @@ function AgentConsole({
               const beforeAndExit = remaining.slice(0, exitEnd);
               const after = remaining.slice(exitEnd);
               inAltScreen = false;
+              if (termDebugOn()) {
+                termRecord({ kind: 'alt', action: 'exit', vsCursorY, afterBytes: after.length });
+              }
               let output = beforeAndExit;
               if (after) {
                 const result = processPrimaryBuffer(after);
@@ -971,11 +1047,53 @@ function AgentConsole({
             if (processed.trim()) dismissGuide();
             const buf = terminal.buffer.active;
             const atBottom = buf.baseY + terminal.rows >= buf.length;
+            const debugOn = termDebugOn();
             pendingWrites++;
             terminal.write(processed, () => {
               pendingWrites = Math.max(0, pendingWrites - 1);
               if (!replayDone && !disposed) { replayDone = true; replayDoneRef.current = true; hideOverlay(); }
               if (atBottom && !disposed) terminal.scrollToBottom();
+              // 诊断（门控）：写入完成后比对「虚拟屏幕 vs 真实屏幕」与
+              // 「vsCursorY vs 真实光标」。只在 primary buffer 且已启用时执行；
+              // 关闭时这里只有一次布尔判断，无额外开销。
+              if (debugOn && !disposed && !inAltScreen) {
+                try {
+                  const b = terminal.buffer.active;
+                  const realCursorY = b.cursorY;
+                  const realCursorX = b.cursorX;
+                  const rowsToCheck = Math.min(vsRows, terminal.rows, 12);
+                  let firstMismatch = -1;
+                  let mismatchCount = 0;
+                  for (let y = 0; y < rowsToCheck; y++) {
+                    const line = b.getLine(b.baseY + y);
+                    const real = line ? line.translateToString(true) : '';
+                    // 虚拟屏幕用 '\u0000' 作宽字符占位符，比对真实屏幕时去掉。
+                    const virt = (vsScreen[y] || '').split('\u0000').join('');
+                    if (real.trimEnd() !== virt.trimEnd()) {
+                      if (firstMismatch < 0) firstMismatch = y;
+                      mismatchCount++;
+                    }
+                  }
+                  const cursorDrift = Math.abs(realCursorY - vsCursorY);
+                  if (mismatchCount > 0 || cursorDrift > 0) {
+                    termRecord({
+                      kind: 'drift',
+                      mismatchCount,
+                      firstMismatch,
+                      realCursorY,
+                      realCursorX,
+                      vsCursorY,
+                      cursorDrift,
+                      atBottom,
+                      // 首个不一致行的两侧内容，便于直接看出「写回了旧内容」
+                      realLine: firstMismatch >= 0
+                        ? (b.getLine(b.baseY + firstMismatch)?.translateToString(true) || '').slice(0, 80) : null,
+                      vsLine: firstMismatch >= 0 ? (vsScreen[firstMismatch] || '').slice(0, 80) : null,
+                      wrote: processed.length > 100 ? `${processed.slice(0, 100)}…(${processed.length})` : processed,
+                    });
+                  }
+                } catch { /* 诊断失败不影响渲染 */ }
+              }
             });
           }
 
