@@ -106,11 +106,26 @@ const TUI_QUESTION_RE = /\?|？|\ballow\b|\bapprove\b|\bproceed\b|\bconfirm\b|\b
 const TUI_CHROME_RE =
   /\?\s*for\s+(?:shortcuts|context|commands|help|keys)|esc\s+to\s+\w+|ctrl\+[a-z]|auto-accept|bypass\s+permissions|plan\s+mode\b|(?:total\s+)?(?:cost|duration)\s*[·:]|\d[\d,.]*\s+tokens?\b/i;
 
+// Leading TUI decoration (indentation, box-drawing borders, bullets) that wraps
+// a prompt block without carrying meaning. Real TUIs render pickers as
+// "│   ❯ 1. Yes" / "* Choose an option:" / "   Trust this folder?", so the
+// column-0 anchors below would otherwise miss every real prompt.
+// NOTE: ❯/› are deliberately NOT stripped — they are the option cursor and
+// carry meaning, so they must survive normalization for the checks below.
+const TUI_LEADING_DECOR_RE =
+  /^[\s\u3000│┃┆┊|┌┐└┘├┤┬┴┼─━═╔╗╚╝║╠╣╦╩╬>*·●○◆▪▫•‣∙]+/;
+
 // A line that itself asks something: ends with "?" (or fullwidth ？) or starts
 // with an explicit question verb. Loose keyword hits anywhere in the scrollback
 // ("继续" inside a completion summary) no longer count as question context.
+// Anchored at column 0 after decoration is stripped (see normalizeTuiLine).
 const QUESTION_LINE_RE =
   /(?:\?|？)\s*$|^(?:choose|select|pick|approve|proceed|confirm|permission|是否|允许|确认|批准|选择|请选)/i;
+
+/** Strip trailing blanks + leading decoration; used before the anchored checks. */
+function normalizeTuiLine(line) {
+  return String(line).replace(/[\s\u3000]+$/g, '').replace(TUI_LEADING_DECOR_RE, '');
+}
 
 /**
  * Detect a TUI confirmation / selection prompt from screen text lines.
@@ -119,7 +134,7 @@ const QUESTION_LINE_RE =
  */
 export function detectTuiPrompt(allLines) {
   const tail = (allLines || [])
-    .map((l) => String(l).replace(/\s+$/g, ''))
+    .map(normalizeTuiLine)
     .filter((l) => l.trim())
     .filter((l) => !TUI_CHROME_RE.test(l));
   if (tail.length === 0) return null;

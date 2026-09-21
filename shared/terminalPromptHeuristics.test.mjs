@@ -111,6 +111,27 @@ describe('detectTuiPrompt', () => {
     assert.equal(r, null);
   });
 
+  it('detects real prompts wrapped in leading decoration (indent / box / bullet)', () => {
+    // Regression: real TUIs wrap the prompt block in decoration. Anchoring the
+    // option cursor / question line to column 0 made every real picker
+    // undetectable, so no waiting notification ever fired. Detection must
+    // survive any amount of leading whitespace AND non-blank decoration.
+    const picker = (q, ...opts) => detectTuiPrompt([q, ...opts])?.kind;
+    // leading whitespace: any count, tabs, fullwidth space
+    assert.equal(picker('Choose an option:', '❯ 1. Yes', '  2. No'), 'select');
+    assert.equal(picker('   Choose an option:', '   ❯ 1. Yes', '     2. No'), 'select');
+    assert.equal(picker('          Choose an option:', '          ❯ 1. Yes'), 'select');
+    assert.equal(picker('\tChoose an option:', '\t❯ 1. Yes'), 'select');
+    assert.equal(picker('\u3000Choose an option:', '\u3000❯ 1. Yes'), 'select');
+    // non-blank decoration: box borders / bullets
+    assert.equal(picker('│ Choose an option:', '│ ❯ 1. Yes', '│ 2. No'), 'select');
+    assert.equal(picker('┃ Choose an option:', '┃ ❯ 1. Yes'), 'select');
+    assert.equal(picker('| Choose an option:', '| ❯ 1. Yes'), 'select');
+    assert.equal(picker('* Choose an option:', '* ❯ 1. Yes'), 'select');
+    // question line + cursor both decorated
+    assert.equal(picker('│  Trust this folder?', '│  ❯ Trust this folder'), 'select');
+  });
+
   it('works on ANSI-laden transcript lines after stripAnsi', () => {
     const raw = ['\x1b[32m✓ Done\x1b[0m', '\x1b[1mAllow execution? (y/n)\x1b[0m'];
     const r = detectTuiPrompt(raw.map((l) => stripAnsi(l)));
