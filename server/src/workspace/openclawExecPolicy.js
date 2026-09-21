@@ -56,15 +56,24 @@ async function writeOpenclawExecPolicy({ runtime, runtimeRef, workspaceRoot, sta
     // 用户 configSchema 同路径 configFiles（defaultAgents.js openclaw 条目）
     // 先于此处写入；读取合并保证用户自定义（providers/models 等）不丢。
     // 用户若在 UI 里改过 tools.exec 段则尊重用户配置，跳过预写。
-    let config = {};
-    if (typeof runtime.fs.fsRead === 'function') {
-        try {
-            const raw = await runtime.fs.fsRead(workspaceRoot, configPath, { runtimeRef });
-            config = JSON.parse(String(raw ?? '').trim() || '{}');
-            if (!config || typeof config !== 'object' || Array.isArray(config)) config = {};
-        } catch {
-            config = {};
+    // 只允许「读得到旧配置 → 合并追加」这一条路径写文件。fsRead 不可用或
+    // 读取失败（K8sFsAdapter 未实现 fsRead、文件损坏等）时放弃预写——盲写
+    // 会以空对象起步整文件覆盖，把网关刚写入的 providers/primary model 抹
+    // 掉，openclaw 直接 Config: invalid。
+    if (typeof runtime.fs.fsRead !== 'function') {
+        log?.warn?.({ configPath }, '[openclaw-bootstrap] fsRead unavailable, skip exec policy pre-seed');
+        return false;
+    }
+    let config;
+    try {
+        const raw = await runtime.fs.fsRead(workspaceRoot, configPath, { runtimeRef });
+        config = JSON.parse(String(raw ?? '').trim() || '{}');
+        if (!config || typeof config !== 'object' || Array.isArray(config)) {
+            throw new Error('invalid config json');
         }
+    } catch (err) {
+        log?.warn?.({ err, configPath }, '[openclaw-bootstrap] read existing config failed, skip exec policy pre-seed');
+        return false;
     }
     if (config.tools?.exec?.mode) return false;
 

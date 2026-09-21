@@ -530,15 +530,16 @@ async function createAgentSession({
         // LoopTask 审批配置 bootstrap（pi 反向逻辑 + openclaw exec approvals）：
         // 两个 Agent 都没有「默认逐个审批」的 TUI 行为——pi 原生无审批门
         //（工具直接执行），openclaw exec approvals 无配置时按内置默认档跑
-        //（自动批准象限会卡审批，手动批准象限不弹审批）。仅交互式拉起
-        //（taskPrompt=null，runner 固定）时预写：
+        //（自动批准象限会卡审批，手动批准象限不弹审批）。仅 LoopTask 预写：
         //   openclaw 双象限都要写 —— 自动批准 → full+askFallback full（YOLO）；
         //     手动批准 → ask + allowlist + on-miss ask（白名单外逐个问人）
         //   pi 仅手动批准写（写 gate extension，spawn 时 -e 加载）；自动批准
         //   即原生无门，无需任何配置
-        // 配置落会话隔离 state dir，普通交互会话（source=interactive）不进
-        // 该分支，零影响。
-        if (!taskPrompt && sessionStateDir?.stateDirPath
+        // 必须判 source==='loop_task'，不能只判 !taskPrompt——交互式会话的
+        // taskPrompt 同样是 null，历史上（a09401c，2026-09-21）只判 !taskPrompt
+        // 把审批配置泄漏进了交互会话：openclaw 被写入 tools.exec（镜像内版本
+        // 不认即 Config: invalid，无法对话），pi 被追加审批 gate。
+        if (source === 'loop_task' && !taskPrompt && sessionStateDir?.stateDirPath
             && (agentMeta.id === 'openclaw' || (agentMeta.id === 'pi' && !taskAutoApprove))) {
             try {
                 const vmRuntimeRef = ready.runtime ? ready.runtime.runtimeRef : undefined;
