@@ -217,7 +217,7 @@ async function generatePRDescription(project, gitOperationService, { sourceBranc
     } catch { /* non-fatal */ }
     // Use three-dot diff (origin/<base>...HEAD) so we only capture commits
     // unique to the source branch, not the full divergence from base.
-    const result = await generateAIDescription(project, gitOperationService, 'pr', { base, locale, metering: opts.metering });
+    const result = await generateAIDescription(project, gitOperationService, 'pr', { base, locale, metering });
     return result;
 }
 
@@ -1087,3 +1087,7 @@ function registerProjectGitRoutes(fastify) {
     });}
 
 module.exports = { registerProjectGitRoutes };
+
+// 仅测试使用：commit/PR 描述生成器是纯函数（git 服务与 LLM 均可注入/桩替），
+// 可在无 DB 环境下做 metering 接线与输出形状的回归。
+module.exports.__testables = { generateCommitMessage, generatePRDescription, generateAIDescription };
