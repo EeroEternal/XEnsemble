@@ -285,7 +285,11 @@ function AgentConsole({
         if (disposed) return;
         if (hostRef.current) hostRef.current.style.opacity = '1';
         if (overlayRef.current) overlayRef.current.style.display = 'none';
-        terminal.scrollToBottom();
+        // 仅当用户视口本来就贴底时才回底（同 web 端修复）。
+        try {
+          const b = terminal.buffer.active;
+          if (b.viewportY === b.baseY) terminal.scrollToBottom();
+        } catch (_) { /* buffer 未就绪时跳过 */ }
       });
     };
 
@@ -792,7 +796,10 @@ function AgentConsole({
             // 的 agent 不进入此分支（hoverMouseDowngrade 为 false）。
             if (hoverMouseDowngrade) processed = downgradeHoverMouseMode(processed);
             const buf = terminal.buffer.active;
-            const atBottom = buf.baseY + terminal.rows >= buf.length;
+            // 同 web 端修复：必须用 viewportY（用户视口位置）而非 baseY（缓冲区
+            // 底部基准）。baseY+rows>=length 恒真，导致 agent 等待选择/空闲重绘
+            // 的每一帧都把上滑查看历史的用户强行拉回底部。
+            const atBottom = buf.viewportY === buf.baseY;
             pendingWrites++;
             terminal.write(processed, () => {
               pendingWrites = Math.max(0, pendingWrites - 1);

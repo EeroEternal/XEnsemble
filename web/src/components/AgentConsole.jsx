@@ -419,7 +419,12 @@ function AgentConsole({
       if (disposed) return;
       if (hostRef.current) hostRef.current.style.opacity = '1';
       if (overlayRef.current) overlayRef.current.style.display = 'none';
-      try { terminal.scrollToBottom(); } catch (_) {}
+      // 仅当用户视口本来就贴底时才回底：overlay 兜底超时（5s）等路径可能在
+      // 用户上滑查看历史时触发，无守卫的 scrollToBottom 会把视口强行拉回底部。
+      try {
+        const b = terminal.buffer.active;
+        if (b.viewportY === b.baseY) terminal.scrollToBottom();
+      } catch (_) {}
       try { if (!serverEnded) terminal.focus(); } catch (_) {}
     };
 
@@ -1046,7 +1051,12 @@ function AgentConsole({
             if (hoverMouseDowngrade) processed = downgradeHoverMouseMode(processed);
             if (processed.trim()) dismissGuide();
             const buf = terminal.buffer.active;
-            const atBottom = buf.baseY + terminal.rows >= buf.length;
+            // 「用户视口是否贴底」必须用 viewportY（=ydisp，用户当前滚到的位置），
+            // 不能用 baseY（=ybase，缓冲区底部基准 = length-rows）。后者代入
+            // 后判据恒真（(length-rows)+rows>=length），守卫形同虚设：agent 等
+            // 待选择/空闲重绘的每一帧都会把上滑查看历史的用户强行拉回底部
+            // （7396a16 为消除 layout thrashing 引入，替换时选错了 API）。
+            const atBottom = buf.viewportY === buf.baseY;
             const debugOn = termDebugOn();
             pendingWrites++;
             terminal.write(processed, () => {
