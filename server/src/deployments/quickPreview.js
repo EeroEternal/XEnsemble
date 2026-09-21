@@ -1110,7 +1110,8 @@ const QUICK_MOCK_SERVER_SCRIPT = `#!/usr/bin/env node
 // 数据优先级：
 //   1. .xensemble/mocks/<METHOD>__<path>.json      （用户手写，完全覆盖）
 //   2. .xensemble/mocks/_generated.cjs             （LLM 拟真工厂：真实包络+合理数据+写操作回显）
-//   3. 通用兜底                                     （保活不报错，提示如何补 mock）
+//   3. 认证端点确定性兜底                            （auth/login|register|refresh|me，见 authMock）
+//   4. 通用兜底                                     （保活不报错，提示如何补 mock）
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -1133,6 +1134,25 @@ function expectsArray(cleanPath) {
         if (ok) return true;
     }
     return false;
+}
+// 认证端点确定性兜底：快速预览把 /api/* 全量 mock，而登录是所有页面的硬前置——工厂漏掉
+// auth（或干脆没有工厂，本仓库预览即无 _generated.cjs）时，兜底 {data:null} 会让前端
+// Login.jsx:44 判定「凭据不完整」卡死在登录页。这里仅在工厂/手写 mock 均未覆盖时补一份
+// 可用凭据，形态对齐 server/src/routes/auth.js：login/register 平铺 access_token/
+// refresh_token/user/quotas；auth/me 直接返回 user 字段对象（顶层带 id）。
+const MOCK_AUTH_USER = { id: 1, username: 'preview', role: 'admin', status: 'active', llm_auth_mode: 'platform' };
+const MOCK_AUTH_QUOTAS = { max_projects: null, max_sessions: null, max_previews: null, max_runtimes: null, max_custom_images: null, resource_tier: 'standard', usage: { projects: 0, sessions: 0, previews: 0, custom_images: 0 } };
+function authMock(method, cleanPath) {
+    if (method === 'POST' && (cleanPath === 'api/v1/auth/login' || cleanPath === 'api/v1/auth/register')) {
+        return { access_token: 'mock-access-token', refresh_token: 'mock-refresh-token', user: MOCK_AUTH_USER, quotas: MOCK_AUTH_QUOTAS };
+    }
+    if (method === 'POST' && cleanPath === 'api/v1/auth/refresh') {
+        return { access_token: 'mock-access-token', refresh_token: 'mock-refresh-token' };
+    }
+    if (method === 'GET' && cleanPath === 'api/v1/auth/me') {
+        return { id: MOCK_AUTH_USER.id, username: MOCK_AUTH_USER.username, role: MOCK_AUTH_USER.role, status: MOCK_AUTH_USER.status, display_name: null, email: null, quotas: MOCK_AUTH_QUOTAS, granted_agents_count: null, llm_auth_mode: MOCK_AUTH_USER.llm_auth_mode };
+    }
+    return null;
 }
 const MOCK_DIR = '.xensemble/mocks';
 // 工厂模块按 mtime 惰性加载：用户/生成器更新文件后无需重启 mock server
@@ -1205,6 +1225,8 @@ http.createServer((req, res) => {
             if (isArrayResource) {
                 return send(200, []);
             }
+            var authHit = authMock(req.method, cleanPath);
+            if (authHit) return send(200, authHit);
             return send(200, { data: null, mock: true, path: '/' + cleanPath, note: 'no mock; add ' + MOCK_DIR + '/' + req.method + '__' + cleanPath.replace(/\\//g, '__') + '.json' });
         });
         return;
@@ -1212,6 +1234,8 @@ http.createServer((req, res) => {
     // 无工厂：endpoints 种子空壳 / 通用兜底
     // 前端声明为 X[] 的端点优先返回 []（无工厂时更常见，是白屏高发路径）。
     if (expectsArray(cleanPath)) return send(200, []);
+    const authSeed = authMock(req.method, cleanPath);
+    if (authSeed) return send(200, authSeed);
     const ep = ENDPOINTS.find((e) => e.path && cleanPath.startsWith(e.path.replace(/^\\//, '')));
     if (ep) return send(200, { data: null, mock: true, endpoint: ep.method + ' /' + cleanPath });
     return send(200, { data: null, mock: true, path: '/' + cleanPath, note: 'no mock; add ' + MOCK_DIR + '/' + req.method + '__' + cleanPath.replace(/\\//g, '__') + '.json' });

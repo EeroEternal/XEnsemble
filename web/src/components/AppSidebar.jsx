@@ -208,8 +208,6 @@ export function SidebarAccountMenu({ user, onOpenSettings, onOpenObservability, 
             </div>
           )}
         </button>
-        {/* 铃铛通知：头像右侧、下拉按钮左侧（App/Settings/Observability 侧栏共用同一挂载点） */}
-        <NotificationBell collapsed={collapsed} />
         {!collapsed && (
           <button
             type="button"
@@ -225,6 +223,8 @@ export function SidebarAccountMenu({ user, onOpenSettings, onOpenObservability, 
             />
           </button>
         )}
+        {/* 铃铛通知：下拉按钮右侧（App/Settings/Observability 侧栏共用同一挂载点） */}
+        <NotificationBell collapsed={collapsed} />
         {menu && createPortal(menu, document.body)}
       </div>
     </div>
