@@ -50,6 +50,8 @@ const TASK_RUN_MODES = {
     'opencode': {
         args: (prompt) => ['run', prompt],
         autoApproveArgs: [],
+        // 交互式 TUI 默认逐个审批；--auto 开启自动批准（headless run 本就自动跑工具）
+        interactiveAutoApproveArgs: ['--auto'],
     },
     'cursor': {
         args: (prompt) => ['-p', prompt],
@@ -72,6 +74,9 @@ const TASK_RUN_MODES = {
     'cline': {
         args: (prompt) => [prompt],
         autoApproveArgs: ['--yolo'],
+        // 交互式人工审批模式必须显式空数组短路：回退 autoApproveArgs 会注入
+        // --yolo，--yolo 与交互 TUI 不兼容（TUI 立即退出，run 被误判 failed）
+        interactiveAutoApproveArgs: [],
         removeBaseArgs: ['-i'], // 目录默认 args 带 -i（强制 TUI），一次性模式必须剔除
     },
     'hermes': {
@@ -87,18 +92,31 @@ const TASK_RUN_MODES = {
         // kimi -p 即 headless 一次性模式，且新建会话固定 permission: "auto"
         //（完全自治，不问问题）；--yolo/--auto 均禁止与 --prompt 组合
         //（CLI 报 "Cannot combine --prompt with --yolo."，exit 1）。
+        // 交互式 TUI 用 --yolo 开启自动批准（无 prompt 组合限制）。
         args: (prompt) => ['-p', prompt],
         autoApproveArgs: [],
+        interactiveAutoApproveArgs: ['--yolo'],
     },
     'glm-agent': {
         args: (prompt) => ['-p', prompt],
         autoApproveArgs: [], // zai headless 下工具默认自动批准
+        // 交互式 TUI 无免审 flag：自动批准由 loopTasks/runner 在 TUI 就绪后
+        // PTY 注入 shift-tab（\x1b[Z，官方切换 auto-accept 的快捷键）实现。
+        // 手动批准无需任何处理（TUI 默认逐个审批）。
+        interactiveAutoApproveArgs: [],
     },
     'pi': {
         // pi -p "<prompt>" 官方非交互模式（process and exit，prompt 为位置参数）；
         // 工具（bash/edit/write）直接执行，无交互确认门，无需额外审批 flag。
         args: (prompt) => ['-p', prompt],
         autoApproveArgs: [],
+        // 反向逻辑：pi 手动审批不能靠「不加 flag」（默认就是无审批直接执行），
+        // 只能靠追加 -e <extension> 加载审批 gate（pi.on("tool_call") 拦截 +
+        // ctx.ui.select 逐个放行）。getManualApprovalArgs 据 manualApprovalArg
+        // 处理：自动批准 → 不带任何参数（原生无门即全放行）；手动批准 →
+        // 追加 -e 加载 gate。
+        interactiveAutoApproveArgs: [],
+        manualApprovalArg: true,
     },
     'github-copilot': {
         // copilot -p 非交互模式必须 --allow-all-tools（帮助原文 "required for
@@ -115,9 +133,24 @@ const TASK_RUN_MODES = {
         // 否则 CLI 直接报 "Pass --to ... to choose a session" 退出（exit 1）。
         // 无 agents.list 配置时默认 agent id 为 main，故用 --agent main 走默认 agent。
         args: (prompt) => ['agent', '--local', '--agent', 'main', '--message', prompt],
-        autoApproveArgs: [], // 权限走 OpenClaw 自身沙箱/白名单配置
+        // 权限不走 CLI flag：exec approvals（五档 deny/allowlist/ask/auto/full）
+        // 由 createAgentSession 按任务审批模式写会话隔离的 ${STATE_DIR}/openclaw.json
+        //（execPolicyFor / writeOpenclawExecPolicy）：
+        //   自动批准 → mode full + host 层 askFallback full（YOLO）
+        //   手动批准 → mode ask + allowlist + on-miss ask（未命中白名单逐个问人）
+        autoApproveArgs: [],
     },
 };
+
+/**
+ * pi / openclaw 均具备完整的手动审批机制（4 象限全支持）：
+ *   pi        手动审批 = 追加 -e <审批 extension>（反向逻辑，见 pi 条目 +
+ *             getManualApprovalArgs）；自动批准 = 原生无审批门直接执行
+ *   openclaw  手动审批 = exec approvals ask 档（${STATE_DIR}/openclaw.json 预写，
+ *             会话隔离）；自动批准 = full 档 YOLO
+ * 自动/手动批准均可落实，无需服务端强制 autoApprove=true。
+ * 人工复核（requireReview，事后审阅结果）是 xensemble 自身机制，与 Agent 无关。
+ */
 
 /**
  * 循环任务禁用清单：交互模式注入/引导适配投入产出比过高的 Agent
@@ -175,4 +208,18 @@ function getTaskRunRemoveArgs(agentId) {
     return Array.isArray(mode?.removeBaseArgs) ? mode.removeBaseArgs : [];
 }
 
-module.exports = { isTaskRunSupported, isLoopTaskAllowed, getTaskRunArgs, getTaskRunRemoveArgs, getAutoApproveArgs };
+/**
+ * 反向逻辑 Agent（manualApprovalArg: true，当前仅 pi）：默认无审批门，
+ * 「手动批准」需要额外追加参数加载审批 gate（-e <extension> 路径）；
+ * 「自动批准」反而无需任何参数。
+ * @param {string} agentId
+ * @param {string|null} gatePath 审批 extension 文件路径（VM 内绝对路径）
+ * @returns {string[]}
+ */
+function getManualApprovalArgs(agentId, gatePath) {
+    const mode = TASK_RUN_MODES[agentId];
+    if (!mode?.manualApprovalArg || !gatePath) return [];
+    return ['-e', String(gatePath)];
+}
+
+module.exports = { isTaskRunSupported, isLoopTaskAllowed, getTaskRunArgs, getTaskRunRemoveArgs, getAutoApproveArgs, getManualApprovalArgs };

@@ -330,6 +330,9 @@ async function executeRun(task, run, log = console) {
             // 通过）。TUI 收到文本必然在输入框回显——在转录 out 帧里找注入文本
             // 开头片段（去 ANSI、压空白后比对）才是「已进入 TUI」的可靠信号。
             const taskPromptText = String(task.prompt).replace(/\r?\n+/g, ' ');
+            // glm-agent 自动批准象限：TUI 就绪后先注入 shift-tab（\x1b[Z）切
+            // auto-accept 再注入任务指令（手动批准象限不注入，TUI 默认逐个审批）。
+            const glmAutoAcceptInject = task.agentId === 'glm-agent' && task.autoApprove !== false;
             const normForEcho = (s) => stripAnsi(String(s || '')).replace(/\s+/g, ' ').trim();
             const echoNeedle = normForEcho(taskPromptText).slice(0, 24);
             let injectedAt = null;
@@ -360,38 +363,54 @@ async function executeRun(task, run, log = console) {
                 }
                 const cur = sessionManager.getSession(sessionId);
                 if (!cur) return;
-                if (cur.transcriptRef) {
-                    transcriptStore.append(cur.transcriptRef, { kind: 'in', data: `${taskPromptText}\r` });
-                }
-                cur?.handle?.write(taskPromptText);
-                sessionManager.touchActivity(sessionId, 'input');
-                setTimeout(() => {
+                const writePrompt = () => {
                     if (settled) return;
-                    const cur2 = sessionManager.getSession(sessionId);
-                    if (!cur2) return;
-                    cur2?.handle?.write('\r');
-                    // 验证：12s 内出现注入文本回显 → 已提交；否则重试
+                    const live = sessionManager.getSession(sessionId);
+                    if (!live) return;
+                    if (live.transcriptRef) {
+                        transcriptStore.append(live.transcriptRef, { kind: 'in', data: `${taskPromptText}\r` });
+                    }
+                    live?.handle?.write(taskPromptText);
+                    sessionManager.touchActivity(sessionId, 'input');
                     setTimeout(() => {
                         if (settled) return;
-                        const cur3 = sessionManager.getSession(sessionId);
-                        if (!cur3) return;
-                        if (hasPromptEcho(cur3)) {
-                            injectedAt = Date.now();
-                            committedAt = injectedAt;
-                            return;
-                        }
-                        if (injectAttempts >= 3) {
-                            // 3 次仍未确认（可能仍卡在引导屏/弹窗）：不再重试，
-                            // 放行 reviewPoll 但 committed 门控会阻止收口，挂到
-                            // 执行超时兜底抓终端尾定位
-                            injectedAt = Date.now();
-                            log.warn?.(`[loop-task-runner] run ${runId}: prompt injection unconfirmed after ${injectAttempts} attempts — keep running until timeout (terminal tail will be captured)`);
-                            return;
-                        }
-                        log.warn?.(`[loop-task-runner] run ${runId}: prompt injection appeared swallowed (no echo within 12s), retrying (${injectAttempts}/3)`);
-                        injectTry();
-                    }, 12_000);
-                }, 400);
+                        const cur2 = sessionManager.getSession(sessionId);
+                        if (!cur2) return;
+                        cur2?.handle?.write('\r');
+                        // 验证：12s 内出现注入文本回显 → 已提交；否则重试
+                        setTimeout(() => {
+                            if (settled) return;
+                            const cur3 = sessionManager.getSession(sessionId);
+                            if (!cur3) return;
+                            if (hasPromptEcho(cur3)) {
+                                injectedAt = Date.now();
+                                committedAt = injectedAt;
+                                return;
+                            }
+                            if (injectAttempts >= 3) {
+                                // 3 次仍未确认（可能仍卡在引导屏/弹窗）：不再重试，
+                                // 放行 reviewPoll 但 committed 门控会阻止收口，挂到
+                                // 执行超时兜底抓终端尾定位
+                                injectedAt = Date.now();
+                                log.warn?.(`[loop-task-runner] run ${runId}: prompt injection unconfirmed after ${injectAttempts} attempts — keep running until timeout (terminal tail will be captured)`);
+                                return;
+                            }
+                            log.warn?.(`[loop-task-runner] run ${runId}: prompt injection appeared swallowed (no echo within 12s), retrying (${injectAttempts}/3)`);
+                            injectTry();
+                        }, 12_000);
+                    }, 400);
+                };
+                if (glmAutoAcceptInject) {
+                    // glm-agent 自动批准象限：zai 交互 TUI 无 CLI 免审 flag，
+                    // 靠官方快捷键 shift-tab 切 auto-accept。TUI 就绪后、prompt
+                    // 注入前 PTY 注入 \x1b[Z 切模式（等 400ms 让 TUI 处理重绘，
+                    // 避免模式切换吞掉 prompt 文本）。手动批准象限不发——TUI
+                    // 默认逐个审批正是手动象限要的行为。
+                    cur?.handle?.write('\x1b[Z');
+                    setTimeout(writePrompt, 400);
+                } else {
+                    writePrompt();
+                }
             };
             const bootStart = Date.now();
             const bootPoll = setInterval(() => {

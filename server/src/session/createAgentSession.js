@@ -30,7 +30,7 @@ const { applyProjectGitEnv } = require('../agents/projectGitEnv');
 const { ensureSessionStateDir, prepareHomeRedirect } = require('./stateDir');
 const { resolveRuntimeProvider } = require('../config/runtimeProvider');
 const { injectForSession: injectSkillsForSession, isEnabled: skillInjectEnabled } = require('../skills/skillInjector');
-const { getTaskRunArgs, getTaskRunRemoveArgs, getAutoApproveArgs, isTaskRunSupported } = require('../agents/taskRunModes');
+const { getTaskRunArgs, getTaskRunRemoveArgs, getAutoApproveArgs, getManualApprovalArgs, isTaskRunSupported } = require('../agents/taskRunModes');
 const { assembleSpawnArgs } = require('./assembleSpawnArgs');
 const { registerSessionLifecycle } = require('./resumeSession');
 
@@ -99,6 +99,9 @@ function applyStateDirEnv(env, resumeSpec, stateDirPath) {
  *   启动（执行完任务即退出进程，exitCode 即任务结果）。要求 Agent 支持
  *   taskRunModes（不支持时返回 agent_task_unsupported）。
  * @param {boolean} [p.taskAutoApprove] 无人值守自动批准工具调用
+ * @param {boolean} [p.taskManualApproval] 强制走手动审批（loopTasks 象限用）。
+ *   交互式拉起默认 taskAutoApprove=false，即手动审批；true 仅用于显式声明，
+ *   当前与 false 等价（预留字段，与 taskAutoApprove 互斥）
  * @param {object} [p.log] fastify 风格 logger（.info/.warn/.error）
  * @returns {Promise<{ok: true, sessionId: string} | {ok: false, statusCode: number, error: string, code?: string}>}
  */
@@ -115,6 +118,7 @@ async function createAgentSession({
     title = null,
     taskPrompt = null,
     taskAutoApprove = false,
+    taskManualApproval = false,
     log = console,
 }) {
     const projectId = project.id;
@@ -483,6 +487,7 @@ async function createAgentSession({
         applyProjectGitEnv(resolved.env, project);
 
         let handle;
+        let piGatePath = null; // pi 手动审批 gate extension 的 VM 内路径（bootstrap 成功后非空）
         const spawnOpts = {
             name: agentMeta.name,
             cwd: workspacePath,
@@ -519,6 +524,46 @@ async function createAgentSession({
                 } catch (err) {
                     log.warn({ err, sessionId }, '[sessions] claude api key approval failed');
                 }
+            }
+        }
+
+        // LoopTask 审批配置 bootstrap（pi 反向逻辑 + openclaw exec approvals）：
+        // 两个 Agent 都没有「默认逐个审批」的 TUI 行为——pi 原生无审批门
+        //（工具直接执行），openclaw exec approvals 无配置时按内置默认档跑
+        //（自动批准象限会卡审批，手动批准象限不弹审批）。仅交互式拉起
+        //（taskPrompt=null，runner 固定）时预写：
+        //   openclaw 双象限都要写 —— 自动批准 → full+askFallback full（YOLO）；
+        //     手动批准 → ask + allowlist + on-miss ask（白名单外逐个问人）
+        //   pi 仅手动批准写（写 gate extension，spawn 时 -e 加载）；自动批准
+        //   即原生无门，无需任何配置
+        // 配置落会话隔离 state dir，普通交互会话（source=interactive）不进
+        // 该分支，零影响。
+        if (!taskPrompt && sessionStateDir?.stateDirPath
+            && (agentMeta.id === 'openclaw' || (agentMeta.id === 'pi' && !taskAutoApprove))) {
+            try {
+                const vmRuntimeRef = ready.runtime ? ready.runtime.runtimeRef : undefined;
+                if (agentMeta.id === 'pi') {
+                    const { writePiApprovalGate } = require('../workspace/piApprovalGate');
+                    piGatePath = await writePiApprovalGate({
+                        runtime,
+                        runtimeRef: vmRuntimeRef,
+                        workspaceRoot: workspacePath,
+                        stateDirPath: sessionStateDir.stateDirPath,
+                        log,
+                    });
+                } else {
+                    const { writeOpenclawExecPolicy } = require('../workspace/openclawExecPolicy');
+                    await writeOpenclawExecPolicy({
+                        runtime,
+                        runtimeRef: vmRuntimeRef,
+                        workspaceRoot: workspacePath,
+                        stateDirPath: sessionStateDir.stateDirPath,
+                        taskAutoApprove,
+                        log,
+                    });
+                }
+            } catch (err) {
+                log.warn({ err, sessionId }, '[sessions] loop task approval bootstrap failed (non-fatal)');
             }
         }
 
@@ -582,6 +627,16 @@ async function createAgentSession({
             const interactiveAutoApproveArgs = (!taskPrompt && taskAutoApprove)
                 ? getAutoApproveArgs(agentMeta.id)
                 : [];
+            // 反向逻辑 Agent（manualApprovalArg，当前仅 pi）：手动审批需追加
+            // -e <gate>（原生无审批门，见 taskRunModes.getManualApprovalArgs）。
+            // 交互式拉起 && taskAutoApprove=false（手动审批象限）时加载 gate。
+            // runner 一律交互式拉起（taskPrompt=null），taskAutoApprove 即象限。
+            const piApprovalGatePath = agentMeta.id === 'pi' && !taskPrompt && !taskAutoApprove
+                ? piGatePath
+                : null;
+            const manualApprovalArgs = piApprovalGatePath
+                ? getManualApprovalArgs(agentMeta.id, piApprovalGatePath)
+                : [];
             const baseAgentArgs = taskRemoveArgs.length
                 ? agentMeta.args.filter((a) => !taskRemoveArgs.includes(a))
                 : agentMeta.args;
@@ -594,7 +649,7 @@ async function createAgentSession({
                     baseArgs: baseAgentArgs,
                     append: spawnArgs.append,
                     taskArgs: taskRunArgs || [],
-                    approveArgs: interactiveAutoApproveArgs,
+                    approveArgs: [...interactiveAutoApproveArgs, ...manualApprovalArgs],
                 }),
                 resolved.env,
                 spawnOpts,
@@ -648,6 +703,9 @@ async function createAgentSession({
                     const retryInteractiveAutoApproveArgs = (!taskPrompt && taskAutoApprove)
                         ? getAutoApproveArgs(agentMeta.id)
                         : [];
+                    const retryManualApprovalArgs = agentMeta.id === 'pi' && !taskPrompt && !taskAutoApprove && piGatePath
+                        ? getManualApprovalArgs(agentMeta.id, piGatePath)
+                        : [];
                     const retryBaseAgentArgs = retryRemoveArgs.length
                         ? agentMeta.args.filter((a) => !retryRemoveArgs.includes(a))
                         : agentMeta.args;
@@ -660,7 +718,7 @@ async function createAgentSession({
                             baseArgs: retryBaseAgentArgs,
                             append: retrySpawnArgs.append,
                             taskArgs: retryTaskRunArgs || [],
-                            approveArgs: retryInteractiveAutoApproveArgs,
+                            approveArgs: [...retryInteractiveAutoApproveArgs, ...retryManualApprovalArgs],
                         }),
                         resolved.env,
                         spawnOpts,

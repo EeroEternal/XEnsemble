@@ -2,10 +2,11 @@ import { apiFetch } from './api';
 
 // 循环任务可选 Agent（与 server/src/agents/taskRunModes.js 的
 // isLoopTaskAllowed 保持一致：TASK_RUN_MODES 全集剔除交互模式注入/引导
-// 适配成本过高的 claude-code / droid / github-copilot / hermes）
+// 适配成本过高的 claude-code / droid / github-copilot / hermes。
+// 9 个 Agent 均具备工具审批门，自动/手动审批 × 自动/人工结束 4 象限全支持）
 export const TASK_RUN_AGENTS = [
   'codebuddy', 'qwen-code', 'cline', 'kimi-code', 'opencode',
-  'glm-agent', 'pi', 'cursor', 'openclaw',
+  'glm-agent', 'pi', 'openclaw', 'cursor',
 ];
 
 /**
