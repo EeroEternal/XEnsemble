@@ -410,14 +410,32 @@ async function createAgentSession({
                     log.warn({ err, sessionId }, '[sessions] claude onboarding seed failed (non-fatal)');
                 }
             }
-            if (resumeSpec?.redirectHome && sessionStateDir.stateDirRef) {
-                const runtimeRef = ready.runtime ? ready.runtime.runtimeRef : undefined;
-                await prepareHomeRedirect(runtime.fs, {
-                    workspaceRoot: workspacePath,
-                    stateDirRef: sessionStateDir.stateDirRef,
-                    runtimeRef,
-                }).catch((err) => log.warn({ err, sessionId }, '[sessions] prepareHomeRedirect failed'));
+        }
+
+        // copilot 无 stateDir（config 落 VM HOME），信任预写不能放进上面的
+        // stateDir 条件块内，需独立执行。首次交互启动会弹
+        // "Confirm folder trust"——无人值守时注入的任务指令会被弹窗吞掉。
+        if (agentMeta.id === 'github-copilot') {
+            try {
+                const { ensureCopilotFolderTrusted } = require('../workspace/copilotConfigBootstrap');
+                await ensureCopilotFolderTrusted({
+                    runtime,
+                    runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
+                    cwd: workspacePath,
+                    log,
+                });
+            } catch (err) {
+                log.warn({ err, sessionId }, '[sessions] copilot folder trust seed failed (non-fatal)');
             }
+        }
+
+        if (resumeSpec?.redirectHome && sessionStateDir?.stateDirRef) {
+            const runtimeRef = ready.runtime ? ready.runtime.runtimeRef : undefined;
+            await prepareHomeRedirect(runtime.fs, {
+                workspaceRoot: workspacePath,
+                stateDirRef: sessionStateDir.stateDirRef,
+                runtimeRef,
+            }).catch((err) => log.warn({ err, sessionId }, '[sessions] prepareHomeRedirect failed'));
         }
 
         // Gateway mode: write agent-specific config files to route through the gateway.
@@ -575,7 +593,8 @@ async function createAgentSession({
                     stateArgs,
                     baseArgs: baseAgentArgs,
                     append: spawnArgs.append,
-                    taskArgs: [...(taskRunArgs || []), ...interactiveAutoApproveArgs],
+                    taskArgs: taskRunArgs || [],
+                    approveArgs: interactiveAutoApproveArgs,
                 }),
                 resolved.env,
                 spawnOpts,
@@ -640,7 +659,8 @@ async function createAgentSession({
                             stateArgs: retryStateArgs,
                             baseArgs: retryBaseAgentArgs,
                             append: retrySpawnArgs.append,
-                            taskArgs: [...(retryTaskRunArgs || []), ...retryInteractiveAutoApproveArgs],
+                            taskArgs: retryTaskRunArgs || [],
+                            approveArgs: retryInteractiveAutoApproveArgs,
                         }),
                         resolved.env,
                         spawnOpts,

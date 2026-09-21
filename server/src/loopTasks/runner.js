@@ -321,11 +321,36 @@ async function executeRun(task, run, log = console) {
             // 事件。多行指令压成单行（裸换行会被 TUI 当回车逐行提交）。
             // 时序：① 等 TUI 首帧（lastOutputAt 非空，60s 强制兜底）；② 等输出静默
             // ≥3s（启动 spinner 停止，ink 系 TUI 启动期会丢弃 stdin）；③ 注入；
-            // ④ 8s 内无新输出视为未提交，重试至多 3 次（重试先补 \r 提交可能残留
-            // 在输入框里的文本，再重新写一遍）。
+            // ④ 12s 内转录 out 帧无注入文本的回显视为未提交，重试至多 3 次
+            // （重试先补 \r 提交可能残留在输入框里的文本，再重新写一遍）。
+            //
+            // 验证为什么用回显而不是「有新输出」：SessionManager 对任意 PTY 输出
+            // 刷新 lastOutputAt，TUI 启动期的动画/重绘/主界面渲染都会造成假阳性
+            // （实测 claude-code 卡欢迎屏、copilot 卡信任弹窗时注入无反应但验证
+            // 通过）。TUI 收到文本必然在输入框回显——在转录 out 帧里找注入文本
+            // 开头片段（去 ANSI、压空白后比对）才是「已进入 TUI」的可靠信号。
+            const taskPromptText = String(task.prompt).replace(/\r?\n+/g, ' ');
+            const normForEcho = (s) => stripAnsi(String(s || '')).replace(/\s+/g, ' ').trim();
+            const echoNeedle = normForEcho(taskPromptText).slice(0, 24);
             let injectedAt = null;
+            let committedAt = null;
             let injectAttempts = 0;
-            const bootStart = Date.now();
+            // 输入回显确认：TUI 收到注入文本必然在输入框渲染出来（会进转录 out 帧）
+            const hasPromptEcho = (session) => {
+                if (!echoNeedle) return true; // 空 prompt 无从验证，等价旧行为
+                const ref = session?.transcriptRef;
+                if (!ref) return false;
+                try {
+                    const { frames } = transcriptStore.readTail(ref, 65536);
+                    let text = '';
+                    for (const f of frames) {
+                        if (f.kind === 'out' && typeof f.data === 'string') text += f.data;
+                    }
+                    return normForEcho(text).includes(echoNeedle);
+                } catch {
+                    return false;
+                }
+            };
             const injectTry = () => {
                 if (settled || injectAttempts >= 3) return;
                 injectAttempts += 1;
@@ -335,30 +360,40 @@ async function executeRun(task, run, log = console) {
                 }
                 const cur = sessionManager.getSession(sessionId);
                 if (!cur) return;
-                const text = `${String(task.prompt).replace(/\r?\n+/g, ' ')}`;
                 if (cur.transcriptRef) {
-                    transcriptStore.append(cur.transcriptRef, { kind: 'in', data: `${text}\r` });
+                    transcriptStore.append(cur.transcriptRef, { kind: 'in', data: `${taskPromptText}\r` });
                 }
-                cur?.handle?.write(text);
+                cur?.handle?.write(taskPromptText);
                 sessionManager.touchActivity(sessionId, 'input');
                 setTimeout(() => {
                     if (settled) return;
                     const cur2 = sessionManager.getSession(sessionId);
                     if (!cur2) return;
-                    const before = Number(cur2.lastOutputAt || 0);
                     cur2?.handle?.write('\r');
-                    injectedAt = Date.now();
-                    // 验证：8s 内出现新输出 → 已提交；否则重试
+                    // 验证：12s 内出现注入文本回显 → 已提交；否则重试
                     setTimeout(() => {
-                        if (settled || injectAttempts >= 3) return;
+                        if (settled) return;
                         const cur3 = sessionManager.getSession(sessionId);
                         if (!cur3) return;
-                        if (Number(cur3.lastOutputAt || 0) > before) return;
-                        log.warn?.(`[loop-task-runner] run ${runId}: prompt injection appeared swallowed (no output in 8s), retrying (${injectAttempts}/3)`);
+                        if (hasPromptEcho(cur3)) {
+                            injectedAt = Date.now();
+                            committedAt = injectedAt;
+                            return;
+                        }
+                        if (injectAttempts >= 3) {
+                            // 3 次仍未确认（可能仍卡在引导屏/弹窗）：不再重试，
+                            // 放行 reviewPoll 但 committed 门控会阻止收口，挂到
+                            // 执行超时兜底抓终端尾定位
+                            injectedAt = Date.now();
+                            log.warn?.(`[loop-task-runner] run ${runId}: prompt injection unconfirmed after ${injectAttempts} attempts — keep running until timeout (terminal tail will be captured)`);
+                            return;
+                        }
+                        log.warn?.(`[loop-task-runner] run ${runId}: prompt injection appeared swallowed (no echo within 12s), retrying (${injectAttempts}/3)`);
                         injectTry();
-                    }, 8_000);
+                    }, 12_000);
                 }, 400);
             };
+            const bootStart = Date.now();
             const bootPoll = setInterval(() => {
                 if (settled) { clearInterval(bootPoll); return; }
                 const live = sessionManager.getSession(sessionId);
@@ -376,9 +411,10 @@ async function executeRun(task, run, log = console) {
             }, 1_000);
 
             // 静默检测本轮任务结束（headless 靠进程退出，交互式只能靠静默启发式）：
-            //   ① 注入之后必须出现过新的 agent 输出（lastOutputAt > injectedAt）——
-            //      TUI 首帧/启动期的静默不算开工；注入始终被吞时保持 running 直到
-            //      执行超时，超时会抓终端尾打进 error 便于定位。
+            //   ① 注入必须回显确认（committedAt 非空）且确认后出现过新的 agent
+            //      输出（lastOutputAt > committedAt）——TUI 首帧/启动期的静默不算
+            //      开工；注入始终被吞（未确认提交）时保持 running 直到执行超时，
+            //      超时会抓终端尾打进 error 便于定位。
             //   ② 开工后输出静默 TURN_IDLE_MS（至少距注入 TURN_MIN_MS）→ 认为干完
             //      活：复核模式进入 awaiting_review 挂起等人；自动结束模式自动按
             //      成功收口并退出会话。
@@ -386,11 +422,12 @@ async function executeRun(task, run, log = console) {
             reviewPoll = setInterval(() => {
                 if (settled) { clearInterval(reviewPoll); reviewPoll = null; return; }
                 if (injectedAt == null) return;
+                if (committedAt == null) return; // 回显确认前不判定（假阳性：TUI 动画/弹窗重绘都会刷新 lastOutputAt）
                 const live = sessionManager.getSession(sessionId);
                 if (!live) return;
                 const now = Date.now();
-                if (now - injectedAt < TURN_MIN_MS) return;
-                const started = Number(live.lastOutputAt || 0) > injectedAt;
+                if (now - committedAt < TURN_MIN_MS) return;
+                const started = Number(live.lastOutputAt || 0) > committedAt;
                 const lastOut = Number(live.lastOutputAt || live.lastActivityAt || injectedAt);
                 if (now - lastOut < TURN_IDLE_MS) return;
                 if (!started) {

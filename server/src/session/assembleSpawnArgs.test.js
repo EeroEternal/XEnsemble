@@ -37,6 +37,49 @@ test('droid task run keeps --auto high before the prompt and inserts --model bef
     );
 });
 
+test('approveArgs are appended at the very end, never spliced into taskArgs', () => {
+    // 回归点：交互式批准参数曾与 taskArgs 混传，droid 特例把最后一个元素
+    // （'high'）当 prompt 搬到 --model 之后，--auto 与其值被拆开，
+    // CLI 报 "Invalid --auto value. Allowed values: low, medium, high."
+    assert.deepEqual(
+        assembleSpawnArgs({
+            agentId: 'droid',
+            append: ['--model', 'm'],
+            taskArgs: [],
+            approveArgs: ['--auto', 'high'],
+        }),
+        ['--model', 'm', '--auto', 'high'],
+    );
+    assert.deepEqual(
+        assembleSpawnArgs({
+            agentId: 'droid',
+            append: [],
+            taskArgs: [],
+            approveArgs: ['--auto', 'high'],
+        }),
+        ['--auto', 'high'],
+    );
+    // 一次性任务 + 批准参数并存：prompt 位置不动，approveArgs 追加最末
+    assert.deepEqual(
+        assembleSpawnArgs({
+            agentId: 'droid',
+            append: ['--model', 'm'],
+            taskArgs: ['exec', '--auto', 'high', 'do it'],
+            approveArgs: ['--extra-flag'],
+        }),
+        ['exec', '--auto', 'high', '--model', 'm', 'do it', '--extra-flag'],
+    );
+    assert.deepEqual(
+        assembleSpawnArgs({
+            agentId: 'claude-code',
+            append: [],
+            taskArgs: ['-p', 'hi'],
+            approveArgs: ['--dangerously-skip-permissions'],
+        }),
+        ['-p', 'hi', '--dangerously-skip-permissions'],
+    );
+});
+
 test('droid task run keeps prepend / state / base args in front', () => {
     assert.deepEqual(
         assembleSpawnArgs({
