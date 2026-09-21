@@ -280,15 +280,25 @@ async function runQuickPreviewInner({ project, userId, projectId, sessionId, rep
     // plan 缓存的 mockDataFactory 标志——环境变量开关已废除（systemctl
     // set-environment 设了忘 unset 会永久残留，20:04 事故根因）。
     const forceRegen = false;
-    if (!plan.mockDataFactory || forceRegen) {
+    // 标志位为真≠产物可用：DB 标志位与沙箱产物生命周期不一致（沙箱重建丢产物、标志位
+    // 仍在）。必须先探测产物，不能只信标志位——否则「既不生成也不兜底」，工厂缺失导致
+    // 登录等硬前置接口卡死（见 probeFactoryArtifact）。
+    const GEN = '.xensemble/mocks/_generated.cjs';
+    const BAK = '/tmp/_generated.cjs.bak';
+    let factoryOk = plan.mockDataFactory
+        ? await probeFactoryArtifact({ runtimeRef: ref, workspacePath: wsPath })
+        : false;
+    if (plan.mockDataFactory && !factoryOk) {
+        quickLog('mock factory flagged as cached but artifact missing/unusable; regenerating');
+    }
+    if (!factoryOk || forceRegen) {
         if (forceRegen) quickLog('mock factory regenerate forced (MOCK_FACTORY_REGENERATE=1)');
-        const GEN = '.xensemble/mocks/_generated.cjs';
-        const BAK = '/tmp/_generated.cjs.bak';
         try {
             await runtime.exec.exec('sh', ['-c', `cp ${GEN} ${BAK} 2>/dev/null; rm -f ${GEN}`], {}, { runtimeRef: ref, cwd: wsPath, timeoutMs: 5000 }).catch(() => null);
             const generated = await generateMockFactory({ workspacePath: wsPath, hostWorkspacePath: hostPath, runtimeRef: ref });
             if (generated) {
                 plan.mockDataFactory = true;
+                factoryOk = true;
                 if (forceRegen) {
                     // 一次性开关：清本进程 + 提示用户清 systemd 环境（delete 只影响当前进程，
                     // systemd 重启会重新注入——20:04 事故根因）。用 DEPLOY_MOCK_NO_REGEN 永久关闸。
@@ -297,16 +307,19 @@ async function runQuickPreviewInner({ project, userId, projectId, sessionId, rep
                 }
                 try { await saveVerifyState(projectId, { plan, messages: [], trail: [], roundsUsed: 0, runtimeRef: ref, workspacePath: wsPath }); } catch { /* cache best-effort */ }
             } else {
-                // 生成失败 → 回滚旧工厂（有的话）
+                // 生成失败 → 回滚旧工厂（有的话）；回滚失败则产物仍缺失，如实记回探测结果，
+                // 避免下方 readiness 日志谎报 factory=true。
                 await runtime.exec.exec('sh', ['-c', `[ -f ${BAK} ] && mv ${BAK} ${GEN} || true`], {}, { runtimeRef: ref, cwd: wsPath, timeoutMs: 5000 }).catch(() => null);
                 quickLog('mock factory generation failed; previous factory restored (if any)');
+                factoryOk = await probeFactoryArtifact({ runtimeRef: ref, workspacePath: wsPath });
             }
         } catch (e) {
             quickLog(`mock factory generation failed (non-fatal): ${e.message}`);
             await runtime.exec.exec('sh', ['-c', `[ -f ${BAK} ] && mv ${BAK} ${GEN} || true`], {}, { runtimeRef: ref, cwd: wsPath, timeoutMs: 5000 }).catch(() => null);
+            factoryOk = await probeFactoryArtifact({ runtimeRef: ref, workspacePath: wsPath });
         }
     } else {
-        quickLog('mock factory cached (plan.mockDataFactory), skipping generation');
+        quickLog('mock factory cached and artifact verified, skipping generation');
     }
     const mockEndpoints = await collectMockEndpoints(projectId);
     // 前端期望裸数组的端点（确定性兜底）：工厂可能漏掉某端点（LLM 覆盖不全），此时通用
@@ -322,7 +335,7 @@ async function runQuickPreviewInner({ project, userId, projectId, sessionId, rep
         }
     }
     const mockOk = await startMockServer({ runtimeRef: ref, workspacePath: wsPath, port: mockPort, endpoints: mockEndpoints, arrayPaths });
-    if (mockOk) quickLog(`mock server ready on :${mockPort} (factory=${!!plan.mockDataFactory})`);
+    if (mockOk) quickLog(`mock server ready on :${mockPort} (factory=${factoryOk})`);
     else quickLog('mock server failed (non-fatal): /api 将透传 dev server 自己的 /api（若有）');
 
     const previewBase = `${((process.env.PREVIEW_PUBLIC_URL || '').trim() || resolveControlPlanePublicUrlSync()).replace(/\/+$/, '')}/preview/${deployRef.id}/`;
@@ -1032,6 +1045,19 @@ async function generateMockFactory({ workspacePath, hostWorkspacePath, runtimeRe
     return false;
 }
 
+// 产物可用性探测：缓存标志位存在宿主 DB（deploy_verify_states），产物存在沙箱文件系统，
+// 两者生命周期不一致——沙箱重建会丢产物而标志位仍在（TTL 30min，见 twoStage
+// VERIFY_STATE_TTL_MS）。跳过生成前必须先验证产物真实存在且可加载，否则工厂静默缺失、
+// mock 退化成 {data:null}，登录等硬前置接口直接卡死且长时间不自愈。
+async function probeFactoryArtifact({ runtimeRef, workspacePath }) {
+    const runtime = getRuntime();
+    const GEN = '.xensemble/mocks/_generated.cjs';
+    const chk = await runtime.exec.exec('sh', ['-c',
+        `[ -f ${GEN} ] && node -e "const m=require('./${GEN}'); if(typeof m.handle!=='function')process.exit(3)" && echo FACTORY_OK`],
+        {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => null);
+    return /FACTORY_OK/.test(String(chk?.stdout || ''));
+}
+
 // mock endpoints 种子：最近一次成功部署的 verify API 探测结果（plan 缓存 trail）+
 // workspace .xensemble/mocks/*.json 约定文件（GET__api__users.json → GET /api/users）。
 async function collectMockEndpoints(projectId) {
@@ -1110,8 +1136,7 @@ const QUICK_MOCK_SERVER_SCRIPT = `#!/usr/bin/env node
 // 数据优先级：
 //   1. .xensemble/mocks/<METHOD>__<path>.json      （用户手写，完全覆盖）
 //   2. .xensemble/mocks/_generated.cjs             （LLM 拟真工厂：真实包络+合理数据+写操作回显）
-//   3. 认证端点确定性兜底                            （auth/login|register|refresh|me，见 authMock）
-//   4. 通用兜底                                     （保活不报错，提示如何补 mock）
+//   3. 通用兜底                                     （保活不报错，提示如何补 mock）
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -1134,25 +1159,6 @@ function expectsArray(cleanPath) {
         if (ok) return true;
     }
     return false;
-}
-// 认证端点确定性兜底：快速预览把 /api/* 全量 mock，而登录是所有页面的硬前置——工厂漏掉
-// auth（或干脆没有工厂，本仓库预览即无 _generated.cjs）时，兜底 {data:null} 会让前端
-// Login.jsx:44 判定「凭据不完整」卡死在登录页。这里仅在工厂/手写 mock 均未覆盖时补一份
-// 可用凭据，形态对齐 server/src/routes/auth.js：login/register 平铺 access_token/
-// refresh_token/user/quotas；auth/me 直接返回 user 字段对象（顶层带 id）。
-const MOCK_AUTH_USER = { id: 1, username: 'preview', role: 'admin', status: 'active', llm_auth_mode: 'platform' };
-const MOCK_AUTH_QUOTAS = { max_projects: null, max_sessions: null, max_previews: null, max_runtimes: null, max_custom_images: null, resource_tier: 'standard', usage: { projects: 0, sessions: 0, previews: 0, custom_images: 0 } };
-function authMock(method, cleanPath) {
-    if (method === 'POST' && (cleanPath === 'api/v1/auth/login' || cleanPath === 'api/v1/auth/register')) {
-        return { access_token: 'mock-access-token', refresh_token: 'mock-refresh-token', user: MOCK_AUTH_USER, quotas: MOCK_AUTH_QUOTAS };
-    }
-    if (method === 'POST' && cleanPath === 'api/v1/auth/refresh') {
-        return { access_token: 'mock-access-token', refresh_token: 'mock-refresh-token' };
-    }
-    if (method === 'GET' && cleanPath === 'api/v1/auth/me') {
-        return { id: MOCK_AUTH_USER.id, username: MOCK_AUTH_USER.username, role: MOCK_AUTH_USER.role, status: MOCK_AUTH_USER.status, display_name: null, email: null, quotas: MOCK_AUTH_QUOTAS, granted_agents_count: null, llm_auth_mode: MOCK_AUTH_USER.llm_auth_mode };
-    }
-    return null;
 }
 const MOCK_DIR = '.xensemble/mocks';
 // 工厂模块按 mtime 惰性加载：用户/生成器更新文件后无需重启 mock server
@@ -1225,8 +1231,6 @@ http.createServer((req, res) => {
             if (isArrayResource) {
                 return send(200, []);
             }
-            var authHit = authMock(req.method, cleanPath);
-            if (authHit) return send(200, authHit);
             return send(200, { data: null, mock: true, path: '/' + cleanPath, note: 'no mock; add ' + MOCK_DIR + '/' + req.method + '__' + cleanPath.replace(/\\//g, '__') + '.json' });
         });
         return;
@@ -1234,8 +1238,6 @@ http.createServer((req, res) => {
     // 无工厂：endpoints 种子空壳 / 通用兜底
     // 前端声明为 X[] 的端点优先返回 []（无工厂时更常见，是白屏高发路径）。
     if (expectsArray(cleanPath)) return send(200, []);
-    const authSeed = authMock(req.method, cleanPath);
-    if (authSeed) return send(200, authSeed);
     const ep = ENDPOINTS.find((e) => e.path && cleanPath.startsWith(e.path.replace(/^\\//, '')));
     if (ep) return send(200, { data: null, mock: true, endpoint: ep.method + ' /' + cleanPath });
     return send(200, { data: null, mock: true, path: '/' + cleanPath, note: 'no mock; add ' + MOCK_DIR + '/' + req.method + '__' + cleanPath.replace(/\\//g, '__') + '.json' });
