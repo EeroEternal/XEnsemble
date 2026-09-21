@@ -75,7 +75,10 @@ const TASK_RUN_MODES = {
         args: (prompt) => [prompt],
         autoApproveArgs: ['--yolo'],
         // 交互式人工审批模式必须显式空数组短路：回退 autoApproveArgs 会注入
-        // --yolo，--yolo 与交互 TUI 不兼容（TUI 立即退出，run 被误判 failed）
+        // --yolo，--yolo 与交互 TUI 不兼容（TUI 立即退出，run 被误判 failed）。
+        // 交互双象限的审批控制由 loopTasks/runner 在 TUI 就绪后闭环落实：
+        // 扫转录帧核对 auto-approve 指示态，不匹配则注入 shift-tab（同 glm），
+        // 确认不了则拒绝注入任务指令（fail-closed）。
         interactiveAutoApproveArgs: [],
         removeBaseArgs: ['-i'], // 目录默认 args 带 -i（强制 TUI），一次性模式必须剔除
     },

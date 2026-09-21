@@ -352,8 +352,12 @@ async function executeRun(task, run, log = console) {
             // 通过）。TUI 收到文本必然在输入框回显——在转录 out 帧里找注入文本
             // 开头片段（去 ANSI、压空白后比对）才是「已进入 TUI」的可靠信号。
             const taskPromptText = String(task.prompt).replace(/\r?\n+/g, ' ');
-            // glm-agent 自动批准象限：TUI 就绪后先注入 shift-tab（\x1b[Z）切
-            // auto-accept 再注入任务指令（手动批准象限不注入，TUI 默认逐个审批）。
+            // cline / glm-agent 的 TUI 审批态控制（都无 CLI 免审 flag 或 flag 与 TUI
+            // 不兼容，见 taskRunModes）TUI 就绪后、任务指令注入前落实：
+            //   cline：TUI 默认 auto-approve 全开（无人值守事故实测），双象限都靠
+            //     Shift+Tab 切到目标态，闭环校验见 verifyClineApprovalState。
+            //   glm-agent：TUI 默认逐个审批（手动批准象限=默认态无需处理），仅
+            //     自动批准象限注入 shift-tab 切 auto-accept。
             const glmAutoAcceptInject = task.agentId === 'glm-agent' && task.autoApprove !== false;
             const normForEcho = (s) => stripAnsi(String(s || '')).replace(/\s+/g, ' ').trim();
             const echoNeedle = normForEcho(taskPromptText).slice(0, 24);
@@ -422,7 +426,60 @@ async function executeRun(task, run, log = console) {
                         }, 12_000);
                     }, 400);
                 };
-                if (glmAutoAcceptInject) {
+                // cline 审批态闭环校验：Shift+Tab 按键无回显，状态靠扫转录帧判定——
+                // 目标态不匹配就 PTY 注入 \x1b[Z 再扫（seq 过滤只看按键后的新输出，
+                // 避免旧头部渲染污染判定），至多 3 次；仍确认不了就拒绝注入任务指令
+                //（fail-closed：宁可 run failed，不可审批状态不明就无人值守开跑）。
+                // 注意：匹配串与 cline TUI 头部文案耦合（镜像 pin 版本，升级须复核；
+                // 若 Shift+Tab 是多档循环且存在中间档，单串匹配无法区分「已关」与
+                // 「中间档」，同样按 fail-closed 处理——新输出不含 enabled 串即视为
+                // 到达目标，中间档风险由镜像升级时的复核实验兜底）。
+                const verifyClineApprovalState = (attempt, scanFromSeq) => {
+                    if (settled) return;
+                    const live = sessionManager.getSession(sessionId);
+                    if (!live?.transcriptRef) return; // 会话已不在：走既有超时兜底
+                    const targetEnabled = task.autoApprove !== false;
+                    let text = '';
+                    let headSeq = scanFromSeq;
+                    let readable = true;
+                    try {
+                        const { frames } = transcriptStore.readTail(live.transcriptRef, 65536);
+                        for (const f of frames) {
+                            if (typeof f.seq !== 'number') continue;
+                            if (f.seq > headSeq) headSeq = f.seq;
+                            if (f.kind === 'out' && typeof f.data === 'string' && f.seq > scanFromSeq) text += f.data;
+                        }
+                    } catch { readable = false; }
+                    const failClosed = () => {
+                        log.warn?.(`[loop-task-runner] run ${runId}: cline auto-approve state unverifiable (target=${targetEnabled ? 'on' : 'off'}, attempt ${attempt}) — refusing to start unattended run`);
+                        void (async () => {
+                            await finalize('failed', 'cline auto-approve state could not be confirmed; refusing unattended run (approval-state verification failed)');
+                            await stopTaskSession(sessionId, log);
+                        })();
+                    };
+                    const press = () => {
+                        live.handle?.write('\x1b[Z');
+                        setTimeout(() => verifyClineApprovalState(attempt + 1, headSeq), 800);
+                    };
+                    if (!readable) { failClosed(); return; } // 转录不可读 → 无法闭环验证
+                    const enabled = stripAnsi(text).toLowerCase().includes('auto-approve all enabled');
+                    if (attempt === 0) {
+                        if (enabled === targetEnabled) { writePrompt(); return; }
+                        press(); // 初扫不在目标态（默认全开、手动象限为目标关）→ 按一次
+                        return;
+                    }
+                    if (headSeq <= scanFromSeq) {
+                        // 按键后无任何新输出 = 被 TUI 吞掉（启动期丢 stdin），重试
+                        if (attempt >= 3) { failClosed(); return; }
+                        press();
+                        return;
+                    }
+                    if (enabled === targetEnabled) { writePrompt(); return; }
+                    failClosed(); // 按键生效但停在非目标态（多档循环越过目标）
+                };
+                if (task.agentId === 'cline') {
+                    verifyClineApprovalState(0, 0);
+                } else if (glmAutoAcceptInject) {
                     // glm-agent 自动批准象限：zai 交互 TUI 无 CLI 免审 flag，
                     // 靠官方快捷键 shift-tab 切 auto-accept。TUI 就绪后、prompt
                     // 注入前 PTY 注入 \x1b[Z 切模式（等 400ms 让 TUI 处理重绘，

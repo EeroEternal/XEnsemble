@@ -535,37 +535,46 @@ async function createAgentSession({
         //     手动批准 → ask + allowlist + on-miss ask（白名单外逐个问人）
         //   pi 仅手动批准写（写 gate extension，spawn 时 -e 加载）；自动批准
         //   即原生无门，无需任何配置
+        // cline 不在此预写：审批态由 loopTasks/runner 的 Shift+Tab 闭环校验
+        // 落实（扫转录帧核对 TUI auto-approve 指示态，确认不了拒绝注入任务
+        // 指令），避免赌无文档的配置 schema。
         // 必须判 source==='loop_task'，不能只判 !taskPrompt——交互式会话的
         // taskPrompt 同样是 null，历史上（a09401c，2026-09-21）只判 !taskPrompt
         // 把审批配置泄漏进了交互会话：openclaw 被写入 tools.exec（镜像内版本
         // 不认即 Config: invalid，无法对话），pi 被追加审批 gate。
-        if (source === 'loop_task' && !taskPrompt && sessionStateDir?.stateDirPath
-            && (agentMeta.id === 'openclaw' || (agentMeta.id === 'pi' && !taskAutoApprove))) {
-            try {
-                const vmRuntimeRef = ready.runtime ? ready.runtime.runtimeRef : undefined;
-                if (agentMeta.id === 'pi') {
-                    const { writePiApprovalGate } = require('../workspace/piApprovalGate');
-                    piGatePath = await writePiApprovalGate({
-                        runtime,
-                        runtimeRef: vmRuntimeRef,
-                        workspaceRoot: workspacePath,
-                        stateDirPath: sessionStateDir.stateDirPath,
-                        log,
-                    });
-                } else {
-                    const { writeOpenclawExecPolicy } = require('../workspace/openclawExecPolicy');
-                    await writeOpenclawExecPolicy({
-                        runtime,
-                        runtimeRef: vmRuntimeRef,
-                        workspaceRoot: workspacePath,
-                        stateDirPath: sessionStateDir.stateDirPath,
-                        taskAutoApprove,
-                        log,
-                    });
-                }
-            } catch (err) {
-                log.warn({ err, sessionId }, '[sessions] loop task approval bootstrap failed (non-fatal)');
+        // 封装成闭包：boxlite spawn 失败的 retry 路径会重建 VM，bootstrap 写入
+        // 的文件随旧 VM 丢失，retry 重建 state dir 后必须重跑（piGatePath 也要
+        // 更新——workspacePath 可能变化，state dir 的 VM 内绝对路径随之变化）。
+        const runLoopTaskApprovalBootstrap = async () => {
+            if (!(source === 'loop_task' && !taskPrompt && sessionStateDir?.stateDirPath)) return;
+            if (agentMeta.id !== 'openclaw' && agentMeta.id !== 'pi') return;
+            const vmRuntimeRef = ready.runtime ? ready.runtime.runtimeRef : undefined;
+            if (agentMeta.id === 'pi') {
+                if (taskAutoApprove) return; // 自动批准即原生无门，无需任何配置
+                const { writePiApprovalGate } = require('../workspace/piApprovalGate');
+                piGatePath = await writePiApprovalGate({
+                    runtime,
+                    runtimeRef: vmRuntimeRef,
+                    workspaceRoot: workspacePath,
+                    stateDirPath: sessionStateDir.stateDirPath,
+                    log,
+                });
+                return;
             }
+            const { writeOpenclawExecPolicy } = require('../workspace/openclawExecPolicy');
+            await writeOpenclawExecPolicy({
+                runtime,
+                runtimeRef: vmRuntimeRef,
+                workspaceRoot: workspacePath,
+                stateDirPath: sessionStateDir.stateDirPath,
+                taskAutoApprove,
+                log,
+            });
+        };
+        try {
+            await runLoopTaskApprovalBootstrap();
+        } catch (err) {
+            log.warn({ err, sessionId }, '[sessions] loop task approval bootstrap failed (non-fatal)');
         }
 
         // P4：spawn 前把 active skills 注入 workspace 指令文件（AGENTS.md / CLAUDE.md）。
@@ -693,6 +702,36 @@ async function createAgentSession({
                             configFiles: mergedConfigFiles,
                             stateDirPath: sessionStateDir?.stateDirPath || null,
                         }).catch(() => {});
+                    }
+                    // 重建 VM 后主路径 bootstrap 写入的文件随旧 VM 一起丢失，必须
+                    // 重跑，否则重试拉起的会话丢网关认证（providers.json 等）/
+                    // 丢审批配置（openclaw policy、pi gate），与主路径的写入集合保持一致。
+                    if (authMode === 'gateway') {
+                        try {
+                            const { ensureGatewayConfig } = require('../workspace/ensureGatewayConfig');
+                            const { resolveAgentGatewayModelTargets } = require('../agents/agentEnv');
+                            const { targets: retryModelTargets, defaultTarget: retryDefaultTarget } = await resolveAgentGatewayModelTargets(agentMeta.id);
+                            await ensureGatewayConfig({
+                                runtime,
+                                runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
+                                agentId: agentMeta.id,
+                                authMode,
+                                stateDirPath: sessionStateDir?.stateDirPath || null,
+                                sessionToken: resolved.env.LLM_ROUTER_API_KEY,
+                                routerUrl: resolved.env.LLM_ROUTER_URL,
+                                modelTarget: resolved.env.OPENAI_MODEL,
+                                modelTargets: retryModelTargets,
+                                defaultTarget: retryDefaultTarget,
+                                warn: (msg) => log.warn(msg),
+                            });
+                        } catch (err) {
+                            log.warn({ err, sessionId }, '[sessions] gateway config bootstrap retry failed');
+                        }
+                    }
+                    try {
+                        await runLoopTaskApprovalBootstrap();
+                    } catch (err) {
+                        log.warn({ err, sessionId }, '[sessions] loop task approval bootstrap retry failed (non-fatal)');
                     }
                     const retryStateArgs = sessionStateDir?.stateDirPath
                         ? buildStateArgs(resumeSpec, sessionStateDir.stateDirPath)
