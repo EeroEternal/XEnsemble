@@ -114,11 +114,21 @@ test('completed: assistant 后静默 → 一次 session_completed；repeat 窗�
     assert.equal(notifications.length, 1);
 }));
 
-test('completed: 期间有 PTY 输出 → 不算安静完成', isolated(async (notifications) => {
+test('completed: PTY 输出把静默期重新计时，停止后仍收口（不再永久丢失）', isolated(async (notifications) => {
+    // 旧实现只在 assistant 时排期一次，observeOutput 把计时器清掉后不再重排
+    // → TUI 收尾阶段的状态栏计时器/光标闪烁（实测 0~200ms 一帧）会让
+    // session_completed 永久丢失，用户侧表现为「任务跑完没通知」。
     attentionService.observeChatEntry('s7', { role: 'assistant', content: '开始' });
-    attentionService.observeOutput('s7', 'local:pty:s7');
+    // 持续输出（间隔 < quietCompletedMs=40）→ 期间不算安静完成
+    for (let i = 0; i < 4; i++) {
+        await tick(20);
+        attentionService.observeOutput('s7', 'local:pty:s7');
+    }
+    assert.equal(notifications.length, 0, '输出滚动期间不应发 completed');
+    // 输出停止 → 静默期满后应正常收口（旧实现在此处永久丢失）
     await tick(110);
-    assert.equal(notifications.length, 0);
+    assert.equal(notifications.length, 1, '输出停止后应发出 completed');
+    assert.equal(notifications[0].type, 'session_completed');
 }));
 
 test('completed: 等待用户输入时挂起（不发 completed）', isolated(async (notifications) => {

@@ -136,6 +136,7 @@ function observeChatEntry(sessionId, entry) {
                         st.agentStepsSinceUser += 1;
                         st.lastActivityAt = Date.now();
                         clearCompletedTimer(st);
+                        scheduleCompleted(sessionId, st);
                     }
                 })
                 .catch(() => { /* 启发式不可用 → 忽略该信号 */ });
@@ -146,6 +147,7 @@ function observeChatEntry(sessionId, entry) {
             st.agentStepsSinceUser += 1;
             clearWaiting(sessionId, st, 'tool_result');
             clearCompletedTimer(st);
+            scheduleCompleted(sessionId, st);
             break;
         case 'error':
         default:
@@ -184,22 +186,38 @@ function clearWaiting(sessionId, st, byWhat) {
 }
 
 /**
- * assistant 发言后 QUIET_COMPLETED_MS 无任何活动（L1/L3/PTY 输出都会清计时器）
+ * 排期 session_completed 判定：最后一次活动后静默 quietCompletedMs 仍无活动
  * → session_completed。同会话通知有 completedRepeatMs 节流。
+ *
+ * 必须在每个「活动信号」后调用（assistant / tool_call / tool_result / PTY 输出），
+ * 因为语义是「最后一次活动之后静默够久才算跑完」。只在 assistant 时排期一次是
+ * 不够的：TUI 收尾阶段的状态栏计时器、光标闪烁、分隔线重绘会持续产生输出帧
+ * （实测间隔 0~200ms），一旦把唯一的计时器清掉就再也不会重排 → 通知永久丢失。
+ *
+ * 已有 pending 计时器时不重复排期（每 quietCompletedMs 至多一个 timer）；
+ * 回调里若发现期间仍有活动，按剩余静默时间重排而非丢弃。
  */
 function scheduleCompleted(sessionId, st) {
     if (st.completedTimer) return; // 已有 pending 计时器：一条就够
+    if (st.agentStepsSinceUser <= 0) return; // 没有待收口的 agent 工作
+    // 从「最后一次活动」起算剩余静默时间，避免活动后重排还要再等满一轮。
+    const elapsed = Date.now() - (st.lastActivityAt || 0);
+    const delay = Math.max(50, config.quietCompletedMs - elapsed);
     st.completedTimer = setTimeout(() => {
         st.completedTimer = null;
         const quietFor = Date.now() - st.lastActivityAt;
         if (st.agentStepsSinceUser <= 0) return;
         if (st.state === 'waiting_user') return;
-        if (quietFor < config.quietCompletedMs * 0.8) return; // 期间仍有活动
+        if (quietFor < config.quietCompletedMs * 0.8) {
+            // 期间仍有活动（agent 还在跑）：重排而不是丢弃，否则该轮收口永久丢失。
+            scheduleCompleted(sessionId, st);
+            return;
+        }
         if (Date.now() - st.completedNotifiedAt < config.completedRepeatMs) return;
         st.completedNotifiedAt = Date.now();
         st.agentStepsSinceUser = 0; // 下一段工作从零计数
         void emitNotify(sessionId, st, 'session_completed');
-    }, config.quietCompletedMs);
+    }, delay);
 }
 
 async function emitNotify(sessionId, st, type) {
@@ -277,8 +295,12 @@ function observeOutput(sessionId, transcriptRef) {
     if (!sessionId) return;
     const st = ensureState(sessionId);
     st.lastActivityAt = Date.now();
-    clearCompletedTimer(st); // 输出 = agent 还在跑，不算安静完成
     if (transcriptRef) st.transcriptRef = transcriptRef;
+    // 输出 = agent 还在跑，不算安静完成 → 取消本轮收口，并从这次输出重新计时。
+    // 必须重排（而非只清）：TUI 收尾阶段的状态栏计时器/光标闪烁会持续输出，
+    // 只清不排会让 session_completed 永久丢失（用户侧表现为「任务跑完没通知」）。
+    clearCompletedTimer(st);
+    scheduleCompleted(sessionId, st);
     scheduleScan(sessionId, st, Math.max(0, config.scanThrottleMs - (Date.now() - st.lastScanAt)));
 }
 
