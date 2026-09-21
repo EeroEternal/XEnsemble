@@ -1,9 +1,11 @@
 import { apiFetch } from './api';
 
-// 支持无人值守一次性执行的 Agent（与 server/src/agents/taskRunModes.js 保持一致）
+// 循环任务可选 Agent（与 server/src/agents/taskRunModes.js 的
+// isLoopTaskAllowed 保持一致：TASK_RUN_MODES 全集剔除交互模式注入/引导
+// 适配成本过高的 claude-code / droid / github-copilot / hermes）
 export const TASK_RUN_AGENTS = [
-  'claude-code', 'codebuddy', 'qwen-code', 'cline', 'droid', 'hermes',
-  'kimi-code', 'opencode', 'glm-agent', 'pi', 'github-copilot', 'cursor', 'openclaw',
+  'codebuddy', 'qwen-code', 'cline', 'kimi-code', 'opencode',
+  'glm-agent', 'pi', 'cursor', 'openclaw',
 ];
 
 /**

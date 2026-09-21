@@ -23,7 +23,7 @@ const { t } = require('../i18n');
 const { validateCron, describeSchedule, computeNextRunAt, MIN_INTERVAL_MS, MAX_INTERVAL_MS } = require('../loopTasks/cron');
 const runner = require('../loopTasks/runner');
 const policy = require('../auth/PolicyService');
-const { isTaskRunSupported } = require('../agents/taskRunModes');
+const { isLoopTaskAllowed } = require('../agents/taskRunModes');
 
 const MAX_TASKS_PER_USER = Number(process.env.LOOP_TASK_MAX_PER_USER) || 12;
 
@@ -139,7 +139,7 @@ async function validateTaskAgent(userId, userRole, agentId, locale) {
     if (!access.ok) {
         throw httpError(403, 'agent_not_available', access.error || t('errors:agent_not_found', {}, locale));
     }
-    if (!isTaskRunSupported(agentId)) {
+    if (!isLoopTaskAllowed(agentId)) {
         throw loopError(locale, 'agent_task_unsupported', {}, 400);
     }
 }

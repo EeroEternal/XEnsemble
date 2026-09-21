@@ -119,6 +119,19 @@ const TASK_RUN_MODES = {
     },
 };
 
+/**
+ * 循环任务禁用清单：交互模式注入/引导适配投入产出比过高的 Agent
+ * （claude-code 欢迎屏卡注入、copilot 信任弹窗吞注入、droid --auto 拆参、
+ * hermes chat 子命令特例），不再开放新建循环任务。存量任务不受影响
+ * （TASK_RUN_MODES 保留完整模式矩阵，旧任务按原配置继续执行）。
+ */
+const LOOP_TASK_DISABLED_AGENTS = new Set(['claude-code', 'droid', 'github-copilot', 'hermes']);
+
+/** Agent 是否允许创建/编辑循环任务（存量任务执行不走此门） */
+function isLoopTaskAllowed(agentId) {
+    return isTaskRunSupported(agentId) && !LOOP_TASK_DISABLED_AGENTS.has(agentId);
+}
+
 /** Agent 是否支持无人值守一次性执行 */
 function isTaskRunSupported(agentId) {
     return Boolean(TASK_RUN_MODES[agentId]);
@@ -162,4 +175,4 @@ function getTaskRunRemoveArgs(agentId) {
     return Array.isArray(mode?.removeBaseArgs) ? mode.removeBaseArgs : [];
 }
 
-module.exports = { isTaskRunSupported, getTaskRunArgs, getTaskRunRemoveArgs, getAutoApproveArgs };
+module.exports = { isTaskRunSupported, isLoopTaskAllowed, getTaskRunArgs, getTaskRunRemoveArgs, getAutoApproveArgs };
