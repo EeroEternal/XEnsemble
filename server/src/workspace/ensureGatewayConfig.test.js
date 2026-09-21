@@ -221,13 +221,30 @@ test('buildGatewayConfigSpec: openclaw writes contextWindow per model', () => {
     assert.equal(models[0].contextWindow, 1048576);
 });
 
-test('buildGatewayConfigSpec: cline writes contextWindow per model (best-effort)', () => {
+test('buildGatewayConfigSpec: cline writes per-model contextWindow to models.json', () => {
     const spec = buildGatewayConfigSpec('cline', ctx);
-    const content = JSON.parse(spec.content);
-    const openaiCompat = content.providers['openai-compatible'].settings;
     const modelId = 'zxs_deepseek/deepseek-v4-flash';
-    assert.equal(openaiCompat.models[modelId].id, modelId);
-    assert.equal(openaiCompat.models[modelId].contextWindow, 1048576);
+
+    // providers.json：cline 的 zod schema 会 strip 未知键，故此处不含 models/contextWindow
+    const content = JSON.parse(spec.content);
+    const settings = content.providers['openai-compatible'].settings;
+    assert.equal(settings.provider, 'openai-compatible');
+    assert.equal(settings.apiKey, 'xel_test_token');
+    assert.equal(settings.models, undefined, 'providers.json 不应再带会被 strip 的 models');
+
+    // models.json：per-model 上下文窗口的生效位置（须带 provider 块，否则不注册）
+    assert.ok(Array.isArray(spec.extraFiles), 'cline 必须额外写 models.json');
+    const modelsFile = spec.extraFiles.find((f) => f.filePath.endsWith('/models.json'));
+    assert.ok(modelsFile, 'models.json extraFile 必须存在');
+    assert.equal(modelsFile.filePath, '/workspace/.xensemble/state/sess_test/settings/models.json');
+
+    const modelsJson = JSON.parse(modelsFile.content);
+    const entry = modelsJson.providers['openai-compatible'];
+    assert.equal(entry.provider.name, 'OpenAI Compatible');
+    assert.equal(entry.provider.defaultModelId, modelId);
+    assert.equal(entry.models[modelId].id, modelId);
+    assert.equal(entry.models[modelId].contextWindow, 1048576);
+    assert.equal(entry.models[modelId].maxInputTokens, 1048576);
 });
 
 test('buildGatewayConfigSpec: openclaw with multi-targets respects per-model context', () => {

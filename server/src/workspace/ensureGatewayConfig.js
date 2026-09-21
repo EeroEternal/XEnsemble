@@ -135,11 +135,36 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             // Default provider is "cline" (cline's own API); must override the
             // "openai-compatible" provider to point at the gateway, otherwise
             // cline requests go to api.openai.com and reject the session token.
-            // The provider `models` record enumerates selectable models so /model
-            // offers every configured gateway model (not just the default).
-            // contextWindow is written per the cline UI "Context Window size" field;
-            // the exact JSON key isn't fully documented, but writing a camelCase
-            // variant is the closest match and harmless if ignored.
+            //
+            // Per-model context window: cline resolves a model's context via
+            // resolveModelInfo → config.knownModels[modelId] → falls back to
+            // DEFAULT_MAX_INPUT_TOKENS (128000) when absent, which triggers
+            // auto-compact far too early (~115K). The per-model values must come
+            // from a sibling `models.json`, NOT from this file: cline parses
+            // providers.json with a zod schema that strips unknown keys (so a
+            // nested `models` map is silently dropped), while a top-level
+            // `contextWindow` here is applied to EVERY model and would override
+            // each model's own value.
+            //
+            // models.json is parsed by a different loader that registers the
+            // provider collection, and only when the entry carries a `provider`
+            // block (name + baseUrl). Verified against cline 3.0.55: with
+            // models.json present, glm-5.3-flash and glm-5.3 keep independent
+            // context windows; without it both fall back to 128000.
+            const clineModels = targets.map((t) => [t, {
+                id: t,
+                contextWindow: guessContextLength(t),
+                maxInputTokens: guessContextLength(t),
+            }]);
+            const clineSettings = {
+                provider: 'openai-compatible',
+                model: def,
+                // NOTE: no `models` / `contextWindow` here. A nested models map is
+                // stripped by cline's zod schema, and a top-level contextWindow
+                // would apply to every model (see models.json below).
+                baseUrl: `${routerUrl}/v1`,
+                apiKey: sessionToken,
+            };
             return {
                 dirPath: `${stateDirPath}/settings`,
                 filePath: `${stateDirPath}/settings/providers.json`,
@@ -148,18 +173,29 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                     lastUsedProvider: 'openai-compatible',
                     providers: {
                         'openai-compatible': {
-                            settings: {
-                                provider: 'openai-compatible',
-                                model: def,
-                                models: Object.fromEntries(targets.map((t) => [t, { id: t, contextWindow: guessContextLength(t) }])),
-                                baseUrl: `${routerUrl}/v1`,
-                                apiKey: sessionToken,
-                            },
+                            settings: clineSettings,
                             updatedAt: new Date().toISOString(),
                             tokenSource: 'manual',
                         },
                     },
                 }, null, 2),
+                extraFiles: [{
+                    dirPath: `${stateDirPath}/settings`,
+                    filePath: `${stateDirPath}/settings/models.json`,
+                    content: JSON.stringify({
+                        version: 1,
+                        providers: {
+                            'openai-compatible': {
+                                provider: {
+                                    name: 'OpenAI Compatible',
+                                    baseUrl: `${routerUrl}/v1`,
+                                    defaultModelId: def,
+                                },
+                                models: Object.fromEntries(clineModels),
+                            },
+                        },
+                    }, null, 2),
+                }],
             };
 
         case 'glm-agent':
