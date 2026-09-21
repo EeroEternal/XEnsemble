@@ -155,10 +155,11 @@ const TASK_RUN_MODES = {
 /**
  * 循环任务禁用清单：交互模式注入/引导适配投入产出比过高的 Agent
  * （claude-code 欢迎屏卡注入、copilot 信任弹窗吞注入、droid --auto 拆参、
- * hermes chat 子命令特例），不再开放新建循环任务。存量任务不受影响
+ * hermes chat 子命令特例），以及产品裁决不开放的 opencode / openclaw，
+ * 不再开放新建循环任务。存量任务不受影响
  * （TASK_RUN_MODES 保留完整模式矩阵，旧任务按原配置继续执行）。
  */
-const LOOP_TASK_DISABLED_AGENTS = new Set(['claude-code', 'droid', 'github-copilot', 'hermes']);
+const LOOP_TASK_DISABLED_AGENTS = new Set(['claude-code', 'droid', 'github-copilot', 'hermes', 'opencode', 'openclaw']);
 
 /** Agent 是否允许创建/编辑循环任务（存量任务执行不走此门） */
 function isLoopTaskAllowed(agentId) {

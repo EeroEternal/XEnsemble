@@ -116,6 +116,28 @@ async function extractRunResult(sessionId) {
 }
 
 /**
+ * 轨迹层完成判据：Agent 是否仍在执行工具。
+ * LLM proxy 逐次记录模型响应（trajectory），最后一步 finish_reason 为
+ * 'tool_calls'（openai）/ 'tool_use'（anthropic）= 模型刚发出工具指令、
+ * 还在等结果跑；'stop'/'end_turn'/null = 已收口或无轨迹（headless exit
+ * 兜底不受影响）。终端静默不再单独作为「干完活」依据——GLM 等执行长
+ * 工具（慢命令/长推理）时终端静默超 TURN_IDLE_MS 属正常现象，此前会被
+ * 误判完成提前进入 awaiting_review。
+ * @returns {Promise<boolean>} true = 最后一步仍在跑工具（或轨迹明确 tool_use 收尾）
+ */
+async function agentStillWorking(sessionId) {
+    try {
+        const steps = await trajectory.getAllSteps(sessionId);
+        if (!steps.length) return false; // 无轨迹（如审批门不经过 proxy 的纯 TUI 交互）→ 不拦
+        const last = steps[steps.length - 1];
+        const fr = last?.response?.finish_reason;
+        return fr === 'tool_calls' || fr === 'tool_use';
+    } catch {
+        return false;
+    }
+}
+
+/**
  * 终止任务会话（镜像 /exit 语义）：beginHibernate 防 onExit 覆盖状态 → kill →
  * 标记 exited → 从内存表清理。对已退出的会话幂等（进程已死则跳过 kill，
  * 仅补写 DB 终态并清内存）。
@@ -438,7 +460,10 @@ async function executeRun(task, run, log = console) {
             //      活：复核模式进入 awaiting_review 挂起等人；自动结束模式自动按
             //      成功收口并退出会话。
             let warnedNoStart = false;
-            reviewPoll = setInterval(() => {
+            // 完成判定：静默满足后进入异步收口。轨迹检查（agentStillWorking）
+            // 显示仍在跑工具时，重建轮询等下一轮——不做同步重入，避免 DB 查询
+            // 堵塞 interval 回调。
+            const reviewTick = () => {
                 if (settled) { clearInterval(reviewPoll); reviewPoll = null; return; }
                 if (injectedAt == null) return;
                 if (committedAt == null) return; // 回显确认前不判定（假阳性：TUI 动画/弹窗重绘都会刷新 lastOutputAt）
@@ -460,6 +485,16 @@ async function executeRun(task, run, log = console) {
                 reviewPoll = null;
                 void (async () => {
                     try {
+                        // 终端静默只是必要条件（可能正在执行长工具），轨迹最后
+                        // 一步 finish_reason 为 tool_calls/tool_use = 模型还在
+                        // 等工具结果跑，不判完成、下轮轮询再看。
+                        if (await agentStillWorking(sessionId)) {
+                            if (!settled) {
+                                reviewPoll = setInterval(reviewTick, TURN_POLL_MS);
+                                log.log?.(`[loop-task-runner] run ${runId}: terminal idle but last trajectory step is a tool call — still working`);
+                            }
+                            return;
+                        }
                         if (reviewMode) {
                             const result = await extractRunResult(sessionId);
                             if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
@@ -478,7 +513,8 @@ async function executeRun(task, run, log = console) {
                         log.warn?.({ err, runId }, '[loop-task-runner] failed to complete interactive turn');
                     }
                 })();
-            }, TURN_POLL_MS);
+            };
+            reviewPoll = setInterval(reviewTick, TURN_POLL_MS);
         }
 
         // 超时兜底（两种模式共用；复核模式若已进入 awaiting_review 会提前清除本定时器，
