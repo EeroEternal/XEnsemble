@@ -430,7 +430,7 @@ export default function AppSidebar({
               label={t('sessions:action.more_actions', { defaultValue: 'Session actions' })}
               items={[
                 ...(!isLoopTask ? [{ icon: PenSquare, label: t('sessions:action.rename_session', { defaultValue: 'Rename' }), onClick: () => startRename(s) }] : []),
-                ...(canExit && !isLoopTask ? [{ icon: Square, label: t('sessions:action.exit'), onClick: () => onRequestDeleteSession?.(s, { name: s.projectName || activeWorkspaceName }, 'exit') }] : []),
+                ...(canExit ? [{ icon: Square, label: t('sessions:action.exit'), onClick: () => onRequestDeleteSession?.(s, { name: s.projectName || activeWorkspaceName }, 'exit') }] : []),
                 { icon: Trash2, label: t('sessions:action.delete'), danger: true, onClick: () => onRequestDeleteSession?.(s, { name: s.projectName || activeWorkspaceName }, 'delete') },
               ]}
             />
