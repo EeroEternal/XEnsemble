@@ -38,7 +38,6 @@ const GATEWAY_MODEL_ENV_KEYS = [
 ];
 
 const KIMI_CODE_AGENT_IDS = new Set(['kimi-code']);
-const KIMI_CODE_DEFAULT_MAX_CONTEXT = String(1024 * 1024);
 const OPENCODE_AGENT_IDS = new Set(['opencode']);
 const CLAUDE_CODE_AGENT_IDS = new Set(['claude-code']);
 
@@ -152,26 +151,33 @@ function findMissing(env, envRequired) {
  * Resolve PTY env for an agent session.
  * - gateway: platform vault (+ LLM_ROUTER_URL synthesis); users do not supply keys.
  * - byok: user vault for env_required only; interactive-login agents use empty env_required.
+ *
+ * Kimi Code's applyEnvModelConfig MERGES KIMI_MODEL_* into the in-memory
+ * catalog (alias `__kimi_env_model__`) instead of replacing config.toml.
+ * Gateway mode already writes the selected models to config.toml via
+ * ensureGatewayConfig, so do not synthesize those env vars.
  */
 function applyKimiCodeGatewayEnv(env) {
-    const routerUrl = env.LLM_ROUTER_URL?.trim();
-    const routerKey = env.LLM_ROUTER_API_KEY?.trim();
-    const model = env.KIMI_MODEL?.trim()
-        || env.MOONSHOT_MODEL?.trim()
-        || env.OPENAI_MODEL?.trim()
-        || env.LLM_MODEL?.trim();
-    if (!routerUrl || !routerKey || !model) return env;
-    return {
-        ...env,
-        KIMI_MODEL_NAME: model,
-        KIMI_MODEL_API_KEY: routerKey,
-        KIMI_MODEL_BASE_URL: routerUrl,
-        KIMI_MODEL_PROVIDER_TYPE: 'openai',
-        KIMI_MODEL_MAX_CONTEXT_SIZE: env.KIMI_MODEL_MAX_CONTEXT_SIZE?.trim() || KIMI_CODE_DEFAULT_MAX_CONTEXT,
-    };
+    return env;
+}
+
+function kimiGatewayHasConfiguredModel(env) {
+    return Boolean(String(env?.OPENAI_MODEL || env?.LLM_MODEL || env?.KIMI_MODEL || '').trim());
 }
 
 const { toOpencodeModelAlias } = require('./agentModelAlias');
+
+function applyHermesGatewayEnv(env) {
+    // Gateway copies the session token into OPENROUTER_API_KEY / ANTHROPIC_API_KEY
+    // / DASHSCOPE_API_KEY / etc. Hermes and Pi treat those env names as
+    // authenticated built-in catalogs, so /model lists OpenRouter (and others)
+    // beside the gateway provider. Routing uses config (Hermes config.yaml /
+    // Pi models.json); drop the extra keys so only that catalog remains.
+    const out = { ...env };
+    for (const key of GATEWAY_API_KEY_KEYS) delete out[key];
+    for (const key of GATEWAY_BASE_URL_KEYS) delete out[key];
+    return out;
+}
 
 function applyOpencodeGatewayEnv(env, modelTargets, defaultTarget) {
     const routerUrl = env.LLM_ROUTER_URL?.trim();
@@ -191,6 +197,10 @@ function applyOpencodeGatewayEnv(env, modelTargets, defaultTarget) {
     const defaultModelId = toOpencodeModelAlias(defaultReal);
     const config = {
         autoupdate: false,
+        // Gateway copies the session token into OPENAI_API_KEY / ANTHROPIC_API_KEY
+        // etc. OpenCode autoloads models.dev providers whenever those env names
+        // are set. Allowlist keeps /models to the configured gateway catalog.
+        enabled_providers: ['gateway'],
         model: `gateway/${defaultModelId}`,
         provider: {
             gateway: {
@@ -313,6 +323,9 @@ async function applyAgentGatewayModel(agentId, env) {
             .map((m) => composeGatewayModelTarget(cfg.provider, m));
         return applyOpencodeGatewayEnv(out, targets, target);
     }
+    if (agentId === 'hermes' || agentId === 'pi') {
+        return applyHermesGatewayEnv(out);
+    }
     return out;
 }
 
@@ -375,6 +388,9 @@ function applyGatewayAgentEnv(agentId, env, platform, envRequired) {
     }
     if (envRequired.includes('OPENROUTER_API_KEY') && platform.OPENROUTER_BASE_URL?.trim()) {
         out.OPENROUTER_BASE_URL = platform.OPENROUTER_BASE_URL.trim();
+    }
+    if (agentId === 'hermes' || agentId === 'pi') {
+        return applyHermesGatewayEnv(out);
     }
     return out;
 }
@@ -524,7 +540,7 @@ async function resolveSpawnEnv({ userId, agentId, envRequired, sessionToken, pro
             };
         }
         env = await applyAgentGatewayModel(agentId, applySpawnDefaults({ ...platform, ...env }, effectiveRequired));
-        if (KIMI_CODE_AGENT_IDS.has(agentId) && !env.KIMI_MODEL_NAME?.trim()) {
+        if (KIMI_CODE_AGENT_IDS.has(agentId) && !kimiGatewayHasConfiguredModel(env)) {
             return {
                 mode,
                 env: null,
@@ -685,6 +701,9 @@ module.exports = {
     resolveTerminalThemeContext,
     mergeSpawnEnvLayers,
     applyGatewayAgentEnv,
+    applyKimiCodeGatewayEnv,
+    kimiGatewayHasConfiguredModel,
+    applyHermesGatewayEnv,
     applyOpencodeGatewayEnv,
     toOpencodeModelAlias,
     resolveAgentGatewayModelTargets,

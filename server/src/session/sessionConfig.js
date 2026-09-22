@@ -190,7 +190,9 @@ function resolveAgentSpawnArgs(agentId, configFiles, options = {}) {
             if (cfg?.content) {
                 try {
                     const parsed = JSON.parse(cfg.content);
-                    const model = Array.isArray(parsed) ? parsed[0]?.id : parsed?.id;
+                    const model = Array.isArray(parsed)
+                        ? parsed[0]?.id
+                        : (parsed?.models?.[0]?.id || parsed?.id);
                     if (model) prepend.push('--model', model);
                 } catch (_) {}
             }

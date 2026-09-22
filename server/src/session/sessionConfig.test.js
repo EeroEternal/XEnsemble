@@ -108,3 +108,14 @@ test('resolveAgentSpawnArgs: codebuddy gateway mode adds --model', () => {
 test('resolveAgentSpawnArgs: codebuddy non-gateway mode adds no args', () => {
     assert.deepEqual(resolveAgentSpawnArgs('codebuddy', [], { authMode: 'byok' }), { prepend: [], append: [] });
 });
+
+test('resolveAgentSpawnArgs: codebuddy byok reads id from models.json object shape', () => {
+    const result = resolveAgentSpawnArgs('codebuddy', [{
+        path: '${STATE_DIR}/models.json',
+        content: JSON.stringify({
+            models: [{ id: 'custom-m' }],
+            availableModels: ['custom-m'],
+        }),
+    }], { authMode: 'byok' });
+    assert.deepEqual(result.prepend, ['--model', 'custom-m']);
+});

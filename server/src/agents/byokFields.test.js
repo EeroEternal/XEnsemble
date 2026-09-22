@@ -435,10 +435,11 @@ test('generateByokConfig codebuddy: generates env + models.json + settings.json'
     const modelsJson = configFiles.find((f) => f.path.endsWith('models.json'));
     assert.ok(modelsJson);
     const parsed = JSON.parse(modelsJson.content);
-    assert.equal(parsed[0].apiKey, 'sk-test');
-    assert.equal(parsed[0].id, 'gpt-4o');
-    assert.equal(parsed[0].name, 'gpt-4o');
-    assert.equal(parsed[0].vendor, 'custom');
+    assert.equal(parsed.models[0].apiKey, 'sk-test');
+    assert.equal(parsed.models[0].id, 'gpt-4o');
+    assert.equal(parsed.models[0].name, 'gpt-4o');
+    assert.equal(parsed.models[0].vendor, 'custom');
+    assert.deepEqual(parsed.availableModels, ['gpt-4o']);
     const settingsJson = configFiles.find((f) => f.path.endsWith('settings.json'));
     assert.ok(settingsJson);
     const settings = JSON.parse(settingsJson.content);
@@ -460,7 +461,7 @@ test('generateByokConfig codebuddy: writes maxInputTokens + autoCompactWindow', 
     const modelsJson = configFiles.find((f) => f.path.endsWith('models.json'));
     const parsed = JSON.parse(modelsJson.content);
     // maxInputTokens is the context window field; default 1048576 here
-    assert.equal(parsed[0].maxInputTokens, 1048576);
+    assert.equal(parsed.models[0].maxInputTokens, 1048576);
     const settingsJson = configFiles.find((f) => f.path.endsWith('settings.json'));
     const settings = JSON.parse(settingsJson.content);
     assert.equal(settings.autoCompactEnabled, true);
@@ -478,7 +479,7 @@ test('generateByokConfig codebuddy: clamps autoCompactWindow to [100k, 1M]', () 
     const modelsJson = configFiles.find((f) => f.path.endsWith('models.json'));
     const parsed = JSON.parse(modelsJson.content);
     // models.json stores the real value; settings.json is the clamped one
-    assert.equal(parsed[0].maxInputTokens, 64000);
+    assert.equal(parsed.models[0].maxInputTokens, 64000);
     const settingsJson = configFiles.find((f) => f.path.endsWith('settings.json'));
     const settings = JSON.parse(settingsJson.content);
     assert.equal(settings.autoCompactWindow, 100000);

@@ -657,15 +657,18 @@ function generateCodebuddy(values) {
         const configDir = '${STATE_DIR}';
         configFiles.push({
             path: `${configDir}/models.json`,
-            content: JSON.stringify([{
-                id: model,
-                name: model,
-                vendor: 'custom',
-                apiKey: apiKey,
-                url: baseUrl,
-                maxInputTokens: maxInputTokens,
-                maxOutputTokens: 8192,
-            }], null, 2),
+            content: JSON.stringify({
+                models: [{
+                    id: model,
+                    name: model,
+                    vendor: 'custom',
+                    apiKey: apiKey,
+                    url: baseUrl,
+                    maxInputTokens: maxInputTokens,
+                    maxOutputTokens: 8192,
+                }],
+                availableModels: [model],
+            }, null, 2),
         });
         configFiles.push({
             path: `${configDir}/settings.json`,

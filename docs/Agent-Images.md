@@ -233,7 +233,7 @@ POST /api/v1/session/start { agent_id, project_id }
 |------|------|
 | **镜像构建** | `npm install -g @moonshot-ai/kimi-code` 写入 `agent-kimi-code` 镜像 |
 | **开沙箱** | `openSession(image=…/agent-kimi-code:…)`，挂载 project workspace |
-| **Gateway 模式** | `agentEnv.js` 注入 `KIMI_MODEL_*` env，随 spawn 传入 |
+| **Gateway 模式** | `ensureGatewayConfig` 写 `config.toml` 勾选模型；不注入 `KIMI_MODEL_*`（CLI 会 MERGE 出多余条目） |
 | **BYOK 模式** | `ensureKimiConfig` 在沙箱内写 `~/.kimi/config.toml`（Kimi 只读此文件） |
 | **Spawn** | `spawn("kimi", [], env)`，PTY 交互 |
 

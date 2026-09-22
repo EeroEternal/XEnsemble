@@ -463,6 +463,19 @@ async function resumeSession({
                             else if (requestLog?.warn) requestLog.warn(msg);
                         },
                     });
+                    if (agentMeta.id === 'claude-code' && stateDirPath) {
+                        const { ensureClaudeGatewayModelPicker } = require('../workspace/claudeConfigBootstrap');
+                        await ensureClaudeGatewayModelPicker({
+                            runtime,
+                            runtimeRef,
+                            stateDirPath,
+                            modelTargets,
+                            warn: (msg) => {
+                                if (fastifyLog?.warn) fastifyLog.warn(msg);
+                                else if (requestLog?.warn) requestLog.warn(msg);
+                            },
+                        });
+                    }
                 } catch (err) {
                     if (fastifyLog?.warn) fastifyLog.warn({ err }, '[sessions] resume gateway config bootstrap failed');
                     else if (requestLog?.warn) requestLog.warn({ err }, '[sessions] resume gateway config bootstrap failed');

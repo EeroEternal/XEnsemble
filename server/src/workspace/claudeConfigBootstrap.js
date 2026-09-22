@@ -118,4 +118,114 @@ async function ensureClaudeOnboardingCompleted({ runtime, runtimeRef, stateDirPa
     log?.info?.({ stateDirPath }, '[claude-bootstrap] onboarding seeded (theme + workspace trust)');
 }
 
-module.exports = { ensureClaudeApiKeyApproved, ensureClaudeOnboardingCompleted };
+const CLAUDE_AVAILABLE_MODELS_ENFORCE_MIN = [2, 1, 175];
+const CLAUDE_MODEL_PICKER_MIN = [2, 1, 242];
+
+function parseSemver(version) {
+    const m = String(version || '').match(/(\d+)\.(\d+)\.(\d+)/);
+    if (!m) return null;
+    return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+function semverAtLeast(version, min) {
+    const parts = parseSemver(version);
+    if (!parts) return false;
+    for (let i = 0; i < 3; i += 1) {
+        if (parts[i] > min[i]) return true;
+        if (parts[i] < min[i]) return false;
+    }
+    return true;
+}
+
+function toClaudeGatewayModelId(target) {
+    const t = String(target || '').trim();
+    if (!t) return '';
+    return t.startsWith('anthropic.') ? t : `anthropic.${t}`;
+}
+
+function pickerLabel(id) {
+    const bare = id.replace(/^anthropic\./, '');
+    const slash = bare.lastIndexOf('/');
+    return slash >= 0 ? bare.slice(slash + 1) : bare;
+}
+
+/**
+ * Gateway-only /model catalog for claude-code.
+ * Ids must match GET /v1/models (`anthropic.{provider}/{model}`).
+ * ≥ 2.1.242: replaceBuiltInOptions hides opus/sonnet/haiku.
+ * ≥ 2.1.175: enforceAvailableModels so off-list picks fail closed.
+ * Older: availableModels only.
+ */
+function buildClaudeGatewayModelPickerPatch(version, modelTargets) {
+    const ids = (Array.isArray(modelTargets) ? modelTargets : [])
+        .map(toClaudeGatewayModelId)
+        .filter(Boolean);
+    if (ids.length === 0) return null;
+    const patch = { availableModels: ids };
+    if (semverAtLeast(version, CLAUDE_AVAILABLE_MODELS_ENFORCE_MIN)) {
+        patch.enforceAvailableModels = true;
+    }
+    if (semverAtLeast(version, CLAUDE_MODEL_PICKER_MIN)) {
+        patch.modelPicker = {
+            replaceBuiltInOptions: true,
+            options: ids.map((id) => ({ model: id, label: pickerLabel(id) })),
+        };
+    }
+    return patch;
+}
+
+function mergeClaudeSettingsJson(existing, patch) {
+    if (!patch) return existing && typeof existing === 'object' ? existing : {};
+    const base = existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {};
+    return { ...base, ...patch };
+}
+
+async function probeClaudeCodeVersion(runtime, { runtimeRef, cwd } = {}) {
+    if (!runtime?.exec?.exec) return '';
+    try {
+        const probe = await runtime.exec.exec('claude', ['--version'], {}, { runtimeRef, cwd: cwd || '/' });
+        return String(probe?.stdout || probe?.stderr || '').match(/\d+\.\d+\.\d+/)?.[0] || '';
+    } catch {
+        return '';
+    }
+}
+
+/**
+ * Merge Gateway model allowlist into CLAUDE_CONFIG_DIR/settings.json.
+ * Does not overwrite the whole file (keeps permissions / env).
+ */
+async function ensureClaudeGatewayModelPicker({
+    runtime, runtimeRef, stateDirPath, modelTargets, version, cwd, warn,
+} = {}) {
+    if (!stateDirPath || !runtime?.exec?.exec) return;
+    const resolvedVersion = version || await probeClaudeCodeVersion(runtime, { runtimeRef, cwd });
+    const patch = buildClaudeGatewayModelPickerPatch(resolvedVersion, modelTargets);
+    if (!patch) return;
+
+    const configPath = path.join(stateDirPath, 'settings.json');
+    const readResult = await runtime.exec.exec(
+        'sh', ['-c', `cat '${configPath}' 2>/dev/null || echo '{}'`], {}, { runtimeRef, cwd: '/' },
+    );
+    let existing;
+    try {
+        existing = JSON.parse(readResult.stdout || '{}');
+    } catch {
+        existing = {};
+    }
+    const merged = mergeClaudeSettingsJson(existing, patch);
+    if (JSON.stringify(merged) === JSON.stringify(existing)) return;
+
+    const writeScript = `cat > '${configPath}' << 'CLAUDE_JSON_EOF'\n${JSON.stringify(merged, null, 2)}\nCLAUDE_JSON_EOF`;
+    await runtime.exec.exec(
+        'sh', ['-c', writeScript], {}, { runtimeRef, cwd: '/' },
+    );
+    warn?.(`[claude-bootstrap] gateway model picker written (${patch.availableModels.length} models)`);
+}
+
+module.exports = {
+    ensureClaudeApiKeyApproved,
+    ensureClaudeOnboardingCompleted,
+    ensureClaudeGatewayModelPicker,
+    buildClaudeGatewayModelPickerPatch,
+    mergeClaudeSettingsJson,
+};

@@ -462,6 +462,17 @@ async function createAgentSession({
                     defaultTarget,
                     warn: (msg) => log.warn(msg),
                 });
+                if (agentMeta.id === 'claude-code' && sessionStateDir?.stateDirPath) {
+                    const { ensureClaudeGatewayModelPicker } = require('../workspace/claudeConfigBootstrap');
+                    await ensureClaudeGatewayModelPicker({
+                        runtime,
+                        runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
+                        stateDirPath: sessionStateDir.stateDirPath,
+                        modelTargets,
+                        cwd: workspacePath,
+                        warn: (msg) => log.warn(msg),
+                    });
+                }
             } catch (err) {
                 log.warn({ err, sessionId }, '[sessions] gateway config bootstrap failed');
             }

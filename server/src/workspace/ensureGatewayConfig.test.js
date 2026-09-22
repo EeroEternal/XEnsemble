@@ -65,12 +65,16 @@ test('buildGatewayConfigSpec: codebuddy writes models.json to CODEBUDDY_CONFIG_D
     assert.equal(spec.filePath, '/workspace/.xensemble/state/sess_test/models.json');
     assert.equal(spec.dirPath, '/workspace/.xensemble/state/sess_test');
 
-    const models = JSON.parse(spec.content);
-    assert.equal(models.length, 1);
-    assert.equal(models[0].id, 'zxs_deepseek/deepseek-v4-flash');
-    assert.equal(models[0].apiKey, 'xel_test_token');
-    assert.equal(models[0].url, 'https://xensemble.dev/api/v1/llm/v1/chat/completions');
-    assert.equal(models[0].vendor, 'custom');
+    const content = JSON.parse(spec.content);
+    // Official schema is { models, availableModels }. Without availableModels
+    // CodeBuddy shows the full Tencent catalog (Gemini/GPT/...) plus custom.
+    assert.ok(Array.isArray(content.models));
+    assert.equal(content.models.length, 1);
+    assert.equal(content.models[0].id, 'zxs_deepseek/deepseek-v4-flash');
+    assert.equal(content.models[0].apiKey, 'xel_test_token');
+    assert.equal(content.models[0].url, 'https://xensemble.dev/api/v1/llm/v1/chat/completions');
+    assert.equal(content.models[0].vendor, 'custom');
+    assert.deepEqual(content.availableModels, ['zxs_deepseek/deepseek-v4-flash']);
 
     // trust settings to skip the interactive folder-trust prompt
     assert.equal(spec.extraFiles.length, 1);
@@ -125,9 +129,10 @@ test('buildGatewayConfigSpec: codebuddy registers one entry per target', () => {
         modelTargets: ['a/m1', 'b/m2'],
         defaultTarget: 'a/m1',
     });
-    const models = JSON.parse(spec.content);
-    assert.equal(models.length, 2);
-    assert.deepEqual(models.map((m) => m.id), ['a/m1', 'b/m2']);
+    const content = JSON.parse(spec.content);
+    assert.equal(content.models.length, 2);
+    assert.deepEqual(content.models.map((m) => m.id), ['a/m1', 'b/m2']);
+    assert.deepEqual(content.availableModels, ['a/m1', 'b/m2']);
 });
 
 test('buildGatewayConfigSpec: droid registers all targets in customModels', () => {
@@ -269,6 +274,7 @@ test('buildGatewayConfigSpec: opencode writes limit.context per model (official 
     // the model key is the bare id (no provider prefix) so opencode's
     // provider/model_id parser resolves to our `gateway` provider.
     assert.equal(content.model, 'gateway/deepseek-v4-flash');
+    assert.deepEqual(content.enabled_providers, ['gateway']);
 });
 
 test('buildGatewayConfigSpec: opencode writes tui.json with adaptive system theme', () => {
@@ -315,17 +321,25 @@ test('buildGatewayConfigSpec: hermes writes model.context_length + provider.mode
     const spec = buildGatewayConfigSpec('hermes', ctx);
     // YAML output, parse loosely
     assert.match(spec.content, /context_length: 1048576/);
-    assert.match(spec.content, /model:\s*\n\s*default:/);
-    assert.match(spec.content, /providers:\s*\n\s*auto:\s*\n\s*base_url:/);
-    assert.match(spec.content, /models:\s*\n\s{6}"zxs_deepseek\/deepseek-v4-flash":\s*\n\s{8}id:/);
+    assert.match(spec.content, /model:\s*\n\s*default: "zxs_deepseek\/deepseek-v4-flash"/);
+    // Picker first row is the UniGateway provider, not Hermes' synthetic "auto".
+    // Model keys stay the full provider/model target so the request body still
+    // routes on UniGateway.
+    assert.match(spec.content, /provider: "zxs_deepseek"/);
+    assert.match(spec.content, /providers:\s*\n\s*zxs_deepseek:\s*\n\s*base_url:/);
+    assert.doesNotMatch(spec.content, /provider: "auto"/);
+    assert.match(spec.content, /models:\s*\n\s{6}"zxs_deepseek\/deepseek-v4-flash":\s*\n\s{8}id: "zxs_deepseek\/deepseek-v4-flash"/);
     assert.match(spec.content, /max_tokens: 8192/);
+    // Dict-shaped models: is metadata, not an allowlist. Pin the row so
+    // Hermes does not probe /v1/models and append extra ids beside Gateway's.
+    assert.match(spec.content, /discover_models: false/);
 });
 
 test('buildGatewayConfigSpec: codebuddy writes maxInputTokens + autoCompactWindow in settings.json', () => {
     const spec = buildGatewayConfigSpec('codebuddy', ctx);
-    const models = JSON.parse(spec.content);
-    assert.equal(models[0].maxInputTokens, 1048576);
-    assert.equal(models[0].maxOutputTokens, 8192);
+    const content = JSON.parse(spec.content);
+    assert.equal(content.models[0].maxInputTokens, 1048576);
+    assert.equal(content.models[0].maxOutputTokens, 8192);
     const settings = JSON.parse(spec.extraFiles[0].content);
     assert.equal(settings.autoCompactEnabled, true);
     // codebuddy clamps autoCompactWindow to [100k, 1M]; 1M stays 1M

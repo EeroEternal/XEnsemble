@@ -234,18 +234,25 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             // threshold matches the model's real context (clamped by CodeBuddy
             // to [100k, 1M] regardless).
             const configDir = stateDirPath || '$HOME/.codebuddy';
+            const models = targets.map((t) => ({
+                id: t,
+                name: t,
+                vendor: 'custom',
+                apiKey: sessionToken,
+                url: `${routerUrl}/v1/chat/completions`,
+                maxInputTokens: guessContextLength(t),
+                maxOutputTokens: 8192,
+            }));
             return {
                 dirPath: configDir,
                 filePath: `${configDir}/models.json`,
-                content: JSON.stringify(targets.map((t) => ({
-                    id: t,
-                    name: t,
-                    vendor: 'custom',
-                    apiKey: sessionToken,
-                    url: `${routerUrl}/v1/chat/completions`,
-                    maxInputTokens: guessContextLength(t),
-                    maxOutputTokens: 8192,
-                })), null, 2),
+                // Official schema is { models, availableModels }. A bare array
+                // is treated as additive, so Gemini/GPT/… stay in /model.
+                // availableModels allowlists the gateway catalog.
+                content: JSON.stringify({
+                    models,
+                    availableModels: models.map((m) => m.id),
+                }, null, 2),
                 extraFiles: [{
                     dirPath: configDir,
                     filePath: `${configDir}/settings.json`,
@@ -271,10 +278,9 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             // there triggers kimi-code's "Migrate from kimi-cli" prompt). In
             // gateway mode, list every configured model under a gateway
             // (openai-compatible) provider so /model offers all of them; the
-            // primary is the default. KIMI_MODEL_* env vars
-            // (applyKimiCodeGatewayEnv) still synthesize the active model, but
-            // kimi's applyEnvModelConfig MERGES (not replaces) config.toml
-            // models, so every entry here stays selectable.
+            // primary is the default. Do not also inject KIMI_MODEL_* env:
+            // kimi's applyEnvModelConfig MERGES those into the catalog as
+            // `__kimi_env_model__`, which would add a duplicate extra row.
             //
             // The .skip-migration-from-kimi-cli marker is written alongside
             // config.toml so kimi-code never prompts to migrate from a legacy
@@ -312,37 +318,40 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             };
         }
 
-        case 'hermes':
-            // hermes loads $HERMES_HOME/config.yaml and its _resolve_openrouter_runtime
-            // prioritises config.yaml base_url over OPENROUTER_BASE_URL env var when
-            // provider is "auto" and cfg_base_url is set. The hermes installer creates
-            // a default config.yaml with base_url: "https://openrouter.ai/api/v1",
-            // which overrides the gateway env vars. We must write a config.yaml that
-            // points at the gateway so requests route correctly.
+        case 'hermes': {
+            // hermes loads $HERMES_HOME/config.yaml. Named custom providers in
+            // the providers: dict are first-class; we used to force provider
+            // "auto" so _resolve_openrouter_runtime would honour cfg_base_url
+            // over OPENROUTER_BASE_URL. Gateway spawn now strips those env
+            // keys, so the picker row can be the UniGateway provider id.
             //
-            // provider must be "auto" (not "openrouter") because
-            // _resolve_openrouter_runtime only honours cfg_base_url when
-            // cfg_provider is empty or "auto". With provider: "openrouter",
-            // the env var OPENROUTER_BASE_URL would win instead.
+            // Model keys (and spawn -m) stay the full provider/model target.
+            // Hermes sends the yaml key as body.model; UniGateway routes on
+            // that string. Do not strip the provider prefix here.
             //
-            // model.context_length and model.max_tokens are the official knobs for
-            // the model metadata (see minimax mmx-cli Hermes schema). Each per-provider
-            // model entry also accepts context_length so providers can override it.
+            // model.context_length and model.max_tokens are the official knobs
+            // for model metadata (see minimax mmx-cli Hermes schema).
+            const slash = def.indexOf('/');
+            const providerSlug = slash > 0 ? def.slice(0, slash) : 'gateway';
             return {
                 dirPath: stateDirPath,
                 filePath: `${stateDirPath}/config.yaml`,
                 content: [
                     'model:',
                     `  default: "${def}"`,
-                    '  provider: "auto"',
+                    `  provider: "${providerSlug}"`,
                     `  base_url: "${routerUrl}/v1"`,
                     `  api_key: "${sessionToken}"`,
                     `  context_length: ${guessContextLength(def)}`,
                     `  max_tokens: 8192`,
                     'providers:',
-                    '  auto:',
+                    `  ${providerSlug}:`,
                     '    base_url: "' + routerUrl + '/v1"',
                     '    api_key: "' + sessionToken + '"',
+                    // Dict-shaped models: is metadata, not an allowlist. Pin the
+                    // row so Hermes does not probe gateway /v1/models and append
+                    // ids beside the configured Gateway catalog.
+                    '    discover_models: false',
                     '    models:',
                     ...targets.map((t) => `      "${t}":`),
                     ...targets.map((t) => [
@@ -351,6 +360,7 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                     ].join('\n')),
                 ].join('\n') + '\n',
             };
+        }
 
         case 'opencode': {
             const { toOpencodeModelAlias } = require('../agents/agentModelAlias');
@@ -374,6 +384,9 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
                 filePath: '/root/.config/opencode/opencode.json',
                 content: JSON.stringify({
                     autoupdate: false,
+                    // See applyOpencodeGatewayEnv: allowlist so models.dev
+                    // providers do not appear alongside gateway.
+                    enabled_providers: ['gateway'],
                     model: `gateway/${defId}`,
                     provider: {
                         gateway: {
