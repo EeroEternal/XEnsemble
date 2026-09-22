@@ -262,6 +262,42 @@ test("L3': codebuddy 权限确认（spinner 持续重绘）能被识别并通知
     }
 }));
 
+test("L3': 提示框上方滚动日志变化不影响稳定键（codebuddy 场景）", isolated(async (notifications) => {
+    // 真实转录（boxlite_rt_d2eb3bf3275c）中 codebuddy 的提示框上方持续打印
+    // 工具日志（Read/Bash 行、spinner）。若把整个快照纳入稳定键，则每轮 key
+    // 都不同、stableHits 永远停在 1，等待通知永不触发（实测 18/18 轮 key 变化）。
+    // 这里断言：只有「问题行+选项行」参与 key，上方滚动内容变化不影响累积。
+    let round = 0;
+    const screen = () => [
+        `✸ Repairing… (${round}s · waiting for model · ↑ ${round * 40} tokens)`,
+        // 上方滚动日志：每轮都不同（模拟工具输出持续滚动）
+        `● Bash(cd /workspace && grep -n "max\\b" web/src/components/usage/MiniBarChart.jsx | head -${round++})`,
+        '  └ Found 3 files (ctrl+o to expand)',
+        '─────────────────────────────────────────────',
+        ' Do you want to proceed?',
+        ' > 1. Yes',
+        "   2. Yes, and don't ask again for session (shift + tab)",
+        '   3. No, and tell CodeBuddy what to do differently (escape)',
+    ];
+    const restore = attentionService.__configure({
+        deps: { readTailLines: async () => screen() },
+    });
+    try {
+        for (let i = 0; i < 3; i++) {
+            attentionService.observeOutput('s15', 'local:pty:s15');
+            await tick(20);
+        }
+        await tick();
+        const st = attentionService.getState('s15');
+        assert.equal(st.state, 'waiting_user', '滚动日志变化不应阻止等待判定');
+        assert.equal(st.source, 'L3');
+        assert.equal(notifications.length, 1);
+        assert.equal(notifications[0].type, 'session_waiting');
+    } finally {
+        restore();
+    }
+}));
+
 test("L3': L1 来源的等待不被屏幕扫描解除（生命周期归 L1）", isolated(async (notifications) => {
     attentionService.observeChatEntry('s11', { role: 'tool_call', tool: 'AskUserQuestion', content: QUESTION_ARGS });
     await tick();

@@ -342,24 +342,38 @@ async function runScan(sessionId) {
 }
 
 /**
- * 把提示快照归一到「稳定键」：剔除每帧都在变的行（spinner 动画、计时器、
- * token 计数、进度百分比），只留提示本体。
+ * 把提示快照归一到「稳定键」：只保留**问题行与选项行**，剔除其余一切
+ * （spinner 动画、计时器、token 计数，以及提示框上方持续滚动的日志）。
  *
  * 这是区分「等待提示」与「流式正文」的关键判据，且不依赖任何时间阈值：
- *  - 等待中的提示本体是冻结的（用户没回答，内容不变），只有 spinner 在动；
+ *  - 等待中的提示本体是冻结的（用户没回答，问题与选项不变）；
  *  - 流式正文每轮内容都在增长/变化。
+ *
+ * 只取问题+选项行是必需的：codebuddy 等 TUI 的提示框上方会持续打印工具
+ * 日志（Read/Bash 等），若把整个快照纳入 key，则每一轮 key 都不同，
+ * stableHits 永远停在 1 → 等待通知永不触发（实测：全快照 key 变化 18/18 轮；
+ * 仅问题+选项行变化 2/18 轮，最长连续相同 11 轮）。
+ *
  * 旧实现用「PTY 静默 scanQuietMs」当代理信号，但等待确认的 TUI（codebuddy
  * 的 "waiting for permission"）会持续重绘 spinner（实测间隔 201ms），静默
- * 窗口永远不出现 → 等待通知被彻底堵死。
+ * 窗口永远不出现 → 等待通知同样被堵死。
  */
 const VOLATILE_LINE_RE = /[··]\s*\d+\s*s\b|\d+\s*s\s*·|↓\s*\d+\s*tokens?|\(\s*\d+\s*s\b|\b\d+\s*tokens?\b|✹|✶|✳|◐|◓|◑|◒|\b\d+\s*%/;
+
+// 问题行 / 选项行：与 detectTuiPrompt 的判据保持一致（行尾问号、行首疑问
+// 动词、编号选项、❯ 选项光标）。只有这些行参与稳定键比较。
+const PROMPT_KEY_LINE_RE =
+    /(?:\?|？)\s*$|^\d{1,2}[.、)）]\s*\S|^[❯›]\s*\S|^(?:choose|select|pick|approve|proceed|confirm|permission|是否|允许|确认|批准|选择|请选)/i;
 
 function promptStableKey(snapshot) {
     if (!snapshot) return null;
     const kept = String(snapshot)
         .split('\n')
         .map((l) => l.trim())
-        .filter((l) => l && !VOLATILE_LINE_RE.test(l));
+        .filter((l) => l && !VOLATILE_LINE_RE.test(l))
+        // 只保留提示本体（问题行+选项行），排除上方滚动日志——后者每轮都变，
+        // 会把稳定键冲掉，导致等待通知永不触发。
+        .filter((l) => PROMPT_KEY_LINE_RE.test(l));
     return kept.length > 0 ? kept.join('\n') : null;
 }
 
