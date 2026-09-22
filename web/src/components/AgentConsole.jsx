@@ -986,11 +986,9 @@ function AgentConsole({
                 termRecord({ kind: 'alt', action: 'enter', vsCursorY, beforeBytes: before.length });
               }
               let output = '';
-              let hasOutput = false;
               if (before) {
                 const result = processPrimaryBuffer(before);
                 output += result.output;
-                hasOutput = result.hasOutput;
               }
               // Hide xterm.js native cursor in alt screen: the TUI
               // renders its own cursor inside sync-term blocks. Keeping
@@ -999,8 +997,7 @@ function AgentConsole({
               // the TUI at the input box). The TUI will re-enable the
               // cursor with \x1b[?25h when it's ready for input.
               output += transitionAndAfter + '\x1b[?25l';
-              hasOutput = true;
-              if (hasOutput) writeTerminalData(output);
+              writeTerminalData(output);
               return;
             }
 

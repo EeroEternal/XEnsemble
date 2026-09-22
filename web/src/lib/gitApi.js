@@ -9,7 +9,7 @@ export function generateWorkBranchName(repoFullName) {
 
 async function request(path, options = {}) {
   const res = await apiFetch(withSessionId(path), options);
-  let data = {};
+  let data;
   try {
     data = await res.json();
   } catch {

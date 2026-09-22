@@ -48,22 +48,18 @@ export function useEditorTabs(projectId, sessionId, ready) {
       setActivePath(path);
       return;
     }
-    try {
-      const result = await readFile(projectId, path);
-      const now = Date.now();
-      const next = {
-        path,
-        content: result.isBinary ? '' : (result.content || ''),
-        originalContent: result.isBinary ? '' : (result.content || ''),
-        isBinary: !!result.isBinary,
-        loadedAt: now,
-      };
-      tabsRef.current = [next];
-      setTabs([next]);
-      setActivePath(path);
-    } catch (err) {
-      throw err;
-    }
+    const result = await readFile(projectId, path);
+    const now = Date.now();
+    const next = {
+      path,
+      content: result.isBinary ? '' : (result.content || ''),
+      originalContent: result.isBinary ? '' : (result.content || ''),
+      isBinary: !!result.isBinary,
+      loadedAt: now,
+    };
+    tabsRef.current = [next];
+    setTabs([next]);
+    setActivePath(path);
   }, [readFile]);
 
   const closeTab = useCallback((path) => {

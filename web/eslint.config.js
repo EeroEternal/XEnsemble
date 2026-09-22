@@ -31,6 +31,10 @@ export default [
                 caughtErrorsIgnorePattern: '^_',
                 ignoreRestSiblings: true,
             }],
+            // 尽力而为式调用（execCommand 副本、fitAddon.fit() 的布局竞态、
+            // OSC/寄存器探测等）在代码库中统一使用空 catch 静默降级，
+            // 不视为需要注释的空块
+            'no-empty': ['error', { allowEmptyCatch: true }],
         },
     },
 ];
