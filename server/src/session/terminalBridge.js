@@ -137,6 +137,8 @@ async function subscribeTerminal(sessionId, send, options = {}) {
             sessionManager.removeTerminalSubscriber(sessionId);
             subscribed = false;
         }
+        // 解除钉住：会话结束/客户端断开后，state 可被 LRU 淘汰或 onExit 释放。
+        try { transcriptStore.unpinState(transcriptRef); } catch (_) { /* ignore */ }
         offExit();
         offOutput();
     };
@@ -276,6 +278,9 @@ async function subscribeTerminal(sessionId, send, options = {}) {
 
     sessionManager.addTerminalSubscriber(sessionId);
     subscribed = true;
+    // 钉住 state：有活跃终端订阅者时不允许 LRU 淘汰/退出释放，避免正在
+    // 观看的会话 state 被回收后重建（重建期间读到的是重读的文件快照）。
+    try { transcriptStore.pinState(transcriptRef); } catch (_) { /* ignore */ }
 
     let liveBatch = [];
     let liveBatchScheduled = false;

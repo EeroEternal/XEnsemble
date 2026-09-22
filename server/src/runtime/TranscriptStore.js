@@ -11,6 +11,13 @@ const META_UPDATE_INTERVAL_SEQ = Number(process.env.TRANSCRIPT_META_UPDATE_INTER
 const FLUSH_INTERVAL_MS = Number(process.env.TRANSCRIPT_FLUSH_INTERVAL_MS) || 100;
 const FLUSH_SIZE_BYTES = Number(process.env.TRANSCRIPT_FLUSH_SIZE_BYTES) || 65536;
 const MAX_FRAMES = Number(process.env.TRANSCRIPT_MAX_FRAMES) || 50000;
+// 内存中最多保留多少个 transcript state。每个满载 state（MAX_FRAMES 帧）
+// 实测约占 51MB 保留内存（3×GC 后），而 V8 默认堆上限仅 4.05GB —— 不做上限
+// 时只要访问过 ~80 个长会话就会 OOM（实测服务端因此每日重启多次，重启后
+// _lastRseq 归零又触发 after=0 全量重放，用户侧表现为「输入无反应、数分钟后
+// 才显示」）。这里用 LRU 淘汰：超限时释放最久未用的 state（仅清内存，不删
+// 磁盘文件），下次访问再从文件惰性重建（实测 123MB 文件重建约 325ms）。
+const MAX_STATES = Number(process.env.TRANSCRIPT_MAX_STATES) || 24;
 const TAIL_BYTES = Number(process.env.TRANSCRIPT_TAIL_BYTES) || 1048576;
 const ALT_SCREEN_TAIL_BYTES = Number(process.env.TRANSCRIPT_ALT_SCREEN_TAIL_BYTES) || 20971520;
 const TAIL_READ_THRESHOLD = Number(process.env.TRANSCRIPT_TAIL_READ_THRESHOLD) || 67108864; // 64MB
@@ -48,6 +55,9 @@ class TranscriptStore {
         this.db = options.db === undefined ? require('../db/index').db : options.db;
         this.schema = options.schema || schema;
         this.states = new Map();
+        // LRU：Map 的插入顺序即最近使用顺序（每次命中后 delete+set 移到末尾）。
+        // 被「钉住」的 state（仍有活跃订阅者）不参与淘汰，见 releaseState。
+        this.maxStates = Number(options.maxStates) || MAX_STATES;
     }
 
     transcriptDir() {
@@ -142,7 +152,12 @@ class TranscriptStore {
     _state(streamRef) {
         if (!streamRef) return null;
         let state = this.states.get(streamRef);
-        if (state) return state;
+        if (state) {
+            // LRU 触碰：移到 Map 末尾（最近使用），淘汰时从头部取最久未用的。
+            this.states.delete(streamRef);
+            this.states.set(streamRef, state);
+            return state;
+        }
 
         const file = this.transcriptPath(streamRef);
         const frames = [];
@@ -209,9 +224,72 @@ class TranscriptStore {
             // Lets _syncFromFile read only newly appended bytes instead of
             // re-reading (and re-parsing) the whole file on every call.
             _syncOffset: syncOffset,
+            // 被钉住时不允许 LRU 淘汰（有活跃终端订阅者的会话）。
+            _pinned: false,
         };
         this.states.set(streamRef, state);
+        this._evictIfNeeded(streamRef);
         return state;
+    }
+
+    /**
+     * 释放一个 state 的**内存占用**，但保留磁盘文件。
+     *
+     * 与 `remove()` 的区别：`remove()` 会 unlink 转录文件（用于删除会话），
+     * 而本方法只清内存——`/transcript` 端点仍能为已退出会话重放历史，下次
+     * 访问时 `_state` 会从文件惰性重建（实测 123MB 文件约 325ms）。
+     *
+     * 必须先落盘待写队列并清掉 flush 定时器：否则队列里的帧会随 state 一起
+     * 丢失，且定时器会继续持有 state 引用（内存无法回收）。
+     *
+     * @returns {boolean} 是否实际释放（被钉住的 state 不会被释放）
+     */
+    releaseState(streamRef) {
+        const state = this.states.get(streamRef);
+        if (!state) return false;
+        if (state._pinned) return false; // 仍有活跃订阅者/未落盘写入
+        if (state._flushTimer) {
+            clearTimeout(state._flushTimer);
+            state._flushTimer = null;
+        }
+        if (state._writeQueue.length > 0) {
+            // 落盘后再释放；失败则保留 state，避免丢帧。
+            try {
+                this._flushWrites(state);
+            } catch (_) { /* ignore */ }
+            if (state._writeQueue.length > 0) return false;
+        }
+        return this.states.delete(streamRef);
+    }
+
+    /** 标记 state 被钉住（有活跃订阅者时不允许淘汰）。 */
+    pinState(streamRef) {
+        const state = this.states.get(streamRef);
+        if (state) state._pinned = true;
+    }
+
+    /** 解除钉住。 */
+    unpinState(streamRef) {
+        const state = this.states.get(streamRef);
+        if (state) state._pinned = false;
+    }
+
+    /**
+     * LRU 淘汰：state 数超过 maxStates 时，从最久未用的一端释放（跳过被钉住的
+     * 与当前正在使用的）。每次创建新 state 后调用。
+     *
+     * 若所有候选都被钉住则放弃淘汰（size 暂时超限）——宁可内存略涨，也不能
+     * 回收活跃会话的 state。
+     */
+    _evictIfNeeded(protectedRef) {
+        if (this.states.size <= this.maxStates) return;
+        const overflow = this.states.size - this.maxStates;
+        let released = 0;
+        for (const ref of [...this.states.keys()]) {
+            if (released >= overflow) break;
+            if (ref === protectedRef) continue; // 不淘汰调用方正在使用的 state
+            if (this.releaseState(ref)) released += 1;
+        }
     }
 
     bindSession(sessionId, streamRef) {

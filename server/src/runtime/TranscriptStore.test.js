@@ -280,6 +280,96 @@ test('_flushWrites advances the sync cursor so appended frames are not re-read',
     }
 });
 
+test('releaseState frees memory but keeps the file (history still replayable)', () => {
+    const root = makeTempRoot();
+    try {
+        const store = new TranscriptStore({ workspaceRoot: root, db: null, schema: null });
+        const ref = 'local:pty:release';
+        const file = store.transcriptPath(ref);
+        for (let i = 0; i < 5; i++) store.append(ref, { kind: 'out', data: `line-${i}\n` });
+        store.flushSync(ref);
+        assert.equal(store.states.size, 1);
+
+        const released = store.releaseState(ref);
+        assert.equal(released, true, 'release should succeed');
+        assert.equal(store.states.size, 0, 'state dropped from memory');
+        assert.equal(fs.existsSync(file), true, 'transcript file must survive');
+
+        // 关键：释放后仍能重放历史（从文件惰性重建）——这正是与 remove() 的区别。
+        const { frames } = store.readTail(ref);
+        assert.ok(frames.length > 0, 'history must still be replayable after release');
+        assert.deepEqual(frames.map((f) => f.data), ['line-0\n', 'line-1\n', 'line-2\n', 'line-3\n', 'line-4\n']);
+    } finally {
+        cleanup(root);
+    }
+});
+
+test('releaseState flushes pending writes before dropping state (no frame loss)', () => {
+    const root = makeTempRoot();
+    try {
+        const store = new TranscriptStore({ workspaceRoot: root, db: null, schema: null });
+        const ref = 'local:pty:release-pending';
+        const file = store.transcriptPath(ref);
+        // append 后不 flushSync：帧仍在 _writeQueue 里，releaseState 必须先落盘。
+        store.append(ref, { kind: 'out', data: 'unflushed-1\n' });
+        store.append(ref, { kind: 'out', data: 'unflushed-2\n' });
+        const state = store.states.get(ref);
+        assert.ok(state._writeQueue.length > 0, 'precondition: frames still queued');
+
+        store.releaseState(ref);
+        assert.equal(store.states.size, 0);
+
+        // 重建后队列里的帧必须还在（未因释放而丢失）。
+        const { frames } = store.readTail(ref);
+        assert.deepEqual(frames.map((f) => f.data), ['unflushed-1\n', 'unflushed-2\n']);
+    } finally {
+        cleanup(root);
+    }
+});
+
+test('pinned state is never released (active subscriber protection)', () => {
+    const root = makeTempRoot();
+    try {
+        const store = new TranscriptStore({ workspaceRoot: root, db: null, schema: null, maxStates: 2 });
+        // 先建 a 并立即钉住（模拟有活跃订阅者），再建 b、c 触发 LRU 淘汰。
+        store.append('local:pty:a', { kind: 'out', data: 'a\n' });
+        store.pinState('local:pty:a');
+        store.append('local:pty:b', { kind: 'out', data: 'b\n' });
+        store.append('local:pty:c', { kind: 'out', data: 'c\n' });
+
+        assert.equal(store.states.has('local:pty:a'), true, 'pinned state must survive eviction');
+        assert.equal(store.states.has('local:pty:b'), false, 'unpinned oldest must be evicted');
+        assert.ok(store.states.size <= 2, `states capped at 2, got ${store.states.size}`);
+
+        // 解除钉住后可被释放。
+        store.unpinState('local:pty:a');
+        assert.equal(store.releaseState('local:pty:a'), true);
+        assert.equal(store.states.has('local:pty:a'), false);
+    } finally {
+        cleanup(root);
+    }
+});
+
+test('LRU eviction caps in-memory states', () => {
+    const root = makeTempRoot();
+    try {
+        const store = new TranscriptStore({ workspaceRoot: root, db: null, schema: null, maxStates: 3 });
+        for (let i = 0; i < 6; i++) {
+            const ref = `local:pty:lru-${i}`;
+            store.append(ref, { kind: 'out', data: `data-${i}\n` });
+            store.flushSync(ref);
+        }
+        assert.ok(store.states.size <= 3, `states should be capped at 3, got ${store.states.size}`);
+        // 最新访问的必须还在。
+        assert.equal(store.states.has('local:pty:lru-5'), true);
+        // 被淘汰的仍可从文件重建。
+        const { frames } = store.readTail('local:pty:lru-0');
+        assert.deepEqual(frames.map((f) => f.data), ['data-0\n']);
+    } finally {
+        cleanup(root);
+    }
+});
+
 test('TranscriptStore updates session_streams metadata on bind and exit', async () => {
     const root = makeTempRoot();
     let ctx;

@@ -9,6 +9,9 @@ const TITLE_EXIT_MIN_HISTORY = 30;
 const TITLE_FIRST_DELAY_MS = Number(process.env.SESSION_TITLE_FIRST_DELAY_MS) || 60000;
 const TITLE_INPUT_COUNT_THRESHOLD = Number(process.env.SESSION_TITLE_INPUT_COUNT_THRESHOLD) || 10;
 const MAX_OUTPUT_LISTENERS = Number(process.env.SESSION_MAX_OUTPUT_LISTENERS) || 5;
+// 会话退出后延迟多久释放 transcript 内存 state（保留磁盘文件）。留窗口给
+// exit 帧落盘与客户端读取最终画面，避免刚退出就重建导致读到不完整内容。
+const EXIT_STATE_RELEASE_DELAY_MS = Number(process.env.SESSION_EXIT_STATE_RELEASE_DELAY_MS) || 30000;
 
 /**
  * SessionManager — 管理活跃 agent session 的 bridge handle 与转发缓存。
@@ -114,6 +117,17 @@ class SessionManager {
             }
             session.exitListeners.clear();
             session.outputListeners.clear();
+            // 会话已结束：释放 transcript 的内存 state（保留磁盘文件）。
+            // 否则每个跑过的会话都会永久驻留最多 MAX_FRAMES 帧（实测约 51MB），
+            // 累积到 V8 堆上限（4GB）即 OOM 崩溃。已退出会话的历史仍可重放——
+            // /transcript 端点会触发 _state 从文件惰性重建。
+            // 延迟释放：留一个窗口给 exit 帧落盘与客户端读取。
+            if (session.transcriptRef) {
+                const ref = session.transcriptRef;
+                setTimeout(() => {
+                    try { transcriptStore.releaseState(ref); } catch (_) { /* ignore */ }
+                }, EXIT_STATE_RELEASE_DELAY_MS).unref?.();
+            }
         });
 
         this.sessions.set(sessionId, session);
