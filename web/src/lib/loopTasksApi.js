@@ -70,12 +70,6 @@ export async function previewSchedule(schedule) {
   return res.json(); // { description } | { description: null, valid: false, error }
 }
 
-export async function reviewLoopTaskRun(runId, approved) {
-  const res = await apiFetch(`/api/v1/loop-tasks/runs/${encodeURIComponent(runId)}/${approved ? 'approve' : 'reject'}`, { method: 'POST' });
-  if (!res.ok) await throwApiError(res, 'Failed to complete review');
-  return res.json();
-}
-
 export async function listLoopTaskRuns(id) {
   const res = await apiFetch(`/api/v1/loop-tasks/${encodeURIComponent(id)}/runs`);
   if (!res.ok) throw new Error('Failed to load loop task runs');

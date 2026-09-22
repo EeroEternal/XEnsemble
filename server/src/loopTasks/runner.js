@@ -37,15 +37,13 @@ const SPAWN_WAIT_MS = Number(process.env.LOOP_TASK_SPAWN_WAIT_MS) || 5 * 60_000;
 const ALIVE_POLL_MS = 2000;
 const MAX_CONCURRENT_PER_USER = Number(process.env.LOOP_TASK_MAX_CONCURRENT_PER_USER) || 2;
 const ZOMBIE_BUFFER_MS = 10 * 60_000;
-// 人工复核（requireReview=true）模式：
+// 干完判定（requireReview 与自动结束两模式共用）：
 //   TURN_MIN_MS / TURN_IDLE_MS：注入指令后至少跑满 1min 且输出静默 45s 才认为本轮
 //   干完活（headless 靠进程退出判定，交互式只能靠静默启发式；过早误判无害——
-//   awaiting_review 只是把会话标记为等人，人打开会话能看到 agent 还在跑）
+//   只是提前按 succeeded 收口，会话还在，人打开会话能看到 agent 还在跑）
 const TURN_MIN_MS = Number(process.env.LOOP_TASK_TURN_MIN_MS) || 60_000;
 const TURN_IDLE_MS = Number(process.env.LOOP_TASK_TURN_IDLE_MS) || 45_000;
 const TURN_POLL_MS = 10_000;
-// 复核超时：awaiting_review 停留超过此时长由 tick sweep 自动按 succeeded 收口
-const REVIEW_TIMEOUT_MS = Number(process.env.LOOP_TASK_REVIEW_TIMEOUT_MS) || 24 * 60 * 60_000;
 
 function newId(prefix) {
     return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
@@ -123,7 +121,7 @@ async function extractRunResult(sessionId) {
  * 还在等结果跑；'stop'/'end_turn'/null = 已收口或无轨迹（headless exit
  * 兜底不受影响）。终端静默不再单独作为「干完活」依据——GLM 等执行长
  * 工具（慢命令/长推理）时终端静默超 TURN_IDLE_MS 属正常现象，此前会被
- * 误判完成提前进入 awaiting_review。
+ * 误判完成提前收口。
  * @returns {Promise<boolean>} true = 最后一步仍在跑工具（或轨迹明确 tool_use 收尾）
  */
 async function agentStillWorking(sessionId) {
@@ -201,25 +199,6 @@ async function reapZombieRuns(now, log = console) {
     return reaped;
 }
 
-/** 复核超时清扫：awaiting_review 停留超过 REVIEW_TIMEOUT_MS → 自动按
- *  succeeded 收口并退出会话。覆盖进程内定时器无法覆盖的场景（服务重启后
- *  定时器丢失、run 在另一实例进入复核）。 */
-async function sweepReviewTimeouts(now, log = console) {
-    const cutoff = now - REVIEW_TIMEOUT_MS;
-    const stale = await db.select().from(schema.loopTaskRuns)
-        .where(and(eq(schema.loopTaskRuns.status, 'awaiting_review'), lt(schema.loopTaskRuns.reviewStartedAt, cutoff)))
-        .limit(50);
-    let swept = 0;
-    for (const run of stale) {
-        await updateRun(run.id, { status: 'succeeded', finishedAt: now });
-        broadcastRun(run, { status: 'succeeded' });
-        if (run.sessionId) await stopTaskSession(run.sessionId, log);
-        log.warn?.(`[loop-task-runner] review timeout run ${run.id} (task ${run.taskId}) → succeeded (auto-closed)`);
-        swept += 1;
-    }
-    return swept;
-}
-
 /** 每用户并发闸：running run 数（跨该用户全部任务） */
 async function runningCountByUser() {
     const rows = await db.select({
@@ -239,14 +218,14 @@ async function executeRun(task, run, log = console) {
     let settled = false; // 首个终态（exit / 超时 / 创建失败）胜出，其余忽略
     let sessionId = null;
     let deadlineTimer = null;
-    let reviewPoll = null;
+    let turnPoll = null;
     let offExit = null;
 
     const finalize = async (status, error) => {
         if (settled) return;
         settled = true;
         if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
-        if (reviewPoll) { clearInterval(reviewPoll); reviewPoll = null; }
+        if (turnPoll) { clearInterval(turnPoll); turnPoll = null; }
         try { offExit?.(); } catch { /* ignore */ }
 
         // 失败/超时：把 agent 终端输出末尾落进 run.error，否则 CLI 级报错（exit 1）
@@ -294,8 +273,8 @@ async function executeRun(task, run, log = console) {
         // 创建 Agent 会话（source=loop_task；豁免配额由调用方不检查实现）。
         // interactive = 复核模式或 TUI 自动收口模式：不走 headless 一次性参数，
         // 以交互式拉起，任务指令由 runner 就绪后注入 PTY。
-        //   复核模式：干完活 → awaiting_review 挂起等人
-        //   TUI 自动收口：干完活 → 静默后自动按 succeeded 收口并退出会话
+        //   复核模式：干完活 → succeeded，会话保留不退出（人工打开会话复核）
+        //   自动结束模式：干完活 → 静默后自动按 succeeded 收口并退出会话
         //  （终端全程已渲染，回放即历史；退出码语义让位于过程可视化）
         // 所有循环任务一律【交互式】拉起（TUI 可见可回放）；手动批准场景由
         // TUI 逐个审批，自动批准场景由 runner 注入各 CLI 免审批 flag。
@@ -324,8 +303,10 @@ async function executeRun(task, run, log = console) {
             await sleep(ALIVE_POLL_MS);
         }
 
-        // 订阅退出：headless 模式下 exitCode 即任务结果；复核模式下进程中途退出
-        // 属异常崩溃 → failed。finalize 只更新 run 行；会话行必须显式落 exited
+        // 订阅退出：headless 模式下 exitCode 即任务结果；进程在 run 收口前中途退出
+        // 属异常崩溃 → failed（收口后 settled=true，finalize 变 no-op——复核模式
+        // 会话保留不退出，事后用户 /exit 或空闲休眠触发的退出只走 stopTaskSession
+        // 补会话行终态）。finalize 只更新 run 行；会话行必须显式落 exited
         //（否则 DB 停留 running，重启后被 reconcile 误标为可恢复的 idle——
         // 任务会话永远进不了「已退出」）。
         offExit = sessionManager.onExit(sessionId, (exitCode) => {
@@ -416,7 +397,7 @@ async function executeRun(task, run, log = console) {
                             }
                             if (injectAttempts >= 3) {
                                 // 3 次仍未确认（可能仍卡在引导屏/弹窗）：不再重试，
-                                // 放行 reviewPoll 但 committed 门控会阻止收口，挂到
+                                // 放行 turnPoll 但 committed 门控会阻止收口，挂到
                                 // 执行超时兜底抓终端尾定位
                                 injectedAt = Date.now();
                                 log.warn?.(`[loop-task-runner] run ${runId}: prompt injection unconfirmed after ${injectAttempts} attempts — keep running until timeout (terminal tail will be captured)`);
@@ -535,14 +516,14 @@ async function executeRun(task, run, log = console) {
             //      开工；注入始终被吞（未确认提交）时保持 running 直到执行超时，
             //      超时会抓终端尾打进 error 便于定位。
             //   ② 开工后输出静默 TURN_IDLE_MS（至少距注入 TURN_MIN_MS）→ 认为干完
-            //      活：复核模式进入 awaiting_review 挂起等人；自动结束模式自动按
-            //      成功收口并退出会话。
+            //      活：立即按 succeeded 收口；复核模式（requireReview）会话保留
+            //      不退出，自动结束模式收口后退出会话。
             let warnedNoStart = false;
             // 完成判定：静默满足后进入异步收口。轨迹检查（agentStillWorking）
             // 显示仍在跑工具时，重建轮询等下一轮——不做同步重入，避免 DB 查询
             // 堵塞 interval 回调。
-            const reviewTick = () => {
-                if (settled) { clearInterval(reviewPoll); reviewPoll = null; return; }
+            const turnTick = () => {
+                if (settled) { clearInterval(turnPoll); turnPoll = null; return; }
                 if (injectedAt == null) return;
                 if (committedAt == null) return; // 回显确认前不判定（假阳性：TUI 动画/弹窗重绘都会刷新 lastOutputAt）
                 const live = sessionManager.getSession(sessionId);
@@ -559,8 +540,8 @@ async function executeRun(task, run, log = console) {
                     }
                     return;
                 }
-                clearInterval(reviewPoll);
-                reviewPoll = null;
+                clearInterval(turnPoll);
+                turnPoll = null;
                 void (async () => {
                     try {
                         // 终端静默只是必要条件（可能正在执行长工具），轨迹最后
@@ -568,35 +549,29 @@ async function executeRun(task, run, log = console) {
                         // 等工具结果跑，不判完成、下轮轮询再看。
                         if (await agentStillWorking(sessionId)) {
                             if (!settled) {
-                                reviewPoll = setInterval(reviewTick, TURN_POLL_MS);
+                                turnPoll = setInterval(turnTick, TURN_POLL_MS);
                                 log.log?.(`[loop-task-runner] run ${runId}: terminal idle but last trajectory step is a tool call — still working`);
                             }
                             return;
                         }
-                        if (reviewMode) {
-                            const result = await extractRunResult(sessionId);
-                            if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
-                            await updateRun(runId, { status: 'awaiting_review', result, reviewStartedAt: Date.now() });
-                            broadcastRun(run, { status: 'awaiting_review' });
-                            log.log?.(`[loop-task-runner] run ${runId} (task "${task.title}") → awaiting_review (session ${sessionId} kept alive for human review)`);
-                        } else {
-                            // TUI 自动收口：干完活自动按成功收口并退出会话；
-                            // 全过程已写入终端转录，回放即可查看
-                            if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
-                            await finalize('succeeded', null);
-                            await stopTaskSession(sessionId, log);
-                            log.log?.(`[loop-task-runner] run ${runId} (task "${task.title}") → succeeded (tui auto-finish, session closed)`);
-                        }
+                        // 干完即记成功：立即按 succeeded 收口（结果提取在 finalize 内）。
+                        // 两种模式差别只在会话生命周期——复核模式（requireReview）
+                        // 会话保留不退出，人工从侧栏打开查看/继续对话，空闲回收交给
+                        // 既有 idle hibernate；自动结束模式收口后终止会话。
+                        if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
+                        await finalize('succeeded', null);
+                        if (!reviewMode) await stopTaskSession(sessionId, log);
+                        log.log?.(`[loop-task-runner] run ${runId} (task "${task.title}") → succeeded${reviewMode ? ' (session kept alive for human review)' : ' (session closed)'}`);
                     } catch (err) {
                         log.warn?.({ err, runId }, '[loop-task-runner] failed to complete interactive turn');
                     }
                 })();
             };
-            reviewPoll = setInterval(reviewTick, TURN_POLL_MS);
+            turnPoll = setInterval(turnTick, TURN_POLL_MS);
         }
 
-        // 超时兜底（两种模式共用；复核模式若已进入 awaiting_review 会提前清除本定时器，
-        // 改由 REVIEW_TIMEOUT_MS 清扫收口）：到点判 timeout 并终止会话
+        // 超时兜底（两种模式共用；干完活收口时会提前清除本定时器）：到点判 timeout
+        // 并终止会话
         deadlineTimer = setTimeout(() => {
             void (async () => {
                 const mins = Math.round(TIMEOUT_MS / 60_000);
@@ -616,7 +591,6 @@ async function executeRun(task, run, log = console) {
 async function tick({ log = console } = {}) {
     const now = Date.now();
     await reapZombieRuns(now, log);
-    await sweepReviewTimeouts(now, log);
 
     const due = await db.select().from(schema.loopTasks)
         .where(and(eq(schema.loopTasks.status, 'active'), lte(schema.loopTasks.nextRunAt, now)))
@@ -684,24 +658,4 @@ async function tick({ log = console } = {}) {
     }
 }
 
-/** 人工复核收口：通过 → succeeded；打回 → failed。仅对 awaiting_review 生效，
- *  收口后终止会话（镜像 /exit，任务会话生命周期就此结束）。 */
-async function completeReviewRun(runId, approved, log = console) {
-    const rows = await db.select().from(schema.loopTaskRuns).where(eq(schema.loopTaskRuns.id, runId)).limit(1);
-    const run = rows[0] || null;
-    if (!run || run.status !== 'awaiting_review') {
-        return { ok: false, error: 'run is not awaiting review' };
-    }
-    const status = approved ? 'succeeded' : 'failed';
-    await updateRun(runId, {
-        status,
-        error: approved ? null : 'rejected by user',
-        finishedAt: Date.now(),
-    });
-    broadcastRun(run, { status });
-    if (run.sessionId) await stopTaskSession(run.sessionId, log);
-    log.log?.(`[loop-task-runner] run ${runId} review → ${status} (by human)`);
-    return { ok: true, status };
-}
-
-module.exports = { tick, executeRun, completeReviewRun };
+module.exports = { tick, executeRun };

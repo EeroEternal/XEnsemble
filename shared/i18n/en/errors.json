@@ -93,6 +93,5 @@
   "custom_image_not_ready": "Environment image is not ready",
   "no_environment_to_install": "This session has no custom environment to install",
   "session_not_running": "The session is not running yet",
-  "env_provision_failed": "Environment install failed",
-  "not_awaiting_review": "This run is not awaiting review"
+  "env_provision_failed": "Environment install failed"
 }

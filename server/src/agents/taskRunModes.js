@@ -127,7 +127,7 @@ const TASK_RUN_MODES = {
         // 关闭其余确认门（三者组合即官方 --yolo 语义）。
         args: (prompt) => ['-p', prompt],
         autoApproveArgs: ['--allow-all-tools', '--allow-all-paths', '--allow-all-urls'],
-        // 交互式（复核/等待人工场景）同样需要三件套，否则逐个审批无人应答
+        // 交互式（循环任务场景）同样需要三件套，否则逐个审批无人应答
         interactiveAutoApproveArgs: ['--allow-all-tools', '--allow-all-paths', '--allow-all-urls'],
     },
     'openclaw': {

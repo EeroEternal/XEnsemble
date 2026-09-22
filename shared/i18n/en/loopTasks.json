@@ -46,7 +46,7 @@
     "time": "Time",
     "timezone": "Timezone",
     "cron_placeholder": "0 9 * * *",
-    "require_review": "Wait for human on completion"
+    "require_review": "Keep session on completion"
   },
   "status": {
     "active": "Active",
@@ -73,7 +73,7 @@
   "auto_approve": {
     "yes": "Auto",
     "no": "Manual confirm",
-    "headless_locked": "Tool calls are auto-approved in auto-finish mode; switch to \"Wait for human\" for step-by-step confirmation"
+    "headless_locked": "Tool calls are auto-approved in auto-finish mode; switch to \"Keep session\" for step-by-step confirmation"
   },
   "unit": {
     "minutes": "Minutes",
@@ -96,10 +96,7 @@
     "result": "Result",
     "error": "Error",
     "duration": "Duration",
-    "started": "Started",
-    "status_awaiting_review": "Awaiting review",
-    "approve": "Approve",
-    "reject": "Reject"
+    "started": "Started"
   },
   "run_detail": {
     "back_to_tasks": "Back to tasks",
@@ -121,9 +118,7 @@
     "deleted": "Loop task deleted.",
     "run_started": "Run started.",
     "run_in_progress": "Previous run is still in progress.",
-    "action_failed": "Action failed.",
-    "approved": "Approved. Session closed.",
-    "rejected": "Rejected. Session closed."
+    "action_failed": "Action failed."
   },
   "error": {
     "agent_required": "Please select an agent.",
@@ -135,8 +130,8 @@
     "required": "Title, workspace, prompt and schedule are required."
   },
   "require_review": {
-    "yes": "Wait for human",
+    "yes": "Keep session",
     "no": "Auto-finish",
-    "hint": "The session stays alive after the task finishes instead of exiting. Open it from the sidebar to review, then approve or reject here. Auto-closes as succeeded after 24 hours."
+    "hint": "The run is marked succeeded as soon as the agent finishes its work. The session stays alive instead of exiting — open it from the sidebar to inspect the result or keep the conversation going."
   }
 }

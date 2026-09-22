@@ -36,7 +36,7 @@ import { TIMEZONES } from '../lib/timezones';
 import { loadTimezonePref } from '../lib/timezonePref';
 import DateTimeField from '../components/DateTimeField';
 import {
-  listLoopTasks, createLoopTask, updateLoopTask, deleteLoopTask, runLoopTaskNow, listLoopTaskRuns, reviewLoopTaskRun, previewSchedule, TASK_RUN_AGENTS,
+  listLoopTasks, createLoopTask, updateLoopTask, deleteLoopTask, runLoopTaskNow, listLoopTaskRuns, previewSchedule, TASK_RUN_AGENTS,
 } from '../lib/loopTasksApi';
 
 const UNIT_MS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
@@ -49,7 +49,6 @@ const TASK_STATUS_META = {
 
 const RUN_STATUS_META = {
   running: { tone: 'info', spinning: true },
-  awaiting_review: { tone: 'warning' },
   succeeded: { tone: 'success' },
   failed: { tone: 'danger' },
   timeout: { tone: 'danger' },
@@ -93,7 +92,7 @@ const TASK_TEMPLATES = [
   { id: 'standup', icon: Target, kind: 'weekdays', time: '09:00' },
   { id: 'risk_scan', icon: Activity, kind: 'daily', time: '10:00' },
   { id: 'release_notes', icon: FileText, kind: 'weekly', weekdays: [5], time: '16:00' },
-  // 代码改动类任务：预填「完成后等待人工」——变更不直接提交，人工复核后才落 commit
+  // 代码改动类任务：预填「完成后保留会话」——变更不直接提交，人工在会话中复核后才落 commit
   { id: 'nightly_cleanup', icon: MoonStar, kind: 'daily', time: '03:00', requireReview: true },
 ];
 
@@ -184,7 +183,6 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
   const [runs, setRuns] = useState([]);
   const [runsLoading, setRunsLoading] = useState(false);
   const [selectedRun, setSelectedRun] = useState(null);
-  const [reviewingRunId, setReviewingRunId] = useState(null);
 
   const fetchProjects = useCallback(() => {
     apiFetch('/api/v1/projects')
@@ -353,20 +351,6 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
 
   // 执行历史：打开时拉取；有 running run 时 5s 轮询（runsRef 避免闭包过期）
   const runsRef = useRef([]);
-  // 人工复核：通过 → run succeeded；打回 → run failed。会话同步退出。
-  const handleReview = async (runId, approved) => {
-    setReviewingRunId(runId);
-    try {
-      await reviewLoopTaskRun(runId, approved);
-      showToast('success', t(approved ? 'loopTasks:toast.approved' : 'loopTasks:toast.rejected'));
-      if (runsOpenFor) fetchRuns(runsOpenFor.id);
-    } catch (err) {
-      showToast('error', err.message);
-    } finally {
-      setReviewingRunId(null);
-    }
-  };
-
   const fetchRuns = useCallback((taskId) => {
     listLoopTaskRuns(taskId)
       .then((list) => {
@@ -383,7 +367,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
     setRunsLoading(true);
     fetchRuns(runsOpenFor.id);
     const timer = setInterval(() => {
-      if (runsRef.current.some((r) => r.status === 'running' || r.status === 'awaiting_review')) fetchRuns(runsOpenFor.id);
+      if (runsRef.current.some((r) => r.status === 'running')) fetchRuns(runsOpenFor.id);
     }, 5000);
     return () => clearInterval(timer);
   }, [runsOpenFor, fetchRuns]);
@@ -855,21 +839,6 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
                             >
                               {t('loopTasks:run.view_trajectory')}
                             </button>
-                          )}
-                          {selectedRun.status === 'awaiting_review' && (
-                            <span className="ml-auto inline-flex items-center gap-1.5">
-                              <Button variant="primary" size="sm" disabled={reviewingRunId === selectedRun.id}
-                                onClick={() => handleReview(selectedRun.id, true)}>
-                                {reviewingRunId === selectedRun.id
-                                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  : <CheckCircle className="w-3.5 h-3.5" />}
-                                {t('loopTasks:run.approve')}
-                              </Button>
-                              <Button variant="secondary" size="sm" disabled={reviewingRunId === selectedRun.id}
-                                onClick={() => handleReview(selectedRun.id, false)}>
-                                {t('loopTasks:run.reject')}
-                              </Button>
-                            </span>
                           )}
                         </div>
                         {selectedRun.result && (
