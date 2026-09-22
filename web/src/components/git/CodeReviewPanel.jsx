@@ -120,7 +120,7 @@ function CommentActionButtons({ comment, isOwnComment, onReply, onEdit, onDelete
   );
 }
 
-function CommentItem({ comment, mrFiles, renderDiffLines, isOwnComment, onReply, onEdit, onDelete, actionLoading, hideDiff = false }) {
+function CommentItem({ comment, mrFiles, isOwnComment, onReply, onEdit, onDelete, actionLoading, hideDiff = false }) {
   const { t } = useTranslation();
   const isInline = Boolean(comment.path);
   const fileDiff = isInline && !hideDiff ? (mrFiles || []).find((f) => f.path === comment.path)?.diff : null;
@@ -407,19 +407,6 @@ export default function CodeReviewPanel({ projectId, mergeRequestId, mergeReques
       if (!silent) setLoading(false);
     }
   }, [projectId, mergeRequestId, showToast]);
-
-  const fetchMrFiles = useCallback(async () => {
-    if (!projectId || !mergeRequestId || mrFiles.length > 0) return;
-    setMrFilesLoading(true);
-    try {
-      const res = await gitApi.listMrFiles(projectId, mergeRequestId);
-      setMrFiles(res.files || []);
-    } catch (err) {
-      showToast('error', err.message);
-    } finally {
-      setMrFilesLoading(false);
-    }
-  }, [projectId, mergeRequestId, mrFiles.length, showToast]);
 
   useEffect(() => {
     setLocalMR(mergeRequest);

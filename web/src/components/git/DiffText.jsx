@@ -39,7 +39,6 @@ export function renderDiffLines(raw, { showLineNumbers = false } = {}) {
       }
       return <div key={i} className="bg-red-50 text-red-600 pl-2 whitespace-pre">{line.slice(1)}</div>;
     }
-    const ol = oldLine;
     const nl = newLine;
     oldLine++;
     newLine++;

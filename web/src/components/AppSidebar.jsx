@@ -29,10 +29,8 @@ import NotificationBell from './NotificationBell';
 import RowActionsMenu from './RowActionsMenu';
 import { confirm } from './ConfirmDialog';
 import {
-  textPrimary,
   textSecondary,
   textPlaceholder,
-  accentGreen,
   transitionBase,
   hoverTextPrimary,
   hoverBgTertiary,
@@ -503,10 +501,6 @@ export default function AppSidebar({
 
   const sidebarNavItemClass =
     `flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-zinc-700 ${hoverBgTertiary} ${transitionBase}`;
-
-  // 二级页面导航（Skills / 循环任务）：比主动作轻一档（非加粗、12.5px）
-  const sidebarSubNavClass =
-    `flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[12.5px] text-zinc-500 ${hoverBgTertiary} ${transitionBase}`;
 
   if (minimal) {
     return (

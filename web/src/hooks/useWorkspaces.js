@@ -62,7 +62,7 @@ export function useWorkspaces(user) {
   }, [user]);
 
   const hasPendingRef = useRef(false);
-  const [hasPending, setHasPending] = useState(false);
+  const [, setHasPending] = useState(false);
   const pendingSinceRef = useRef(0);
   const debounceTimerRef = useRef(null);
   const fetchInFlightRef = useRef(false);

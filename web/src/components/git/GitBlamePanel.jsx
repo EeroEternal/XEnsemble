@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Eye, Loader2, RefreshCw, User, FolderOpen, Search } from 'lucide-react';
+import { Eye, Loader2, RefreshCw, FolderOpen, Search } from 'lucide-react';
 import * as gitApi from '../../lib/gitApi';
 import { useToast } from '../Toast';
 import {
@@ -8,7 +8,6 @@ import {
   textPrimary,
   textSecondary,
   textPlaceholder,
-  borderHairline,
 } from '../../lib/consoleTokens';
 
 function shaToColor(sha) {
@@ -27,7 +26,7 @@ function formatDate(ts) {
   return isNaN(d.getTime()) ? ts : d.toLocaleDateString();
 }
 
-function BlameLine({ entry, prevSha, showGutter }) {
+function BlameLine({ entry, prevSha }) {
   const isNewBlock = entry.sha !== prevSha;
   const bg = shaToColor(entry.sha);
 
@@ -116,7 +115,7 @@ export default function GitBlamePanel({ projectId }) {
     ? files.filter((f) => f.toLowerCase().includes(fileSearch.toLowerCase()))
     : files;
 
-  const groupedFiles = React.useMemo(() => {
+  const groupedFiles = useMemo(() => {
     const groups = {};
     filteredFiles.forEach((f) => {
       const dir = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '(root)';
@@ -241,7 +240,6 @@ export default function GitBlamePanel({ projectId }) {
                 key={idx}
                 entry={entry}
                 prevSha={idx > 0 ? blameData[idx - 1].sha : null}
-                showGutter
               />
             ))}
           </div>

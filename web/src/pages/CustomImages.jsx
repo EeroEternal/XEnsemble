@@ -24,7 +24,6 @@ import {
   consoleTableHeadBandClass,
   consoleAdminTableShellClass,
   consoleButtonFocusClass,
-  consoleDialogPanelClass,
   consoleIconButtonClass,
   consoleSectionLabelClass,
   consoleStructuredDialogPanelClass,

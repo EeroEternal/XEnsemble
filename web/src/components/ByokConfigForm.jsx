@@ -9,8 +9,6 @@ import {
   textPrimary,
   textPlaceholder,
   textSecondary,
-  borderHairline,
-  bgCanvas,
 } from '../lib/consoleTokens';
 
 export default function ByokConfigForm({ agentId, loading, onSave }) {
@@ -116,7 +114,6 @@ export default function ByokConfigForm({ agentId, loading, onSave }) {
       )}
       {fields.map((f, idx) => {
         const isSecret = f.type === 'secret';
-        const isNumber = f.type === 'number';
         return (
           <div key={f.key}>
             <div className="flex items-center gap-1.5 mb-1">

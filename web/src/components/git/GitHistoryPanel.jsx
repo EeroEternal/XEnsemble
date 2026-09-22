@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { GitCommit, Loader2, RefreshCw, Cloud, FileText } from 'lucide-react';
 import * as gitApi from '../../lib/gitApi';
@@ -206,7 +206,7 @@ function CommitRow({ commit, projectId }) {
   );
 }
 
-export default function GitHistoryPanel({ projectId, filePath }) {
+export default function GitHistoryPanel({ projectId }) {
   const { t } = useTranslation();
   const { showToast } = useToast();
   const [commits, setCommits] = useState([]);

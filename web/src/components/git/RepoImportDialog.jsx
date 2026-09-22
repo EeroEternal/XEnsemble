@@ -9,10 +9,8 @@ import {
 } from '../ConsoleDialog';
 import Input, { FormLabel } from '../Input';
 import Button from '../Button';
-import GitConnectButton from './GitConnectButton';
 import GitOAuthAlert from './GitOAuthAlert';
 import { useGitProvider } from '../../hooks/useGitProvider';
-import { formatGitOAuthError } from '../../lib/gitLabels';
 import { useToast } from '../Toast';
 import * as gitApi from '../../lib/gitApi';
 import { generateWorkBranchName } from '../../lib/gitApi';
@@ -70,7 +68,7 @@ export default function RepoImportDialog({ open, onClose, onImported, fetchWorks
   const { showToast } = useToast();
   const { t } = useTranslation();
   const [provider, setProvider] = useState(forceProvider || 'github');
-  const [providerButtonsVisible, setProviderButtonsVisible] = useState(!forceProvider);
+  const [providerButtonsVisible] = useState(!forceProvider);
   const { connection, loading: connectionLoading, error: connectError, connect, connectWithPat, disconnect } = useGitProvider(provider);
   const [providerOAuthConfigured, setProviderOAuthConfigured] = useState(null);
 

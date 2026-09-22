@@ -91,12 +91,6 @@ export default function GitHubSettingsPanel() {
     }
   };
 
-  const isConfigured = Boolean(
-    settings?.GITHUB_CLIENT_ID
-      && settings?.GITHUB_CLIENT_SECRET
-      && settings?.GITHUB_CALLBACK_URL,
-  );
-
   if (isAdmin) {
     if (error) {
       return (

@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext, useMemo } from 'react';
+import { useState, useEffect, useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AuthContext } from '../../App';
 import Button from '../Button';

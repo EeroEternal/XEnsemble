@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo, memo, lazy, Suspense
 import { createPortal } from 'react-dom';
 import {
   FileText, Files, FolderPlus, Plus, PanelLeftClose, PanelLeft, Loader2,
-  Terminal, Globe, GitBranch, GitPullRequest, X, ArrowLeft, Eye,
+  Terminal, Globe, GitBranch, GitPullRequest, X, Eye,
   Trash2, Pencil, ClipboardCopy, FilePlus, Rocket,
 } from 'lucide-react';
 import WorkspaceFileTree from './WorkspaceFileTree';
@@ -94,9 +94,6 @@ const WorkspacePanel = memo(forwardRef(function WorkspacePanel({
   onFetchDir,
   onCreateFile,
   onCreateDir,
-  onShowDiff,
-  diffView,
-  onCloseDiff,
   gitChanges,
   changesTabActiveRef,
   onGitFileClick,

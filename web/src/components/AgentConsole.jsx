@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
-import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 
 import { getAccessToken, getWsUrl, apiFetch, refreshAccessToken } from '../lib/api';
@@ -980,7 +979,6 @@ function AgentConsole({
             const altExitIdx = remaining.search(/\x1b\[\?(?:1049|47|1047)l/);
 
             if (!inAltScreen && altEnterIdx >= 0) {
-              const match = remaining.match(/\x1b\[\?(?:1049|47|1047)h/);
               const before = remaining.slice(0, altEnterIdx);
               const transitionAndAfter = remaining.slice(altEnterIdx);
               inAltScreen = true;

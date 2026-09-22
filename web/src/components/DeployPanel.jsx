@@ -104,7 +104,7 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
     const [runState, setRunState] = useState('idle');
     const [result, setResult] = useState(null);
     // 当前部署阶段：null（初始）| 'A'（分析）| 'B'（部署/验证）| 'preview'（开预览）
-    const [phase, setPhase] = useState(null);
+    const [, setPhase] = useState(null);
     // ── 部署确认闭环 ──
     // startedAtRef：本次点击时刻；confirmedIdRef：服务端确认的 deploymentId
     //（started 事件或轮询到本次点击之后创建的记录）。确认前绝不把旧记录的

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +11,6 @@ import {
 import { apiFetch } from '../lib/api';
 import { getSkill } from '../lib/skillsApi';
 import SelectMenu from '../components/SelectMenu';
-import Button from '../components/Button';
 import { useToast } from '../components/Toast';
 import { formatRelativeTime } from '../lib/formatRelativeTime';
 import {
@@ -136,10 +135,6 @@ export default function SkillsMarket({ className = '', 'aria-hidden': ariaHidden
 
   const categoryLabel = (v) => {
     const opt = CATEGORY_OPTIONS.find((o) => o.value === v);
-    return opt ? t(`skills:${opt.labelKey}`) : '';
-  };
-  const sortLabel = (v) => {
-    const opt = SORT_OPTIONS.find((o) => o.value === v);
     return opt ? t(`skills:${opt.labelKey}`) : '';
   };
 
@@ -382,11 +377,6 @@ function SkillDetailDrawer({ skill, onClose }) {
     } finally {
       setInstalling(false);
     }
-  };
-
-  const categoryLabel = (v) => {
-    const opt = CATEGORY_OPTIONS.find((o) => o.value === v);
-    return opt ? t(`skills:${opt.labelKey}`) : '';
   };
 
   const SigIcon = CATEGORY_ICONS[detail.category] || Sparkles;

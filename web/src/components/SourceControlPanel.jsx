@@ -102,7 +102,7 @@ function buildTree(files, stripPrefix) {
   return root;
 }
 
-export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile, onCollapse, provider, sessionLive }) {
+export default function SourceControlPanel({ projectId, gitChanges, onJumpToFile, onCollapse, provider }) {
   const { t } = useTranslation();
   const { showToast } = useToast();
   const [commitMessage, setCommitMessage] = useState('');

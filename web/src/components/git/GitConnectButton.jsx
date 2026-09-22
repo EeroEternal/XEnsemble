@@ -5,7 +5,6 @@ import {
   bgActive,
   bgInverse,
   textInverse,
-  textPlaceholder,
   textPrimary,
   textSecondary,
   transitionBase,

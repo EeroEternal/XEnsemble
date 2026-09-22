@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Check, ChevronDown, ChevronRight, FileWarning, Loader2, RefreshCw, GitMerge } from 'lucide-react';
+import { AlertTriangle, Check, ChevronRight, Loader2, RefreshCw, GitMerge } from 'lucide-react';
 import Button from '../Button';
 import { useToast } from '../Toast';
 import * as gitApi from '../../lib/gitApi';

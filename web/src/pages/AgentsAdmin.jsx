@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Loader2, Search, Settings2 } from 'lucide-react';
+import { Search, Settings2 } from 'lucide-react';
 
 import Input from '../components/Input';
 import PageHeader from '../components/PageHeader';
@@ -38,7 +38,7 @@ export default function AgentsAdmin() {
   const [agents, setAgents] = useState(() => loadAdminAgentsCache());
   const [gatewayProviders, setGatewayProviders] = useState([]);
   const [loading, setLoading] = useState(() => loadAdminAgentsCache().length === 0);
-  const [refreshing, setRefreshing] = useState(false);
+  const [, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [keysAgent, setKeysAgent] = useState(null);
 

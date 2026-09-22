@@ -17,7 +17,6 @@ import * as gitApi from '../lib/gitApi';
 import { generateWorkBranchName } from '../lib/gitApi';
 import { setSessionContext, withSessionId } from '../lib/sessionContext';
 import {
-  ConsoleDialogShell,
   ConsoleInlineDialog,
 } from '../components/ConsoleDialog';
 import { useToast } from '../components/Toast';
@@ -33,7 +32,6 @@ import {
   Settings2,
   X,
   Power,
-  FileText,
   Loader2,
   Trash2,
   PanelRightClose,
@@ -55,19 +53,15 @@ import {
   consoleDialogPanelClass,
   consoleStructuredDialogHeaderClass,
   consoleStructuredDialogFooterClass,
-  consoleStructuredDialogBodyClass,
   consoleIconButtonClass,
   consoleButtonFocusClass,
   bgCanvas,
   textPrimary,
   textSecondary,
-  textTertiary,
   textPlaceholder,
   borderHairline,
   transitionBase,
   hoverBgSecondary,
-  hoverBgTertiary,
-  hoverTextPrimary,
 } from '../lib/consoleTokens';
 import { pathParent, pathJoin } from '../lib/workspaceFileTree';
 import { cn } from '../lib/utils';
@@ -121,7 +115,6 @@ export default React.forwardRef(function Sessions({
   switchWorkspace,
   fetchWorkspaces,
   fetchAgents,
-  launchPanelOpen,
   onLaunchPanelClose,
   className,
 }, ref) {
@@ -178,11 +171,6 @@ export default React.forwardRef(function Sessions({
     const timer = setTimeout(measure, 100);
     return () => clearTimeout(timer);
   }, []);
-  const resizingRef = useRef(null);
-  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
-  const [showHiddenFiles, setShowHiddenFiles] = useState(false);
-  const [viewingFile, setViewingFile] = useState(null);
-  const [fileContent, setFileContent] = useState('');
 
   // Compute session liveness early so we can gate VM-triggering API calls
   // (git status polling, file tree listing) on the session being actually
@@ -318,12 +306,8 @@ export default React.forwardRef(function Sessions({
 
   const [gitDiffView, setGitDiffView] = useState(null);
 
-  const [configEnvVars, setConfigEnvVars] = useState([{ key: '', value: '' }]);
-  const [savedConfigKeys, setSavedConfigKeys] = useState({});
-  const configModalInitialKeysRef = useRef(null);
-  const [configSaving, setConfigSaving] = useState(false);
-  const [configLoading, setConfigLoading] = useState(false);
-  const [configError, setConfigError] = useState(null);
+  const [configEnvVars] = useState([{ key: '', value: '' }]);
+  const [savedConfigKeys] = useState({});
   const { themeId, preset } = useTerminalTheme();
 
   const [_deletingSessionId, setDeletingSessionId] = useState(null);
@@ -467,8 +451,6 @@ export default React.forwardRef(function Sessions({
     if (!activeSession?.projectId) {
       setPanelOpen(true);
     }
-    setViewingFile(null);
-    setFileContent('');
   }, [activeSession?.projectId]);
 
   useEffect(() => {
@@ -499,12 +481,6 @@ export default React.forwardRef(function Sessions({
   }, [fetchCustomImages]);
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId);
-
-  const openLaunchConfigModal = async () => {
-    setConfigError(null);
-    setError(null);
-    setShowLaunchConfigModal(true);
-  };
 
   const configRequiredKeys = selectedAgent?.env_required || [];
   // eslint-disable-next-line no-unused-vars
@@ -1002,85 +978,6 @@ export default React.forwardRef(function Sessions({
     if (!wizardWorkspace?.id) return;
     await handleStartSession(wizardWorkspace.id, wizardWorkspace.name, { closeLaunchModal: true });
   }, [wizardWorkspace, handleStartSession]);
-
-  const handleSaveLaunchConfig = async () => {
-    setConfigError(null);
-    const payload = {};
-    for (const { key, value } of configEnvVars) {
-      const k = (key || '').trim();
-      if (!k) continue;
-      const v = (value || '').trim();
-      payload[k] = v;
-    }
-    // Include keys that were removed via X button (present at modal open, now gone)
-    if (configModalInitialKeysRef.current) {
-      for (const k of configModalInitialKeysRef.current) {
-        if (!(k in payload)) payload[k] = '';
-      }
-    }
-    configModalInitialKeysRef.current = null;
-    if (Object.keys(payload).length === 0) {
-      setShowLaunchConfigModal(false);
-      setLaunchModalError(null);
-      return;
-    }
-    setConfigSaving(true);
-    try {
-      const res = await apiFetch('/api/v1/secrets', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || t('sessions:error.save_keys_failed'));
-      setSavedConfigKeys((prev) => {
-        const next = { ...prev };
-        Object.keys(payload).forEach((k) => { next[k] = true; });
-        return next;
-      });
-      showToast('success', t('sessions:toast.config_saved'));
-      setShowLaunchConfigModal(false);
-      setLaunchModalError(null);
-    } catch (err) {
-      setConfigError(err.message);
-    } finally {
-      setConfigSaving(false);
-    }
-  };
-
-  const fetchWorkspaceFiles = useCallback(async ({ notifyError = false } = {}) => {
-    if (!activeSession?.projectId) return;
-    setIsLoadingFiles(true);
-    try {
-      const qs = new URLSearchParams({ project_id: activeSession.projectId });
-      if (showHiddenFiles) qs.set('include_hidden', '1');
-      const res = await apiFetch(withSessionId(`/api/v1/workspace/files?${qs}`));
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || t('sessions:error.load_files_failed'));
-      }
-    } catch (err) {
-      if (notifyError) showToast('error', err.message);
-    } finally {
-      setIsLoadingFiles(false);
-    }
-  }, [activeSession?.projectId, activeSession?.sessionId, showHiddenFiles, showToast]);
-
-  const handleOpenFile = useCallback(async (file) => {
-    if (!activeSession?.projectId || file?.type !== 'file') return;
-    try {
-      const res = await apiFetch(
-        withSessionId(`/api/v1/workspace/file?project_id=${encodeURIComponent(activeSession.projectId)}&path=${encodeURIComponent(file.path)}`)
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || t('sessions:error.read_file_failed'));
-      }
-      setViewingFile(file);
-      setFileContent(data.content || '');
-    } catch (err) {
-      showToast('error', err.message);
-    }
-  }, [activeSession?.projectId, showToast]);
 
   const handleGitFileClick = useCallback(async (filePath) => {
     if (!activeSession?.projectId) return;
@@ -2091,37 +1988,6 @@ export default React.forwardRef(function Sessions({
         />
       )}
 
-      {viewingFile && (
-        <ConsoleDialogShell
-          onClose={() => {
-            setViewingFile(null);
-            setFileContent('');
-          }}
-          panelClassName={`${consoleDialogPanelClass} w-[min(900px,calc(100vw-2rem))] h-[min(80vh,calc(100vh-2rem))]`}
-        >
-          <div className={`flex items-center justify-between ${borderHairline} border-b bg-zinc-50 px-4 py-3 shrink-0`}>
-            <div className="flex min-w-0 items-center gap-2">
-              <FileText className={`w-4 h-4 shrink-0 ${textPlaceholder}`} />
-              <span className={`truncate text-sm font-semibold ${textPrimary}`}>{viewingFile.name}</span>
-              <span className={`truncate text-xs font-mono ${textPlaceholder}`}>{viewingFile.path}</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setViewingFile(null);
-                setFileContent('');
-              }}
-              className={`shrink-0 rounded-md p-1.5 ${textPlaceholder} ${hoverBgTertiary} ${hoverTextPrimary} ${transitionBase}`}
-              aria-label={t('common:action.close')}
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div className={`${consoleStructuredDialogBodyClass} bg-zinc-50 text-sm font-mono ${textTertiary} whitespace-pre`}>
-            {fileContent}
-          </div>
-        </ConsoleDialogShell>
-      )}
     </div>
   );
 });

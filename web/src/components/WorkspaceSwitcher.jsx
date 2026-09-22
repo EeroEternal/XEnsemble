@@ -19,15 +19,11 @@ import {
 } from '../lib/gitLabels';
 import {
   textPrimary,
-  textSecondary,
   textPlaceholder,
-  accentGreen,
   accentRed,
   accentRedBg,
   transitionBase,
-  hoverTextPrimary,
   hoverBgTertiary,
-  bgCanvas,
   bgSecondary,
   consoleButtonFocusClass,
   consoleMenuDropdownZClass,
@@ -100,17 +96,6 @@ export default function WorkspaceSwitcher({
 
   const close = useCallback(() => setOpen(false), []);
 
-  const liveCountByProject = (() => {
-    const map = {};
-    for (const s of sessions || []) {
-      if (s.alive === true) {
-        const pid = s.projectId || '_orphan';
-        map[pid] = (map[pid] || 0) + 1;
-      }
-    }
-    return map;
-  })();
-
   const q = query.trim().toLowerCase();
   const filtered = q
     ? projects.filter((p) => p.name.toLowerCase().includes(q))
@@ -155,7 +140,6 @@ export default function WorkspaceSwitcher({
         ) : (
           filtered.map((p) => {
             const isActive = p.id === activeWorkspaceId;
-            const live = liveCountByProject[p.id] || 0;
             const gitLinked = isGitLinkedProject(p);
             const repoLabel = getWorkspaceRepoLabel(p);
             const providerLabel = getProviderLabel(p.repoProvider);
