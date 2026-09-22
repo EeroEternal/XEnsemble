@@ -24,8 +24,11 @@ const VB_W = 600;             // viewBox 逻辑宽度（preserveAspectRatio=none
 
 export default function UserCostScatter({ users = [], height = 104 }) {
   const [hover, setHover] = useState(null);
+  const rootRef = useRef(null);
   const plotRef = useRef(null);
+  const legendRef = useRef(null);
   const [plotH, setPlotH] = useState(height);
+  const [headPx, setHeadPx] = useState(0); // 图例带实际高度（tooltip 根层级定位的纵向偏移）
 
   // 实测绘图区像素高：flex-1 下容器高度由卡片剩余空间决定，写死值会对不齐
   useEffect(() => {
@@ -34,6 +37,18 @@ export default function UserCostScatter({ users = [], height = 104 }) {
     const ro = new ResizeObserver((entries) => {
       const h = Math.round(entries[0]?.contentRect?.height || 0);
       if (h > 0) setPlotH(h);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // 实测图例带高度：tooltip 挂根层级后，纵向定位需要叠加「图例带 + 间距」
+  useEffect(() => {
+    const el = legendRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const h = Math.round(entries[0]?.contentRect?.height || 0) + 8; // + mb-2
+      if (h > 0) setHeadPx(h);
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -110,7 +125,7 @@ export default function UserCostScatter({ users = [], height = 104 }) {
 
   // 图例置于图上方（用户指定的原设计），正常文档流。shrink-0 防被 svg 区挤压。
   const legend = (
-    <div className="mb-2 flex shrink-0 items-center gap-x-3 overflow-hidden whitespace-nowrap">
+    <div ref={legendRef} className="mb-2 flex shrink-0 items-center gap-x-3 overflow-hidden whitespace-nowrap">
       <span className="flex shrink-0 items-center gap-1 text-[11px] text-zinc-400">
         <span className="inline-block h-2 w-2 rounded-full bg-blue-500" /> 用户
       </span>
@@ -132,10 +147,12 @@ export default function UserCostScatter({ users = [], height = 104 }) {
     // 下层 flex-1 的 svg 包裹层跟着塌 0，svg 被压成一条细线（实测回归）。
     // 刻度文字层的定位上下文是 svg 包裹层（relative），而非含图例的整卡，
     // 否则图例高度会把 ys() 算出的坐标整体顶偏、与图例文字重叠。
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div ref={rootRef} className="relative flex min-h-0 flex-1 flex-col">
       {legend}
       {/* overflow-hidden：svg 内容坐标由 plotH 实测驱动，若一次布局帧内测量滞后于
-          容器变化（如进入/退出全屏的过渡帧），线条可能瞬间越界——裁掉而不是撑破卡片。 */}
+          容器变化（如进入/退出全屏的过渡帧），线条可能瞬间越界——裁掉而不是撑破卡片。
+          注意：tooltip 绝不放这个层内——overflow-hidden 会把向上溢出的 tooltip 裁掉
+          （顶部点的 tooltip 会被图例区域"挡住"，实测），tooltip 渲染在根层级。 */}
       <div ref={plotRef} className="relative min-h-0 flex-1 overflow-hidden">
       <svg viewBox={`0 0 ${VB_W} ${h}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%' }} className="block">
         {/* 水平网格线（对数轴时基线 y=0 单独由下方横轴线承担） */}
@@ -169,7 +186,9 @@ export default function UserCostScatter({ users = [], height = 104 }) {
         })}
       </svg>
 
-      {/* Y 轴刻度文字（HTML 叠加，定位上下文 = svg 包裹层，坐标与 ys() 一致） */}
+      {/* Y 轴刻度文字（HTML 叠加，定位上下文 = svg 包裹层，坐标与 ys() 一致）。
+          顶端刻度（yMax）的 top 会是 PAD.top 附近，可能越过本层上边 1-2px，
+          但不会进入图例区域（图例在根层级、本层之外）。 */}
       <div className="pointer-events-none absolute inset-0">
         {gridY.map((v, i) => (
           <span key={i} className="absolute -translate-y-1/2 text-[10px] tabular-nums text-zinc-400"
@@ -182,22 +201,29 @@ export default function UserCostScatter({ users = [], height = 104 }) {
             中位 {fmtUnit(baseUnit * 1e6)}
           </span>
         )}
-        {/* HTML tooltip：跟随悬停点（svg 不拉伸文字层，信息完整可读） */}
-        {hover && (
-          <div className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-zinc-200 bg-surface px-2 py-1 text-[11px] leading-relaxed shadow-lg"
-            style={{ left: `${(xs(hover.x) / VB_W) * 100}%`, top: ys(hover.y) - 8 }}>
-            <div className="font-medium text-zinc-800">{hover.username}</div>
-            {hover.displayName ? <div className="text-zinc-400">{hover.displayName}</div> : null}
-            <div className="text-zinc-600">
-              {formatTokens(hover.x)} tokens · {hover.requests != null ? `${hover.requests} 次请求 · ` : ''}{fmtY(hover.y)}
-            </div>
-            <div className={hover.y / hover.x > baseUnit * HIGH_COST_RATIO ? 'text-amber-600' : 'text-zinc-400'}>
-              单价 {fmtUnit((hover.y / hover.x) * 1e6)}{hover.y / hover.x > baseUnit * HIGH_COST_RATIO ? '（成本偏高）' : ''}
-            </div>
+      </div>
+      </div>
+
+      {/* tooltip：挂根层级（不在 overflow-hidden 的绘图区内）。
+          放绘图区内时，顶部用户的 tooltip 向上溢出被 overflow-hidden 整个裁掉——
+          视觉上像被图例挡住（实测）。根层级无裁剪，tooltip 可越过图例区域展示。
+          定位：top = 图例带高度 + 绘图区内坐标（ys 相对绘图区），手动叠加。 */}
+      {hover && (
+        <div className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-zinc-200 bg-surface px-2 py-1 text-[11px] leading-relaxed shadow-lg"
+          style={{
+            left: `${(xs(hover.x) / VB_W) * 100}%`,
+            top: headPx + ys(hover.y) - 8,
+          }}>
+          <div className="font-medium text-zinc-800">{hover.username}</div>
+          {hover.displayName ? <div className="text-zinc-400">{hover.displayName}</div> : null}
+          <div className="text-zinc-600">
+            {formatTokens(hover.x)} tokens · {hover.requests != null ? `${hover.requests} 次请求 · ` : ''}{fmtY(hover.y)}
           </div>
-        )}
-      </div>
-      </div>
+          <div className={hover.y / hover.x > baseUnit * HIGH_COST_RATIO ? 'text-amber-600' : 'text-zinc-400'}>
+            单价 {fmtUnit((hover.y / hover.x) * 1e6)}{hover.y / hover.x > baseUnit * HIGH_COST_RATIO ? '（成本偏高）' : ''}
+          </div>
+        </div>
+      )}
 
       {/* X 轴刻度：与左图（MiniBarChart）刻度行同款 mt-1，shrink-0 防被绘图区挤压 */}
       <div className="mt-1 flex shrink-0 justify-between pl-11 pr-3 text-[10px] tabular-nums text-zinc-400">

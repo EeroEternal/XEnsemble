@@ -52,9 +52,9 @@ async function getMyUsageSummary(userId, { days } = {}) {
         })
         .from(schema.llmUsage)
         .where(and(eq(schema.llmUsage.userId, userId), gte(schema.llmUsage.createdAt, sinceTs)));
-    // 个人总额：目录单价估算（与平台总额/模型分布同口径），目录外模型不计入。
-    // 行已按 userId 过滤，group 也用 userId——避免把用户 id 拼进 sql.raw。
-    const costRows = await costByModelRows({ sinceTs, groupBy: schema.llmUsage.userId });
+    // 个人总额：目录单价估算（与平台总额/模型分布同口径）。groupBy userId + where
+    // userId 过滤该用户行，汇总其全部模型行——绝不能漏 userId 条件，否则等于全平台总额。
+    const costRows = await costByModelRows({ sinceTs, groupBy: schema.llmUsage.userId, userId });
     const r = rows[0] || {};
     return {
         promptTokens: Number(r.prompt || 0),
@@ -356,7 +356,7 @@ async function getUserCostByModel({ days } = {}) {
  * 套模型目录 USD 单价（输入/输出/缓存读三档）。目录外模型费用为 0 计（不阻断）。
  * @returns {Promise<Array<{ group:string, costUsd:number, tokens:number }>>}
  */
-async function costByModelRows({ sinceTs, groupBy }) {
+async function costByModelRows({ sinceTs, groupBy, userId }) {
     const rows = await db
         .select({
             group: groupBy,
@@ -367,7 +367,9 @@ async function costByModelRows({ sinceTs, groupBy }) {
             total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
         })
         .from(schema.llmUsage)
-        .where(gte(schema.llmUsage.createdAt, sinceTs))
+        .where(userId
+            ? and(eq(schema.llmUsage.userId, userId), gte(schema.llmUsage.createdAt, sinceTs))
+            : gte(schema.llmUsage.createdAt, sinceTs))
         .groupBy(groupBy, schema.llmUsage.model);
     const catalog = fetchModelCatalog();
     const unitCache = new Map();
@@ -569,14 +571,13 @@ async function getPlatformOverview({ days } = {}) {
         getUsageByUser({ days }),
         getUsageByAgent({ days }),
         getUsageByModelPlatform({ days }),
-        // 平台总额（目录单价估算，与 byModel/trend 同口径）
-        costByModelRows({ sinceTs, groupBy: sql.raw("'__all__'") }),
     ]);
     const s = summaryRows[0] || {};
     const cachedTokens = Number(s.cached || 0);
     const reportedPrompt = Number(s.reportedPrompt || 0);
     const trend = trendFromModelRows(trendRows, { days: d });
-    const platformCostUsd = costRows.reduce((sum, r) => sum + r.costUsd, 0);
+    // 平台总额 = byModel 各模型成本之和（byModel 已按模型算好 costUsd，零新增查询）
+    const platformCostUsd = byModel.reduce((sum, m) => sum + (m.costUsd || 0), 0);
     return {
         summary: {
             promptTokens: Number(s.prompt || 0),

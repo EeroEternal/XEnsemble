@@ -87,7 +87,7 @@ export default function MiniBarChart({
     <div
       ref={plotRef}
       className={`relative flex items-end gap-[2px] overflow-hidden ${fill ? 'min-h-0 flex-1' : ''}`}
-      style={fill ? undefined : { height: effHeight }}
+      style={fill ? { minHeight: 64 } : { height: effHeight }}
     >
       {showAxes && (
         <>
@@ -160,10 +160,13 @@ export default function MiniBarChart({
       {/* fill 模式右列纵向 flex：柱区 flex-1 吃满「列高 − X 行」，柱子 h-full 才有高度可分；
           非 fill 右列保持普通块流（柱区由 height prop 定高）。 */}
       <div className={`min-w-0 flex-1 ${fill ? 'flex flex-col' : ''}`}>
-        <div className={`relative ${fill ? 'min-h-0 flex-1' : ''}`}>
-          {bars}
-          {legendOverlay && legend}
-        </div>
+      {/* fill 模式此处必须是 flex 容器：柱区的 flex-1 只对直接 flex 子元素生效，
+          若包裹层是普通 block，柱区既无 height 又无 flex 伸展 → 塌陷（实测基线悬在
+          卡片中部，只剩 minHeight 兜底高）。flex-col 后柱区撑满「包裹层全高」。 */}
+      <div className={`relative ${fill ? 'flex min-h-0 flex-1 flex-col' : ''}`}>
+        {bars}
+        {legendOverlay && legend}
+      </div>
         <div className={`mt-1 flex justify-between text-[10px] tabular-nums text-zinc-400 ${fill ? 'shrink-0' : ''}`}>
           <span>{data[0]?.label}</span>
           {data.length > 2 && <span>{data[Math.floor((data.length - 1) / 2)]?.label}</span>}

@@ -98,8 +98,11 @@ export default function MyUsagePanel() {
             {/* 两卡同构填满框格：图例悬浮在绘图区内（legendOverlay，自动抬高量程让位），
                 无独立图例行/占位带 → 柱区上下沿贴卡片，两图 X 轴基线同高。
                 卡片 flex-col，MiniBarChart 区 flex-1 撑满剩余高度。 */}
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              <div className={`${consoleCardClass} flex min-h-0 flex-1 flex-col px-3 py-4`}>
+            {/* 两卡定高（h-56）：fill 模式的柱区 flex-1 需要父级有确定高度才撑得开——
+                此页卡片在普通文档流（无定高祖先），flex-1 会让柱区塌 0（实测图消失）。
+                定高后柱区 = 卡片高 − X 行，两卡同高、X 轴基线对齐、无框内留白。 */}
+            <div className="grid h-56 grid-cols-1 gap-3 lg:grid-cols-2">
+              <div className={`${consoleCardClass} flex min-h-0 flex-col px-3 py-4`}>
                 <MiniBarChart
                   data={(usage.trend || []).map((d) => ({
                     label: d.day,
@@ -117,7 +120,7 @@ export default function MyUsagePanel() {
                   ]}
                 />
               </div>
-              <div className={`${consoleCardClass} flex min-h-0 flex-1 flex-col px-3 py-4`}>
+              <div className={`${consoleCardClass} flex min-h-0 flex-col px-3 py-4`}>
                 <MiniBarChart
                   data={costData}
                   height={CHART_HEIGHT}
