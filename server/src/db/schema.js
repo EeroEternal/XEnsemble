@@ -318,6 +318,25 @@ const events = pgTable('events', {
 // 0017: Skills（私有技能 + 市场发布/安装）
 // status: draft | active | archived；source: auto | manual | installed
 // visibility: private | public；published_at 非空即视为"已在市场"
+// MCP servers (P1): user-managed Model Context Protocol servers injected into the
+// agent's config at session start. projectId null = available to all projects.
+const mcpServers = pgTable('mcp_servers', {
+  id: text('id').primaryKey(),
+  ownerUserId: text('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description'),
+  transport: text('transport').notNull().default('stdio'),
+  command: text('command'),
+  args: jsonb('args').notNull().default([]),
+  env: jsonb('env').notNull().default({}),
+  enabled: boolean('enabled').notNull().default(true),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+}, (table) => ({
+  ownerIdx: index('idx_mcp_servers_owner').on(table.ownerUserId, table.enabled),
+}));
+
 const skills = pgTable('skills', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -756,6 +775,7 @@ module.exports = {
   sessionConversations,
   schedulerJobs,
   skills,
+  mcpServers,
   skillCandidates,
   notifications,
   agents,

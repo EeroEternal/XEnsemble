@@ -119,12 +119,24 @@ class BoxLiteClient {
     }
 
     /**
+     * openSession 的超时。首次启动某个镜像时 blink 要先把镜像层拉下来并合成
+     * rootfs（大镜像实测 40~60s，远端 registry 可能更久）；而 blink 在客户端断开
+     * 时会取消会话初始化并清理 box（日志 "Box initialization failed ...
+     * no cause captured"），于是超时=启动失败且已做的 rootfs 合成白费。
+     * 因此默认给足 5 分钟，并允许用 BLINK_OPEN_SESSION_TIMEOUT_MS 覆盖。
+     */
+    static get openSessionTimeoutMs() {
+        const raw = Number(process.env.BLINK_OPEN_SESSION_TIMEOUT_MS);
+        return Number.isFinite(raw) && raw > 0 ? raw : 300000;
+    }
+
+    /**
      * fetch wrapper with timeout. Prevents a single blink-server request
      * from blocking indefinitely when the server's worker threads are
      * exhausted (e.g. multiple VMs failing guest_connect with 30s timeout).
      *
      * Default timeout: 35s (covers blink's 30s guest_connect + overhead).
-     * openSession uses 60s to allow for VM boot + init.
+     * openSession uses a longer, configurable timeout for cold image prep.
      */
     async _fetch(url, options = {}, timeoutMs = 35000) {
         this._refreshFromFile();
@@ -221,7 +233,7 @@ class BoxLiteClient {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
-        }, 60000);
+        }, BoxLiteClient.openSessionTimeoutMs);
         if (!res.ok) {
             const t = await res.text().catch(() => '');
             throw new Error(`open session failed: ${res.status} ${t}`);

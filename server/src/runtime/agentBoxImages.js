@@ -59,22 +59,33 @@ const AGENT_BOX_IMAGE_CATALOG = {
     'hermes': {
         tag: 'hermes',
         buildable: true,
+        verify: 'command -v hermes >/dev/null && hermes --version',
         install: [
             'apt-get update',
             '&& apt-get install -y --no-install-recommends python3 python3-venv python3-pip ripgrep ffmpeg libatomic1',
             '&& rm -rf /var/lib/apt/lists/*',
-            '&& curl -fsSL https://npmmirror.com/mirrors/node/v26.7.0/node-v26.7.0-linux-x64.tar.gz | tar -xzf - -C /usr/local --strip-components=1',
+            // hermes-agent requires node ^22.22.0 || ^24.11.0 || >=26 with npm
+            // <11.10.0 || >=11.17.0. Node 22.23 bundles npm 10.9 (satisfies both);
+            // the previous v26.7 + npm 11.19 pair crashed npm with
+            // "Class extends value undefined is not a constructor or null".
+            '&& curl -fsSL https://npmmirror.com/mirrors/node/v22.23.2/node-v22.23.2-linux-x64.tar.gz | tar -xzf - -C /usr/local --strip-components=1',
             '&& node --version',
-            '&& git config --global url."https://ghfast.top/https://github.com/".insteadOf "https://github.com/"',
+            // ghfast.top only proxies file downloads — it answers 403 to git's smart
+            // HTTP protocol, so the installer's `git clone github.com/...` failed and
+            // the old fallback shim masked that, shipping an image with a broken CLI.
+            '&& git config --global url."https://gh-proxy.com/https://github.com/".insteadOf "https://github.com/"',
             '&& rm -rf "$HOME/.hermes/hermes-agent" "$HOME/.hermes"/hermes-agent.broken-* 2>/dev/null; true',
-            // Install hermes via official installer. npm install for workspace deps
-            // (electron/react/esbuild) may timeout in Docker; hermes itself is Python.
-            // If the installer exits early (install_node_deps || return), setup_path
-            // doesn't run - we create the launcher shim manually in that case.
+            // Install hermes via the official installer. Its Python deps come from
+            // PyPI and its browser from Playwright's CDN; both stall on CN networks,
+            // so point them at mirrors. --skip-browser keeps the image ~187MB smaller.
+            '&& export UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple',
+            '&& export PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple',
+            '&& export PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright',
             '&& curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o /tmp/hermes-install.sh',
-            '&& bash /tmp/hermes-install.sh --skip-setup --skip-browser; true',
-            '&& (test -x /usr/local/bin/hermes || printf \'#!/usr/bin/env bash\\nunset PYTHONPATH\\nunset PYTHONHOME\\nexec /usr/local/lib/hermes-agent/venv/bin/python /usr/local/lib/hermes-agent/hermes "$@"\\n\' > /usr/local/bin/hermes && chmod +x /usr/local/bin/hermes)',
+            '&& bash /tmp/hermes-install.sh --skip-setup --skip-browser',
+            // Hard requirement: no shim fallback — a missing CLI must fail the build.
             '&& test -x /usr/local/bin/hermes',
+            '&& hermes --version',
             // Strip non-runtime files to reduce image size (~400MB saved).
             '&& rm -rf /usr/local/lib/hermes-agent/.git',
             '&& rm -rf /usr/local/lib/hermes-agent/website',

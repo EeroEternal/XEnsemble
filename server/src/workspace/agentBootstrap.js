@@ -196,6 +196,8 @@ function ensureGitignoreEntries(workspacePath) {
     const entries = [
         '.agents/',
         '.xensemble/',
+        // Platform-injected MCP config (project-scoped .mcp.json for Claude Code)
+        '.mcp.json',
         // Agent 原生技能目录（平台注入，勿提交）
         '.claude/skills/',
         '.qwen/skills/',

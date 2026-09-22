@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import Sessions from './pages/Sessions';
 import SkillsMarket from './pages/SkillsMarket';
 import MySkills from './pages/MySkills';
+import McpServers from './pages/McpServers';
 import LoopTasks from './pages/LoopTasks';
 import LoopRunDetail from './pages/LoopRunDetail';
 import AgentsAdmin from './pages/AgentsAdmin';
@@ -83,9 +84,10 @@ function AuthenticatedLayout({
   const isImagesAdmin = location.pathname === '/admin/images';
   const isCustomImages = location.pathname === '/custom-images';
   const isImagesManager = isCustomImages || isImagesAdmin;
+  const isMcpServers = location.pathname === '/mcp';
   const isSettingsPage = location.pathname === '/settings';
 
-  const isSettingsRoute = isAgentsAdmin || isUsersAdmin || isGatewayAdmin || isObservabilityPage || isImagesManager || isSkillsManager || isSettingsPage;
+  const isSettingsRoute = isAgentsAdmin || isUsersAdmin || isGatewayAdmin || isObservabilityPage || isImagesManager || isSkillsManager || isMcpServers || isSettingsPage;
 
   const offRouteClass = 'pointer-events-none invisible absolute inset-0 z-0 [&_*]:pointer-events-none';
 
@@ -291,6 +293,19 @@ function AuthenticatedLayout({
               </div>
             </div>
         )}
+        {isMcpServers && (
+            <div
+              className={cn(
+                'flex min-h-0 flex-1 flex-row overflow-hidden',
+                launchPanelOpen ? offRouteClass : 'relative z-10',
+              )}
+            >
+              <SettingsTabSidebar activeTab="mcp" onSectionChange={handleSettingsSectionChange} user={user} onOpenSettings={null} onLogout={logout} />
+              <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto console-scroll-hidden', APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS)}>
+                <McpServers />
+              </div>
+            </div>
+        )}
         {isSkillsManager && (
             <div
               className={cn(
@@ -490,6 +505,7 @@ function App() {
               <Route path="/loop-tasks" element={null} />
               <Route path="/loop-tasks/:taskId/runs/:runId" element={null} />
               <Route path="/settings" element={null} />
+              <Route path="/mcp" element={null} />
               <Route path="/observability" element={null} />
               <Route
                 path="/custom-images"

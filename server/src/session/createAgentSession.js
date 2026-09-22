@@ -477,6 +477,29 @@ async function createAgentSession({
             }
         }
 
+        // MCP: inject the user's enabled MCP servers into THIS agent's config
+        // file. Runs after the gateway/agent config bootstraps so nothing
+        // overwrites it. Best-effort — never blocks the session.
+        try {
+            const { listEnabledForSession } = require('../mcp/mcpService');
+            const { injectMcpConfigForSession } = require('../mcp/mcpInjector');
+            const mcpServers = await listEnabledForSession(userId, projectId);
+            await injectMcpConfigForSession({
+                agentId: agentMeta.id,
+                fsAdapter: runtime.fs,
+                // User-scoped configs (cline, droid) live under the session state
+                // dir (CLINE_DATA_DIR / FACTORY_HOME_OVERRIDE) and are written via exec.
+                execAdapter: runtime.exec,
+                stateDirPath: sessionStateDir?.stateDirPath || null,
+                workspaceRoot: workspacePath,
+                runtimeRef: ready.runtime ? ready.runtime.runtimeRef : undefined,
+                servers: mcpServers,
+                log,
+            });
+        } catch (err) {
+            log.warn({ err, sessionId }, '[mcp] config injection failed (non-fatal)');
+        }
+
         if (!(await isSessionStillPending(sessionId))) {
             log.info({ sessionId }, '[sessions] session cancelled before spawn');
             return;

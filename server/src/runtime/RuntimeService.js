@@ -145,6 +145,12 @@ async function ensureProjectRuntime(project, opts = {}) {
                 const specs = JSON.parse(runtimeRow.specs || '{}');
                 hostWorkspacePath = specs.host_workspace_path || null;
             } catch { /* ignore */ }
+            // The control plane may have seeded .agents/.git as root (service
+            // running as root) — repair before handing the sandbox over, since the
+            // guest writes into these dirs.
+            if (hostWorkspacePath) {
+                try { workspace.repairWorkspaceOwnership(hostWorkspacePath); } catch { /* best-effort */ }
+            }
             const result = {
                 runtime: runtimeRow,
                 workspacePath,
@@ -241,6 +247,23 @@ async function ensureProjectRuntime(project, opts = {}) {
         });
         const workspacePath = provision.workspacePath;
         const now = Date.now();
+
+        // Self-heal workspace ownership: when the control plane runs as root but
+        // blink (and its virtiofs export) runs as another host user, root-owned
+        // workspace files are unwritable from inside the sandbox (agent edits,
+        // git, config writes all fail). Repair only when the owner actually
+        // differs, so the recursive chown stays a one-off.
+        if (isBoxLite) {
+            try {
+                if (provision.hostWorkspacePath) workspace.repairWorkspaceOwnership(provision.hostWorkspacePath);
+                // Worktrees live next to the project dir, but git objects/index are
+                // written into the project's own .git — repair that side too.
+                workspace.repairWorkspaceOwnership(workspace.projectDir(project.userId, project.id));
+            } catch (err) {
+                console.warn(`[runtime] workspace ownership repair failed: ${err.message}`);
+            }
+        }
+
         const nextSpecs = { ...storedSpecs };
         if (isBoxLite && provision.hostWorkspacePath) {
             nextSpecs.host_workspace_path = provision.hostWorkspacePath;

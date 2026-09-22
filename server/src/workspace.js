@@ -30,6 +30,74 @@ function ensureWorkspaceRoot() {
     }
 }
 
+/**
+ * Host-side owner the sandbox can write as.
+ *
+ * blink runs as a host user (administrator in the standard deploy) and its
+ * virtiofs export enforces that host identity — the guest's root does NOT map to
+ * host root. So workspace dirs/files created by the control plane (which runs as
+ * root) are unwritable from inside the sandbox unless we hand them to the same
+ * host user. Default: inherit WORKSPACE_ROOT's owner.
+ */
+function resolveHostWorkspaceOwner() {
+    const uid = Number(process.env.WORKSPACE_OWNER_UID);
+    const gid = Number(process.env.WORKSPACE_OWNER_GID);
+    if (Number.isInteger(uid) && Number.isInteger(gid)) return { uid, gid };
+    try {
+        const st = fs.statSync(WORKSPACE_ROOT);
+        return { uid: st.uid, gid: st.gid };
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Best-effort: make `dir` writable from inside the sandbox (owner + group).
+ * `recursive` also fixes files created before this ran (e.g. by a root control
+ * plane), which the agent could otherwise not edit.
+ */
+function ensureSandboxWritable(dir, { recursive = false } = {}) {
+    const owner = resolveHostWorkspaceOwner();
+    if (!owner || !dir) return;
+    const apply = (target) => {
+        try { fs.chownSync(target, owner.uid, owner.gid); } catch { /* best-effort */ }
+        // Directories only: files must keep their mode, otherwise every tracked
+        // file shows up as a "mode change" in the user's git status.
+        try {
+            if (fs.statSync(target).isDirectory()) fs.chmodSync(target, 0o775);
+        } catch { /* best-effort */ }
+    };
+    apply(dir);
+    if (!recursive) return;
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+        const child = path.join(dir, entry.name);
+        apply(child);
+        if (entry.isDirectory()) ensureSandboxWritable(child, { recursive: true });
+    }
+}
+
+/**
+ * Repair the workspace entries the control plane creates host-side (as root when
+ * the service runs as root): the workspace dir itself plus the well-known
+ * subdirectories it seeds (.agents, .git). Cheap in the common case — three
+ * stat() calls; only mismatching subtrees are chowned recursively.
+ */
+function repairWorkspaceOwnership(dir) {
+    const owner = resolveHostWorkspaceOwner();
+    if (!owner || !dir) return;
+    const fix = (target) => {
+        let st = null;
+        try { st = fs.statSync(target); } catch { return; }
+        if (st.uid === owner.uid) return;
+        ensureSandboxWritable(target, { recursive: true });
+        console.warn(`[workspace] repaired ownership for ${target} (uid ${st.uid} → ${owner.uid})`);
+    };
+    fix(dir);
+    for (const sub of ['.agents', '.git']) fix(path.join(dir, sub));
+}
+
 function projectDir(userId, projectId) {
     return path.join(WORKSPACE_ROOT, userId, projectId);
 }
@@ -48,6 +116,7 @@ function createProjectDirectory(userId, projectId) {
     ensureWorkspaceRoot();
     const dir = projectDir(userId, projectId);
     fs.mkdirSync(dir, { recursive: true });
+    ensureSandboxWritable(dir);
     const { seedAgentWorkspaceFiles, ensureGitignoreEntries } = require('./workspace/agentBootstrap');
     seedAgentWorkspaceFiles(dir);
     // 0025（方案 B）：导入工程即写入 .gitignore 忽略条目（.xensemble/ 与各 Agent 原生技能目录），
@@ -134,6 +203,9 @@ module.exports = {
     WORKSPACE_ROOT,
     ensureWorkspaceRoot,
     projectDir,
+    ensureSandboxWritable,
+    repairWorkspaceOwnership,
+    resolveHostWorkspaceOwner,
     worktreeDir,
     repoWorktreePath,
     createProjectDirectory,

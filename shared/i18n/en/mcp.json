@@ -1,0 +1,82 @@
+{
+  "title": "MCP Servers",
+  "new": "New MCP server",
+  "empty": "No MCP servers yet. Add one to expose extra tools to your agents.",
+  "count": "{{count}} server(s)",
+  "loading": "Loading…",
+  "refresh": "Refresh",
+  "actions_for": "Actions for",
+  "edit": "Edit",
+  "delete": "Delete",
+  "enabled": "Enabled",
+  "disabled": "Disabled",
+  "enable": "Enable",
+  "disable": "Disable",
+  "create_title": "New MCP server",
+  "edit_title": "Edit MCP server",
+  "field": {
+    "name": "Name",
+    "name_placeholder": "github",
+    "description": "Description",
+    "command_placeholder": "npx -y @modelcontextprotocol/server-github",
+    "env": "Environment variables",
+    "env_hint": "One KEY=value per line. Values are stored but never shown again.",
+    "scope": "Applies to",
+    "scope_global": "All workspaces",
+    "scope_project": "This workspace only",
+    "command_line": "Command",
+    "env_placeholder": "GITHUB_TOKEN=ghp_xxx\nAPI_KEY=sk-xxx"
+  },
+  "table": {
+    "name": "Name",
+    "scope": "Scope",
+    "status": "Status",
+    "updated": "Updated"
+  },
+  "saving": "Saving…",
+  "deleting": "Deleting…",
+  "created_toast": "Created \"{{name}}\"",
+  "updated_toast": "Updated \"{{name}}\"",
+  "deleted_toast": "Deleted \"{{name}}\"",
+  "confirm_delete_title": "Delete MCP server",
+  "confirm_delete_body": "Delete \"{{name}}\"? Sessions started afterwards will no longer have it.",
+  "error": {
+    "load": "Failed to load MCP servers",
+    "save": "Failed to save the MCP server",
+    "delete": "Failed to delete the MCP server",
+    "name_required": "Name is required",
+    "command_required": "Command is required",
+    "name_exists": "An MCP server with this name already exists",
+    "missing_required": "Please fill in the required field(s)",
+    "test": "Failed to run the test"
+  },
+  "choose_preset": "Choose a server",
+  "custom": "Custom (advanced)",
+  "custom_desc": "Write the command line yourself",
+  "required": "Required",
+  "docs": "Get a token",
+  "back": "Back",
+  "presets": {
+    "github": {
+      "desc": "Issues, pull requests, reviews and cross-repository code search."
+    },
+    "playwright": {
+      "desc": "Browser automation for the agent: navigate, interact and capture screenshots to verify front-end changes."
+    },
+    "postgres": {
+      "desc": "Read-only database access: inspect schemas and run SQL queries."
+    },
+    "memory": {
+      "desc": "Persistent cross-session memory for project conventions and past decisions."
+    }
+  },
+  "need": {
+    "token": "Needs a token",
+    "browser": "Downloads a browser on first use"
+  },
+  "test": "Test",
+  "testing": "Testing…",
+  "test_ok": "Connection OK — the server answered the MCP handshake.",
+  "test_failed": "Connection failed",
+  "supported_agents_count": "Applied to {{count}} agents (hover for the list)"
+}

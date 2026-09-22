@@ -2,14 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  Settings2,
-  Container,
-  Users,
   Bot,
-  Globe,
+  Container,
   GitBranch,
+  Globe,
   Palette,
+  Plug,
+  Settings2,
   Sparkles,
+  Users,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { getAccessToken } from '../lib/api';
@@ -22,7 +23,7 @@ import { SidebarAccountMenu } from './AppSidebar';
 
 // 分组结构：admin 侧栏按「个人设置 / 全局设置」两级分组展示；
 // 非管理员不显示分组标题，平铺可见的非 admin 项。
-const SETTINGS_GROUPS = [
+export const SETTINGS_GROUPS = [
   {
     id: 'personal',
     labelKey: 'settings:groups.personal',
@@ -30,6 +31,7 @@ const SETTINGS_GROUPS = [
     tabs: [
       { id: 'preferences', labelKey: 'settings:tabs.preferences', icon: Palette, route: '/settings', adminOnly: false },
       { id: 'skills', labelKey: 'settings:tabs.skills', icon: Sparkles, route: '/skills', adminOnly: false },
+      { id: 'mcp', labelKey: 'settings:tabs.mcp', icon: Plug, route: '/mcp', adminOnly: false },
     ],
   },
   {

@@ -194,6 +194,9 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         if (fs.existsSync(path.join(wtDir, '.git'))) return wtDir;
 
         fs.mkdirSync(path.dirname(wtDir), { recursive: true });
+        // The sandbox writes git objects/index here (worktree is mounted rw) and
+        // blink's virtiofs checks the host owner, so hand it to that user.
+        workspace.ensureSandboxWritable(path.dirname(wtDir));
         const branchName = `agentharness/session-${runtimeId.slice(-4)}`;
         const baseBranch = project.repoDefaultBranch || 'main';
         try {
@@ -201,6 +204,7 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         } catch { /* offline or no remote */ }
         try {
             await execFileAsync('git', ['-C', mainDir, 'worktree', 'add', '-b', branchName, wtDir, `origin/${baseBranch}`]);
+            workspace.ensureSandboxWritable(wtDir, { recursive: true });
             return wtDir;
         } catch {
             try {
@@ -263,6 +267,7 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         } catch { /* offline or no remote */ }
         try {
             await execFileAsync('git', ['-C', mainDir, 'worktree', 'add', '-b', branchName, wtDir, `origin/${baseBranch}`]);
+            workspace.ensureSandboxWritable(wtDir, { recursive: true });
             return wtDir;
         } catch {
             try {
@@ -499,6 +504,8 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
         const openSession = async () => {
             const TRANSIENT_RE = /mkdir.*memory|memory dir|resource busy|temporarily|try again/i;
             const MAX_ATTEMPTS = 4;
+            const MAX_TIMEOUT_RETRIES = 1;
+            let timeoutRetries = 0;
             let lastErr = null;
             let reused = false;
             for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -507,6 +514,20 @@ class BoxLiteRuntimeProvider extends RuntimeProvider {
                     return { reused: false };
                 } catch (e) {
                     const errMsg = String(e);
+                    // 冷启动镜像准备（拉层 + 合成 rootfs）比客户端超时更久时，blink 会
+                    // 因客户端断开而取消初始化并清理 box（日志里是 "Box initialization
+                    // failed ... no cause captured"），只留下一条 Failed 会话记录。镜像层
+                    // 已落盘，重试会快得多 —— 所以超时按可重试处理：先清掉残留会话再重开。
+                    if (/blink request timeout/i.test(errMsg)) {
+                        lastErr = e;
+                        try { await this.client.deleteSession(name); } catch (_) { /* best-effort */ }
+                        timeoutRetries += 1;
+                        if (timeoutRetries <= MAX_TIMEOUT_RETRIES && attempt < MAX_ATTEMPTS) {
+                            await new Promise((r) => setTimeout(r, 1000 * timeoutRetries));
+                            continue;
+                        }
+                        throw new RuntimeError(`BoxLite ensureReady failed: ${e.message}`, 502);
+                    }
                     // Host blink-server returns 500 with this message when session is in Failed state
                     const isFailedStatus = /Invalid BoxStatus for initialization: Failed/i.test(errMsg);
                     if (/already|exists/i.test(errMsg) || isFailedStatus) {

@@ -9,7 +9,7 @@ function loadLocaleResources(locale) {
   const resources = {};
   const namespaces = [
     'common', 'auth', 'sessions', 'agents', 'users',
-    'settings', 'gateway', 'workspace', 'git', 'images', 'deploy', 'skills', 'loopTasks', 'errors',
+    'settings', 'gateway', 'workspace', 'git', 'images', 'deploy', 'skills', 'loopTasks', 'mcp', 'errors',
   ];
   for (const ns of namespaces) {
     const filePath = path.join(localeDir, `${ns}.json`);

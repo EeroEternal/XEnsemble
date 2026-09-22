@@ -36,8 +36,17 @@ const AGENT_LIFECYCLE = {
     },
     'hermes': {
         preInstall: 'rm -rf "$HOME/.hermes/hermes-agent" "$HOME/.hermes"/hermes-agent.broken-* 2>/dev/null; true',
-        install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup',
-        uninstall: 'rm -rf "$HOME/.hermes"; rm -f "$HOME/.local/bin/hermes"',
+        // The upstream installer clones github.com/NousResearch/hermes-agent, pulls
+        // Python deps from PyPI and downloads a ~187MB Playwright Chromium — all
+        // from hosts that stall on CN networks. Route them through mirrors, then
+        // verify the CLI exists (the installer can finish "successfully" without it).
+        install: 'git config --global url."https://gh-proxy.com/https://github.com/".insteadOf "https://github.com/"; '
+            + 'export UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple '
+            + 'PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple '
+            + 'PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright; '
+            + 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup',
+        verify: 'command -v hermes >/dev/null && hermes --version',
+        uninstall: 'rm -rf "$HOME/.hermes" /usr/local/lib/hermes-agent; rm -f "$HOME/.local/bin/hermes" /usr/local/bin/hermes',
         update: 'hermes update',
     },
     'openclaw': {

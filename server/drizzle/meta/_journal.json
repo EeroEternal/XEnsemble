@@ -309,6 +309,13 @@
       "when": 1790000000000,
       "tag": "0043_llm_usage_internal",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1790000000001,
+      "tag": "0044_mcp_servers",
+      "breakpoints": true
     }
   ]
 }

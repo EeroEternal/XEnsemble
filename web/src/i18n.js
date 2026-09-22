@@ -18,6 +18,7 @@ import skillsEn from '../../shared/i18n/en/skills.json';
 import loopTasksEn from '../../shared/i18n/en/loopTasks.json';
 import observabilityEn from '../../shared/i18n/en/observability.json';
 import notificationsEn from '../../shared/i18n/en/notifications.json';
+import mcpEn from '../../shared/i18n/en/mcp.json';
 
 import commonZh from '../../shared/i18n/zh/common.json';
 import authZh from '../../shared/i18n/zh/auth.json';
@@ -36,6 +37,7 @@ import skillsZh from '../../shared/i18n/zh/skills.json';
 import loopTasksZh from '../../shared/i18n/zh/loopTasks.json';
 import observabilityZh from '../../shared/i18n/zh/observability.json';
 import notificationsZh from '../../shared/i18n/zh/notifications.json';
+import mcpZh from '../../shared/i18n/zh/mcp.json';
 
 const savedLocale = (() => {
   try { return localStorage.getItem('xe_locale') || 'en'; } catch { return 'en'; }
@@ -63,6 +65,7 @@ i18next
         loopTasks: loopTasksEn,
         observability: observabilityEn,
         notifications: notificationsEn,
+        mcp: mcpEn,
       },
       zh: {
         common: commonZh,
@@ -82,6 +85,7 @@ i18next
         loopTasks: loopTasksZh,
         observability: observabilityZh,
         notifications: notificationsZh,
+        mcp: mcpZh,
       },
     },
     lng: savedLocale,

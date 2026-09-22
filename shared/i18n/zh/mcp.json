@@ -1,0 +1,82 @@
+{
+  "title": "MCP 服务",
+  "new": "新建 MCP 服务",
+  "empty": "还没有 MCP 服务。添加一个即可为 Agent 增加额外工具。",
+  "count": "共 {{count}} 个服务",
+  "loading": "加载中…",
+  "refresh": "刷新",
+  "actions_for": "操作对象",
+  "edit": "编辑",
+  "delete": "删除",
+  "enabled": "已启用",
+  "disabled": "已禁用",
+  "enable": "启用",
+  "disable": "禁用",
+  "create_title": "新建 MCP 服务",
+  "edit_title": "编辑 MCP 服务",
+  "field": {
+    "name": "名称",
+    "name_placeholder": "github",
+    "description": "描述",
+    "command_placeholder": "npx -y @modelcontextprotocol/server-github",
+    "env": "环境变量",
+    "env_hint": "每行一个 KEY=value。值会保存但不再回显。",
+    "scope": "生效范围",
+    "scope_global": "所有工作区",
+    "scope_project": "仅当前工作区",
+    "command_line": "命令",
+    "env_placeholder": "GITHUB_TOKEN=ghp_xxx\nAPI_KEY=sk-xxx"
+  },
+  "table": {
+    "name": "名称",
+    "scope": "范围",
+    "status": "状态",
+    "updated": "更新时间"
+  },
+  "saving": "保存中…",
+  "deleting": "删除中…",
+  "created_toast": "已创建「{{name}}」",
+  "updated_toast": "已更新「{{name}}」",
+  "deleted_toast": "已删除「{{name}}」",
+  "confirm_delete_title": "删除 MCP 服务",
+  "confirm_delete_body": "确定删除「{{name}}」？之后新建的会话将不再包含它。",
+  "error": {
+    "load": "加载 MCP 服务失败",
+    "save": "保存 MCP 服务失败",
+    "delete": "删除 MCP 服务失败",
+    "name_required": "名称必填",
+    "command_required": "命令必填",
+    "name_exists": "已存在同名 MCP 服务",
+    "missing_required": "请填写必填项",
+    "test": "测试失败"
+  },
+  "choose_preset": "选择要接入的服务",
+  "custom": "自定义（高级）",
+  "custom_desc": "自己填写命令行",
+  "required": "必填",
+  "docs": "获取 token",
+  "back": "返回",
+  "presets": {
+    "github": {
+      "desc": "访问仓库的 issue、PR、review，并支持跨仓库代码搜索。"
+    },
+    "playwright": {
+      "desc": "浏览器自动化：打开页面、交互、截图，用于验证前端改动。"
+    },
+    "postgres": {
+      "desc": "只读访问 PostgreSQL：查看表结构、执行 SQL 查询。"
+    },
+    "memory": {
+      "desc": "跨会话持久记忆：保存项目约定与历史决策。"
+    }
+  },
+  "need": {
+    "token": "需要 Token",
+    "browser": "首次会下载浏览器"
+  },
+  "test": "测试",
+  "testing": "测试中…",
+  "test_ok": "连接正常 — 服务已响应 MCP 握手。",
+  "test_failed": "连接失败",
+  "supported_agents_count": "生效于 {{count}} 个 Agent（悬停查看）"
+}

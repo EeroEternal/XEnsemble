@@ -15,7 +15,8 @@
     "quota": "Quota",
     "skills": "Skills",
     "gateway": "Gateway",
-    "language": "Language"
+    "language": "Language",
+    "mcp": "MCP"
   },
   "preferences": {
     "title": "Preferences",
