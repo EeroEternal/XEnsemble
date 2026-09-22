@@ -1,0 +1,1 @@
+ALTER TABLE "skills" ADD COLUMN IF NOT EXISTS "files" jsonb NOT NULL DEFAULT '[]';

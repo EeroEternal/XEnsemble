@@ -46,11 +46,11 @@ export async function getSkill(id) {
   return res.json();
 }
 
-export async function createSkill({ title, content, tags = [], category = '', projectId = null, scripts = [] }) {
+export async function createSkill({ title, content, tags = [], category = '', projectId = null, scripts = [], files = [] }) {
   const res = await apiFetch('/api/v1/skills', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, content, tags, category: category || null, projectId, scripts }),
+    body: JSON.stringify({ title, content, tags, category: category || null, projectId, scripts, files }),
   });
   if (!res.ok) await throwApiError(res, 'Failed to create skill');
   return res.json();
@@ -149,6 +149,21 @@ export async function importSkillFromFiles(files) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ files }),
+  });
+  if (!res.ok) await throwApiError(res, 'Failed to import skills');
+  return res.json();
+}
+
+/**
+ * 0025：通过 npx（Vercel Labs `skills` CLI）从远程源导入技能。
+ * @param {{source: string, skill?: string}} params source 如 owner/repo 或仓库 URL
+ * @returns {Promise<{ imported: number, skills: object[], blocked: object[] }>}
+ */
+export async function importSkillFromNpx({ source, skill = '' }) {
+  const res = await apiFetch('/api/v1/skills/import-npx', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source, skill: skill || undefined }),
   });
   if (!res.ok) await throwApiError(res, 'Failed to import skills');
   return res.json();

@@ -144,9 +144,10 @@ function trimSnippet(text) {
  * @param {object} opts
  * @param {string} [opts.content] SKILL.md 全文
  * @param {Array<{path:string,content:string}>} [opts.scripts]
+ * @param {Array<{path:string,content:string}>} [opts.files] 0046：references/ 与 assets/ 配套文件
  * @returns {{ ok: boolean, errors: Array, warnings: Array }}
  */
-function scanSkill({ content, scripts = [] } = {}) {
+function scanSkill({ content, scripts = [], files = [] } = {}) {
     const findings = [];
     const seen = new Set();
 
@@ -179,6 +180,11 @@ function scanSkill({ content, scripts = [] } = {}) {
     for (const s of Array.isArray(scripts) ? scripts : []) {
         scanText(s?.content, s?.path || 'scripts/script', true);
     }
+    // 0046：references/ 与 assets/ 同为「文档型」载荷（模板/参考里嵌的代码示例
+    // 会被 Agent 复用执行），故按 ERROR 级扫描，不触发 warning。
+    for (const f of Array.isArray(files) ? files : []) {
+        scanText(f?.content, f?.path || 'references/file', false);
+    }
 
     const errors = findings.filter((f) => f.severity === 'error');
     const warnings = findings.filter((f) => f.severity === 'warning');
@@ -189,8 +195,8 @@ function scanSkill({ content, scripts = [] } = {}) {
  * 供 skillService 各写入口调用：error 级命中即抛 skill_script_blocked。
  * @returns {Array} warnings（放行但需提示作者）
  */
-function assertSkillSafe({ content, scripts } = {}) {
-    const scan = scanSkill({ content, scripts });
+function assertSkillSafe({ content, scripts, files } = {}) {
+    const scan = scanSkill({ content, scripts, files });
     if (!scan.ok) {
         const err = new Error(
             `skill contains blocked patterns: ${scan.errors.map((e) => `${e.path}:${e.rule}`).join(', ')}`,

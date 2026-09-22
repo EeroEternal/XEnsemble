@@ -43,13 +43,13 @@ test('createSkill creates a private draft with normalized tags', async () => {
     const userId = await makeUser();
     const skill = await svc.createSkill({
         userId,
-        title: '  跑通 PostgreSQL 迁移  ',
+        title: '  postgres-migration  ',
         content: '标准流程',
         tags: ['drizzle', '', 'postgres', 'drizzle'],
         category: 'database',
     });
     assert.match(skill.id, /^skl_/);
-    assert.equal(skill.title, '跑通 PostgreSQL 迁移');
+    assert.equal(skill.title, 'postgres-migration');
     assert.deepEqual(skill.tags, ['drizzle', 'postgres']);
     assert.equal(skill.status, 'draft');
     assert.equal(skill.visibility, 'private');
@@ -165,7 +165,7 @@ test('getSkill forbids cross-user access to private skill', async () => {
 
 test('publish/unpublish toggles market visibility', async () => {
     const userId = await makeUser();
-    const skill = await svc.createSkill({ userId, title: 'public skill', content: '---\nname: public-skill\ndescription: d\n---\nbody', category: 'workflow' });
+    const skill = await svc.createSkill({ userId, title: 'public-skill', content: '---\nname: public-skill\ndescription: d\n---\nbody', category: 'workflow' });
     await svc.changeStatus(userId, skill.id, 'activate');
 
     const published = await svc.publishSkill(userId, skill.id);
@@ -186,8 +186,8 @@ test('publish/unpublish toggles market visibility', async () => {
 
 test('listMarket filters by category and q, paginates', async () => {
     const userId = await makeUser();
-    const a = await svc.createSkill({ userId, title: 'DB 迁移', content: '---\nname: db-migration\ndescription: migration\n---\nbody', category: 'database' });
-    const b = await svc.createSkill({ userId, title: 'Git 规范', content: '---\nname: git-convention\ndescription: commit\n---\nbody', category: 'workflow' });
+    const a = await svc.createSkill({ userId, title: 'db-migration', content: '---\nname: db-migration\ndescription: migration\n---\nbody', category: 'database' });
+    const b = await svc.createSkill({ userId, title: 'git-convention', content: '---\nname: git-convention\ndescription: commit\n---\nbody', category: 'workflow' });
     await svc.changeStatus(userId, a.id, 'activate');
     await svc.changeStatus(userId, b.id, 'activate');
     await svc.publishSkill(userId, a.id);
@@ -209,7 +209,7 @@ test('listMarket filters by category and q, paginates', async () => {
 test('installSkill copies a public skill to private draft and bumps install_count', async () => {
     const owner = await makeUser();
     const installer = await makeUser();
-    const source = await svc.createSkill({ userId: owner, title: '共享技能', content: '---\nname: shared-skill\ndescription: content\n---\nbody', tags: ['x'], category: 'debug' });
+    const source = await svc.createSkill({ userId: owner, title: 'shared-skill', content: '---\nname: shared-skill\ndescription: content\n---\nbody', tags: ['x'], category: 'debug' });
     await svc.changeStatus(owner, source.id, 'activate');
     await svc.publishSkill(owner, source.id);
 
@@ -218,7 +218,7 @@ test('installSkill copies a public skill to private draft and bumps install_coun
     assert.equal(installed.status, 'draft');
     assert.equal(installed.source, 'installed');
     assert.equal(installed.forkedFrom, source.id);
-    assert.equal(installed.title, '共享技能');
+    assert.equal(installed.title, 'shared-skill');
     assert.equal(installed.visibility, 'private');
 
     const updated = await svc.getSkill(owner, source.id);
@@ -232,7 +232,7 @@ test('installSkill copies a public skill to private draft and bumps install_coun
 test('installSkill rejects private / unpublished skill', async () => {
     const owner = await makeUser();
     const installer = await makeUser();
-    const privateSkill = await svc.createSkill({ userId: owner, title: '私有', content: 'c' });
+    const privateSkill = await svc.createSkill({ userId: owner, title: 'private-skill', content: 'c' });
     await assert.rejects(
         () => svc.installSkill(installer, privateSkill.id),
         (e) => e.code === 'skill_not_found',
@@ -256,7 +256,7 @@ test('createSkill stores and returns validated scripts (0020)', async () => {
     const userId = await makeUser();
     const skill = await svc.createSkill({
         userId,
-        title: 'Auto fix',
+        title: 'auto-fix',
         content: 'c',
         scripts: [
             { path: 'scripts/main.sh', content: '#!/bin/bash' },
@@ -281,7 +281,7 @@ test('installSkill copies scripts to the new copy', async () => {
     const installer = await makeUser();
     const source = await svc.createSkill({
         userId: owner,
-        title: '共享脚本技能',
+        title: 'shared-script',
         content: '---\nname: shared-script\ndescription: d\n---\nbody',
         scripts: [{ path: 'scripts/run.sh', content: '#!/bin/bash\nrun' }],
     });
@@ -295,6 +295,133 @@ test('installSkill copies scripts to the new copy', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// 0046：Agent Skills 配套资源文件（references/ 与 assets/）
+// ---------------------------------------------------------------------------
+
+test('createSkill stores and returns validated files (0046)', async () => {
+    const userId = await makeUser();
+    const skill = await svc.createSkill({
+        userId,
+        title: 'with-files',
+        content: 'c',
+        files: [
+            { path: 'references/guide.md', content: '# Guide' },
+            { path: 'assets/templates/row.md', content: 'template' },
+            { path: 'scripts/run.sh', content: 'x' },        // 过滤：非 references/assets
+            { path: 'references/../evil.md', content: 'x' }, // 过滤：穿越
+            { path: 'references/bin.md', content: 'a\u0000b' }, // 过滤：二进制
+            { path: 'references/empty.md', content: '' },    // 过滤：空内容
+        ],
+    });
+    assert.deepEqual(skill.files, [
+        { path: 'references/guide.md', content: '# Guide' },
+        { path: 'assets/templates/row.md', content: 'template' },
+    ]);
+});
+
+test('updateSkill patches files (0046)', async () => {
+    const userId = await makeUser();
+    const skill = await svc.createSkill({ userId, title: 't', content: 'c' });
+    const updated = await svc.updateSkill(userId, skill.id, {
+        files: [{ path: 'references/notes.md', content: 'note' }],
+    });
+    assert.deepEqual(updated.files, [{ path: 'references/notes.md', content: 'note' }]);
+});
+
+test('installSkill copies files and syncs source hash (0046)', async () => {
+    const owner = await makeUser();
+    const installer = await makeUser();
+    const source = await svc.createSkill({
+        userId: owner,
+        title: 'shared-files',
+        content: '---\nname: shared-files\ndescription: d\n---\nbody',
+        files: [{ path: 'references/guide.md', content: '# Guide' }],
+    });
+    await svc.changeStatus(owner, source.id, 'activate');
+    await svc.publishSkill(owner, source.id);
+
+    const copy = await svc.installSkill(installer, source.id);
+    assert.deepEqual(copy.files, [{ path: 'references/guide.md', content: '# Guide' }]);
+    // 源未变更 → 无更新
+    const info = await svc.checkInstallUpdate(installer, copy);
+    assert.equal(info.hasUpdate, false);
+
+    // 源文件变更 → 检测到更新（active 技能需先归档才能编辑）
+    await svc.unpublishSkill(owner, source.id);
+    await svc.changeStatus(owner, source.id, 'archive');
+    await svc.updateSkill(owner, source.id, { files: [{ path: 'references/guide.md', content: '# Guide v2' }] });
+    await svc.changeStatus(owner, source.id, 'restore');
+    await svc.publishSkill(owner, source.id);
+    const info2 = await svc.checkInstallUpdate(installer, copy);
+    assert.equal(info2.hasUpdate, true);
+});
+
+test('importSkillFromPath imports references/ and assets/ files (0046)', async () => {
+    const userId = await makeUser();
+    const root = await makeTempSkillRoot({ withFiles: true });
+    try {
+        const { imported } = await svc.importSkillFromPath(userId, root);
+        assert.equal(imported.length, 1);
+        const files = imported[0].files;
+        assert.deepEqual(
+            files.map((f) => f.path).sort(),
+            ['assets/template.md', 'references/guide.md'],
+        );
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('importSkillFromPath reports dropped files instead of silently discarding (0046)', async () => {
+    const userId = await makeUser();
+    const root = await makeTempSkillRoot();
+    try {
+        await mkdir(path.join(root, 'fix-pool', 'references'));
+        // 超过 MAX_FILES 时计入 warnings；此处用二进制文件触发 dropped 明细
+        await writeFile(path.join(root, 'fix-pool', 'references', 'bin.dat'), Buffer.from([0x00, 0x01, 0x02]));
+        const { imported } = await svc.importSkillFromPath(userId, root);
+        assert.equal(imported.length, 1);
+        assert.deepEqual(imported[0].importWarnings, [
+            { path: 'references/bin.dat', reason: 'binary file skipped' },
+        ]);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('importSkillFromPath keeps more than 3 scripts (limits unified, 0046)', async () => {
+    const userId = await makeUser();
+    const root = await makeTempSkillRoot();
+    try {
+        for (let i = 2; i <= 5; i += 1) {
+            await writeFile(path.join(root, 'fix-pool', 'scripts', `run${i}.sh`), `#!/bin/bash\necho ${i}`);
+        }
+        const { imported } = await svc.importSkillFromPath(userId, root);
+        assert.equal(imported.length, 1);
+        assert.equal(imported[0].scripts.length, 5);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('importSkillFromPath collects scripts from one-level subdirs (0047)', async () => {
+    const userId = await makeUser();
+    const root = await makeTempSkillRoot();
+    try {
+        await mkdir(path.join(root, 'fix-pool', 'scripts', 'lib'));
+        await writeFile(path.join(root, 'fix-pool', 'scripts', 'lib', 'helper.py'), 'print("hi")');
+        const { imported } = await svc.importSkillFromPath(userId, root);
+        assert.equal(imported.length, 1);
+        assert.deepEqual(
+            imported[0].scripts.map((s) => s.path).sort(),
+            ['scripts/lib/helper.py', 'scripts/run.sh'],
+        );
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+// ---------------------------------------------------------------------------
 // 0022：本地目录导入（外部开源技能安装）
 // ---------------------------------------------------------------------------
 
@@ -302,7 +429,7 @@ const { mkdtemp, mkdir, writeFile, rm } = require('fs/promises');
 const os = require('os');
 const path = require('path');
 
-async function makeTempSkillRoot({ withScripts = true } = {}) {
+async function makeTempSkillRoot({ withScripts = true, withFiles = false } = {}) {
     const root = await mkdtemp(path.join(os.tmpdir(), 'xe-skill-import-'));
     const skillDir = path.join(root, 'fix-pool');
     await mkdir(skillDir);
@@ -317,6 +444,12 @@ async function makeTempSkillRoot({ withScripts = true } = {}) {
     if (withScripts) {
         await writeFile(path.join(skillDir, 'scripts', 'run.sh'), '#!/bin/bash\necho fix');
         await writeFile(path.join(skillDir, 'scripts', 'ignore.txt'), 'not a script');
+    }
+    if (withFiles) {
+        await mkdir(path.join(skillDir, 'references')).catch(() => {});
+        await mkdir(path.join(skillDir, 'assets')).catch(() => {});
+        await writeFile(path.join(skillDir, 'references', 'guide.md'), '# Guide');
+        await writeFile(path.join(skillDir, 'assets', 'template.md'), 'template');
     }
     return root;
 }

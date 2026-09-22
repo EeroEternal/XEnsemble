@@ -24,14 +24,16 @@ const DEDUP_MAX_TOKENS = 256;
 const TITLE_SIMILARITY_THRESHOLD = 0.85;
 const MAX_TAGS = 10;
 const MAX_TITLE = 100;
-// 正文上限留 frontmatter 余量（skillService.content ≤ 16384）
+// 正文上限（LLM 提炼产物通常远小于此；导入侧另有 MAX_SKILL_CONTENT）
 const MAX_BODY = 16000;
 
 // 脚本级 Skill（0020）：从会话工具调用提取可执行命令 → LLM 整理为脚本
 const MAX_COMMANDS = 50;            // 喂给 LLM 的命令序列上限
-const MAX_SCRIPTS = 3;              // 单技能脚本文件数上限
-const MAX_SCRIPT_BYTES = 32768;     // 单脚本大小上限
-const SCRIPT_PATH_RE = /^scripts\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+// 0046：与导入侧 skillService 统一（此前 3 个/32KB，会在第 4 个脚本或 32-64KB 脚本时静默丢弃）
+const MAX_SCRIPTS = 10;             // 单技能脚本文件数上限
+const MAX_SCRIPT_BYTES = 65536;     // 单脚本大小上限
+// 0047：允许 scripts/ 下一层子目录（与导入/落库侧 skillService 白名单一致）
+const SCRIPT_PATH_RE = /^scripts\/(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/)?[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SCRIPT_EXT_RE = /\.(sh|bash|py|js|mjs|ts|ps1|sql)$/;
 // 判定为"命令型工具"的 tool 名（转小写比对）
 const COMMAND_TOOLS = new Set(['bash', 'shell', 'terminal', 'run_shell', 'command']);

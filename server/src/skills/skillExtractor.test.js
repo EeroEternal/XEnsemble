@@ -88,9 +88,9 @@ test('extract returns SKILL.md content with title = name', async () => {
         summary: { overview: 'fix pool leak', keyDecisions: [], filesTouched: [] },
         turns: [],
     });
-    assert.equal(out.title, 'Fix Postgres pool leak');
+    assert.equal(out.title, 'fix-postgres-pool-leak');
     assert.equal(out.description, 'DB pool debugging recipe');
-    assert.ok(out.content.startsWith('---\nname: Fix Postgres pool leak'));
+    assert.ok(out.content.startsWith('---\nname: fix-postgres-pool-leak'));
     assert.ok(out.content.includes('description: DB pool debugging recipe'));
     assert.ok(out.content.includes('## Steps'));
     assert.deepEqual(out.tags, ['postgres']);
@@ -132,14 +132,16 @@ test('validateScripts accepts whitelisted script paths and rejects traversal', (
     const ok = extractor.validateScripts([
         { path: 'scripts/main.sh', content: '#!/bin/bash' },
         { path: 'scripts/check.py', content: 'x' },
+        { path: 'scripts/lib/helper.py', content: 'x' }, // 0047：允许一层子目录
     ]);
-    assert.deepEqual(ok.map((s) => s.path), ['scripts/main.sh', 'scripts/check.py']);
+    assert.deepEqual(ok.map((s) => s.path), ['scripts/main.sh', 'scripts/check.py', 'scripts/lib/helper.py']);
 
     const bad = extractor.validateScripts([
         { path: '../evil.sh', content: 'x' },      // 穿越
         { path: 'scripts/noext', content: 'x' },   // 无白名单扩展名
         { path: 'scripts/empty.sh', content: '' }, // 空内容
-        { path: 'scripts/big.sh', content: 'x'.repeat(40000) }, // 超 32KB
+        { path: 'scripts/big.sh', content: 'x'.repeat(70000) }, // 超 64KB
+        { path: 'scripts/a/b/c.sh', content: 'x' }, // 超过一层子目录
     ]);
     assert.equal(bad.length, 0);
     assert.equal(extractor.validateScripts(null).length, 0);

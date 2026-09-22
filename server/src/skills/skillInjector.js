@@ -20,6 +20,7 @@
  */
 
 const { and, eq, or, isNull, inArray, sql } = require('drizzle-orm');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { db } = require('../db');
@@ -112,18 +113,23 @@ function isLandableSkill(skill) {
  * 注意：OpenCode 等 Agent 对技能目录名/frontmatter name 有硬校验
  * `^[a-z0-9]+(-[a-z0-9]+)*$`（小写字母数字 + 单连字符分隔），中文等
  * 非 ASCII 字符会被 Agent 静默拒绝（技能不出现在可用清单里）。因此
- * 这里丢弃全部非 `[a-z0-9]` 字符——纯中文标题会退化为 `skill`，
+ * 这里丢弃全部非 `[a-z0-9]` 字符——纯中文标题无 ASCII 残留，
  * 混合标题（如「跑通 PostgreSQL 迁移」）保留 ASCII 部分（`postgresql`）。
+ * 无 ASCII 残留时用原名的短哈希兜底（`skill-<8hex>`），避免所有纯中文技能
+ * 塌缩为同一个 `skill` 而互相撞名；哈希确定，同名重复写入仍幂等。
  */
 function slugify(name) {
-    const slug = String(name || '')
+    const raw = String(name || '');
+    const slug = raw
         .toLowerCase()
         .normalize('NFKD')
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
         .slice(0, 60)
         .replace(/^-+|-+$/g, '');
-    return slug && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug) ? slug : 'skill';
+    if (slug && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug)) return slug;
+    const hash = crypto.createHash('sha1').update(raw).digest('hex').slice(0, 8);
+    return `skill-${hash}`;
 }
 
 /**
@@ -337,6 +343,11 @@ async function writeSkillDirectory(adapter, rootDir, skill, targetRoot, options 
         if (typeof adapter.chmod === 'function') {
             await adapter.chmod(rootDir, path.posix.join(targetRoot, fileRel), 0o755);
         }
+    }
+    // 0046：references/ 与 assets/ 配套资源（按需读取，不 chmod）
+    for (const file of skill.files || []) {
+        const fileRel = safeRel(file.path, dirRel);
+        await adapter.writeFile(rootDir, path.posix.join(targetRoot, fileRel), String(file.content || ''));
     }
     // 0029：平台写入标记——cleanup 只清理带标记目录（保护用户/Agent 自建技能）
     if (options.markManaged && typeof adapter.writeFile === 'function') {

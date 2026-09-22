@@ -509,6 +509,20 @@ function SkillDetailDrawer({ skill, onClose }) {
             </div>
           )}
 
+          {Array.isArray(detail.files) && detail.files.length > 0 && (
+            <div className="border border-zinc-200 rounded-lg p-3 bg-zinc-50">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">{t('skills:field_files', { defaultValue: 'Resource files (optional, JSON array)' })}</div>
+              <div className="space-y-2">
+                {detail.files.map((f, i) => (
+                  <div key={i} className="border border-zinc-200 rounded-md bg-surface overflow-hidden">
+                    <div className="px-2.5 py-1 bg-zinc-100 text-[10px] font-mono text-zinc-500 border-b border-zinc-200 truncate">{f.path}</div>
+                    <pre className="px-2.5 py-2 text-xs text-zinc-700 whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">{f.content}</pre>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="border border-zinc-200 rounded-lg p-3 bg-zinc-50">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">{t('skills:detail_inject_preview')}</div>
             <pre className="text-xs text-zinc-600 leading-relaxed whitespace-pre-wrap font-mono">{`# 用户 AGENTS.md（仅一行引导指针，不污染 git）\n<!-- xe-skills-pointer:start -->\nXEnsemble Skills 索引详见 \`.xensemble/AGENTS.md\`（技能列表按需加载）\n<!-- xe-skills-pointer:end -->\n\n# 平台索引 .xensemble/AGENTS.md（gitignore 内）\n<!-- xe-skills:start -->\n## XEnsemble Skills\n\n### ${detail.title}\n${detail.description || ''}\n\n详见 .xensemble/skills/${(detail.title || '').toLowerCase().replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60)}/SKILL.md\n<!-- xe-skills:end -->`}</pre>

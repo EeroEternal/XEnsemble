@@ -24,11 +24,23 @@ const STATUS_TRANSITIONS = {
     archived: { restore: 'active' },
 };
 
-// 0020 脚本级 Skill：路径白名单（scripts/*，禁 `..` 穿越）、扩展名白名单、大小/数量上限
-const SCRIPT_PATH_RE = /^scripts\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-const SCRIPT_EXT_RE = /\.(sh|bash|py|js|mjs|ts|ps1|sql)$/;
-const MAX_SCRIPTS = 3;
-const MAX_SCRIPT_BYTES = 32768;
+// 0020 脚本级 Skill：路径白名单（scripts/* 或 scripts/<子目录>/*，禁 `..` 穿越）、
+// 扩展名白名单、大小/数量上限。0047：允许 scripts/ 下一层子目录（开源技能常见 scripts/lib/）。
+const SCRIPT_PATH_RE = /^scripts\/(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/)?[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const SCRIPT_EXT_RE = /\.(sh|bash|py|js|mjs|ts|ps1|sql|zsh)$/;
+// 0046：与导入侧统一（此前落库侧 3 个/32KB，会在导入第 4 个脚本或 32-64KB 脚本时静默丢弃）
+const MAX_SCRIPTS = 10;
+const MAX_SCRIPT_BYTES = 65536;
+
+// 0046 配套资源文件：Agent Skills 标准的 references/ 与 assets/（支持子目录）。
+// 仅接收文本文件（含 NUL 字节视为二进制，跳过）；超限项计入导入告警。
+const FILE_PATH_RE = /^(?:references|assets)\/[A-Za-z0-9][A-Za-z0-9._/-]{0,191}$/;
+const MAX_FILES = 100;
+const MAX_FILE_BYTES = 262144; // 256KB
+
+// 单技能正文上限（字符）。开源 Agent Skills（如 vercel-labs/agent-skills）常见
+// 16-20KB，故放宽到 64KB；DB 列为 text 无长度约束。
+const MAX_SKILL_CONTENT = 65536;
 
 function newSkillId() {
     return `skl_${randomBytes(8).toString('hex')}`;
@@ -37,8 +49,8 @@ function newSkillId() {
 /**
  * 计算技能内容哈希（content + scripts），用于 forkedFrom 更新检测。
  */
-function computeSourceHash(content, scripts = []) {
-    const payload = `${String(content || '')}\u0000${JSON.stringify(Array.isArray(scripts) ? scripts : [])}`;
+function computeSourceHash(content, scripts = [], files = []) {
+    const payload = `${String(content || '')}\u0000${JSON.stringify(Array.isArray(scripts) ? scripts : [])}\u0000${JSON.stringify(Array.isArray(files) ? files : [])}`;
     return createHash('sha256').update(payload).digest('hex');
 }
 
@@ -82,6 +94,28 @@ function parseScripts(scripts) {
     return out;
 }
 
+/**
+ * 0046 校验并归一化配套资源文件列表（references/ 与 assets/）。
+ * 丢弃非法项（路径穿越 / 非白名单目录 / 二进制 / 超限 / 空内容），保留前 MAX_FILES 项。
+ */
+function parseFiles(files) {
+    if (!Array.isArray(files)) return [];
+    const out = [];
+    for (const f of files) {
+        if (!f || typeof f !== 'object') continue;
+        const pathVal = String(f.path || '').trim();
+        const contentVal = String(f.content ?? '');
+        if (!FILE_PATH_RE.test(pathVal)) continue;
+        // 显式拒绝 `.` / `..` 段（正则允许点号，需单独兜底）
+        if (pathVal.split('/').some((seg) => !seg || seg === '.' || seg === '..')) continue;
+        if (!contentVal || contentVal.includes('\u0000')) continue; // 空文件 / 二进制跳过
+        if (Buffer.byteLength(contentVal, 'utf8') > MAX_FILE_BYTES) continue;
+        out.push({ path: pathVal, content: contentVal });
+        if (out.length >= MAX_FILES) break;
+    }
+    return out;
+}
+
 function parseDescription(content) {
     const m = /^---\s*\n([\s\S]*?)\n---/.exec(String(content || ''));
     if (!m) return '';
@@ -119,6 +153,7 @@ function mapRow(row) {
         title: row.title,
         content: row.content,
         scripts: Array.isArray(row.scripts) ? row.scripts : [],
+        files: Array.isArray(row.files) ? row.files : [],
         tags: Array.isArray(row.tags) ? row.tags : [],
         status: row.status,
         source: row.source,
@@ -185,7 +220,7 @@ function validateCreate({ title, content }) {
         err.statusCode = 400;
         throw err;
     }
-    if (trimmedContent.length > 16384) {
+    if (trimmedContent.length > MAX_SKILL_CONTENT) {
         const err = new Error('content too long');
         err.code = 'skill_validation_failed';
         err.statusCode = 400;
@@ -197,10 +232,10 @@ function validateCreate({ title, content }) {
 /**
  * 创建 skill（手动创建 / 从会话提炼入口）。
  */
-async function createSkill({ userId, title, content, tags = [], category = null, projectId = null, sessionId = null, source = 'manual', signals = null, confidence = null, scripts = null }) {
+async function createSkill({ userId, title, content, tags = [], category = null, projectId = null, sessionId = null, source = 'manual', signals = null, confidence = null, scripts = null, files = null }) {
     const { title: t, content: c } = validateCreate({ title, content });
     // P0 安全治理：创建入口静态扫描（error 级阻断，warning 级随返回值提示）
-    const scriptWarnings = assertSkillSafe({ content: c, scripts: parseScripts(scripts) });
+    const scriptWarnings = assertSkillSafe({ content: c, scripts: parseScripts(scripts), files: parseFiles(files) });
     const id = newSkillId();
     const now = Date.now();
     await db.insert(schema.skills).values({
@@ -211,6 +246,7 @@ async function createSkill({ userId, title, content, tags = [], category = null,
         title: t,
         content: c,
         scripts: parseScripts(scripts),
+        files: parseFiles(files),
         tags: parseTags(tags),
         status: 'draft',
         // 0022：支持外部导入 source='external'；其余归 auto/manual
@@ -264,7 +300,7 @@ async function listMySkills(userId, { status = null, q = '' } = {}) {
         if (!item.sourceHash) {
             try {
                 const src = await getSkill(userId, item.forkedFrom, { allowPublic: true });
-                const hash = computeSourceHash(src.content, src.scripts);
+                const hash = computeSourceHash(src.content, src.scripts, src.files);
                 await db.update(schema.skills)
                     .set({ sourceHash: hash, updatedAt: Date.now() })
                     .where(eq(schema.skills.id, item.id));
@@ -347,6 +383,7 @@ async function updateSkill(userId, skillId, patch = {}) {
     }
     if (patch.tags !== undefined) next.tags = parseTags(patch.tags);
     if (patch.scripts !== undefined) next.scripts = parseScripts(patch.scripts);
+    if (patch.files !== undefined) next.files = parseFiles(patch.files);
     if (patch.category !== undefined) next.category = CATEGORIES.includes(patch.category) ? patch.category : null;
     if (patch.projectId !== undefined) next.projectId = patch.projectId || null;
     next.updatedAt = Date.now();
@@ -355,6 +392,7 @@ async function updateSkill(userId, skillId, patch = {}) {
     const scriptWarnings = assertSkillSafe({
         content: next.content ?? skill.content,
         scripts: next.scripts ?? skill.scripts,
+        files: next.files ?? skill.files,
     });
 
     const oldProjectId = skill.projectId || null;
@@ -458,7 +496,7 @@ async function publishSkill(userId, skillId) {
     }
     // P0-1：发布时对最终内容+脚本再做一次静态扫描（防御纵深：创建/导入后的
     // 编辑可能引入新载荷）。
-    assertSkillSafe({ content: skill.content, scripts: skill.scripts });
+    assertSkillSafe({ content: skill.content, scripts: skill.scripts, files: skill.files });
     const now = Date.now();
     await db.update(schema.skills)
         .set({ visibility: 'public', publishedAt: now, updatedAt: now })
@@ -552,13 +590,13 @@ async function listMarket({ q = '', category = null, sort = 'hot', page = 1, pag
             const fork = forkMap.get(s.id);
             let forkHash = fork.sourceHash;
             if (!forkHash) {
-                forkHash = computeSourceHash(src.content, src.scripts);
+                forkHash = computeSourceHash(src.content, src.scripts, src.files);
                 await db.update(schema.skills)
                     .set({ sourceHash: forkHash, updatedAt: Date.now() })
                     .where(eq(schema.skills.id, fork.id));
                 s.hasUpdate = false;
             } else {
-                s.hasUpdate = forkHash !== computeSourceHash(src.content, src.scripts);
+                s.hasUpdate = forkHash !== computeSourceHash(src.content, src.scripts, src.files);
             }
         }
     }
@@ -610,7 +648,7 @@ async function installSkill(userId, skillId) {
     if (existing[0]) {
         const existingSkill = mapRow(existing[0]);
         if (!existingSkill.sourceHash) {
-            const hash = computeSourceHash(source.content, source.scripts);
+            const hash = computeSourceHash(source.content, source.scripts, source.files);
             await db.update(schema.skills)
                 .set({ sourceHash: hash, updatedAt: Date.now() })
                 .where(eq(schema.skills.id, existingSkill.id));
@@ -621,7 +659,7 @@ async function installSkill(userId, skillId) {
 
     const id = newSkillId();
     const now = Date.now();
-    const sourceHash = computeSourceHash(source.content, source.scripts);
+    const sourceHash = computeSourceHash(source.content, source.scripts, source.files);
     await db.transaction(async (tx) => {
         await tx.insert(schema.skills).values({
             id,
@@ -631,6 +669,7 @@ async function installSkill(userId, skillId) {
             title: source.title,
             content: source.content,
             scripts: Array.isArray(source.scripts) ? source.scripts : [],
+            files: Array.isArray(source.files) ? source.files : [],
             tags: source.tags,
             status: 'draft',
             source: 'installed',
@@ -674,12 +713,13 @@ async function syncSkillFromSource(userId, skillId) {
         err.statusCode = 404;
         throw err;
     }
-    const sourceHash = computeSourceHash(source.content, source.scripts);
+    const sourceHash = computeSourceHash(source.content, source.scripts, source.files);
     await db.update(schema.skills)
         .set({
             title: source.title,
             content: source.content,
             scripts: Array.isArray(source.scripts) ? source.scripts : [],
+            files: Array.isArray(source.files) ? source.files : [],
             tags: source.tags,
             category: source.category,
             sourceHash,
@@ -707,7 +747,7 @@ async function checkInstallUpdate(userId, skill) {
     if (source.visibility !== 'public' || source.publishedAt == null) {
         return { hasUpdate: false, sourceAvailable: false };
     }
-    const sourceHash = computeSourceHash(source.content, source.scripts);
+    const sourceHash = computeSourceHash(source.content, source.scripts, source.files);
     return {
         hasUpdate: sourceHash !== (skill.sourceHash || null),
         sourceAvailable: true,
@@ -781,14 +821,16 @@ const { readFile, readdir } = require('fs/promises');
 
 const IMPORT_MAX_DIR_DEPTH = 6;
 const IMPORT_MAX_DIRS = 200;
-const IMPORT_MAX_SCRIPTS = 10;
-const IMPORT_MAX_SCRIPT_BYTES = 65536;
 const IMPORT_MAX_FILES = 500;       // 0024：上传文件总数上限
 const IMPORT_MAX_FILE_BYTES = 262144; // 0024：单文件上限 256KB
 // 导入允许的脚本扩展名（与 scripts 白名单一致 + 常见开源技能格式）
 const IMPORT_SCRIPT_EXT_RE = /\.(sh|bash|py|js|mjs|ts|ps1|sql|zsh)$/;
 // 合法 frontmatter：name + description 都必填
 const FRONTMATTER_RE = /^---\s*\n([\s\S]*?)\n---/;
+// 0046：整目录导入时，SKILL.md 与 scripts/ 之外的标准配套目录
+const IMPORT_ASSET_DIRS = ['references', 'assets'];
+const IMPORT_ASSET_MAX_DEPTH = 4;
+const IMPORT_ASSET_MAX_FILES = MAX_FILES;
 
 function parseFrontmatter(content) {
     const m = FRONTMATTER_RE.exec(String(content || ''));
@@ -801,15 +843,100 @@ function parseFrontmatter(content) {
 }
 
 /**
+ * 0047：收集 scripts/ 下的脚本，允许一层子目录（开源技能常见 scripts/lib/）。
+ * 返回 { scripts, warnings }——warnings 记录被丢弃的脚本与原因（供导入结果提示）。
+ */
+async function collectScripts(skillDir) {
+    const scripts = [];
+    const warnings = [];
+    const scriptsDir = path.join(skillDir, 'scripts');
+    const stack = [{ abs: scriptsDir, rel: 'scripts', depth: 0 }];
+    while (stack.length > 0) {
+        const { abs, rel, depth } = stack.pop();
+        const entries = await readdir(abs, { withFileTypes: true }).catch(() => []);
+        for (const entry of entries) {
+            if (entry.name.startsWith('.')) continue;
+            const childAbs = path.join(abs, entry.name);
+            const childRel = `${rel}/${entry.name}`;
+            if (entry.isDirectory()) {
+                if (depth < 1) stack.push({ abs: childAbs, rel: childRel, depth: depth + 1 });
+                continue;
+            }
+            if (!entry.isFile()) continue;
+            if (!IMPORT_SCRIPT_EXT_RE.test(entry.name)) continue;
+            if (scripts.length >= MAX_SCRIPTS) {
+                warnings.push({ path: childRel, reason: `too many scripts (max ${MAX_SCRIPTS})` });
+                continue;
+            }
+            const content = await readFile(childAbs, 'utf8').catch(() => '');
+            if (!content) continue;
+            if (Buffer.byteLength(content, 'utf8') > MAX_SCRIPT_BYTES) {
+                warnings.push({ path: childRel, reason: `script too large (max ${MAX_SCRIPT_BYTES} bytes)` });
+                continue;
+            }
+            scripts.push({ path: childRel, content });
+        }
+    }
+    return { scripts, warnings };
+}
+
+/**
+ * 0046：递归收集技能目录下 references/ 与 assets/ 的文本文件。
+ * 返回 { files, dropped }——dropped 记录被丢弃的文件与原因（供导入结果提示，不再静默）。
+ */
+async function collectAssetFiles(skillDir) {
+    const files = [];
+    const dropped = [];
+    for (const dirName of IMPORT_ASSET_DIRS) {
+        const absDir = path.join(skillDir, dirName);
+        const stack = [{ abs: absDir, rel: dirName, depth: 0 }];
+        while (stack.length > 0 && files.length < IMPORT_ASSET_MAX_FILES) {
+            const { abs, rel, depth } = stack.pop();
+            const entries = await readdir(abs, { withFileTypes: true }).catch(() => []);
+            for (const entry of entries) {
+                if (entry.name.startsWith('.')) continue;
+                const childAbs = path.join(abs, entry.name);
+                const childRel = `${rel}/${entry.name}`;
+                if (entry.isDirectory()) {
+                    if (depth < IMPORT_ASSET_MAX_DEPTH) stack.push({ abs: childAbs, rel: childRel, depth: depth + 1 });
+                    continue;
+                }
+                if (!entry.isFile()) continue;
+                if (files.length >= IMPORT_ASSET_MAX_FILES) {
+                    dropped.push({ path: childRel, reason: `too many files (max ${IMPORT_ASSET_MAX_FILES})` });
+                    continue;
+                }
+                const content = await readFile(childAbs, 'utf8').catch(() => null);
+                if (content === null) {
+                    dropped.push({ path: childRel, reason: 'unreadable file skipped' });
+                    continue;
+                }
+                if (content.includes('\u0000')) {
+                    dropped.push({ path: childRel, reason: 'binary file skipped' });
+                    continue;
+                }
+                if (Buffer.byteLength(content, 'utf8') > MAX_FILE_BYTES) {
+                    dropped.push({ path: childRel, reason: `file too large (max ${MAX_FILE_BYTES} bytes)` });
+                    continue;
+                }
+                files.push({ path: childRel, content });
+            }
+        }
+    }
+    return { files, dropped };
+}
+
+/**
  * 0022：从本地目录导入符合 Agent Skills 目录标准的技能。
  * - 输入 dirPath：技能目录的父目录（含一个或多个 <name>/SKILL.md 子目录），或直接指向技能目录本身
  * - 校验：SKILL.md 存在 + frontmatter 含 name/description + 目录名与 name 匹配
  * - scripts：复制 <name>/scripts/* 白名单扩展名脚本（≤10 个 / 单个 ≤64KB）
+ * - 0046 files：复制 <name>/references/、<name>/assets/ 下的文本文件（≤100 个 / 单个 ≤256KB）
  * - 落库：source='external'，status='draft'（激活后由注入器落盘到 Agent 目录）
  *
  * @param {string} userId
  * @param {string} dirPath 本地目录绝对路径（服务端可见）
- * @returns {Promise<Array<object>>} 导入成功的技能列表
+ * @returns {Promise<{imported: object[], blocked: object[], skipped: object[]}>}
  */
 async function importSkillFromPath(userId, dirPath) {
     if (!dirPath || typeof dirPath !== 'string') {
@@ -837,6 +964,7 @@ async function importSkillFromPath(userId, dirPath) {
 
     const imported = [];
     const blocked = [];
+    const skipped = [];
     for (const skillDir of skillDirs) {
         const skillMdPath = path.join(skillDir, 'SKILL.md');
         const content = await readFile(skillMdPath, 'utf8').catch(() => null);
@@ -850,19 +978,14 @@ async function importSkillFromPath(userId, dirPath) {
         const nn = normalizeName(fm.name);
         if (!nd || !nn || !nd.includes(nn)) continue;
 
-        const scripts = [];
-        const scriptsDir = path.join(skillDir, 'scripts');
-        const scriptEntries = await readdir(scriptsDir, { withFileTypes: true }).catch(() => []);
-        for (const entry of scriptEntries) {
-            if (!entry.isFile()) continue;
-            if (!IMPORT_SCRIPT_EXT_RE.test(entry.name)) continue;
-            const scriptPath = path.join(scriptsDir, entry.name);
-            const scriptContent = await readFile(scriptPath, 'utf8').catch(() => '');
-            if (!scriptContent) continue;
-            if (Buffer.byteLength(scriptContent, 'utf8') > IMPORT_MAX_SCRIPT_BYTES) continue;
-            scripts.push({ path: `scripts/${entry.name}`, content: scriptContent });
-            if (scripts.length >= IMPORT_MAX_SCRIPTS) break;
-        }
+        const warnings = [];
+        // 0047：scripts/ 支持一层子目录（scripts/lib/helper.py）
+        const { scripts, warnings: scriptWarnings } = await collectScripts(skillDir);
+        warnings.push(...scriptWarnings);
+
+        // 0046：references/ 与 assets/ 文本文件一并导入（Agent Skills 标准配套资源）
+        const { files, dropped } = await collectAssetFiles(skillDir);
+        warnings.push(...dropped);
 
         try {
             const skill = await createSkill({
@@ -870,15 +993,23 @@ async function importSkillFromPath(userId, dirPath) {
                 title: slugify(fm.name),
                 content,
                 scripts,
+                files,
                 category: null,
                 source: 'external',
                 confidence: null,
             });
+            // 0046：被丢弃的脚本/资源文件明细（超限/二进制），随导入结果告知用户
+            if (warnings.length > 0) skill.importWarnings = warnings;
             imported.push(skill);
         } catch (err) {
             // P0 安全治理：安全扫描命中的技能跳过（不中断整批导入），明细随返回值告知用户
             if (err.code === 'skill_script_blocked') {
                 blocked.push({ name: fm.name, findings: err.details || [] });
+                continue;
+            }
+            // 正文/标题超限：跳过该技能，不中断整批导入（开源技能常见超长 SKILL.md）
+            if (err.code === 'skill_validation_failed') {
+                skipped.push({ name: fm.name, reason: err.message });
                 continue;
             }
             throw err;
@@ -892,12 +1023,19 @@ async function importSkillFromPath(userId, dirPath) {
             err.details = blocked;
             throw err;
         }
+        if (skipped.length > 0) {
+            const err = new Error(`all imported skills skipped (${skipped.map((s) => `${s.name}: ${s.reason}`).join(', ')})`);
+            err.code = 'skill_import_invalid';
+            err.statusCode = 400;
+            err.details = skipped;
+            throw err;
+        }
         const err = new Error('no valid skills found (need SKILL.md with name+description, dir name matching)');
         err.code = 'skill_import_invalid';
         err.statusCode = 400;
         throw err;
     }
-    return { imported, blocked };
+    return { imported, blocked, skipped };
 }
 
 async function walkSkillDirs(dir, depth, acc) {
@@ -965,6 +1103,150 @@ async function importSkillFromUpload(userId, files) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 0025：npx 导入（Vercel Labs `skills` CLI，从远程源拉取 Agent Skills）
+// ---------------------------------------------------------------------------
+
+const NPX_TIMEOUT_MS = 180_000;
+const NPX_MAX_OUTPUT_BYTES = 512 * 1024;
+// 仅允许远程源形态（owner/repo、https/git/ssh URL、git@host:path）：
+// 首字符必须是字母数字，天然拒绝 `-` 开头（防止被 CLI 当作 flag），
+// 也不接受本地路径（避免借 CLI 读取宿主任意目录）。
+const NPX_SOURCE_RE = /^(?:[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9._/-]+|(?:https?|git|ssh):\/\/[^\s]+|git@[^\s:]+:[^\s]+)$/;
+const NPX_SKILL_RE = /^[A-Za-z0-9*][A-Za-z0-9._*-]{0,63}$/;
+
+function npxImportError(message, code = 'skill_npx_failed', statusCode = 400) {
+    const err = new Error(message);
+    err.code = code;
+    err.statusCode = statusCode;
+    return err;
+}
+
+/**
+ * 执行 npx skills CLI：stdin 关闭（避免交互挂起）、超时 SIGKILL、输出截断。
+ * 参数以数组传入（不走 shell），杜绝命令注入。
+ */
+function runNpxSkills(args, { cwd, timeoutMs = NPX_TIMEOUT_MS, log } = {}) {
+    const { spawn } = require('child_process');
+    const { resolveExecutable, enrichPath } = require('../agents/agentProbe');
+    const npxBin = resolveExecutable('npx');
+    if (!npxBin) {
+        throw npxImportError('npx is not available on the server host', 'skill_npx_unavailable', 503);
+    }
+    const startedAt = Date.now();
+    log?.info?.({ bin: npxBin, args, cwd }, '[skills] npx spawn');
+    return new Promise((resolve, reject) => {
+        const child = spawn(npxBin, args, {
+            cwd,
+            env: {
+                ...process.env,
+                PATH: enrichPath(process.env),
+                DISABLE_TELEMETRY: '1',
+                DO_NOT_TRACK: '1',
+                GIT_TERMINAL_PROMPT: '0',
+                CI: '1',
+            },
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let out = '';
+        let settled = false;
+        const append = (d) => { if (out.length < NPX_MAX_OUTPUT_BYTES) out += String(d); };
+        const tail = () => out.trim().slice(-1000) || 'no output';
+        const fail = () => npxImportError(`npx skills failed: ${tail()}`);
+        const finish = (fn, value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            fn(value);
+        };
+        const timer = setTimeout(() => {
+            child.kill('SIGKILL');
+            log?.warn?.({ args, elapsedMs: Date.now() - startedAt }, '[skills] npx timed out, SIGKILL');
+            finish(reject, npxImportError(`npx skills timed out after ${Math.round(timeoutMs / 1000)}s`));
+        }, timeoutMs);
+        child.stdout.on('data', append);
+        child.stderr.on('data', append);
+        child.on('error', (err) => {
+            log?.error?.({ err, args }, '[skills] npx spawn error');
+            finish(reject, npxImportError(`failed to run npx: ${err.message}`));
+        });
+        child.on('close', (code) => {
+            log?.info?.({ code, elapsedMs: Date.now() - startedAt, output: tail() }, '[skills] npx closed');
+            if (code !== 0) { finish(reject, fail()); return; }
+            finish(resolve, { stdout: out });
+        });
+        // npx 会 fork npm / git 子进程，孙进程持有管道时 'close' 可能永不到来
+        // （同 hostGit 兜底），exit 后给 1s 收尾窗口。
+        child.on('exit', (code) => {
+            setTimeout(() => {
+                if (settled) return;
+                if (code === 0) finish(resolve, { stdout: out });
+                else finish(reject, fail());
+            }, 1000);
+        });
+    });
+}
+
+/**
+ * 0025：通过 npx 从远程源导入 Agent Skills。
+ *
+ * 在临时目录执行 `npx skills add <source> --copy -y -a universal`，
+ * 技能落到 <tmp>/.agents/skills/<name>/，再复用 importSkillFromPath
+ * 完成校验（frontmatter / 目录名匹配）、脚本白名单与安全扫描，落库为 draft。
+ *
+ * @param {string} userId
+ * @param {string} source owner/repo、https/git/ssh URL 或 git@host:path
+ * @param {{skill: string, log?: object}} options skill：必填，仅导入指定技能名
+ * @returns {Promise<{imported: object[], blocked: object[], skipped: object[]}>}
+ */
+async function importSkillFromNpx(userId, source, { skill, log } = {}) {
+    const os = require('os');
+    const fsp = require('fs/promises');
+    const src = String(source ?? '').trim();
+    if (!src) {
+        throw npxImportError('source is required', 'skill_npx_invalid', 400);
+    }
+    if (src.length > 300 || !NPX_SOURCE_RE.test(src)) {
+        throw npxImportError(
+            'unsupported source: expected owner/repo, an https/git/ssh URL, or git@host:path',
+            'skill_npx_invalid',
+            400,
+        );
+    }
+    const skillName = String(skill ?? '').trim();
+    if (!skillName) {
+        throw npxImportError('skill name is required', 'skill_npx_invalid', 400);
+    }
+    if (!NPX_SKILL_RE.test(skillName)) {
+        throw npxImportError('invalid skill name', 'skill_npx_invalid', 400);
+    }
+
+    const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'xensemble-skill-npx-'));
+    log?.info?.({ userId, source: src, skill: skillName, tmp }, '[skills] import-npx start');
+    try {
+        await runNpxSkills([
+            '-y', 'skills@latest', 'add', src,
+            '--copy', '-y', '-a', 'universal',
+            '--skill', skillName,
+        ], { cwd: tmp, log });
+
+        const skillsRoot = path.join(tmp, '.agents', 'skills');
+        const stat = await fsp.stat(skillsRoot).catch(() => null);
+        if (!stat?.isDirectory()) {
+            log?.warn?.({ tmp }, '[skills] import-npx no .agents/skills dir produced');
+            throw npxImportError('npx skills installed no skills for this source');
+        }
+        const result = await importSkillFromPath(userId, skillsRoot);
+        log?.info?.(
+            { userId, source: src, imported: result.imported.length, blocked: result.blocked.length },
+            '[skills] import-npx done',
+        );
+        return result;
+    } finally {
+        await fsp.rm(tmp, { recursive: true, force: true }).catch(() => {});
+    }
+}
+
 module.exports = {
     CATEGORIES,
     createSkill,
@@ -986,6 +1268,7 @@ module.exports = {
     markDraftsSeen,
     importSkillFromPath,
     importSkillFromUpload,
+    importSkillFromNpx,
     parseFrontmatter,
     normalizeName,
 };

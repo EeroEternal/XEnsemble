@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus, Pencil, CheckCircle, Archive, Play, Trash2, UploadCloud, ArrowDownToLine,
-  Loader2, RefreshCw, Search, ArrowUpCircle, Store,
+  Loader2, RefreshCw, Search, ArrowUpCircle, Store, ChevronDown, FolderOpen, Terminal, X,
 } from 'lucide-react';
 
 import Button from '../components/Button';
@@ -21,6 +21,7 @@ import {
   consoleTableHeadBandClass,
   consoleAdminTableShellClass,
   consoleIconButtonClass,
+  consoleMenuDropdownZClass,
   consoleStructuredDialogPanelClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
@@ -29,7 +30,7 @@ import {
 
 import {
   listMySkills, createSkill, updateSkill, changeStatus, deleteSkill, publishSkill, unpublishSkill,
-  importSkillFromFiles, syncSkill,
+  importSkillFromFiles, importSkillFromNpx, syncSkill,
 } from '../lib/skillsApi';
 
 const STATUS_META = {
@@ -38,18 +39,18 @@ const STATUS_META = {
   archived: { tone: 'warning', icon: Archive, key: 'status_archived' },
 };
 
-const emptyForm = { title: '', content: '', tags: '', category: '', scripts: '[]' };
+const emptyForm = { title: '', content: '', tags: '', category: '', scripts: '[]', files: '[]' };
 
-/** scripts 数组 ↔ 表单 JSON 文本 */
-function scriptsToText(scripts) {
+/** 数组字段（scripts/files）↔ 表单 JSON 文本 */
+function listToText(list) {
   try {
-    return JSON.stringify(Array.isArray(scripts) ? scripts : [], null, 2);
+    return JSON.stringify(Array.isArray(list) ? list : [], null, 2);
   } catch {
     return '[]';
   }
 }
 
-function textToScripts(text) {
+function textToList(text) {
   const t = String(text || '').trim();
   if (!t) return [];
   const parsed = JSON.parse(t);
@@ -72,11 +73,23 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importMenuOpen, setImportMenuOpen] = useState(false);
+  const [npxDialogOpen, setNpxDialogOpen] = useState(false);
+  const [npxSource, setNpxSource] = useState('');
+  const [npxSkill, setNpxSkill] = useState('');
+  const [npxImporting, setNpxImporting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const fetchSkills = useCallback(({ silent = false } = {}) => {
     if (!silent) setRefreshing(true);
     return listMySkills({ status: statusFilter || '', q: searchQuery.trim() })
-      .then((data) => setSkills(Array.isArray(data) ? data : []))
+      .then((data) => {
+        const list = Array.isArray(data) ? data : [];
+        setSkills(list);
+        // 列表刷新后丢弃已不存在的选中项
+        setSelectedIds((prev) => prev.filter((id) => list.some((s) => s.id === id)));
+      })
       .catch(() => {})
       .finally(() => { setLoading(false); setRefreshing(false); });
   }, [statusFilter, searchQuery]);
@@ -103,7 +116,8 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
       content: skill.content,
       tags: (skill.tags || []).join(', '),
       category: skill.category || '',
-      scripts: scriptsToText(skill.scripts),
+      scripts: listToText(skill.scripts),
+      files: listToText(skill.files),
     });
     setDialogMode('edit');
   };
@@ -121,9 +135,11 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
       showToast('error', t('skills:name_invalid', { defaultValue: 'Only lowercase letters, numbers, and hyphens allowed (e.g. my-skill)' }));
       return;
     }
-    let scripts = [];
+    let scripts;
+    let files;
     try {
-      scripts = textToScripts(form.scripts);
+      scripts = textToList(form.scripts);
+      files = textToList(form.files);
     } catch {
       showToast('error', t('skills:scripts_invalid_json', { defaultValue: 'Scripts must be a valid JSON array' }));
       return;
@@ -132,10 +148,10 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
     try {
       const tags = form.tags.split(',').map((s) => s.trim()).filter(Boolean);
       if (dialogMode === 'create') {
-        await createSkill({ title, content, tags, category: form.category || null, scripts });
+        await createSkill({ title, content, tags, category: form.category || null, scripts, files });
         showToast('success', t('skills:toast_created', { defaultValue: 'Skill created.' }));
       } else {
-        await updateSkill(editing.id, { title, content, tags, category: form.category || null, scripts });
+        await updateSkill(editing.id, { title, content, tags, category: form.category || null, scripts, files });
         showToast('success', t('skills:toast_updated', { defaultValue: 'Skill updated.' }));
       }
       closeDialog();
@@ -181,6 +197,37 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
 
   // 0024：浏览器选择本地文件夹 → 读取全部文件 → 上传导入（无需服务端可见路径）
   const fileInputRef = useRef(null);
+
+  // 导入结果统一处理：成功提示 + 被安全扫描拦截 / 超限跳过的技能提示 + 错误分支
+  const handleImportResult = (res) => {
+    const blockedCount = Array.isArray(res.blocked) ? res.blocked.length : 0;
+    const skippedCount = Array.isArray(res.skipped) ? res.skipped.length : 0;
+    showToast('success', t('skills:import_done', { count: res.imported, defaultValue: '{{count}} skill(s) imported.' }));
+    if (blockedCount > 0) {
+      const names = res.blocked.map((b) => b.name).join(', ');
+      showToast('error', `${t('skills:error_import_blocked', { defaultValue: 'Some imported skills were blocked by the security scan.' })} (${names})`);
+    }
+    if (skippedCount > 0) {
+      const names = res.skipped.map((s) => s.name).join(', ');
+      showToast('error', `${t('skills:error_import_skipped', { defaultValue: 'Some imported skills were skipped (content over size limit).' })} (${names})`);
+    }
+    // 0046：被丢弃的脚本/资源文件（超限、二进制）逐条提示，避免静默丢失
+    const dropped = (res.skills || []).flatMap((s) => (s.importWarnings || []).map((w) => `${s.title}/${w.path}: ${w.reason}`));
+    if (dropped.length > 0) {
+      showToast('warning', `${t('skills:error_import_dropped_files', { defaultValue: 'Some skill files were dropped (over limit / binary).' })} (${dropped.join('; ')})`);
+    }
+    fetchSkills({ silent: true });
+  };
+
+  const handleImportError = (err, fallback) => {
+    if (err?.code === 'skill_import_blocked' || err?.code === 'skill_script_blocked') {
+      const detail = (err.findings || []).map((f) => `${f.path ?? f.name}: ${f.rule}`).join('; ');
+      showToast('error', detail ? `${t('skills:error_script_blocked')} (${detail})` : t('skills:error_script_blocked'));
+      return;
+    }
+    showToast('error', err?.message || fallback);
+  };
+
   const handleImportFolder = (e) => {
     const picked = Array.from(e.target.files || []);
     e.target.value = ''; // 允许重复选择同一文件夹
@@ -198,26 +245,56 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
     }));
     Promise.all(readers)
       .then((files) => importSkillFromFiles(files))
-      .then((res) => {
-        // P0 安全治理：部分技能被扫描拦截时提示（导入成功的照常展示）
-        const blockedCount = Array.isArray(res.blocked) ? res.blocked.length : 0;
-        showToast('success', t('skills:import_done', { count: res.imported, defaultValue: '{{count}} skill(s) imported.' }));
-        if (blockedCount > 0) {
-          const names = res.blocked.map((b) => b.name).join(', ');
-          showToast('error', `${t('skills:error_import_blocked', { defaultValue: 'Some imported skills were blocked by the security scan.' })} (${names})`);
-        }
-        fetchSkills({ silent: true });
-      })
-      .catch((err) => {
-        if (err?.code === 'skill_import_blocked' || err?.code === 'skill_script_blocked') {
-          const detail = (err.findings || []).map((f) => `${f.path ?? f.name}: ${f.rule}`).join('; ');
-          showToast('error', detail ? `${t('skills:error_script_blocked')} (${detail})` : t('skills:error_script_blocked'));
-          return;
-        }
-        showToast('error', err.message || t('skills:toast_action_failed', { defaultValue: 'Action failed.' }));
-      })
+      .then(handleImportResult)
+      .catch((err) => handleImportError(err, t('skills:import_failed', { defaultValue: 'Failed to import skills.' })))
       .finally(() => setImporting(false));
   };
+
+  // 0025：通过 npx 从远程源（owner/repo、URL）导入技能
+  const openNpxDialog = () => {
+    setNpxSource('');
+    setNpxSkill('');
+    setNpxDialogOpen(true);
+  };
+
+  const handleImportNpx = async () => {
+    const source = npxSource.trim();
+    if (!source) {
+      showToast('error', t('skills:import_npx_required', { defaultValue: 'Please enter a source' }));
+      return;
+    }
+    const skill = npxSkill.trim();
+    if (!skill) {
+      showToast('error', t('skills:import_npx_skill_required', { defaultValue: 'Please enter a skill name' }));
+      return;
+    }
+    setNpxImporting(true);
+    try {
+      const res = await importSkillFromNpx({ source, skill });
+      setNpxDialogOpen(false);
+      handleImportResult(res);
+    } catch (err) {
+      handleImportError(err, t('skills:import_npx_failed', { defaultValue: 'Failed to import skills via npx.' }));
+    } finally {
+      setNpxImporting(false);
+    }
+  };
+
+  // 导入下拉菜单：外部点击 / Escape 关闭
+  const importMenuRef = useRef(null);
+  useEffect(() => {
+    if (!importMenuOpen) return undefined;
+    const onPointerDown = (e) => {
+      if (importMenuRef.current && !importMenuRef.current.contains(e.target)) setImportMenuOpen(false);
+    };
+    const onKeyDown = (e) => { if (e.key === 'Escape') setImportMenuOpen(false); };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [importMenuOpen]);
 
   const togglePublish = (skill) => act(
     () => (skill.visibility === 'public' ? unpublishSkill(skill.id) : publishSkill(skill.id)),
@@ -251,6 +328,47 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
     return skills.filter((s) => (s.title || '').toLowerCase().includes(q));
   }, [skills, searchQuery]);
 
+  // ── 批量操作（最小集：启用 / 归档 / 删除）────────────────────────────────
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+  const allFilteredSelected = filtered.length > 0 && filtered.every((s) => selectedIds.includes(s.id));
+  const toggleSelectAll = () => {
+    setSelectedIds(allFilteredSelected ? [] : filtered.map((s) => s.id));
+  };
+
+  // 逐项执行（Promise.allSettled），汇总成功/失败计数
+  const runBulk = async (fn, doneKey) => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const results = await Promise.allSettled(ids.map((id) => fn(id)));
+      const okCount = results.filter((r) => r.status === 'fulfilled').length;
+      const failCount = results.length - okCount;
+      if (okCount > 0) showToast('success', t(doneKey, { count: okCount }));
+      if (failCount > 0) showToast('error', t('skills:bulk_failed', { count: failCount }));
+      setSelectedIds([]);
+      fetchSkills({ silent: true });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const bulkActivate = () => runBulk((id) => changeStatus(id, 'activate'), 'skills:bulk_activate_done');
+  const bulkArchive = () => runBulk((id) => changeStatus(id, 'archive'), 'skills:bulk_archive_done');
+  const bulkDelete = async () => {
+    const ok = await confirm({
+      title: t('skills:bulk_delete_confirm', { count: selectedIds.length }),
+      message: t('common:dialog.cannot_undo', { defaultValue: 'This action cannot be undone.' }),
+      confirmLabel: t('common:action.delete'),
+      cancelLabel: t('common:action.cancel'),
+      variant: 'danger',
+    });
+    if (!ok) return;
+    await runBulk((id) => deleteSkill(id), 'skills:bulk_delete_done');
+  };
+
   const statusOptions = [
     { value: '', label: t('skills:filter_all_status', { defaultValue: 'All statuses' }) },
     { value: 'draft', label: t('skills:status_draft', { defaultValue: 'Draft' }) },
@@ -279,10 +397,46 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
             <Store className="w-4 h-4" />
             {t('skills:market', { defaultValue: 'Skills Market' })}
           </Button>
-          <Button type="button" onClick={() => fileInputRef.current?.click()} disabled={importing} variant="secondary" size="md" className="shrink-0">
-            {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
-            {t('skills:import', { defaultValue: 'Import Skill' })}
-          </Button>
+          <div ref={importMenuRef} className="relative shrink-0">
+            <Button
+              type="button"
+              onClick={() => setImportMenuOpen((v) => !v)}
+              disabled={importing}
+              variant="secondary"
+              size="md"
+              aria-haspopup="menu"
+              aria-expanded={importMenuOpen}
+            >
+              {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
+              {t('skills:import_menu_label', { defaultValue: 'Import' })}
+              <ChevronDown className={`w-4 h-4 transition-transform ${importMenuOpen ? 'rotate-180' : ''}`} />
+            </Button>
+            {importMenuOpen && (
+              <div
+                role="menu"
+                className={`absolute right-0 top-full mt-2 w-52 rounded-lg border border-zinc-200 bg-surface py-1 shadow-lg shadow-zinc-200/50 ${consoleMenuDropdownZClass}`}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setImportMenuOpen(false); fileInputRef.current?.click(); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900"
+                >
+                  <FolderOpen className="w-4 h-4 shrink-0" />
+                  <span className="flex-1 truncate text-left">{t('skills:import_menu_folder', { defaultValue: 'From folder' })}</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setImportMenuOpen(false); openNpxDialog(); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900"
+                >
+                  <Terminal className="w-4 h-4 shrink-0" />
+                  <span className="flex-1 truncate text-left">{t('skills:import_menu_npx', { defaultValue: 'Via npx' })}</span>
+                </button>
+              </div>
+            )}
+          </div>
           <Button type="button" onClick={openCreate} size="md" className="shrink-0">
             <Plus className="w-4 h-4" />
             {t('skills:create', { defaultValue: 'New Skill' })}
@@ -291,10 +445,34 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
         </div>
       </div>
 
+      {selectedIds.length > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-2">
+          <span className="text-sm text-zinc-700">{t('skills:bulk_selected', { count: selectedIds.length })}</span>
+          <div className="ml-auto flex items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={bulkActivate} disabled={bulkBusy}>
+              {bulkBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+              {t('skills:bulk_activate')}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={bulkArchive} disabled={bulkBusy}>
+              {bulkBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Archive className="w-4 h-4" />}
+              {t('skills:bulk_archive')}
+            </Button>
+            <Button variant="danger" size="sm" onClick={bulkDelete} disabled={bulkBusy}>
+              {bulkBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+              {t('skills:bulk_delete')}
+            </Button>
+            <button type="button" onClick={() => setSelectedIds([])} disabled={bulkBusy} className={consoleIconButtonClass} title={t('skills:bulk_clear')}>
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className={consoleAdminTableShellClass}>
         <div className={consoleTableHeadBandClass}>
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
+              <col className="w-10" />
               <col className="w-2/5" />
               <col className="w-1/6" />
               <col className="w-1/6" />
@@ -303,6 +481,16 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
             </colgroup>
             <thead>
               <tr className={consoleTableHeadRowClass}>
+                <th className={consoleTableHeadCellClass}>
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelected}
+                    onChange={toggleSelectAll}
+                    disabled={filtered.length === 0}
+                    aria-label={t('skills:bulk_select_all')}
+                    className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-0"
+                  />
+                </th>
                 <th className={consoleTableHeadCellClass}>{t('skills:field_title', { defaultValue: 'Title' })}</th>
                 <th className={consoleTableHeadCellClass}>{t('skills:field_status', { defaultValue: 'Status' })}</th>
                 <th className={consoleTableHeadCellClass}>{t('skills:field_market', { defaultValue: 'Market' })}</th>
@@ -315,6 +503,7 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
         <div className={consoleAdminTableScrollClass}>
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <colgroup>
+              <col className="w-10" />
               <col className="w-2/5" />
               <col className="w-1/6" />
               <col className="w-1/6" />
@@ -323,13 +512,22 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
             </colgroup>
             <tbody className="divide-y divide-zinc-100">
               {loading ? (
-                <tr><td colSpan={5} className={`${consoleTableBodyCellClass} text-zinc-400`}>{t('common:state.loading')}</td></tr>
+                <tr><td colSpan={6} className={`${consoleTableBodyCellClass} text-zinc-400`}>{t('common:state.loading')}</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={5} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>{t('skills:empty_my', { defaultValue: 'No skills yet.' })}</td></tr>
+                <tr><td colSpan={6} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>{t('skills:empty_my', { defaultValue: 'No skills yet.' })}</td></tr>
               ) : filtered.map((s) => {
                 const meta = STATUS_META[s.status] || STATUS_META.draft;
                 return (
                   <tr key={s.id} className="hover:bg-zinc-50/50">
+                    <td className={consoleTableBodyCellClass}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(s.id)}
+                        onChange={() => toggleSelect(s.id)}
+                        aria-label={t('skills:bulk_select_row')}
+                        className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-0"
+                      />
+                    </td>
                     <td className={consoleTableBodyCellClass}>
                       <div className="font-medium text-zinc-900 truncate">{s.title}</div>
                       <div className="text-xs text-zinc-400 truncate">{s.content}</div>
@@ -431,12 +629,64 @@ export default function MySkills({ className = '', 'aria-hidden': ariaHidden }) 
               />
               <p className="mt-1 text-[11px] text-zinc-400">{t('skills:scripts_hint')}</p>
             </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:field_files', { defaultValue: 'Resource files (optional, JSON array)' })}</label>
+              <textarea
+                value={form.files}
+                onChange={(e) => setForm({ ...form, files: e.target.value })}
+                rows={5}
+                placeholder={t('skills:files_placeholder')}
+                className="w-full bg-surface border border-zinc-300 rounded-md px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-colors font-mono"
+              />
+              <p className="mt-1 text-[11px] text-zinc-400">{t('skills:files_hint')}</p>
+            </div>
           </ConsoleStructuredDialogBody>
           <ConsoleStructuredDialogFooter>
             <Button variant="ghost" onClick={closeDialog}>{t('common:action.cancel')}</Button>
             <Button onClick={save} disabled={saving}>
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
               {t('common:action.save')}
+            </Button>
+          </ConsoleStructuredDialogFooter>
+        </ConsoleDialogShell>
+      )}
+
+      {npxDialogOpen && (
+        <ConsoleDialogShell
+          onClose={() => { if (!npxImporting) setNpxDialogOpen(false); }}
+          panelClassName={consoleStructuredDialogPanelClass}
+        >
+          <ConsoleStructuredDialogHeader
+            title={t('skills:import_npx_title', { defaultValue: 'Import skills via npx' })}
+            subtitle={t('skills:import_npx_hint')}
+          />
+          <ConsoleStructuredDialogBody>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:import_npx_source_label', { defaultValue: 'Source' })}</label>
+              <Input
+                value={npxSource}
+                onChange={(e) => setNpxSource(e.target.value)}
+                placeholder={t('skills:import_npx_source_placeholder')}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">{t('skills:import_npx_skill_label', { defaultValue: 'Skill name' })}</label>
+              <Input
+                value={npxSkill}
+                onChange={(e) => setNpxSkill(e.target.value)}
+                placeholder={t('skills:import_npx_skill_placeholder')}
+              />
+            </div>
+            {npxImporting && (
+              <p className="text-xs text-zinc-500">{t('skills:import_npx_slow', { defaultValue: 'Fetching skills from the remote source, this may take a while…' })}</p>
+            )}
+          </ConsoleStructuredDialogBody>
+          <ConsoleStructuredDialogFooter>
+            <Button variant="ghost" onClick={() => setNpxDialogOpen(false)} disabled={npxImporting}>{t('common:action.cancel')}</Button>
+            <Button onClick={handleImportNpx} disabled={npxImporting || !npxSource.trim() || !npxSkill.trim()}>
+              {npxImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {t(npxImporting ? 'skills:import_npx_loading' : 'skills:import_menu_label', { defaultValue: 'Import' })}
             </Button>
           </ConsoleStructuredDialogFooter>
         </ConsoleDialogShell>

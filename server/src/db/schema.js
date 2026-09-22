@@ -346,6 +346,8 @@ const skills = pgTable('skills', {
   content: text('content').notNull(),
   // 0020: 脚本级 Skill——[{ path: 'scripts/xxx.sh', content: '<script>' }]，注入时落盘到 workspace
   scripts: jsonb('scripts').notNull().default([]),
+  // 0046: 配套资源文件（Agent Skills 标准的 references/ 与 assets/）——[{ path: 'references/xx.md', content: '...' }]
+  files: jsonb('files').notNull().default([]),
   tags: jsonb('tags').notNull().default([]),
   status: text('status').notNull().default('draft'),
   source: text('source').notNull().default('auto'),

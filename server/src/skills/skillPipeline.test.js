@@ -273,7 +273,8 @@ test('extractFromSession (US-3) creates a skill directly from a session', async 
     };
 
     const skill = await pipeline.extractFromSession(sessionId, { userId });
-    assert.equal(skill.title, '手动提炼的技能');
+    // 纯中文名无 ASCII 残留 → slugify 用短哈希兜底（Agent 原生目录名要求 [a-z0-9-]）
+    assert.match(skill.title, /^skill-[0-9a-f]{8}$/);
     assert.equal(skill.source, 'auto');
     assert.equal(skill.status, 'draft');
     assert.equal(skill.sessionId, sessionId);

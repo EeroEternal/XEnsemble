@@ -34,3 +34,4 @@ skills-lock.json
 server/.blink.env
 /.blink.env
 /server/.blink.env
+.trae/

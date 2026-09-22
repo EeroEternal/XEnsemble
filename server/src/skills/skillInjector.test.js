@@ -450,12 +450,16 @@ test('slugify produces safe directory names', () => {
     assert.equal(injector.slugify('Fix Postgres Pool'), 'fix-postgres-pool');
     // 非 ASCII 字符（中文等）会被 OpenCode 等的目录名校验拒绝，统一丢弃
     assert.equal(injector.slugify('跑通 PostgreSQL 迁移'), 'postgresql');
-    assert.equal(injector.slugify('跑通 迁移'), 'skill'); // 纯中文回退
-    assert.equal(injector.slugify('...'), 'skill'); // 全符号回退
+    // 无 ASCII 残留 → 短哈希兜底，且不同名不撞名（此前统一塌缩为 'skill'）
+    assert.match(injector.slugify('跑通 迁移'), /^skill-[0-9a-f]{8}$/);
+    assert.match(injector.slugify('...'), /^skill-[0-9a-f]{8}$/);
+    assert.notEqual(injector.slugify('跑通 迁移'), injector.slugify('...'));
+    assert.equal(injector.slugify('跑通 迁移'), injector.slugify('跑通 迁移')); // 确定性
     assert.equal(injector.slugify('a'.repeat(100)).length, 60);
     assert.ok(!/\.\./.test(injector.slugify('../etc')));
     // Agent 原生目录的硬校验（OpenCode：^[a-z0-9]+(-[a-z0-9]+)*$）
     assert.match(injector.slugify('跑通 PostgreSQL 迁移'), /^[a-z0-9]+(-[a-z0-9]+)*$/);
+    assert.match(injector.slugify('跑通 迁移'), /^[a-z0-9]+(-[a-z0-9]+)*$/);
 });
 
 test('safeRel blocks path traversal', () => {
@@ -490,7 +494,7 @@ test('writeSkillDirectory writes SKILL.md + scripts with chmod', async () => {
             { path: 'scripts/verify.py', content: 'print(1)' },
         ],
     };
-    const dir = await injector.writeSkillDirectory(fsAdapter, '/ws', skill);
+    const dir = await injector.writeSkillDirectory(fsAdapter, '/ws', skill, '.xensemble/skills');
     assert.equal(dir, 'fix-pool');
     // 0023：frontmatter name 归一化为小写连字符 slug，与目录名一致
     assert.match(files['.xensemble/skills/fix-pool/SKILL.md'], /^name: fix-pool$/m);
@@ -499,6 +503,30 @@ test('writeSkillDirectory writes SKILL.md + scripts with chmod', async () => {
     assert.equal(files['.xensemble/skills/fix-pool/scripts/verify.py'], 'print(1)');
     assert.equal(chmodded.length, 2);
     assert.equal(chmodded[0].mode, 0o755);
+});
+
+test('writeSkillDirectory writes references/ and assets/ files without chmod (0046)', async () => {
+    const files = {};
+    const chmodded = [];
+    const fsAdapter = {
+        async writeFile(rootDir, rel, content) { files[rel] = content; },
+        async chmod(rootDir, rel, mode) { chmodded.push({ rel, mode }); },
+    };
+    const skill = {
+        title: 'With Files',
+        content: '---\nname: With Files\n---\n## Steps',
+        scripts: [{ path: 'scripts/main.sh', content: 'echo hi' }],
+        files: [
+            { path: 'references/guide.md', content: '# Guide' },
+            { path: 'assets/template.md', content: 'TPL' },
+        ],
+    };
+    await injector.writeSkillDirectory(fsAdapter, '/ws', skill, '.xensemble/skills');
+    assert.equal(files['.xensemble/skills/with-files/references/guide.md'], '# Guide');
+    assert.equal(files['.xensemble/skills/with-files/assets/template.md'], 'TPL');
+    // 仅脚本 chmod，资源文件不 chmod
+    assert.equal(chmodded.length, 1);
+    assert.equal(chmodded[0].rel, '.xensemble/skills/with-files/scripts/main.sh');
 });
 
 test('writeSkillDirectory ignores unsafe script paths', async () => {

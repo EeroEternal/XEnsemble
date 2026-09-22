@@ -4,6 +4,8 @@
  * 端点概览：
  *  - GET    /api/v1/skills/market         市场浏览（公开已发布，分页/筛选/搜索/排序）
  *  - POST   /api/v1/skills/market/:id/install  安装（复制为私有 draft）
+ *  - POST   /api/v1/skills/import-upload  从浏览器文件夹上传导入
+ *  - POST   /api/v1/skills/import-npx     通过 npx 从远程源导入
  *  - GET    /api/v1/skills                我的 skill 列表（可传 status/q）
  *  - POST   /api/v1/skills                创建（手动）
  *  - GET    /api/v1/skills/:id            详情
@@ -49,9 +51,39 @@ function registerSkillRoutes(fastify) {
     fastify.post('/api/v1/skills/import-upload', { preValidation: authPre }, async (request, reply) => {
         try {
             const files = request.body?.files;
-            const { imported, blocked } = await skillService.importSkillFromUpload(request.user.id, files);
-            return reply.code(201).send({ imported: imported.length, skills: imported, blocked });
+            const { imported, blocked, skipped } = await skillService.importSkillFromUpload(request.user.id, files);
+            request.log.info(
+                { userId: request.user.id, files: files?.length ?? 0, imported: imported.length, blocked: blocked.length, skipped: skipped.length },
+                '[skills] import-upload ok',
+            );
+            return reply.code(201).send({ imported: imported.length, skills: imported, blocked, skipped });
         } catch (err) {
+            request.log.error({ err, userId: request.user.id }, '[skills] import-upload failed');
+            // P0 安全治理：安全扫描明细透传（让用户知道哪个文件命中哪条规则）
+            if (err.code === 'skill_script_blocked' || err.code === 'skill_import_blocked') {
+                return reply.code(err.statusCode || 400).send({
+                    error: err.message,
+                    code: err.code,
+                    findings: err.details || [],
+                });
+            }
+            return sendPublicError(reply, err, 'Failed to import skills', 500, request.locale || 'en');
+        }
+    });
+
+    // 0025：通过 npx 从远程源（owner/repo、URL）导入技能
+    fastify.post('/api/v1/skills/import-npx', { preValidation: authPre }, async (request, reply) => {
+        try {
+            const source = request.body?.source;
+            const skill = request.body?.skill;
+            const { imported, blocked, skipped } = await skillService.importSkillFromNpx(request.user.id, source, { skill, log: request.log });
+            request.log.info(
+                { userId: request.user.id, source, skill, imported: imported.length, blocked: blocked.length, skipped: skipped.length },
+                '[skills] import-npx ok',
+            );
+            return reply.code(201).send({ imported: imported.length, skills: imported, blocked, skipped });
+        } catch (err) {
+            request.log.error({ err, userId: request.user.id, source: request.body?.source }, '[skills] import-npx failed');
             // P0 安全治理：安全扫描明细透传（让用户知道哪个文件命中哪条规则）
             if (err.code === 'skill_script_blocked' || err.code === 'skill_import_blocked') {
                 return reply.code(err.statusCode || 400).send({
@@ -87,6 +119,7 @@ function registerSkillRoutes(fastify) {
                 category: body.category,
                 projectId: body.projectId || null,
                 scripts: body.scripts,
+                files: body.files,
                 source: 'manual',
             });
             return reply.code(201).send(skill);
