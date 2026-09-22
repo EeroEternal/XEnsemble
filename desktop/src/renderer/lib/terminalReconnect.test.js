@@ -9,7 +9,8 @@ import {
 
 describe('Desktop terminal reconnect protocol', () => {
   it('does not reset retries on WebSocket open', () => {
-    const state = createTerminalReconnectState();
+    // 默认 maxAttempts 已从 5 提升到 20，用显式小预算保持原断言语义。
+    const state = createTerminalReconnectState({ maxAttempts: 5 });
     const attempts = [];
     for (let cycle = 0; cycle < 8; cycle += 1) {
       state.socketOpened();

@@ -9,7 +9,9 @@ import {
 
 describe('terminal reconnect state', () => {
   it('does not reset retry attempts when only the transport opens', () => {
-    const state = createTerminalReconnectState();
+    // 默认 maxAttempts 已从 5 提升到 20（7b41191 之后），本用例只验证
+    // 「transport open 不重置计数」：用显式小预算让断言可穷尽。
+    const state = createTerminalReconnectState({ maxAttempts: 5 });
     const displayedAttempts = [];
 
     for (let cycle = 0; cycle < 8; cycle += 1) {
