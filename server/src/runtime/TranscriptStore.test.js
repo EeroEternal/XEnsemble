@@ -159,6 +159,127 @@ test('readTail generic fallback (no TUI markers) keeps newest bytes and first fr
     }
 });
 
+test('_syncFromFile reads only appended bytes (no full re-read)', () => {
+    const root = makeTempRoot();
+    try {
+        const store = new TranscriptStore({ workspaceRoot: root, db: null, schema: null });
+        const ref = 'local:pty:incremental';
+        const file = store.transcriptPath(ref);
+
+        // Seed a file on disk, then simulate an external writer appending to it
+        // (as a previous server instance would have).
+        store.append(ref, { kind: 'out', data: 'one\n' });
+        store.flushSync(ref);
+
+        // A fresh store cold-starts aligned to EOF, so nothing to sync yet.
+        const fresh = new TranscriptStore({ workspaceRoot: root, db: null, schema: null });
+        const state = fresh._state(ref);
+        assert.equal(state._syncOffset, fs.statSync(file).size, 'cold start aligns cursor to EOF');
+        assert.equal(state.frames.length, 1);
+        fresh._syncFromFile(state);
+        assert.equal(state.frames.length, 1, 'no-op when nothing was appended');
+
+        // Simulate another writer appending frames directly to the file.
+        const extra = [
+            { seq: 2, ts: Date.now(), kind: 'out', data: 'two\n', bytes: 4 },
+            { seq: 3, ts: Date.now(), kind: 'out', data: 'three\n', bytes: 6 },
+        ].map((f) => `${JSON.stringify(f)}\n`).join('');
+        fs.appendFileSync(file, extra);
+
+        fresh._syncFromFile(state);
+        assert.deepEqual(state.frames.map((f) => f.seq), [1, 2, 3]);
+        assert.equal(state.headSeq, 3);
+        assert.equal(state._syncOffset, fs.statSync(file).size, 'cursor advances to EOF');
+
+        // A second sync with no new bytes must not duplicate anything.
+        fresh._syncFromFile(state);
+        assert.deepEqual(state.frames.map((f) => f.seq), [1, 2, 3]);
+    } finally {
+        cleanup(root);
+    }
+});
+
+test('_syncFromFile leaves a trailing partial line for the next call', () => {
+    const root = makeTempRoot();
+    try {
+        const store = new TranscriptStore({ workspaceRoot: root, db: null, schema: null });
+        const ref = 'local:pty:partial';
+        const file = store.transcriptPath(ref);
+        store.append(ref, { kind: 'out', data: 'seed\n' });
+        store.flushSync(ref);
+
+        const fresh = new TranscriptStore({ workspaceRoot: root, db: null, schema: null });
+        const state = fresh._state(ref);
+
+        // A half-written line (write in progress) must NOT be parsed: parsing it
+        // would drop that frame forever once the rest arrives.
+        const whole = `${JSON.stringify({ seq: 2, ts: Date.now(), kind: 'out', data: 'complete\n', bytes: 9 })}\n`;
+        fs.appendFileSync(file, whole.slice(0, Math.floor(whole.length / 2)));
+        fresh._syncFromFile(state);
+        assert.deepEqual(state.frames.map((f) => f.seq), [1], 'partial line not consumed');
+
+        // The rest of the line arrives → now it must be picked up intact.
+        fs.appendFileSync(file, whole.slice(Math.floor(whole.length / 2)));
+        fresh._syncFromFile(state);
+        assert.deepEqual(state.frames.map((f) => f.seq), [1, 2], 'complete line consumed');
+        assert.equal(state.frames[1].data, 'complete\n', 'frame parsed whole, not truncated');
+    } finally {
+        cleanup(root);
+    }
+});
+
+test('_syncFromFile detects a shrunk (rotated) file and resyncs', () => {
+    const root = makeTempRoot();
+    try {
+        const store = new TranscriptStore({ workspaceRoot: root, db: null, schema: null });
+        const ref = 'local:pty:rotate';
+        const file = store.transcriptPath(ref);
+        for (let i = 0; i < 5; i++) store.append(ref, { kind: 'out', data: `line-${i}\n` });
+        store.flushSync(ref);
+
+        const fresh = new TranscriptStore({ workspaceRoot: root, db: null, schema: null });
+        const state = fresh._state(ref);
+        assert.equal(state.frames.length, 5);
+        const beforeSize = fs.statSync(file).size;
+
+        // Rotation rewrites the file smaller with re-sequenced frames.
+        const rotated = [
+            { seq: 1, ts: Date.now(), kind: 'out', data: 'kept-a\n', bytes: 7 },
+            { seq: 2, ts: Date.now(), kind: 'out', data: 'kept-b\n', bytes: 7 },
+        ].map((f) => `${JSON.stringify(f)}\n`).join('');
+        fs.writeFileSync(file, rotated);
+        assert.ok(fs.statSync(file).size < beforeSize, 'rotated file must be smaller');
+
+        fresh._syncFromFile(state);
+        assert.deepEqual(state.frames.map((f) => f.data), ['kept-a\n', 'kept-b\n'], 'resynced from rotated file');
+        assert.equal(state.headSeq, 2);
+        assert.equal(state._syncOffset, fs.statSync(file).size);
+    } finally {
+        cleanup(root);
+    }
+});
+
+test('_flushWrites advances the sync cursor so appended frames are not re-read', () => {
+    const root = makeTempRoot();
+    try {
+        const store = new TranscriptStore({ workspaceRoot: root, db: null, schema: null });
+        const ref = 'local:pty:cursor';
+        const file = store.transcriptPath(ref);
+        store.append(ref, { kind: 'out', data: 'a\n' });
+        store.flushSync(ref);
+
+        const state = store._state(ref);
+        assert.equal(state._syncOffset, fs.statSync(file).size, 'flush keeps cursor aligned with the file');
+
+        // Syncing after our own flush must be a pure no-op (nothing to read).
+        const before = state.frames.length;
+        store._syncFromFile(state);
+        assert.equal(state.frames.length, before, 'own writes are not re-read');
+    } finally {
+        cleanup(root);
+    }
+});
+
 test('TranscriptStore updates session_streams metadata on bind and exit', async () => {
     const root = makeTempRoot();
     let ctx;

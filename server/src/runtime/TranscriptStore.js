@@ -100,6 +100,45 @@ class TranscriptStore {
         }
     }
 
+    /**
+     * Read NDJSON frames from `offset` to EOF, consuming only complete lines.
+     *
+     * Returns `{ frames, nextOffset }` where nextOffset points just past the
+     * last consumed newline. A trailing partial line (a write in progress) is
+     * left unread so the next call picks it up intact — parsing a half-written
+     * line would silently drop that frame forever.
+     */
+    _readFramesFromOffset(file, offset) {
+        const stat = fs.statSync(file);
+        const end = stat.size;
+        if (offset >= end) return { frames: [], nextOffset: end };
+        const fd = fs.openSync(file, 'r');
+        try {
+            const buf = Buffer.alloc(end - offset);
+            fs.readSync(fd, buf, 0, buf.length, offset);
+            // Locate the last newline on the raw bytes so nextOffset is exact
+            // (no UTF-8 decode/encode round-trip).
+            const lastNewline = buf.lastIndexOf(0x0a);
+            if (lastNewline < 0) {
+                // No complete line yet — leave everything for the next call.
+                return { frames: [], nextOffset: offset };
+            }
+            const complete = buf.toString('utf8', 0, lastNewline + 1);
+            const frames = [];
+            for (const line of complete.split('\n')) {
+                if (!line.trim()) continue;
+                try {
+                    const frame = JSON.parse(line);
+                    if (!frame || typeof frame.seq !== 'number' || !VALID_KINDS.has(frame.kind)) continue;
+                    frames.push(frame);
+                } catch (_) { /* ignore malformed lines */ }
+            }
+            return { frames, nextOffset: offset + lastNewline + 1 };
+        } finally {
+            fs.closeSync(fd);
+        }
+    }
+
     _state(streamRef) {
         if (!streamRef) return null;
         let state = this.states.get(streamRef);
@@ -109,6 +148,7 @@ class TranscriptStore {
         const frames = [];
         let headSeq = 0;
         let bytes = 0;
+        let syncOffset = 0;
 
         if (file && fs.existsSync(file)) {
             try {
@@ -139,6 +179,10 @@ class TranscriptStore {
                     const trimmed = frames.length - MAX_FRAMES;
                     frames.splice(0, trimmed);
                 }
+                // Cold start is caught up to EOF by construction (the tail read
+                // intentionally omits anything earlier), so the incremental
+                // cursor starts at the end of the file.
+                syncOffset = stat.size;
             } catch (_) {
                 // treat unreadable files as empty
             }
@@ -161,6 +205,10 @@ class TranscriptStore {
             _writeQueue: [],
             _flushTimer: null,
             _pendingBytes: 0,
+            // Byte offset of the on-disk file already reflected in `frames`.
+            // Lets _syncFromFile read only newly appended bytes instead of
+            // re-reading (and re-parsing) the whole file on every call.
+            _syncOffset: syncOffset,
         };
         this.states.set(streamRef, state);
         return state;
@@ -208,26 +256,36 @@ class TranscriptStore {
         return stored;
     }
 
+    /**
+     * Merge frames appended to the on-disk file since the last sync.
+     *
+     * Historically this re-read and re-parsed the ENTIRE file (up to 64MB) on
+     * every call and then filtered by seq. Since readTail/readFrom/head are hit
+     * on every attention scan (~2s) and every attach, that made the cost grow
+     * with session length — a 127MB cline transcript cost ~316ms of blocking
+     * work per call. Now we read only the bytes appended past `_syncOffset`.
+     *
+     * Safety:
+     *  - File shrunk (rotation rewrites the file with re-sequenced frames):
+     *    detected via `stat.size < _syncOffset` → resync the whole file.
+     *  - Trailing partial line (concurrent flush in progress): left unconsumed
+     *    so the next call parses it whole.
+     *  - Cold start: `_state` sets `_syncOffset = stat.size` (already caught up).
+     */
     _syncFromFile(state) {
         if (!state?.file || !fs.existsSync(state.file)) return;
         try {
-            let fileFrames;
             const stat = fs.statSync(state.file);
-            if (stat.size > TAIL_READ_THRESHOLD) {
-                fileFrames = this._readTailLines(state.file, TAIL_READ_THRESHOLD);
-            } else {
-                const contents = fs.readFileSync(state.file, 'utf8');
-                fileFrames = [];
-                for (const line of contents.split('\n')) {
-                    if (!line.trim()) continue;
-                    try {
-                        const frame = JSON.parse(line);
-                        if (!frame || typeof frame.seq !== 'number' || !VALID_KINDS.has(frame.kind)) continue;
-                        fileFrames.push(frame);
-                    } catch (_) { /* ignore malformed lines */ }
-                }
+            if (stat.size < (state._syncOffset || 0)) {
+                // File was rotated/truncated — the in-memory view is stale.
+                this._resyncFromFile(state, stat.size);
+                return;
             }
-            const newFrames = fileFrames.filter((f) => f.seq > state.headSeq);
+            if (stat.size === (state._syncOffset || 0)) return; // nothing new
+            const { frames, nextOffset } = this._readFramesFromOffset(state.file, state._syncOffset || 0);
+            state._syncOffset = nextOffset;
+            if (frames.length === 0) return;
+            const newFrames = frames.filter((f) => f.seq > state.headSeq);
             if (newFrames.length === 0) return;
             for (const frame of newFrames) {
                 state.frames.push(frame);
@@ -244,6 +302,52 @@ class TranscriptStore {
             }
             state.nextSeq = state.headSeq + 1;
         } catch (_) { /* best-effort */ }
+    }
+
+    /**
+     * Rebuild the in-memory frames from the file. Used when the file shrank
+     * (rotation) and the incremental cursor is meaningless. Mirrors `_state`'s
+     * cold-start read so the result is identical to a fresh instance.
+     */
+    _resyncFromFile(state, size) {
+        let frames;
+        if (size > TAIL_READ_THRESHOLD) {
+            frames = this._readTailLines(state.file, TAIL_READ_THRESHOLD);
+        } else {
+            frames = [];
+            const contents = fs.readFileSync(state.file, 'utf8');
+            for (const line of contents.split('\n')) {
+                if (!line.trim()) continue;
+                try {
+                    const frame = JSON.parse(line);
+                    if (!frame || typeof frame.seq !== 'number' || !VALID_KINDS.has(frame.kind)) continue;
+                    frames.push(frame);
+                } catch (_) { /* ignore malformed lines */ }
+            }
+        }
+        let headSeq = 0;
+        let bytes = 0;
+        let exited = false;
+        let exitSeq = null;
+        let exitCode = null;
+        for (const frame of frames) {
+            headSeq = Math.max(headSeq, frame.seq);
+            bytes += Number(frame.bytes) || bytesFor(frame.kind, frame.data);
+            if (frame.kind === 'exit') {
+                exited = true;
+                exitSeq = frame.seq;
+                exitCode = frame?.data?.code ?? null;
+            }
+        }
+        if (frames.length > MAX_FRAMES) frames.splice(0, frames.length - MAX_FRAMES);
+        state.frames = frames;
+        state.headSeq = headSeq;
+        state.bytes = bytes;
+        state.nextSeq = headSeq + 1;
+        state.exited = exited;
+        state.exitSeq = exitSeq;
+        state.exitCode = exitCode;
+        state._syncOffset = size;
     }
 
     readFrom(streamRef, afterSeq = 0) {
@@ -488,6 +592,11 @@ class TranscriptStore {
             this._scheduleFlush(state);
             return;
         }
+        // These frames are already in `state.frames` (pushed by append), so the
+        // incremental cursor can skip past them — no need to re-read/re-parse
+        // them on the next _syncFromFile. Byte length is taken from the buffer
+        // actually written to keep the cursor exact.
+        state._syncOffset = (state._syncOffset || 0) + Buffer.byteLength(lines);
         this._maybeRotateFile(state);
     }
 
@@ -529,6 +638,9 @@ class TranscriptStore {
         if (state.frames.length > MAX_FRAMES) {
             state.frames.splice(0, state.frames.length - MAX_FRAMES);
         }
+        // The file was rewritten; realign the incremental cursor with the new
+        // size so the next _syncFromFile doesn't misread it as a shrink.
+        try { state._syncOffset = fs.statSync(state.file).size; } catch (_) { state._syncOffset = 0; }
     }
 
     _flushAllStates() {

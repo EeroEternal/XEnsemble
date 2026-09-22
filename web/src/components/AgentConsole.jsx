@@ -241,7 +241,7 @@ function AgentConsole({
       allowProposedApi: true,
       cols: 120,
       rows: 32,
-      scrollback: 10000,
+      scrollback: 5000,
       convertEol: true,
       scrollOnUserInput: true,
       smoothScrollDuration: 0,
