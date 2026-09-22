@@ -141,7 +141,7 @@ export default React.forwardRef(function Sessions({
   const [startSessionAfterCreate, setStartSessionAfterCreate] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [launchingSession, setLaunchingSession] = useState(false);
-  // eslint-disable-next-line no-unused-vars
+
   const [_error, setError] = useState(null);
   const [panelOpen, setPanelOpen] = useState(true);
   // Agent 运行界面视图：'agent'（原生 TUI 终端，默认）| 'chat'（对话框风格）
@@ -325,7 +325,7 @@ export default React.forwardRef(function Sessions({
   const [configLoading, setConfigLoading] = useState(false);
   const [configError, setConfigError] = useState(null);
   const { themeId, preset } = useTerminalTheme();
-  // eslint-disable-next-line no-unused-vars
+
   const [_deletingSessionId, setDeletingSessionId] = useState(null);
   const [restartingSession, setRestartingSession] = useState(false);
   const [reconnectVersion, setReconnectVersion] = useState(0);

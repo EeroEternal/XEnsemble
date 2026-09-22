@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 export function Editor({ value, onChange, language, theme, options, onMount }) {
-  // eslint-disable-next-line no-unused-vars
+
   const [content, setContent] = useState(value || '');
 
   useEffect(() => {
