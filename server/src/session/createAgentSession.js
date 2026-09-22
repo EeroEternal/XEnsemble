@@ -192,6 +192,9 @@ async function createAgentSession({
         const { opencodeThemeConfigFile } = require('../agents/byokFields');
         byokConfigFiles = [...byokConfigFiles, opencodeThemeConfigFile()];
     }
+    // Agent TUI 稳定性 env（如禁用 cline ClinePass 促销弹窗；用户 customEnv
+    // 稍后经 applyCustomEnv 后写入，显式设置可覆盖）。
+    require('../agents/agentTuiEnv').applyAgentTuiEnv(resolved.env, agentMeta.id);
 
     // Validate config files BEFORE creating the session so we can reject
     // invalid JSON without leaving an orphaned session row.

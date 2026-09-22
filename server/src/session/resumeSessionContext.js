@@ -88,6 +88,9 @@ async function buildResumeSessionContext({
         const { opencodeThemeConfigFile } = require('../agents/byokFields');
         byokConfigFiles = [...byokConfigFiles, opencodeThemeConfigFile()];
     }
+    // Agent TUI 稳定性 env（如禁用 cline ClinePass 促销弹窗；用户 customEnv
+    // 稍后经 applyCustomEnv 后写入，显式设置可覆盖）。
+    require('../agents/agentTuiEnv').applyAgentTuiEnv(resolvedSpawnEnv.env, agentMeta.id);
 
     return {
         project,

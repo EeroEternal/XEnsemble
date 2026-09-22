@@ -25,6 +25,7 @@ const sessionManager = require('../session/SessionManager');
 const { broadcastSse } = require('../session/sseManager');
 const { recordEvent } = require('../events/recordEvent');
 const { computeNextRunAt } = require('./cron');
+const { parseApprovalState } = require('./approvalState');
 const { createAgentSession } = require('../session/createAgentSession');
 const transcriptStore = require('../runtime/TranscriptStore');
 const trajectory = require('../llm/trajectory');
@@ -427,13 +428,27 @@ async function executeRun(task, run, log = console) {
                     }, 400);
                 };
                 // cline 审批态闭环校验：Shift+Tab 按键无回显，状态靠扫转录帧判定——
-                // 目标态不匹配就 PTY 注入 \x1b[Z 再扫（seq 过滤只看按键后的新输出，
-                // 避免旧头部渲染污染判定），至多 3 次；仍确认不了就拒绝注入任务指令
-                //（fail-closed：宁可 run failed，不可审批状态不明就无人值守开跑）。
-                // 注意：匹配串与 cline TUI 头部文案耦合（镜像 pin 版本，升级须复核；
-                // 若 Shift+Tab 是多档循环且存在中间档，单串匹配无法区分「已关」与
-                // 「中间档」，同样按 fail-closed 处理——新输出不含 enabled 串即视为
-                // 到达目标，中间档风险由镜像升级时的复核实验兜底）。
+                // 目标态不匹配就 PTY 注入按键再扫（seq 过滤只看按键后的新输出，
+                // 避免旧头部渲染污染判定）。匹配串与 cline TUI 头部文案耦合（镜像
+                // pin 版本，升级须复核）。
+                //
+                // 事故复盘（2026-09，cline@3.0.55 二进制核实）：cline 首启弹
+                // "Try ClinePass" 促销 modal，激活期间吞掉全部非修饰键（enter=开
+                // 浏览器、其余键一律 dismiss）——Shift+Tab 首按只把弹窗关掉，
+                // auto-approve 纹丝不动，重绘帧仍含 enabled 串，旧逻辑误判「按键
+                // 生效但停在非目标态」直接 fail-closed 误杀 run。修复：
+                //   ① spawn env 注入官方开关 CLINE_DISABLE_CLINE_PASS_NOTICE=1
+                //     禁弹（agents/agentTuiEnv，根治）；
+                //   ② 此处兜底：每次按键先发 Esc dismiss 可能存在的 modal（空输入
+                //     主屏 Esc 是 no-op，TUI 退出是 Ctrl+C），隔 250ms 再 Shift+Tab；
+                //   ③ 状态解析改为「两串各自最后出现位置较新者胜」（loopTasks/
+                //     approvalState.parseApprovalState）——Esc dismiss 弹窗的重绘
+                //     （enabled）与 toggle 后的重绘（disabled）会先后出现在同一
+                //     扫描窗口，单串 includes 会误读中间态；
+                //   ④ 状态明确非目标/未知/按键被吞一律重试而非立即 fail-closed，
+                //     总轮次上限 5（每轮约 1s，fail-closed 只在持续无法确认时触发：
+                //     宁可 run failed，不可审批状态不明就无人值守开跑）。
+                const APPROVAL_VERIFY_MAX_ATTEMPTS = 5;
                 const verifyClineApprovalState = (attempt, scanFromSeq) => {
                     if (settled) return;
                     const live = sessionManager.getSession(sessionId);
@@ -457,25 +472,31 @@ async function executeRun(task, run, log = console) {
                             await stopTaskSession(sessionId, log);
                         })();
                     };
+                    // 先 Esc 关掉可能存在的促销/引导 modal（吞键元凶），再 Shift+Tab
                     const press = () => {
-                        live.handle?.write('\x1b[Z');
-                        setTimeout(() => verifyClineApprovalState(attempt + 1, headSeq), 800);
+                        live.handle?.write('\x1b');
+                        setTimeout(() => {
+                            if (settled) return;
+                            const cur = sessionManager.getSession(sessionId);
+                            if (!cur?.handle) return;
+                            cur.handle.write('\x1b[Z');
+                            setTimeout(() => verifyClineApprovalState(attempt + 1, headSeq), 800);
+                        }, 250);
                     };
                     if (!readable) { failClosed(); return; } // 转录不可读 → 无法闭环验证
-                    const enabled = stripAnsi(text).toLowerCase().includes('auto-approve all enabled');
+                    const stripped = stripAnsi(text).toLowerCase();
+                    const state = parseApprovalState(stripped);
+                    const promoDialogSeen = stripped.includes('clinepass is a');
+                    if (promoDialogSeen) {
+                        log.warn?.(`[loop-task-runner] run ${runId}: cline ClinePass promo dialog rendered during approval-state verification (attempt ${attempt})`);
+                    }
+                    if (state !== null && state === targetEnabled) { writePrompt(); return; }
                     if (attempt === 0) {
-                        if (enabled === targetEnabled) { writePrompt(); return; }
-                        press(); // 初扫不在目标态（默认全开、手动象限为目标关）→ 按一次
+                        press(); // 初扫不在目标态（默认全开、手动象限为目标关）→ 按键
                         return;
                     }
-                    if (headSeq <= scanFromSeq) {
-                        // 按键后无任何新输出 = 被 TUI 吞掉（启动期丢 stdin），重试
-                        if (attempt >= 3) { failClosed(); return; }
-                        press();
-                        return;
-                    }
-                    if (enabled === targetEnabled) { writePrompt(); return; }
-                    failClosed(); // 按键生效但停在非目标态（多档循环越过目标）
+                    if (attempt >= APPROVAL_VERIFY_MAX_ATTEMPTS) { failClosed(); return; }
+                    press(); // 按键被吞（无新输出）/窗口内只有弹窗帧（状态未知）/明确非目标（弹窗吃了上一次 Shift+Tab）→ dismiss 后重试
                 };
                 if (task.agentId === 'cline') {
                     verifyClineApprovalState(0, 0);
