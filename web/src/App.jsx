@@ -345,13 +345,14 @@ function AuthenticatedLayout({
   );
 }
 
-/** /admin/usage → /observability?section=usage，保留 ?user= 深链参数。 */
+/** /admin/usage → /observability?section=user-stats，保留 ?user= 深链参数。
+ *  原「用量统计」页已拆为「用户统计」+「智能体与模型」，旧入口落到用户统计。 */
 function UsageRedirect() {
   const { user } = useContext(AuthContext);
   const location = useLocation();
   if (user?.role !== 'admin') return <Navigate to="/sessions" replace />;
   const params = new URLSearchParams(location.search);
-  params.set('section', 'usage');
+  params.set('section', 'user-stats');
   return <Navigate to={`/observability?${params.toString()}`} replace />;
 }
 

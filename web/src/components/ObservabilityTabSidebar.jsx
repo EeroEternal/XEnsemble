@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Gauge, BarChart3, Route, TrendingUp } from 'lucide-react';
+import { Gauge, Route, TrendingUp, Users, Bot } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
   consoleSettingsTabActiveClass,
@@ -26,20 +26,28 @@ const OBSERVABILITY_GROUPS = [
     labelKey: 'observability:groups.global',
     adminOnly: true,
     tabs: [
-      { id: 'usage', labelKey: 'observability:tabs.usage', icon: BarChart3, adminOnly: true },
+      { id: 'user-stats', labelKey: 'observability:tabs.user_stats', icon: Users, adminOnly: true },
+      { id: 'agents-models', labelKey: 'observability:tabs.agents_models', icon: Bot, adminOnly: true },
     ],
   },
 ];
 
 const OBSERVABILITY_TABS = OBSERVABILITY_GROUPS.flatMap((group) => group.tabs);
 
+// 旧 section id → 新 id：拆分前的 ?section=usage（原「用量统计」页）深链/书签
+// 仍可用，统一落到拆出的「用户统计」。
+const LEGACY_SECTION_ALIASES = {
+  usage: 'user-stats',
+};
+
 export function defaultObservabilitySection() {
   return OBSERVABILITY_TABS[0].id;
 }
 
-/** 非法 / 越权 section 一律回退到第一个可见 tab。 */
+/** 非法 / 越权 section 一律回退到第一个可见 tab；旧 id 先经别名映射（见 LEGACY_SECTION_ALIASES）。 */
 export function resolveObservabilitySection(value, isAdmin = false) {
-  const tab = OBSERVABILITY_TABS.find((t) => t.id === value);
+  const normalized = LEGACY_SECTION_ALIASES[value] || value;
+  const tab = OBSERVABILITY_TABS.find((t) => t.id === normalized);
   if (tab && (!tab.adminOnly || isAdmin)) return tab.id;
   return defaultObservabilitySection();
 }

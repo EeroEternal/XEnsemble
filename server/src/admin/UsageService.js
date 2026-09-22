@@ -271,12 +271,17 @@ async function getTotalBetween(userId, fromTs, toTs) {
 
 /**
  * 全部用户用量排行（LEFT JOIN users，含 0 用量用户）。附每用户缓存命中率
- * （分母只计上报了缓存信息的请求）。
- * @returns {Promise<Array<{ userId, username, displayName, role, promptTokens, completionTokens, totalTokens, requests, cachedTokens, cacheHitRate }>>}
+ * （分母只计上报了缓存信息的请求）与目录单价估算成本 costUsd。
+ *
+ * costUsd 的口径与 getUsageByModelPlatform / trendFromModelRows 一致：按
+ * 「用户 × 模型」聚合 token，套模型目录 USD 单价（输入/输出/缓存读三档）。
+ * 拿不到单价的模型费用为 0 计（不阻断整行）——用户成本以「可估价部分」为准，
+ * avgCostPerMillion 据此得出，同样可能是低估。
+ * @returns {Promise<Array<{ userId, username, displayName, role, promptTokens, completionTokens, totalTokens, requests, cachedTokens, cacheHitRate, costUsd, avgCostPerMillion }>>}
  */
 async function getUsageByUser({ days } = {}) {
     const { sinceTs } = normalizeRange(days);
-    const [rows, savingsByUser] = await Promise.all([
+    const [rows, savingsByUser, costByUser] = await Promise.all([
         db
             .select({
                 userId: schema.users.id,
@@ -300,11 +305,13 @@ async function getUsageByUser({ days } = {}) {
             .groupBy(schema.users.id, schema.users.username, schema.users.displayName, schema.users.role)
             .orderBy(sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0) desc`),
         getRoutingCostByUser({ days }),
+        getUserCostByModel({ days }),
     ]);
     return rows.map((r) => {
         const cachedTokens = Number(r.cached || 0);
         const reportedPrompt = Number(r.reportedPrompt || 0);
         const savings = savingsByUser.get(r.userId);
+        const cost = costByUser.get(r.userId) || { costUsd: 0, tokens: 0 };
         return {
             userId: r.userId,
             username: r.username,
@@ -318,8 +325,50 @@ async function getUsageByUser({ days } = {}) {
             cacheHitRate: reportedPrompt > 0 ? Number((cachedTokens / reportedPrompt).toFixed(4)) : null,
             avgDifficulty: r.avgDifficulty == null ? null : Number(Number(r.avgDifficulty).toFixed(4)),
             estSavingsUsd: savings ? Number(savings.estSavingsUsd.toFixed(4)) : null,
+            costUsd: Number(cost.costUsd.toFixed(4)),
+            avgCostPerMillion: cost.tokens > 0 ? Number(((cost.costUsd / cost.tokens) * 1e6).toFixed(4)) : null,
         };
     });
+}
+
+/**
+ * 平台全用户成本估算（内部辅助）：按「用户 × 模型」聚合，套目录单价。
+ * 返回 Map<userId, {costUsd, tokens}>，tokens 为可估价 token 总量（avgCostPerMillion 分母）。
+ */
+async function getUserCostByModel({ days } = {}) {
+    const { sinceTs } = normalizeRange(days);
+    const rows = await db
+        .select({
+            userId: schema.llmUsage.userId,
+            model: schema.llmUsage.model,
+            prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
+            completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
+            cached: sql`coalesce(sum(${schema.llmUsage.cachedTokens}), 0)::int`,
+            total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
+        })
+        .from(schema.llmUsage)
+        .where(gte(schema.llmUsage.createdAt, sinceTs))
+        .groupBy(schema.llmUsage.userId, schema.llmUsage.model);
+    const catalog = fetchModelCatalog();
+    const unitCache = new Map();
+    const unitOf = (model) => {
+        const key = model ?? '';
+        if (!unitCache.has(key)) unitCache.set(key, usdEstimateFromEntry(lookupCatalog(catalog, { model })));
+        return unitCache.get(key);
+    };
+    const byUser = new Map();
+    for (const r of rows) {
+        const unit = unitOf(r.model);
+        if (!unit) continue; // 目录外模型：无法估价，不阻断其余模型
+        const cost = (Number(r.prompt) / 1e6) * (unit.input ?? 0)
+            + (Number(r.completion) / 1e6) * (unit.output ?? 0)
+            + (Number(r.cached) / 1e6) * (unit.cache_read ?? 0);
+        const acc = byUser.get(r.userId) || { costUsd: 0, tokens: 0 };
+        acc.costUsd += cost;
+        acc.tokens += Number(r.total || 0);
+        byUser.set(r.userId, acc);
+    }
+    return byUser;
 }
 
 /**
@@ -395,13 +444,79 @@ async function getUsageByModel(userId, { days } = {}) {
 }
 
 /**
- * 平台总览：汇总（含缓存命中）+ 日趋势 + TOP5 用户 + agent 分布。
+ * 平台维度按模型聚合（管理员总览用：模型使用量 + 单价估算）。
+ *
+ * 与 getUsageByModel 的区别：不限用户，且附带目录单价估算的费用。
+ * avgCostPerMillion 是该模型**实际用量结构**下的混合均价
+ * （估算费用 ÷ 总 token × 1e6），而非目录标价——同一模型输入/输出配比不同，
+ * 均价随之变化，因此它反映真实花费水平。
+ *
+ * @returns {Promise<Array<{key:string, requests:number, promptTokens:number,
+ *   completionTokens:number, cachedTokens:number, totalTokens:number,
+ *   cacheHitRate:number|null, costUsd:number|null, avgCostPerMillion:number|null}>>}
+ *   cacheHitRate 分母只计上报了缓存信息的请求（与 getUsageByAgent 同口径）；
+ *   costUsd / avgCostPerMillion 为 null 表示目录里查不到该模型单价（无法估算）。
+ */
+async function getUsageByModelPlatform({ days } = {}) {
+    const { sinceTs } = normalizeRange(days);
+    const rows = await db
+        .select({
+            key: schema.llmUsage.model,
+            requests: sql`count(*)::int`,
+            prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
+            completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
+            cached: sql`coalesce(sum(${schema.llmUsage.cachedTokens}), 0)::int`,
+            reportedPrompt: sql`coalesce(sum(case when ${schema.llmUsage.cachedTokens} is not null then ${schema.llmUsage.promptTokens} else 0 end), 0)::int`,
+            total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
+        })
+        .from(schema.llmUsage)
+        .where(gte(schema.llmUsage.createdAt, sinceTs))
+        .groupBy(schema.llmUsage.model)
+        .orderBy(sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0) desc`);
+    const catalog = fetchModelCatalog();
+    const unitCache = new Map();
+    const unitOf = (model) => {
+        const key = model ?? '';
+        if (!unitCache.has(key)) unitCache.set(key, usdEstimateFromEntry(lookupCatalog(catalog, { model })));
+        return unitCache.get(key);
+    };
+    return rows.map((r) => {
+        const promptTokens = Number(r.prompt || 0);
+        const completionTokens = Number(r.completion || 0);
+        const cachedTokens = Number(r.cached || 0);
+        const reportedPrompt = Number(r.reportedPrompt || 0);
+        const totalTokens = Number(r.total || 0);
+        const unit = unitOf(r.key);
+        // 与 trendFromModelRows 同口径：输入/输出/缓存读三档分别计价
+        const cost = unit
+            ? (promptTokens / 1e6) * (unit.input ?? 0)
+                + (completionTokens / 1e6) * (unit.output ?? 0)
+                + (cachedTokens / 1e6) * (unit.cache_read ?? 0)
+            : null;
+        return {
+            key: r.key ?? '(unknown)',
+            requests: Number(r.requests || 0),
+            promptTokens,
+            completionTokens,
+            cachedTokens,
+            totalTokens,
+            cacheHitRate: reportedPrompt > 0 ? Number((cachedTokens / reportedPrompt).toFixed(4)) : null,
+            costUsd: cost == null ? null : Number(cost.toFixed(4)),
+            avgCostPerMillion: cost != null && totalTokens > 0
+                ? Number(((cost / totalTokens) * 1e6).toFixed(4))
+                : null,
+        };
+    });
+}
+
+/**
+ * 平台总览：汇总（含缓存命中）+ 日趋势 + TOP5 用户 + agent 分布 + 模型分布。
  */
 async function getPlatformOverview({ days } = {}) {
     const { days: d, sinceTs } = normalizeRange(days);
     // 同 getMyUsageTrend：按天分桶用内联常量表达式（select/group by 逐字一致）
     const bucketExpr = sql.raw(`floor(created_at / ${DAY_MS})`);
-    const [summaryRows, trendRows, topUsers, byAgent] = await Promise.all([
+    const [summaryRows, trendRows, topUsers, byAgent, byModel] = await Promise.all([
         db
             .select({
                 prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
@@ -430,6 +545,7 @@ async function getPlatformOverview({ days } = {}) {
             .groupBy(bucketExpr, schema.llmUsage.model, schema.llmUsage.agentId),
         getUsageByUser({ days }),
         getUsageByAgent({ days }),
+        getUsageByModelPlatform({ days }),
     ]);
     const s = summaryRows[0] || {};
     const cachedTokens = Number(s.cached || 0);
@@ -448,6 +564,7 @@ async function getPlatformOverview({ days } = {}) {
         trend,
         topUsers: topUsers.filter((u) => u.totalTokens > 0).slice(0, 5),
         byAgent,
+        byModel,
     };
 }
 
@@ -485,6 +602,7 @@ module.exports = {
     getTotalBetween,
     getUsageByUser,
     getUsageByModel,
+    getUsageByModelPlatform,
     getUsageByAgent,
     getUserUsageDetail,
     getPlatformOverview,

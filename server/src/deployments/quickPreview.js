@@ -269,19 +269,28 @@ async function runQuickPreviewInner({ project, userId, projectId, sessionId, rep
     // 重生成流程：先备份旧工厂，生成成功才替换——绝不 rm 后失败留空（实测 20:04：
     // 开关还挂在 systemd 环境里 → 强刷遇 route-grep 偶发空 → fallback 垃圾 → rm 掉
     // 好工厂后生成失败 → 登录回归）。备份在沙箱 /tmp，失败后自动回滚。
-    // 强制重生成的唯一入口是手动删除沙箱内 .xensemble/mocks/_generated.cjs +
-    // plan 缓存的 mockDataFactory 标志——环境变量开关已废除（systemctl
-    // set-environment 设了忘 unset 会永久残留，20:04 事故根因）。
+    // 强制重生成的唯一入口是手动删除沙箱内 .xensemble/mocks/_generated.cjs——
+    // 环境变量开关已废除（systemctl set-environment 设了忘 unset 会永久残留，20:04 事故根因）。
     const forceRegen = false;
-    // 标志位为真≠产物可用：DB 标志位与沙箱产物生命周期不一致（沙箱重建丢产物、标志位
-    // 仍在）。必须先探测产物，不能只信标志位——否则「既不生成也不兜底」，工厂缺失导致
-    // 登录等硬前置接口卡死（见 probeFactoryArtifact）。
+    // 工厂复用判定与 plan 缓存**解耦**：只看沙箱内产物自身健康度（加载 + 行为探测，
+    // 见 probeFactoryArtifact），不受 VERIFY_STATE_TTL_MS（30min）过期影响。
+    // 此前 `plan.mockDataFactory ? probe : false`——缓存过期把标志位一并丢掉，即使沙箱里
+    // 工厂完好也无条件走全量 LLM 重生成（2×120s），第三步动辄卡 4~7 分钟；且 LLM 缺
+    // service 层形状，每次重生成产物形状都可能不对。产物能过探测就是可用资产，与缓存
+    // 生命周期无关。
     const GEN = '.xensemble/mocks/_generated.cjs';
     const BAK = '/tmp/_generated.cjs.bak';
-    let factoryOk = plan.mockDataFactory
-        ? await probeFactoryArtifact({ runtimeRef: ref, workspacePath: wsPath })
-        : false;
-    if (plan.mockDataFactory && !factoryOk) {
+    let factoryOk = await probeFactoryArtifact({ runtimeRef: ref, workspacePath: wsPath, log: quickLog });
+    if (factoryOk) {
+        if (plan.mockDataFactory) {
+            quickLog('mock factory cached and artifact verified, skipping generation');
+        } else {
+            // plan 缓存过期/丢失但产物健在：复用产物，把标志位记回缓存，后续预览省一次探测说明
+            quickLog('mock factory artifact verified (plan cache expired); reusing artifact');
+            plan.mockDataFactory = true;
+            try { await saveVerifyState(projectId, { plan, messages: [], trail: [], roundsUsed: 0, runtimeRef: ref, workspacePath: wsPath }); } catch { /* cache best-effort */ }
+        }
+    } else if (plan.mockDataFactory) {
         quickLog('mock factory flagged as cached but artifact missing/unusable; regenerating');
     }
     if (!factoryOk || forceRegen) {
@@ -304,15 +313,13 @@ async function runQuickPreviewInner({ project, userId, projectId, sessionId, rep
                 // 避免下方 readiness 日志谎报 factory=true。
                 await runtime.exec.exec('sh', ['-c', `[ -f ${BAK} ] && mv ${BAK} ${GEN} || true`], {}, { runtimeRef: ref, cwd: wsPath, timeoutMs: 5000 }).catch(() => null);
                 quickLog('mock factory generation failed; previous factory restored (if any)');
-                factoryOk = await probeFactoryArtifact({ runtimeRef: ref, workspacePath: wsPath });
+                factoryOk = await probeFactoryArtifact({ runtimeRef: ref, workspacePath: wsPath, log: quickLog });
             }
         } catch (e) {
             quickLog(`mock factory generation failed (non-fatal): ${e.message}`);
             await runtime.exec.exec('sh', ['-c', `[ -f ${BAK} ] && mv ${BAK} ${GEN} || true`], {}, { runtimeRef: ref, cwd: wsPath, timeoutMs: 5000 }).catch(() => null);
-            factoryOk = await probeFactoryArtifact({ runtimeRef: ref, workspacePath: wsPath });
+            factoryOk = await probeFactoryArtifact({ runtimeRef: ref, workspacePath: wsPath, log: quickLog });
         }
-    } else {
-        quickLog('mock factory cached and artifact verified, skipping generation');
     }
     const mockEndpoints = await collectMockEndpoints(projectId);
     // 前端期望裸数组的端点（确定性兜底）：工厂可能漏掉某端点（LLM 覆盖不全），此时通用
@@ -821,6 +828,128 @@ async function startAggregateProxyCompat({ runtimeRef, workspacePath, devPort, m
     return devPort > 0;
 }
 
+// 工厂「可用」判定脚本（沙箱内执行）：加载 + **行为探测**。
+//
+// 只验「可加载、handle 是函数」会漏掉「能加载但一调用就抛」的工厂：实测一次生成产物
+// 内部 matches() 调用少传了 path 参数 → handle 对**每个**请求都抛
+// "Cannot read properties of undefined"，而 mock server 的 try/catch 静默吞掉异常 →
+// 所有接口降级成 {data:null} → 登录等硬前置接口卡死。那种工厂完全通过旧的存在性校验，
+// 于是被当作「已缓存且可用」反复复用。
+//
+// 因此这里用两个**不存在的路径**真正调一次 handle，要求不抛异常。路由遍历阶段发生的
+// 签名/初始化类错误（正是上面那类 bug）必然暴露；不存在的路径不依赖任何具体项目的
+// 路由约定，故对任意项目通用。target 可由 argv 指定（校验待落盘候选），默认取沙箱内工厂。
+const FACTORY_PROBE_JS = `const p = require('path');
+const target = process.argv[2] || p.join(process.cwd(), '.xensemble/mocks/_generated.cjs');
+let m;
+try { m = require(target); } catch (e) { console.error('probe: require failed -> ' + e.message); process.exit(3); }
+if (typeof m.handle !== 'function') { console.error('probe: handle is not a function'); process.exit(3); }
+for (const method of ['GET', 'POST']) {
+    try { m.handle({ method, path: '/__xe_probe__', body: {}, query: {} }); }
+    catch (e) { console.error('probe: handle threw on ' + method + ' -> ' + e.message); process.exit(4); }
+}
+console.log('FACTORY_OK');
+`;
+
+// 探测脚本落盘片段（heredoc 单引号包裹，避免 shell 转义；两个调用点共用同一份逻辑）
+const FACTORY_PROBE_WRITE = `cat > /tmp/_xe_factory_probe.cjs <<'XE_FACTORY_PROBE_EOF'\n${FACTORY_PROBE_JS}\nXE_FACTORY_PROBE_EOF`;
+
+/** 校验沙箱内**已就位**的工厂（跳过重新生成前的探测）。 */
+function factoryProbeCommand() {
+    return `${FACTORY_PROBE_WRITE}\nnode /tmp/_xe_factory_probe.cjs && echo FACTORY_OK`;
+}
+
+/** 校验**待落盘**的候选内容：先写候选文件，再按路径探测（不覆盖沙箱内的好工厂）。 */
+function factoryCandidateProbeCommand(content) {
+    return `cat > /tmp/_xe_factory_candidate.cjs <<'XE_FACTORY_CANDIDATE_EOF'\n${content}\nXE_FACTORY_CANDIDATE_EOF\n`
+        + `${FACTORY_PROBE_WRITE}\nnode /tmp/_xe_factory_probe.cjs /tmp/_xe_factory_candidate.cjs && echo FACTORY_OK`;
+}
+
+/**
+ * 从被预览项目**前端源码**通用地提取浏览器实际调用的 API 路径（机器可读，供生成后
+ * 校验工厂覆盖率）。与 GREP_CMD 的 FRONTEND API PATHS 段同一个 grep 模式——那条喂
+ * LLM，这条落成 JSON 清单做机器校验，两处必须保持同源。不含任何写死路径。
+ */
+function extractFrontendApiPathsCmd() {
+    return `for d in web/src frontend/src client/src app/src src; do [ -d "$d" ] || continue; ` +
+        `grep -rhoE "/v[0-9]+/[a-zA-Z0-9_-]+(/[a-zA-Z0-9_{}.-]+)*|/api/[a-zA-Z0-9_-]+(/[a-zA-Z0-9_{}.-]+)*|/console/api/[a-zA-Z0-9_-]+" ` +
+        `--include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' "$d" 2>/dev/null; done | sort -u | head -40`;
+}
+
+/**
+ * 生成后通用响应校验：对候选工厂跑「前端真实路径抽查」。
+ * 校验规则是结构级通用的（不抛异常 / GET 非 null / 可序列化），见 FACTORY_VALIDATE_JS。
+ * @returns {Promise<{ok:boolean, coverage:string, missed:string}>}
+ */
+async function validateFactoryCandidate({ content, runtimeRef, workspacePath }) {
+    const runtime = getRuntime();
+    let pathsRaw = '';
+    try {
+        const r = await runtime.exec.exec('sh', ['-c', extractFrontendApiPathsCmd()], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 }).catch(() => null);
+        pathsRaw = String(r?.stdout || '').trim();
+    } catch { pathsRaw = ''; }
+    const paths = [...new Set(pathsRaw.split('\n').map((s) => s.trim()).filter(Boolean))];
+    if (paths.length < 3) {
+        // 提取不到足够的路径清单（非浏览器项目/纯后端）：无从校验，按通过处理——
+        // 行为探测（FACTORY_PROBE_JS）已把关"不抛异常"。
+        return { ok: true, coverage: 'n/a (no frontend paths)', missed: '' };
+    }
+    const cmd = `cat > /tmp/_xe_factory_candidate.cjs <<'XE_FACTORY_CANDIDATE_EOF'\n${content}\nXE_FACTORY_CANDIDATE_EOF\n`
+        + `cat > /tmp/_xe_factory_paths.json <<'XE_FACTORY_PATHS_EOF'\n${JSON.stringify(paths)}\nXE_FACTORY_PATHS_EOF\n`
+        + `${FACTORY_PROBE_WRITE.replace('_xe_factory_probe.cjs', '_xe_factory_validate.cjs').replace(FACTORY_PROBE_JS, FACTORY_VALIDATE_JS)}\n`
+        + `node /tmp/_xe_factory_validate.cjs /tmp/_xe_factory_candidate.cjs /tmp/_xe_factory_paths.json && echo FACTORY_OK`;
+    const chk = await runtime.exec.exec('sh', ['-c', cmd], {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 }).catch(() => null);
+    const stdout = String(chk?.stdout || '');
+    const ok = /FACTORY_OK/.test(stdout);
+    return {
+        ok,
+        coverage: (stdout.match(/coverage=\S+/) || ['coverage=?'])[0],
+        missed: String(chk?.stderr || '').split('\n').filter((l) => l.startsWith('VALIDATE_MISSED')).map((l) => l.replace('VALIDATE_MISSED ', ''))[0] || '',
+    };
+}
+
+// 生成后**通用响应校验**：拿「被预览项目自己前端代码里提取的 API 路径」（无任何写死）
+// 对候选工厂逐一调用，只做结构级判定（不校验字段内容——字段对不对是 LLM 的事）：
+//   1. 不抛异常（除_factory_handle_error_ 前缀的内部哨兵错误外）
+//   2. GET 返回非 null/undefined（null = 工厂未覆盖该端点；mock server 对 null 落
+//      {data:null} 兜底，正是前端读 data.access_token 白屏的形态）
+//   3. 返回值可 JSON 序列化（mock server 走 JSON.stringify 发送，循环引用会炸）
+// 命中率红线：校验端点里 ≥60% 未覆盖 → 判为劣质产物，拒绝并带清单重试。
+// 路径含 {param} 段时替换为固定值 1（段数不变，工厂按段匹配）。
+const FACTORY_VALIDATE_JS = `const fs = require('fs');
+const m = require(process.argv[2]);
+const paths = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+const MISS_LIMIT = Math.max(3, Math.ceil(paths.length * 0.4));
+let miss = 0; const missed = [];
+// 「懒包络」判定：{data:null} / {foo:null} / {} 这类全 null 且无有效值的对象。
+// 工厂契约是"未知路由返回 null"，但 LLM 常违规地返回 {data:null}——mock server 原样
+// 透传，前端读 data.access_token 仍白屏。结构级判定：非数组对象的每个属性值都是
+// null/undefined（或根本没有属性）→ 视同未覆盖。
+function isLazyEnvelope(out) {
+    if (out === null || typeof out !== 'object' || Array.isArray(out)) return false;
+    const vals = Object.values(out);
+    return vals.length === 0 || vals.every((v) => v === null || v === undefined);
+}
+for (const p of paths) {
+    const concrete = p.split('/').map(s => (s.startsWith('{') || s.startsWith(':')) ? '1' : s).join('/');
+    let out; let threw = null;
+    try { out = m.handle({ method: 'GET', path: concrete, body: {}, query: {} }); }
+    catch (e) { threw = e.message; }
+    if (threw) { miss++; missed.push(concrete + ' (threw: ' + String(threw).slice(0, 60) + ')'); }
+    else if (out === null || out === undefined || isLazyEnvelope(out)) { miss++; missed.push(concrete); }
+    else {
+        try { JSON.stringify(out); } catch (e) { miss++; missed.push(concrete + ' (non-serializable)'); }
+    }
+    if (miss > MISS_LIMIT) break; // 已远超红线，不必跑完
+}
+if (miss > MISS_LIMIT) {
+    console.error('VALIDATE_FAIL coverage=' + (paths.length - miss) + '/' + paths.length);
+    console.error('VALIDATE_MISSED ' + missed.slice(0, 12).join(' | '));
+    process.exit(5);
+}
+console.log('FACTORY_OK coverage=' + (paths.length - miss) + '/' + paths.length);
+`;
+
 // LLM 生成拟真 mock 数据工厂（.xensemble/mocks/_generated.cjs）。
 // 输入：沙箱内路由文件摘要（让 LLM 看到真实接口结构）——路由注册行 grep + 数据模型
 // 字段（schema/prisma/entities）。输出：CommonJS 工厂模块，导出 handle({method,path,body,query})。
@@ -841,6 +970,7 @@ Module contract:
   * The section "FRONTEND TS INTERFACES" is the authoritative field list the browser reads. Match its top-level keys AND its nesting exactly (optional "?" fields may be omitted; everything else must be present).
   * NEVER reuse one shape helper across endpoints whose response models differ. Similar-looking paths often return different shapes: /v2/organizations returns List[OrganizationPublic] (flat org) while /v2/users/me/organizations returns List[MyOrganization] (nested {organization, role}). Same noun, different shape — build separate item factories.
 - Auth/login/register endpoints: return plausible tokens (e.g. 'mock-jwt-header.payload.sig') + a user object, at top level if the handler does.
+- HANDLERS THAT DELEGATE: when a handler returns "await someService.x()" instead of a literal, the REAL response shape lives in that service function's return statement. The section "SERVICE LAYER RETURNS" contains those verbatim excerpts — your mock for that route MUST copy the service's return shape (keys, nesting, casing), NOT a guess. If a service excerpt's return statement references dynamic fields (e.g. computed values), emit plausible values with those exact key names.
 - Data must be REALISTIC and DETERMINISTIC (seeded pseudo-random; stable across restarts):
   * list endpoints: 8 plausible items with plausible field values (names, emails, dates in the past, booleans, statuses seen in the models)
   * detail endpoints (/:id): return the first list item
@@ -921,6 +1051,18 @@ async function generateMockFactory({ workspacePath, hostWorkspacePath, runtimeRe
         `--include='*.js' --include='*.ts' --include='*.mjs' --include='*.py' --include='*.go' ` +
         `${GREP_EXCLUDES} "$d" 2>/dev/null; done ` +
         `| grep -v node_modules | grep -vE ":[0-9]+:\\s*[*//]" | sort -u | head -60; ` +
+        // SERVICE 层响应形状（分层后端的普遍盲区）：现代 Node 后端普遍写成
+        // handler → return await service.x()，真实响应形状在 service 文件里——
+        // 只看 handler 的 return 字面量，LLM 拿不到形状只能瞎猜（实测 overview/summary
+        // 端点每次重生成形状都错的根因）。按「service/repository/dao」命名约定抓
+        // **目录或单文件**（有的项目 service 是目录，有的如 UsageService.js 是单文件），
+        // 对任何分层 Node 项目适用，无项目绑定；Python 项目的形状由上面
+        // response_model 段覆盖，互不干扰。排除 *.test.* 只留实现。
+        `echo '--- SERVICE LAYER RETURNS (authoritative shape when handlers delegate to services) ---'; ` +
+        `SVC_PATHS=$(find server/src src api backend server -maxdepth 4 \\( -type d -o -type f \\) \\( -iname '*service*.js' -o -iname '*service*.ts' -o -iname '*repository*.js' -o -iname '*repository*.ts' -o -iname '*dao*.js' -o -iname '*dao*.ts' -o -iname '*service*' -type d \\) ${FIND_EXCLUDES} 2>/dev/null | grep -vE '\\.test\\.' | head -12); ` +
+        `for sp in $SVC_PATHS; do ` +
+        `grep -rnA3 -E "return \\{" --include='*.js' --include='*.ts' ${GREP_EXCLUDES} "$sp" 2>/dev/null; done ` +
+        `| grep -v node_modules | sort -u | head -80; ` +
         `echo '--- ROUTER PREFIXES ---'; ` +
         `grep -rhoE 'prefix="/[^"]*"' --include='*.py' --include='*.js' --include='*.ts' ${GREP_EXCLUDES} backend server src api 2>/dev/null | sort -u | head -30; ` +
         // Next.js app router 的路由就是目录结构（page.tsx/route.ts）——没有注册行可
@@ -1010,14 +1152,22 @@ async function generateMockFactory({ workspacePath, hostWorkspacePath, runtimeRe
             quickLog(`mock factory output unusable (len=${content.length}, attempt ${attempt})`);
             continue; // 重试
         }
-        // 沙箱内语法自检后再落盘——坏的工厂会拖垮整个 mock server
-        const chk = await runtime.exec.exec('sh', ['-c',
-            `cat > /tmp/_mf_check.cjs <<'XENSEMBLE_MF_EOF'\n${content}\nXENSEMBLE_MF_EOF\nnode -e "const m=require('/tmp/_mf_check.cjs'); if(typeof m.handle!=='function')process.exit(3)" && echo FACTORY_OK`],
+        // 沙箱内语法自检 + 行为探测后再落盘——坏的工厂会拖垮整个 mock server，
+        // 且「能加载但一调用就抛」的工厂必须在这里就被拒（见 FACTORY_PROBE_JS）。
+        const chk = await runtime.exec.exec('sh', ['-c', factoryCandidateProbeCommand(content)],
             {}, { runtimeRef, cwd: workspacePath, timeoutMs: 20000 }).catch(() => null);
         if (!chk || !/FACTORY_OK/.test(String(chk.stdout || ''))) {
-            quickLog(`mock factory syntax/contract check failed (attempt ${attempt}); discard`);
+            quickLog(`mock factory syntax/contract check failed (attempt ${attempt}): ${String(chk?.stderr || '').slice(-200).replace(/\n/g, ' ')}`);
             continue;
         }
+        // 通用响应校验：用被预览项目前端真实 API 路径抽查覆盖率（结构级规则，零写死）。
+        // 不合格 → 拒绝落盘，带着未覆盖清单进下一次 LLM 尝试（重试时 LLM 可对照补齐）。
+        const verdict = await validateFactoryCandidate({ content, runtimeRef, workspacePath });
+        if (!verdict.ok) {
+            quickLog(`mock factory coverage check failed (attempt ${attempt}): ${verdict.coverage}; missed: ${verdict.missed.slice(0, 300)}`);
+            continue;
+        }
+        quickLog(`mock factory coverage check passed (attempt ${attempt}): ${verdict.coverage}`);
         await runtime.fs.fsWrite(workspacePath, '.xensemble/mocks/_generated.cjs', content, { runtimeRef });
         quickLog(`mock factory generated (${content.length} bytes)`);
         return true;
@@ -1027,15 +1177,19 @@ async function generateMockFactory({ workspacePath, hostWorkspacePath, runtimeRe
 
 // 产物可用性探测：缓存标志位存在宿主 DB（deploy_verify_states），产物存在沙箱文件系统，
 // 两者生命周期不一致——沙箱重建会丢产物而标志位仍在（TTL 30min，见 twoStage
-// VERIFY_STATE_TTL_MS）。跳过生成前必须先验证产物真实存在且可加载，否则工厂静默缺失、
+// VERIFY_STATE_TTL_MS）。跳过生成前必须先验证产物真实可用，否则工厂静默缺失、
 // mock 退化成 {data:null}，登录等硬前置接口直接卡死且长时间不自愈。
-async function probeFactoryArtifact({ runtimeRef, workspacePath }) {
+// 判定为「加载 + 行为」双重探测（见 FACTORY_PROBE_JS），只验可加载拦不住
+// 「能加载但一调用就抛」的工厂——那正是实测登录回归的形态。
+async function probeFactoryArtifact({ runtimeRef, workspacePath, log }) {
     const runtime = getRuntime();
-    const GEN = '.xensemble/mocks/_generated.cjs';
-    const chk = await runtime.exec.exec('sh', ['-c',
-        `[ -f ${GEN} ] && node -e "const m=require('./${GEN}'); if(typeof m.handle!=='function')process.exit(3)" && echo FACTORY_OK`],
+    const chk = await runtime.exec.exec('sh', ['-c', factoryProbeCommand()],
         {}, { runtimeRef, cwd: workspacePath, timeoutMs: 15000 }).catch(() => null);
-    return /FACTORY_OK/.test(String(chk?.stdout || ''));
+    const ok = /FACTORY_OK/.test(String(chk?.stdout || ''));
+    if (!ok) {
+        log?.(`mock factory probe failed: ${String(chk?.stderr || '(no stderr)').slice(-200).replace(/\n/g, ' ')}`);
+    }
+    return ok;
 }
 
 // mock endpoints 种子：最近一次成功部署的 verify API 探测结果（plan 缓存 trail）+

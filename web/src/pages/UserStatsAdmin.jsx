@@ -1,26 +1,31 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, ChevronUp, Loader2, RefreshCw, Search } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2, Search } from 'lucide-react';
 
 import PageHeader from '../components/PageHeader';
-import SelectMenu from '../components/SelectMenu';
 import MultiSelectMenu from '../components/MultiSelectMenu';
+import UsagePeriodActions from '../components/usage/UsagePeriodActions';
 import UserUsageDialog from '../components/usage/UserUsageDialog';
-import MiniBarChart, { SERIES_COLORS } from '../components/usage/MiniBarChart';
-import { buildAgentCostChart } from '../components/usage/costSeries';
+import MiniBarChart from '../components/usage/MiniBarChart';
+import { useUsageOverview } from '../components/usage/useUsageOverview';
 import {
   consoleAdminPageClass,
   consoleAdminTableScrollClass,
   consoleTableHeadBandClass,
   consoleAdminTableShellClass,
-  consoleIconButtonClass,
   consoleTableBodyCellClass,
   consoleTableHeadCellClass,
   consoleTableHeadRowClass,
 } from '../lib/consoleTokens';
 import { apiFetch } from '../lib/api';
 import { formatTokens, formatTokensFull } from '../lib/formatTokens';
+import UserCostScatter from '../components/usage/UserCostScatter';
+
+// 「日趋势 | 用户成本」两图并排：绘图区同高（柱高 104 + X 轴刻度行 ≈ 118 总高）。
+// 散点图 height 传总高（含自身底部刻度行），使两卡内容底部齐平、卡片等高。
+const CHART_HEIGHT = 104;
+// 用户成本散点图高度自适应卡片（组件根 flex-1 + ResizeObserver 实测），无需传定值。
 
 const AVATAR_COLORS = [
   'bg-blue-100 text-blue-700',
@@ -37,39 +42,15 @@ function avatarClass(userId = '') {
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
 
-export default function UsageAdmin() {
+/** 用户统计：概览卡 + Token 日趋势 + 用户排行。
+ *  Agent 维度的费用趋势与 Agent 表已拆到「智能体与模型」页。 */
+export default function UserStatsAdmin() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [days, setDays] = useState('30');
-  const [overview, setOverview] = useState(null);
-  const [summary, setSummary] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const { days, setDays, overview, summary, loading, refreshing, refresh } = useUsageOverview({ withSummary: true });
   const [expandedUserId, setExpandedUserId] = useState(null);
   const [dialogUserId, setDialogUserId] = useState(null);
-
-  const fetchData = useCallback(({ silent = false } = {}) => {
-    if (!silent) setRefreshing(true);
-    setLoading((prev) => (silent ? prev : true));
-    return Promise.all([
-      apiFetch(`/api/v1/admin/usage/overview?days=${days}`).then((r) => r.json()),
-      apiFetch(`/api/v1/admin/usage/summary?days=${days}`).then((r) => r.json()),
-    ])
-      .then(([ov, sm]) => {
-        setOverview(ov?.summary ? ov : null);
-        setSummary(sm?.items ? sm : null);
-      })
-      .catch(() => {})
-      .finally(() => {
-        setLoading(false);
-        setRefreshing(false);
-      });
-  }, [days]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
 
   // 深链：?user=<id> → 打开对应弹窗。清理参数时保留其余参数
   // （section 等），页面仍停留在当前观测 tab。
@@ -133,51 +114,19 @@ export default function UsageAdmin() {
     [overview],
   );
 
-  // 费用日趋势按 agent 堆叠：Top N 各自成段，超出的合并为「其他」，
-  // 保证柱高 = 当日真实合计（否则尾部 agent 费用被静默丢弃，费用预估偏低）。
-  const costChart = useMemo(
-    () => buildAgentCostChart(overview?.trend || [], t('users:usage.cost_other')),
-    [overview, t],
-  );
-
-  // 兜底：后端未返回 costByAgent（旧版服务端）时退回单一总量序列，仅展示合计
-  const hasCostByAgent = (overview?.trend || []).some((d) => d.costByAgent && Object.keys(d.costByAgent).length > 0);
-  const costSeries = hasCostByAgent
-    ? costChart.series
-    : (overview?.trend || []).some((d) => (d.costUsd || 0) > 0)
-      ? [{ key: 'total', label: t('users:usage.cost_total'), color: SERIES_COLORS[0] }]
-      : [];
-  const costData = hasCostByAgent
-    ? costChart.data
-    : (overview?.trend || []).map((d) => ({ label: d.day, tip: d.day, values: { total: d.costUsd || 0 } }));
-
   const toggleExpand = (userId) => setExpandedUserId((prev) => (prev === userId ? null : userId));
 
   return (
     <div className={consoleAdminPageClass}>
       <PageHeader
-        title={t('users:usage.title')}
+        title={t('observability:tabs.user_stats')}
         actions={(
-          <div className="flex items-center gap-2">
-            <SelectMenu
-              value={days}
-              onChange={(v) => setDays(v)}
-              options={[
-                { value: '7', label: t('users:usage.period_7d') },
-                { value: '30', label: t('users:usage.period_30d') },
-                { value: '90', label: t('users:usage.period_90d') },
-              ]}
-            />
-            <button
-              type="button"
-              onClick={() => fetchData()}
-              disabled={refreshing}
-              className={consoleIconButtonClass}
-              title={t('common:action.refresh')}
-            >
-              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            </button>
-          </div>
+          <UsagePeriodActions
+            days={days}
+            onDaysChange={setDays}
+            refreshing={refreshing}
+            onRefresh={() => refresh()}
+          />
         )}
       />
 
@@ -205,11 +154,11 @@ export default function UsageAdmin() {
             />
           </div>
 
-          {/* 平台日趋势：左 Token（输入/输出两段）/ 右 费用（按 agent 堆叠） */}
-          <section>
-            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.trend')}</h2>
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              <div className="rounded-lg border border-zinc-200 bg-surface px-3 py-4">
+          {/* 日趋势（Token 柱状）| 用户 Token 成本（散点）：并排等高 */}
+          <div className="grid shrink-0 grid-cols-1 gap-4 lg:grid-cols-2">
+            <section className="flex min-h-0 flex-col">
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.trend')}</h2>
+              <div className="flex flex-1 flex-col rounded-lg border border-zinc-200 bg-surface px-3 py-4">
                 <div className="mb-2 flex items-center gap-3">
                   <span className="flex items-center gap-1 text-[11px] text-zinc-400">
                     <span className="inline-block h-1.5 w-1.5 rounded-sm bg-blue-500" /> {t('users:usage.prompt')}
@@ -220,7 +169,7 @@ export default function UsageAdmin() {
                 </div>
                 <MiniBarChart
                   data={trendData}
-                  height={104}
+                  height={CHART_HEIGHT}
                   showAxes
                   formatValue={formatTokens}
                   series={[
@@ -229,27 +178,15 @@ export default function UsageAdmin() {
                   ]}
                 />
               </div>
-              <div className="rounded-lg border border-zinc-200 bg-surface px-3 py-4">
-                {costSeries.length > 0 && (
-                  <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-                    {costSeries.map((s) => (
-                      <span key={s.key} className="flex items-center gap-1 text-[11px] text-zinc-400">
-                        <span className={`inline-block h-1.5 w-1.5 rounded-sm ${s.color}`} /> {s.label}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <MiniBarChart
-                  data={costData}
-                  height={104}
-                  showAxes
-                  formatValue={(v) => `$${Number(v).toFixed(2)}`}
-                  series={costSeries}
-                  totalLabel={hasCostByAgent ? t('users:usage.cost_total') : undefined}
-                />
+            </section>
+
+            <section className="flex min-h-0 flex-col">
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.user_cost')}</h2>
+              <div className="flex flex-1 flex-col rounded-lg border border-zinc-200 bg-surface px-3 py-4">
+                <UserCostScatter users={items} />
               </div>
-            </div>
-          </section>
+            </section>
+          </div>
 
           {/* 用户排行 */}
           <section className="flex min-h-48 flex-1 flex-col">
@@ -363,66 +300,6 @@ export default function UsageAdmin() {
                         </td>
                       </tr>
                     )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </section>
-
-          {/* Agent 分布（含缓存命中率）：与上方用户排行等权重平分剩余高度，
-              行数多时在表体滚动，避免 agent 表挤占排行表空间 */}
-          <section className="flex min-h-48 flex-1 flex-col">
-            <h2 className="mb-2 shrink-0 text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.by_agent')}</h2>
-            <div className={consoleAdminTableShellClass}>
-              <div className={consoleTableHeadBandClass}>
-                <table className="w-full table-fixed border-collapse text-left text-sm">
-                  <colgroup>
-                    <col className="w-1/6" />
-                    <col className="w-1/6" />
-                    <col className="w-1/6" />
-                    <col className="w-1/6" />
-                    <col className="w-1/6" />
-                    <col className="w-1/6" />
-                  </colgroup>
-                  <thead>
-                    <tr className={consoleTableHeadRowClass}>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.agent')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.requests')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.prompt')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.cached_tokens')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.cache_hit_rate')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.total_tokens')}</th>
-                    </tr>
-                  </thead>
-                </table>
-              </div>
-              <div className={consoleAdminTableScrollClass}>
-                <table className="w-full table-fixed border-collapse text-left text-sm">
-                  <colgroup>
-                    <col className="w-1/6" />
-                    <col className="w-1/6" />
-                    <col className="w-1/6" />
-                    <col className="w-1/6" />
-                    <col className="w-1/6" />
-                    <col className="w-1/6" />
-                  </colgroup>
-                  <tbody className="divide-y divide-zinc-100">
-                    {(overview?.byAgent || []).length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className={`${consoleTableBodyCellClass} text-center text-zinc-400`}>
-                          {t('users:usage.no_data')}
-                        </td>
-                      </tr>
-                    ) : (overview?.byAgent || []).map((a) => (
-                      <tr key={a.key} className="transition-colors hover:bg-zinc-50/70">
-                        <td className={`${consoleTableBodyCellClass} font-medium text-zinc-700`}>{a.key}</td>
-                        <td className={consoleTableBodyCellClass}>{formatTokens(a.requests)}</td>
-                        <td className={consoleTableBodyCellClass}>{formatTokens(a.promptTokens)}</td>
-                        <td className={consoleTableBodyCellClass}>{a.cachedTokens > 0 ? formatTokens(a.cachedTokens) : '—'}</td>
-                        <td className={consoleTableBodyCellClass}>{a.cacheHitRate != null ? `${Math.round(a.cacheHitRate * 100)}%` : '—'}</td>
-                        <td className={consoleTableBodyCellClass}>{formatTokens(a.totalTokens)}</td>
-                      </tr>
-                    ))}
                   </tbody>
                 </table>
               </div>

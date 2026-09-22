@@ -22,6 +22,12 @@ export const SERIES_COLORS = [
  * @param {boolean} [showAxes=false] 显示横纵坐标（Y 轴刻度 + 网格线 + X 轴起止日期）
  * @param {(v:number)=>string} [formatValue] 刻度与 tooltip 数值格式化（默认 token 缩写）
  * @param {string} [totalLabel] tooltip 合计行名称（如「合计」）；提供时在分段明细下展示
+ * @param {string} [yAxisWidth] Y 轴刻度列的固定宽度 class（如 'w-8'）。不传则按内容撑开。
+ *        并排的两张图若刻度文案宽度不同（如 "$0.21" vs "$0.5757"），绘图区左边界会不一致、
+ *        X 轴线段对不齐；传入相同值即可让两图绘图区严格对齐。
+ * @param {boolean} [legendOverlay=false] 把图例悬浮在绘图区右上角内侧（稍低于顶端刻度、
+ *        纵轴右侧），不占独立布局行——卡片顶部不产生空白带。多 series 且需要顶部
+ *        对齐的并排图使用。
  */
 export default function MiniBarChart({
   data = [],
@@ -30,10 +36,24 @@ export default function MiniBarChart({
   showAxes = false,
   formatValue = formatTokens,
   totalLabel,
+  yAxisWidth = '',
+  legendOverlay = false,
 }) {
   if (!data.length || !series.length) return null;
   const totals = data.map((d) => series.reduce((sum, s) => sum + (Number(d.values?.[s.key]) || 0), 0));
   const max = Math.max(...totals, 1);
+
+  const legend = series.length > 1 && (
+    // pointer-events-none：不挡柱子 tooltip。absolute 定位在绘图区右上角，
+    // top-3 让图例稍低于顶端刻度行（"纵坐标顶部"），left 侧让开 Y 轴列。
+    <div className="pointer-events-none absolute right-1 top-3 z-10 flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+      {series.map((s) => (
+        <span key={s.key} className="flex shrink-0 items-center gap-1 text-[11px] text-zinc-400">
+          <span className={`inline-block h-1.5 w-1.5 rounded-sm ${s.color}`} /> {s.label}
+        </span>
+      ))}
+    </div>
+  );
 
   const bars = (
     <div className="relative flex items-end gap-[2px]" style={{ height }}>
@@ -93,17 +113,23 @@ export default function MiniBarChart({
     </div>
   );
 
-  if (!showAxes) return bars;
+  if (!showAxes) {
+    if (legendOverlay) return <div className="relative">{bars}{legend}</div>;
+    return bars;
+  }
 
   return (
     <div className="flex gap-2">
-      <div className="flex shrink-0 flex-col justify-between text-right text-[10px] tabular-nums text-zinc-400" style={{ height }}>
-        <span>{formatValue(max)}</span>
-        <span>{formatValue(max / 2)}</span>
+      <div className={`flex shrink-0 flex-col justify-between text-right text-[10px] tabular-nums text-zinc-400 ${yAxisWidth}`} style={{ height }}>
+        <span className="truncate">{formatValue(max)}</span>
+        <span className="truncate">{formatValue(max / 2)}</span>
         <span>0</span>
       </div>
       <div className="min-w-0 flex-1">
-        {bars}
+        <div className="relative">
+          {bars}
+          {legendOverlay && legend}
+        </div>
         <div className="mt-1 flex justify-between text-[10px] tabular-nums text-zinc-400">
           <span>{data[0]?.label}</span>
           {data.length > 2 && <span>{data[Math.floor((data.length - 1) / 2)]?.label}</span>}

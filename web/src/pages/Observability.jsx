@@ -4,15 +4,17 @@ import ObservabilityTabSidebar, { resolveObservabilitySection } from '../compone
 import QuotaSettingsPanel from '../components/settings/QuotaSettingsPanel';
 import MyUsagePanel from '../components/usage/MyUsagePanel';
 import PageHeader from '../components/PageHeader';
-import UsageAdmin from './UsageAdmin';
+import UserStatsAdmin from './UserStatsAdmin';
+import AgentsModelsAdmin from './AgentsModelsAdmin';
 import RoutingAnalytics from './RoutingAnalytics';
 import { cn } from '../lib/utils';
 import { APP_SHELL_PAD_CLASS, APP_SHELL_MAIN_PY_CLASS } from '../lib/appShellLayout';
 
-/** section → 内容；usage 自带 PageHeader 且自管滚动，其余由本页提供表头。 */
+/** section → 内容；admin 统计两页自带 PageHeader 且自管滚动，其余由本页提供表头。 */
 function ObservabilityContent({ section }) {
   const { t } = useTranslation();
-  if (section === 'usage') return <UsageAdmin />;
+  if (section === 'user-stats') return <UserStatsAdmin />;
+  if (section === 'agents-models') return <AgentsModelsAdmin />;
   if (section === 'routing-analytics') return <RoutingAnalytics />;
   if (section === 'my-usage') {
     return (

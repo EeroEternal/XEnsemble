@@ -93,7 +93,16 @@ export default function MyUsagePanel() {
           <div>
             <div className={`${consoleSectionLabelClass} mb-2`}>{t('observability:my_usage.trend')}</div>
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              <div className={`${consoleCardClass} px-3 py-4`}>
+              {/* 两卡结构逐段同款：图例行（自然高+mb-2）→ MiniBarChart(104, mt-1 X 行) → X 轴基线对齐 */}
+              <div className={`${consoleCardClass} flex flex-col px-3 py-4`}>
+                <div className="mb-2 flex items-center gap-3">
+                  <span className="flex items-center gap-1 text-[11px] text-zinc-400">
+                    <span className="inline-block h-1.5 w-1.5 rounded-sm bg-blue-500" /> {t('observability:my_usage.prompt_tokens')}
+                  </span>
+                  <span className="flex items-center gap-1 text-[11px] text-zinc-400">
+                    <span className="inline-block h-1.5 w-1.5 rounded-sm bg-emerald-400" /> {t('observability:my_usage.completion_tokens')}
+                  </span>
+                </div>
                 <MiniBarChart
                   data={(usage.trend || []).map((d) => ({
                     label: d.day,
@@ -109,16 +118,11 @@ export default function MyUsagePanel() {
                   ]}
                 />
               </div>
-              <div className={`${consoleCardClass} px-3 py-4`}>
-                {costSeries.length > 0 && (
-                  <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-                    {costSeries.map((sr) => (
-                      <span key={sr.key} className="flex items-center gap-1 text-[11px] text-zinc-400">
-                        <span className={`inline-block h-1.5 w-1.5 rounded-sm ${sr.color}`} /> {sr.label}
-                      </span>
-                    ))}
-                  </div>
-                )}
+              <div className={`${consoleCardClass} flex flex-col px-3 py-4`}>
+                {/* 对齐带：左卡此位置是图例行（自然高 ~23px = 15 行高 + mb-2 8px）。
+                    右卡图例悬浮在绘图区内（多 agent），此处放等高带保持两图绘图区同起点。
+                    定高 h-[23px]：与左图 text-[11px] 行高 + mb-2 逐像素对应。 */}
+                <div className="mb-2 h-[23px] shrink-0" aria-hidden="true" />
                 <MiniBarChart
                   data={costData}
                   height={80}
@@ -126,6 +130,7 @@ export default function MyUsagePanel() {
                   formatValue={(v) => `$${Number(v).toFixed(2)}`}
                   series={costSeries}
                   totalLabel={hasCostByAgent ? t('observability:my_usage.cost_total') : undefined}
+                  legendOverlay={costSeries.length > 1}
                 />
               </div>
             </div>

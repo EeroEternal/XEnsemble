@@ -7,7 +7,8 @@
   "tabs": {
     "quota": "Quota",
     "my_usage": "My usage",
-    "usage": "Usage",
+    "user_stats": "User Stats",
+    "agents_models": "Agents & Models",
     "routing_analytics": "Routing Analysis"
   },
   "my_usage": {
