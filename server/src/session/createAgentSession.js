@@ -99,9 +99,6 @@ function applyStateDirEnv(env, resumeSpec, stateDirPath) {
  *   启动（执行完任务即退出进程，exitCode 即任务结果）。要求 Agent 支持
  *   taskRunModes（不支持时返回 agent_task_unsupported）。
  * @param {boolean} [p.taskAutoApprove] 无人值守自动批准工具调用
- * @param {boolean} [p.taskManualApproval] 强制走手动审批（loopTasks 象限用）。
- *   交互式拉起默认 taskAutoApprove=false，即手动审批；true 仅用于显式声明，
- *   当前与 false 等价（预留字段，与 taskAutoApprove 互斥）
  * @param {object} [p.log] fastify 风格 logger（.info/.warn/.error）
  * @returns {Promise<{ok: true, sessionId: string} | {ok: false, statusCode: number, error: string, code?: string}>}
  */
@@ -118,7 +115,6 @@ async function createAgentSession({
     title = null,
     taskPrompt = null,
     taskAutoApprove = false,
-    taskManualApproval = false,
     log = console,
 }) {
     const projectId = project.id;
