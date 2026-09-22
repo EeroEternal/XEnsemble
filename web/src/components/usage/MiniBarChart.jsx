@@ -86,7 +86,10 @@ export default function MiniBarChart({
   const bars = (
     <div
       ref={plotRef}
-      className={`relative flex items-end gap-[2px] overflow-hidden ${fill ? 'min-h-0 flex-1' : ''}`}
+      // 禁止在此层加 overflow-hidden：柱状 tooltip 用 bottom-full 定位在容器顶边
+      // 之上（盒外），加了会被整体裁掉、悬停无提示（实测回归）。柱高均为百分比、
+      // 不会溢出，无需裁剪。
+      className={`relative flex items-end gap-[2px] ${fill ? 'min-h-0 flex-1' : ''}`}
       style={fill ? { minHeight: 64 } : { height: effHeight }}
     >
       {showAxes && (

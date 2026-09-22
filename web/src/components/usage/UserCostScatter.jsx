@@ -154,7 +154,11 @@ export default function UserCostScatter({ users = [], height = 104 }) {
           注意：tooltip 绝不放这个层内——overflow-hidden 会把向上溢出的 tooltip 裁掉
           （顶部点的 tooltip 会被图例区域"挡住"，实测），tooltip 渲染在根层级。 */}
       <div ref={plotRef} className="relative min-h-0 flex-1 overflow-hidden">
-      <svg viewBox={`0 0 ${VB_W} ${h}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%' }} className="block">
+      {/* svg 必须绝对定位铺满绘图区：若走常规流 + height:100%，高度不定时会退回
+          viewBox 固有宽高比定高（宽×h/600），与 ResizeObserver 形成「测高→撑高→
+          再测」的指数循环——全屏宽卡片时纵轴一路长到页面底部（实测）。
+          绝对定位后 svg 脱离文档流，永远无法参与撑高父容器，循环被结构性切断。 */}
+      <svg viewBox={`0 0 ${VB_W} ${h}`} preserveAspectRatio="none" className="absolute inset-0 block h-full w-full">
         {/* 水平网格线（对数轴时基线 y=0 单独由下方横轴线承担） */}
         {gridY.map((v, i) => (
           <line key={i} x1={PAD.left} x2={VB_W - PAD.right} y1={ys(v)} y2={ys(v)}
@@ -194,13 +198,9 @@ export default function UserCostScatter({ users = [], height = 104 }) {
           <span key={i} className="absolute -translate-y-1/2 text-[10px] tabular-nums text-zinc-400"
             style={{ left: 0, width: PAD.left - 6, textAlign: 'right', top: ys(v) }}>{fmtY(v)}</span>
         ))}
-        {/* 基准线单价标注（贴在线的上端） */}
-        {baseUnit != null && (
-          <span className="absolute whitespace-nowrap rounded bg-zinc-100 px-1 py-px text-[10px] tabular-nums text-zinc-500"
-            style={{ left: `${(xs(xMax * 0.62) / VB_W) * 100}%`, top: ys(baseUnit * xMax * 0.62) - 14 }}>
-            中位 {fmtUnit(baseUnit * 1e6)}
-          </span>
-        )}
+        {/* 基准线不做图内文字标注：单价接近中位的用户圆点正好落在线上，任何贴线
+            位置的标注都会挡点（实测）。基准含义（单价 + 偏高人数）已在图例行的
+            「中位基准」项中完整给出，虚线样式示例与线本身对应。 */}
       </div>
       </div>
 
