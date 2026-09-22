@@ -27,11 +27,10 @@ const config = {
     completedRepeatMs: Number(process.env.ATTENTION_COMPLETED_REPEAT_MS) || 120000,
     // L3 尾部扫描节流
     scanThrottleMs: Number(process.env.ATTENTION_SCAN_THROTTLE_MS) || 2000,
-    // L3 需要连续几轮扫描都看到 prompt 才通知（稳定窗口，滤掉一闪而过的重绘）
+    // L3 需要连续几轮扫描都看到「同一个提示本体」才通知（稳定窗口）。
+    // 注意：稳定判据是「提示内容冻结」（见 promptStableKey），不是「PTY 静默」——
+    // 等待确认的 TUI 会持续重绘 spinner，用静默当代理信号会漏报。
     promptStableScans: Number(process.env.ATTENTION_PROMPT_STABLE_SCANS) || 2,
-    // L3 只在 PTY 输出静止这么久后才开始等待判定：滚动中的正文（编号总结、
-    // 问号句尾、y/n 字样）不是提示。输出帧会不断把扫描推迟到静止点之后。
-    scanQuietMs: Number(process.env.ATTENTION_SCAN_QUIET_MS) || 4000,
     // 参与扫描的 transcript 尾部字节数
     tailBytes: Number(process.env.ATTENTION_SCAN_TAIL_BYTES) || 4096,
     // reason 截断
@@ -80,6 +79,9 @@ function ensureState(sessionId) {
             lastScanAt: 0,
             stableHits: 0,
             lastPromptSnapshot: null,
+            // 「易变行归一化」后的提示键：同一键连续出现才累计 stableHits，
+            // 用来区分冻结的等待提示与每轮都在变的流式正文。
+            lastStablePromptKey: null,
             completedTimer: null,
             completedNotifiedAt: 0,
         };
@@ -171,6 +173,7 @@ function setWaiting(sessionId, st, source, reason) {
     st.source = source;
     st.reason = truncateReason(reason);
     st.stableHits = 0;
+    st.lastStablePromptKey = null;
     clearCompletedTimer(st);
     void emitNotify(sessionId, st, 'session_waiting');
 }
@@ -181,6 +184,7 @@ function clearWaiting(sessionId, st, byWhat) {
     st.source = null;
     st.reason = null;
     st.stableHits = 0;
+    st.lastStablePromptKey = null;
     st.lastWaitingClearBy = byWhat || null; // 测试观测用
     clearCompletedTimer(st);
 }
@@ -318,15 +322,6 @@ async function runScan(sessionId) {
     const st = states.get(sessionId);
     if (!st || !st.transcriptRef) return;
     st.lastScanAt = Date.now();
-    // 输出仍在滚动（或刚停）：尾部是流式正文——编号总结、问号句尾、y/n 字样
-    // 都只是内容，不是等待提示。丢弃半程稳定计数（输出间隙不能跨轮凑满），
-    // 并把本轮扫描推迟到静止点之后；静止后的命中才参与稳定窗口。
-    const elapsedSinceOutput = Date.now() - (st.lastActivityAt || 0);
-    if (config.scanQuietMs > 0 && elapsedSinceOutput < config.scanQuietMs) {
-        st.stableHits = 0;
-        scheduleScan(sessionId, st, config.scanQuietMs - elapsedSinceOutput + config.scanThrottleMs);
-        return;
-    }
     const read = deps.readTailLines || defaultReadTailLines;
     let lines;
     try {
@@ -335,8 +330,8 @@ async function runScan(sessionId) {
         return; // transcript 不可达 → 本轮跳过
     }
     await evaluateLines(sessionId, lines);
-    // 静止后没有新的输出帧来驱动下一轮扫描；命中但稳定窗口未满时续排一轮，
-    // 否则 promptStableScans 永远凑不满（等待中 / 已解除则不续排）。
+    // 等待中 / 已解除则不续排；命中但稳定窗口未满时续排一轮——静止后没有新的
+    // 输出帧来驱动下一轮扫描，不续排则 promptStableScans 永远凑不满。
     const after = states.get(sessionId);
     if (after
         && after.state === 'working'
@@ -346,19 +341,50 @@ async function runScan(sessionId) {
     }
 }
 
+/**
+ * 把提示快照归一到「稳定键」：剔除每帧都在变的行（spinner 动画、计时器、
+ * token 计数、进度百分比），只留提示本体。
+ *
+ * 这是区分「等待提示」与「流式正文」的关键判据，且不依赖任何时间阈值：
+ *  - 等待中的提示本体是冻结的（用户没回答，内容不变），只有 spinner 在动；
+ *  - 流式正文每轮内容都在增长/变化。
+ * 旧实现用「PTY 静默 scanQuietMs」当代理信号，但等待确认的 TUI（codebuddy
+ * 的 "waiting for permission"）会持续重绘 spinner（实测间隔 201ms），静默
+ * 窗口永远不出现 → 等待通知被彻底堵死。
+ */
+const VOLATILE_LINE_RE = /[··]\s*\d+\s*s\b|\d+\s*s\s*·|↓\s*\d+\s*tokens?|\(\s*\d+\s*s\b|\b\d+\s*tokens?\b|✹|✶|✳|◐|◓|◑|◒|\b\d+\s*%/;
+
+function promptStableKey(snapshot) {
+    if (!snapshot) return null;
+    const kept = String(snapshot)
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l && !VOLATILE_LINE_RE.test(l));
+    return kept.length > 0 ? kept.join('\n') : null;
+}
+
 /** 测试入口：直接喂屏幕行，跑一轮 L3 判定。 */
 async function evaluateLines(sessionId, lines) {
     const st = ensureState(sessionId);
     const { detectTuiPrompt } = await loadHeuristics();
     const res = detectTuiPrompt(lines);
     if (res) {
-        st.stableHits += 1;
+        const key = promptStableKey((res.lines || []).join('\n'));
+        if (key && key === st.lastStablePromptKey) {
+            // 同一提示本体再次出现 → 计数（spinner 变化不影响 key）。
+            st.stableHits += 1;
+        } else {
+            // 提示本体变了（新一轮正文/另一个提示）→ 重新起算。
+            st.stableHits = 1;
+            st.lastStablePromptKey = key;
+        }
         st.lastPromptSnapshot = (res.lines || []).join('\n');
         if (st.stableHits >= config.promptStableScans) {
             setWaiting(sessionId, st, 'L3', st.lastPromptSnapshot);
         }
     } else {
         st.stableHits = 0;
+        st.lastStablePromptKey = null;
         // prompt 消失（用户已回答）→ 仅解除 L3 来源的等待；L1 等待由 tool_result/user 解除。
         if (st.state === 'waiting_user' && st.source === 'L3') {
             clearWaiting(sessionId, st, 'prompt_gone');

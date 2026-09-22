@@ -170,36 +170,95 @@ test("L3': 无问句上下文的屏幕内容不误报", isolated(async (notifica
     assert.equal(notifications.length, 0);
 }));
 
-test("L3': PTY 输出滚动中不判等待；静止后才累计稳定命中并通知", isolated(async (notifications) => {
-    const promptLines = ['Do you want to proceed?', '1. Yes', '2. No', '❯'];
-    const restoreQuiet = attentionService.__configure({
-        config: { scanQuietMs: 30 },
-        deps: { readTailLines: async () => promptLines },
+test("L3': 提示本体冻结才累计命中并通知（与 PTY 是否滚动无关）", isolated(async (notifications) => {
+    // 稳定判据是「提示内容冻结」而非「PTY 静默」：等待确认的 TUI（codebuddy
+    // 的 "waiting for permission"）会持续重绘 spinner，PTY 永不静默，用静默
+    // 当代理信号会彻底漏报。这里断言 spinner 每轮都在变、但提示本体不变时，
+    // 仍然能凑满稳定窗口并通知。
+    const volatile = (n) => [
+        `✹ Chilling… (${n}s · waiting for permission · ↓ ${n * 37} tokens)`,
+        'Do you want to proceed?',
+        ' > 1. Yes',
+        '   2. No',
+    ];
+    let round = 0;
+    const restore = attentionService.__configure({
+        deps: { readTailLines: async () => volatile(round++) },
     });
     try {
-        // 场景A：持续输出（每个输出帧都刷新 lastActivityAt）→ 扫描被推迟到静止点，
-        // 半程计数被丢弃，正文里的 prompt 形状不产生等待通知。
+        // 每轮都伴随 PTY 输出（lastActivityAt 持续刷新，永不静默）。
         attentionService.observeOutput('s12', 'local:pty:s12');
-        await tick(10);
+        await tick(20);
         attentionService.observeOutput('s12', 'local:pty:s12');
-        await tick(10);
+        await tick(20);
         attentionService.observeOutput('s12', 'local:pty:s12');
-        await tick(5);
-        const during = attentionService.getState('s12');
-        assert.equal(during.state, 'working', '输出滚动中不应判等待');
-        assert.equal(during.stableHits, 0, '滚动中的命中应被丢弃');
-        assert.equal(notifications.length, 0);
-
-        // 场景B：输出停止 ≥ scanQuietMs → 扫描执行，连续两轮命中 → waiting。
-        await tick(120);
+        await tick(20);
         await tick(); // 通知发射是异步 void,等 flush
         const st = attentionService.getState('s12');
+        assert.equal(st.state, 'waiting_user', '提示冻结即应判等待（不依赖静默）');
+        assert.equal(st.source, 'L3');
+        assert.equal(notifications.length, 1);
+        assert.equal(notifications[0].type, 'session_waiting');
+    } finally {
+        restore();
+    }
+}));
+
+test("L3': 流式正文（提示本体每轮都在变）不累计命中、不通知", isolated(async (notifications) => {
+    // 正文滚动时每轮内容都在增长：稳定键每次不同 → 计数反复重置 → 不通知。
+    // 这是移除「静默门槛」后必须守住的防误报行为。
+    let round = 0;
+    const streaming = () => [
+        '● 已完成修改，可以继续优化：',
+        `  1. 增加测试覆盖${'，补充边界用例'.repeat(round++ % 3)}`,
+        `  2. 补充文档说明${'，包含示例'.repeat(round % 2)}`,
+        '  3. 性能优化',
+    ];
+    const restore = attentionService.__configure({
+        deps: { readTailLines: async () => streaming() },
+    });
+    try {
+        for (let i = 0; i < 5; i++) {
+            attentionService.observeOutput('s13', 'local:pty:s13');
+            await tick(20);
+        }
+        await tick();
+        const st = attentionService.getState('s13');
+        assert.notEqual(st.state, 'waiting_user', '流式正文不应判等待');
+        assert.equal(notifications.length, 0);
+    } finally {
+        restore();
+    }
+}));
+
+test("L3': codebuddy 权限确认（spinner 持续重绘）能被识别并通知", isolated(async (notifications) => {
+    // 真实转录（boxlite_rt_d2eb3bf3275c）中 codebuddy 等待权限时的屏幕形态：
+    // 状态栏 spinner 以 ~201ms 节奏刷新（PTY 永不静默 4s），提示本体冻结。
+    // 修复前 scanQuietMs 门槛使扫描永不执行 → 连续多次确认都收不到通知。
+    const screen = [
+        '✹ Chilling… (0s · waiting for permission)',
+        ' Do you want to make this edit to AppSidebar.jsx?',
+        '',
+        ' > 1. Yes',
+        "   2. Yes, and don't ask again this session (shift + tab)",
+        '   3. No, and tell CodeBuddy what to do differently (escape)',
+    ];
+    const restore = attentionService.__configure({
+        deps: { readTailLines: async () => screen },
+    });
+    try {
+        for (let i = 0; i < 3; i++) {
+            attentionService.observeOutput('s14', 'local:pty:s14');
+            await tick(20);
+        }
+        await tick();
+        const st = attentionService.getState('s14');
         assert.equal(st.state, 'waiting_user');
         assert.equal(st.source, 'L3');
         assert.equal(notifications.length, 1);
         assert.equal(notifications[0].type, 'session_waiting');
     } finally {
-        restoreQuiet();
+        restore();
     }
 }));
 
