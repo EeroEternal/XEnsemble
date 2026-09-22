@@ -24,6 +24,8 @@
     "cost_other": "Other",
     "by_project": "By workspace",
     "by_agent": "By agent",
+    "by_agent_breakdown": "By agent",
+    "est_cost": "Est. cost",
     "agent": "Agent",
     "cached_tokens": "Cached tokens",
     "project": "Workspace",
@@ -44,7 +46,8 @@
     "feature_deploy_analyze": "Deploy plan analysis",
     "feature_deploy_verify": "Deploy verification",
     "feature_quick_preview": "Quick preview",
-    "feature_git_pr_fill": "Git commit/PR messages"
+    "feature_git_pr_fill": "Git commit/PR messages",
+    "internal_ai": "Built-in AI"
   },
   "routing": {
     "title": "Routing Analysis",

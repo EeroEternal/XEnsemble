@@ -78,6 +78,7 @@
     "completion": "输出",
     "active_users": "活跃用户",
     "tokens_per_user": "人均 Token",
+    "total_cost": "消耗金额",
     "trend": "日趋势",
     "cost_trend": "费用日趋势",
     "cost_total": "合计",

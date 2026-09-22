@@ -30,6 +30,9 @@ export default function MyUsagePanel() {
   const prevTotal = usage?.prevTotalTokens ?? 0;
   const deltaPct = s && prevTotal > 0 ? Math.round(((s.totalTokens - prevTotal) / prevTotal) * 100) : null;
 
+  // 日趋势两图：卡片定高、fill 模式撑满剩余高度（X 轴基线对齐且无框内留白）
+  const CHART_HEIGHT = 104;
+
   // 费用日趋势按 agent 堆叠：Top N 各自成段，超出的合并为「其他」，
   // 保证柱高 = 当日真实合计（否则尾部 agent 费用被静默丢弃，费用预估偏低）。
   const costChart = useMemo(
@@ -84,33 +87,29 @@ export default function MyUsagePanel() {
               full={formatTokensFull(s.requests)}
             />
             <UsageStatCard
-              label={t('observability:my_usage.completion_tokens')}
-              value={formatTokens(s.completionTokens)}
-              full={formatTokensFull(s.completionTokens)}
+              label={t('observability:my_usage.est_cost')}
+              value={`$${Number(s.costUsd ?? 0).toFixed(2)}`}
+              full={`$${Number(s.costUsd ?? 0).toFixed(4)}`}
             />
           </div>
 
           <div>
             <div className={`${consoleSectionLabelClass} mb-2`}>{t('observability:my_usage.trend')}</div>
+            {/* 两卡同构填满框格：图例悬浮在绘图区内（legendOverlay，自动抬高量程让位），
+                无独立图例行/占位带 → 柱区上下沿贴卡片，两图 X 轴基线同高。
+                卡片 flex-col，MiniBarChart 区 flex-1 撑满剩余高度。 */}
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {/* 两卡结构逐段同款：图例行（自然高+mb-2）→ MiniBarChart(104, mt-1 X 行) → X 轴基线对齐 */}
-              <div className={`${consoleCardClass} flex flex-col px-3 py-4`}>
-                <div className="mb-2 flex items-center gap-3">
-                  <span className="flex items-center gap-1 text-[11px] text-zinc-400">
-                    <span className="inline-block h-1.5 w-1.5 rounded-sm bg-blue-500" /> {t('observability:my_usage.prompt_tokens')}
-                  </span>
-                  <span className="flex items-center gap-1 text-[11px] text-zinc-400">
-                    <span className="inline-block h-1.5 w-1.5 rounded-sm bg-emerald-400" /> {t('observability:my_usage.completion_tokens')}
-                  </span>
-                </div>
+              <div className={`${consoleCardClass} flex min-h-0 flex-1 flex-col px-3 py-4`}>
                 <MiniBarChart
                   data={(usage.trend || []).map((d) => ({
                     label: d.day,
                     tip: d.day,
                     values: { prompt: d.promptTokens || 0, completion: d.completionTokens || 0 },
                   }))}
-                  height={80}
+                  height={CHART_HEIGHT}
                   showAxes
+                  fill
+                  legendOverlay
                   formatValue={formatTokens}
                   series={[
                     { key: 'prompt', label: t('observability:my_usage.prompt_tokens'), color: 'bg-blue-500' },
@@ -118,19 +117,16 @@ export default function MyUsagePanel() {
                   ]}
                 />
               </div>
-              <div className={`${consoleCardClass} flex flex-col px-3 py-4`}>
-                {/* 对齐带：左卡此位置是图例行（自然高 ~23px = 15 行高 + mb-2 8px）。
-                    右卡图例悬浮在绘图区内（多 agent），此处放等高带保持两图绘图区同起点。
-                    定高 h-[23px]：与左图 text-[11px] 行高 + mb-2 逐像素对应。 */}
-                <div className="mb-2 h-[23px] shrink-0" aria-hidden="true" />
+              <div className={`${consoleCardClass} flex min-h-0 flex-1 flex-col px-3 py-4`}>
                 <MiniBarChart
                   data={costData}
-                  height={80}
+                  height={CHART_HEIGHT}
                   showAxes
+                  fill
+                  legendOverlay
                   formatValue={(v) => `$${Number(v).toFixed(2)}`}
                   series={costSeries}
                   totalLabel={hasCostByAgent ? t('observability:my_usage.cost_total') : undefined}
-                  legendOverlay={costSeries.length > 1}
                 />
               </div>
             </div>
@@ -195,7 +191,7 @@ export default function MyUsagePanel() {
           </div>
 
           <div>
-            <div className={`${consoleSectionLabelClass} mb-2`}>{t('observability:my_usage.by_agent')}</div>
+            <div className={`${consoleSectionLabelClass} mb-2`}>{t('observability:my_usage.by_agent_breakdown')}</div>
             <div className={`${consoleCardClass} overflow-hidden`}>
               <div className="shrink-0 overflow-x-hidden overflow-y-auto">
               <table className="w-full table-fixed border-collapse text-left text-sm">
@@ -212,7 +208,7 @@ export default function MyUsagePanel() {
                     <th className="px-4 py-2 font-medium">{t('observability:my_usage.agent')}</th>
                     <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.requests')}</th>
                     <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.prompt_tokens')}</th>
-                    <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.cached_tokens')}</th>
+                    <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.completion_tokens')}</th>
                     <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.cache_hit_rate')}</th>
                     <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.total_tokens')}</th>
                   </tr>
@@ -232,10 +228,12 @@ export default function MyUsagePanel() {
                 <tbody className="divide-y divide-zinc-100">
                   {(usage.byAgent || []).map((a) => (
                     <tr key={a.key} className="text-zinc-600">
-                      <td className="px-4 py-2.5 font-medium text-zinc-900">{a.key}</td>
+                      {/* agentId 为 NULL 的行 = 内置 AI 用量（服务端兜底为 '(unknown)'），
+                          展示为「内置 AI」；内置 AI 的用量本就计入按项目/按 Agent 分解 */}
+                      <td className="px-4 py-2.5 font-medium text-zinc-900">{a.key === '(unknown)' ? t('observability:my_usage.internal_ai') : a.key}</td>
                       <td className="px-4 py-2.5 text-right font-mono tabular-nums">{a.requests}</td>
                       <td className="px-4 py-2.5 text-right font-mono tabular-nums">{formatTokens(a.promptTokens)}</td>
-                      <td className="px-4 py-2.5 text-right font-mono tabular-nums">{formatTokens(a.cachedTokens)}</td>
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums">{formatTokens(a.completionTokens)}</td>
                       <td className="px-4 py-2.5 text-right font-mono tabular-nums">
                         {a.cacheHitRate != null ? `${Math.round(a.cacheHitRate * 100)}%` : '—'}
                       </td>
@@ -250,79 +248,10 @@ export default function MyUsagePanel() {
             </div>
           </div>
 
-          {/* 0043：内置 AI 用量归属 —— 流量性质二分 + 按功能明细（旧版服务端无 bySource 时整段隐藏） */}
-          {usage.bySource && (usage.internalByFeature || []).length > 0 && (
-            <div>
-              <div className={`${consoleSectionLabelClass} mb-2`}>{t('observability:my_usage.internal_by_feature')}</div>
-              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                <span className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2 py-1">
-                  {t('observability:my_usage.source_session')}
-                  <span className="font-mono tabular-nums text-zinc-900">{formatTokens(usage.bySource.session?.totalTokens || 0)}</span>
-                  <span className="text-zinc-400">· {usage.bySource.session?.requests || 0}</span>
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2 py-1">
-                  {t('observability:my_usage.source_internal')}
-                  <span className="font-mono tabular-nums text-zinc-900">{formatTokens(usage.bySource.internal?.totalTokens || 0)}</span>
-                  <span className="text-zinc-400">· {usage.bySource.internal?.requests || 0}</span>
-                </span>
-              </div>
-              <div className={`${consoleCardClass} overflow-hidden`}>
-                <div className="shrink-0 overflow-x-hidden overflow-y-auto">
-                <table className="w-full table-fixed border-collapse text-left text-sm">
-                  <colgroup>
-                    <col className="w-[40%]" />
-                    <col className="w-[15%]" />
-                    <col className="w-[15%]" />
-                    <col className="w-[15%]" />
-                    <col className="w-[15%]" />
-                  </colgroup>
-                  <thead>
-                    <tr className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-400">
-                      <th className="px-4 py-2 font-medium">{t('observability:my_usage.feature')}</th>
-                      <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.requests')}</th>
-                      <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.prompt_tokens')}</th>
-                      <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.completion_tokens')}</th>
-                      <th className="px-4 py-2 text-right font-medium">{t('observability:my_usage.total_tokens')}</th>
-                    </tr>
-                  </thead>
-                </table>
-                </div>
-                <div className="max-h-48 overflow-y-auto overflow-x-hidden console-scroll-hidden">
-                <table className="w-full table-fixed border-collapse text-left text-sm">
-                  <colgroup>
-                    <col className="w-[40%]" />
-                    <col className="w-[15%]" />
-                    <col className="w-[15%]" />
-                    <col className="w-[15%]" />
-                    <col className="w-[15%]" />
-                  </colgroup>
-                  <tbody className="divide-y divide-zinc-100">
-                    {usage.internalByFeature.map((f) => (
-                      <tr key={f.feature} className="text-zinc-600">
-                        <td className="px-4 py-2.5 font-medium text-zinc-900">{featureLabel(f.feature, t)}</td>
-                        <td className="px-4 py-2.5 text-right font-mono tabular-nums">{f.requests}</td>
-                        <td className="px-4 py-2.5 text-right font-mono tabular-nums">{formatTokens(f.promptTokens)}</td>
-                        <td className="px-4 py-2.5 text-right font-mono tabular-nums">{formatTokens(f.completionTokens)}</td>
-                        <td className="px-4 py-2.5 text-right font-mono font-semibold tabular-nums text-zinc-900">{formatTokens(f.totalTokens)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                </div>
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>
   );
-}
-
-// 内置功能标识 → 本地化名称；未知 feature 原样展示（向前兼容新功能）。
-function featureLabel(feature, t) {
-  const key = `observability:my_usage.feature_${feature}`;
-  const label = t(key);
-  return label === key ? feature : label;
 }
 
 function UsageStatCard({ label, value, full, deltaPct, deltaText }) {

@@ -145,21 +145,25 @@ export default function UserStatsAdmin() {
               value={`${overview?.summary?.activeUsers ?? 0}`}
             />
             <StatCard
-              label={t('users:usage.tokens_per_user')}
-              value={formatTokens(
-                overview?.summary?.activeUsers > 0
-                  ? Math.round(overview.summary.totalTokens / overview.summary.activeUsers)
-                  : 0,
-              )}
+              label={t('users:usage.total_cost')}
+              value={`$${Number(overview?.summary?.costUsd ?? 0).toFixed(2)}`}
+              full={`$${Number(overview?.summary?.costUsd ?? 0).toFixed(4)}`}
             />
           </div>
 
-          {/* 日趋势（Token 柱状）| 用户 Token 成本（散点）：并排等高 */}
-          <div className="grid shrink-0 grid-cols-1 gap-4 lg:grid-cols-2">
+          {/* 日趋势（Token 柱状）| 用户 Token 成本（散点）：并排等高。
+              grid shrink-0 且不定高时，卡片高度由内容撑开——散点图 Y 轴刻度/tooltip
+              属于内容的一部分，个别用户成本极大时（头部用户远超其余）会把整行
+              撑高到页面滚动都拉不到底（实测）。定高与「Agent 与模型」页同款：
+              shrink-0 + 两卡内部 flex-1，内容溢出时在绘图区内部消化（点收进绘图区，
+              tooltip 绝对定位不参与布局）。 */}
+          <div className="grid h-56 shrink-0 grid-cols-1 gap-4 lg:grid-cols-2">
             <section className="flex min-h-0 flex-col">
               <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('users:usage.trend')}</h2>
+              {/* 与右卡（散点）同构：图例行在图上方（正常文档流）→ svg 区 flex-1 撑满剩余高度，
+                  两卡绘图区顶、底完全一致，X 轴基线天然对齐 */}
               <div className="flex flex-1 flex-col rounded-lg border border-zinc-200 bg-surface px-3 py-4">
-                <div className="mb-2 flex items-center gap-3">
+                <div className="mb-2 flex shrink-0 items-center gap-3">
                   <span className="flex items-center gap-1 text-[11px] text-zinc-400">
                     <span className="inline-block h-1.5 w-1.5 rounded-sm bg-blue-500" /> {t('users:usage.prompt')}
                   </span>
@@ -171,6 +175,7 @@ export default function UserStatsAdmin() {
                   data={trendData}
                   height={CHART_HEIGHT}
                   showAxes
+                  fill
                   formatValue={formatTokens}
                   series={[
                     { key: 'prompt', label: t('users:usage.prompt'), color: 'bg-blue-500' },

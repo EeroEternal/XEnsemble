@@ -24,6 +24,8 @@
     "cost_other": "其他",
     "by_project": "按项目分解",
     "by_agent": "按 Agent",
+    "by_agent_breakdown": "按 Agent 分解",
+    "est_cost": "消耗金额",
     "agent": "Agent",
     "cached_tokens": "缓存命中",
     "project": "项目",
@@ -44,7 +46,8 @@
     "feature_deploy_analyze": "部署计划分析",
     "feature_deploy_verify": "部署验证",
     "feature_quick_preview": "快速预览",
-    "feature_git_pr_fill": "Git 提交/PR 描述"
+    "feature_git_pr_fill": "Git 提交/PR 描述",
+    "internal_ai": "内置 AI"
   },
   "routing": {
     "title": "路由分析",

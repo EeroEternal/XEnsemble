@@ -59,19 +59,31 @@ export default function UserCostScatter({ users = [], height = 104 }) {
     ? points.filter((p) => p.y / p.x > baseUnit * HIGH_COST_RATIO).length
     : 0;
 
-  const { xs, ys, xMax, yMax, baseLine } = useMemo(() => {
+  const { xs, ys, xMax, yMax, baseLine, logScale } = useMemo(() => {
     const h = plotH;
     const xMax = Math.max(...points.map((p) => p.x), 1);
-    const yMax = Math.max(...points.map((p) => p.y), 0.01) * 1.08; // 8% 头部空间防贴顶
+    const rawYMax = Math.max(...points.map((p) => p.y), 0.01);
+    // 重尾检测：头部用户成本远超中位数（>中位×50）时切对数纵轴——线性轴下
+    // 少数头部用户把量程拉到极高、其余用户全被压在基线附近成一条线（实测：
+    // 少数人超多 token，多数人少量使用，线性轴大面积不可读）。
+    const yMedian = (() => {
+      const ys = points.map((p) => p.y).sort((a, b) => a - b);
+      const mid = Math.floor(ys.length / 2);
+      return ys.length % 2 ? ys[mid] : (ys[mid - 1] + ys[mid]) / 2;
+    })();
+    const logScale = rawYMax > yMedian * 50;
+    const yMax = rawYMax * 1.08; // 8% 头部空间防贴顶
     const xs = (x) => PAD.left + (x / xMax) * (VB_W - PAD.left - PAD.right);
     // 基线贴 svg 底边（bottom pad = 0）：左图柱底也贴其绘图盒底边，两图 X 轴基线同高。
-    // 顶部仍留白防最大点贴顶；刻度文字由 svg 下方的 HTML 行承担（同左图）。
-    const PAD_B = 0;
-    const ys = (y) => h - PAD_B - (y / yMax) * (h - PAD.top - PAD_B);
+    // 线性轴：y 直接映射；对数轴：y=0 映射到底、其余按 log10(y)/log10(yMax) 压缩——
+    // 低用量用户在对数轴上仍可分辨，头部用户也不会把别人挤成一条线。
+    const ys = logScale
+      ? (y) => (y <= 0 ? h : h - (Math.log10(y) / Math.log10(yMax)) * (h - PAD.top))
+      : (y) => h - (y / yMax) * (h - PAD.top);
     const baseLine = baseUnit != null
       ? { x1: 0, y1: ys(0), x2: xMax, y2: ys(baseUnit * xMax) }  // 过原点的斜线
       : null;
-    return { xs, ys, xMax, yMax, baseLine };
+    return { xs, ys, xMax, yMax, baseLine, logScale };
   }, [points, baseUnit, plotH]);
 
   if (!points.length) {
@@ -84,14 +96,21 @@ export default function UserCostScatter({ users = [], height = 104 }) {
 
   const fmtY = (v) => `$${v >= 1 ? v.toFixed(2) : v.toFixed(4)}`;
   const fmtUnit = (u) => `$${u >= 1 ? u.toFixed(2) : u.toFixed(4)}/1M`;
-  const gridY = [yMax, yMax / 2, 0];
+  // 刻度：线性轴 max/半程/0；对数轴取 10 的幂（yMax 向下取整数量级），最多 4 条防拥挤
+  const gridY = useMemo(() => {
+    if (!logScale) return [yMax, yMax / 2, 0];
+    const ticks = [];
+    for (let e = Math.floor(Math.log10(yMax)); e >= 0; e--) {
+      ticks.push(10 ** e);
+      if (ticks.length >= 4) break;
+    }
+    return ticks;
+  }, [logScale, yMax]);
   const h = plotH;
 
-  // 图例置于图上方（与并排柱状图的图例位置一致，保证两图绘图区顶部对齐）。
-  // 结构与左图逐字对应：自然行高 + mb-2（左图图例行同款），不定高——高度差会
-  // 直接移动绘图区起点，破坏两图 X 轴基线对齐。
+  // 图例置于图上方（用户指定的原设计），正常文档流。shrink-0 防被 svg 区挤压。
   const legend = (
-    <div className="mb-2 flex items-center gap-x-3 overflow-hidden whitespace-nowrap">
+    <div className="mb-2 flex shrink-0 items-center gap-x-3 overflow-hidden whitespace-nowrap">
       <span className="flex shrink-0 items-center gap-1 text-[11px] text-zinc-400">
         <span className="inline-block h-2 w-2 rounded-full bg-blue-500" /> 用户
       </span>
@@ -102,6 +121,9 @@ export default function UserCostScatter({ users = [], height = 104 }) {
         <span className="inline-block h-px w-4 border-t border-dashed border-zinc-400" />
         中位基准 {baseUnit != null ? fmtUnit(baseUnit * 1e6) : ''}{highCount > 0 ? `（${highCount} 人偏高）` : ''}
       </span>
+      {logScale && (
+        <span className="shrink-0 text-[10px] text-zinc-400">纵轴为对数刻度</span>
+      )}
     </div>
   );
 
@@ -112,13 +134,15 @@ export default function UserCostScatter({ users = [], height = 104 }) {
     // 否则图例高度会把 ys() 算出的坐标整体顶偏、与图例文字重叠。
     <div className="flex min-h-0 flex-1 flex-col">
       {legend}
-      <div ref={plotRef} className="relative min-h-0 flex-1">
+      {/* overflow-hidden：svg 内容坐标由 plotH 实测驱动，若一次布局帧内测量滞后于
+          容器变化（如进入/退出全屏的过渡帧），线条可能瞬间越界——裁掉而不是撑破卡片。 */}
+      <div ref={plotRef} className="relative min-h-0 flex-1 overflow-hidden">
       <svg viewBox={`0 0 ${VB_W} ${h}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%' }} className="block">
-        {/* 水平网格线 */}
+        {/* 水平网格线（对数轴时基线 y=0 单独由下方横轴线承担） */}
         {gridY.map((v, i) => (
           <line key={i} x1={PAD.left} x2={VB_W - PAD.right} y1={ys(v)} y2={ys(v)}
-            stroke={i === gridY.length - 1 ? '#e4e4e7' : '#f4f4f5'}
-            strokeDasharray={i === gridY.length - 1 ? '0' : '3 3'} vectorEffect="non-scaling-stroke" />
+            stroke={v === 0 ? '#e4e4e7' : '#f4f4f5'}
+            strokeDasharray={v === 0 ? '0' : '3 3'} vectorEffect="non-scaling-stroke" />
         ))}
         {/* 纵轴（Y 轴竖线）+ 横轴基线（基线贴 svg 底边，与左图柱底同位） */}
         <line x1={PAD.left} x2={PAD.left} y1={PAD.top - 6} y2={h}
@@ -175,8 +199,8 @@ export default function UserCostScatter({ users = [], height = 104 }) {
       </div>
       </div>
 
-      {/* X 轴刻度：与左图（MiniBarChart）刻度行同款 mt-1，基线到刻度行的间距一致 */}
-      <div className="mt-1 flex justify-between pl-11 pr-3 text-[10px] tabular-nums text-zinc-400">
+      {/* X 轴刻度：与左图（MiniBarChart）刻度行同款 mt-1，shrink-0 防被绘图区挤压 */}
+      <div className="mt-1 flex shrink-0 justify-between pl-11 pr-3 text-[10px] tabular-nums text-zinc-400">
         <span>0</span>
         <span>{formatTokens(xMax / 2)}</span>
         <span>{formatTokens(xMax)}</span>

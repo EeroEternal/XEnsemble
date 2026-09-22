@@ -52,12 +52,16 @@ async function getMyUsageSummary(userId, { days } = {}) {
         })
         .from(schema.llmUsage)
         .where(and(eq(schema.llmUsage.userId, userId), gte(schema.llmUsage.createdAt, sinceTs)));
+    // 个人总额：目录单价估算（与平台总额/模型分布同口径），目录外模型不计入。
+    // 行已按 userId 过滤，group 也用 userId——避免把用户 id 拼进 sql.raw。
+    const costRows = await costByModelRows({ sinceTs, groupBy: schema.llmUsage.userId });
     const r = rows[0] || {};
     return {
         promptTokens: Number(r.prompt || 0),
         completionTokens: Number(r.completion || 0),
         totalTokens: Number(r.total || 0),
         requests: Number(r.requests || 0),
+        costUsd: Number(costRows.reduce((s, row) => s + row.costUsd, 0).toFixed(4)),
     };
 }
 
@@ -337,9 +341,25 @@ async function getUsageByUser({ days } = {}) {
  */
 async function getUserCostByModel({ days } = {}) {
     const { sinceTs } = normalizeRange(days);
+    const byUser = new Map();
+    for (const r of await costByModelRows({ sinceTs, groupBy: schema.llmUsage.userId })) {
+        const acc = byUser.get(r.group) || { costUsd: 0, tokens: 0 };
+        acc.costUsd += r.costUsd;
+        acc.tokens += r.tokens;
+        byUser.set(r.group, acc);
+    }
+    return byUser;
+}
+
+/**
+ * 目录单价成本估算的共享实现：按 sinceTs 过滤，按 groupBy 维度聚合 token，
+ * 套模型目录 USD 单价（输入/输出/缓存读三档）。目录外模型费用为 0 计（不阻断）。
+ * @returns {Promise<Array<{ group:string, costUsd:number, tokens:number }>>}
+ */
+async function costByModelRows({ sinceTs, groupBy }) {
     const rows = await db
         .select({
-            userId: schema.llmUsage.userId,
+            group: groupBy,
             model: schema.llmUsage.model,
             prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
             completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
@@ -348,7 +368,7 @@ async function getUserCostByModel({ days } = {}) {
         })
         .from(schema.llmUsage)
         .where(gte(schema.llmUsage.createdAt, sinceTs))
-        .groupBy(schema.llmUsage.userId, schema.llmUsage.model);
+        .groupBy(groupBy, schema.llmUsage.model);
     const catalog = fetchModelCatalog();
     const unitCache = new Map();
     const unitOf = (model) => {
@@ -356,19 +376,19 @@ async function getUserCostByModel({ days } = {}) {
         if (!unitCache.has(key)) unitCache.set(key, usdEstimateFromEntry(lookupCatalog(catalog, { model })));
         return unitCache.get(key);
     };
-    const byUser = new Map();
+    const out = [];
     for (const r of rows) {
         const unit = unitOf(r.model);
         if (!unit) continue; // 目录外模型：无法估价，不阻断其余模型
-        const cost = (Number(r.prompt) / 1e6) * (unit.input ?? 0)
-            + (Number(r.completion) / 1e6) * (unit.output ?? 0)
-            + (Number(r.cached) / 1e6) * (unit.cache_read ?? 0);
-        const acc = byUser.get(r.userId) || { costUsd: 0, tokens: 0 };
-        acc.costUsd += cost;
-        acc.tokens += Number(r.total || 0);
-        byUser.set(r.userId, acc);
+        out.push({
+            group: r.group,
+            costUsd: (Number(r.prompt) / 1e6) * (unit.input ?? 0)
+                + (Number(r.completion) / 1e6) * (unit.output ?? 0)
+                + (Number(r.cached) / 1e6) * (unit.cache_read ?? 0),
+            tokens: Number(r.total || 0),
+        });
     }
-    return byUser;
+    return out;
 }
 
 /**
@@ -385,6 +405,7 @@ async function getUsageByAgent({ days, userId } = {}) {
             key: schema.llmUsage.agentId,
             requests: sql`count(*)::int`,
             prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
+            completion: sql`coalesce(sum(${schema.llmUsage.completionTokens}), 0)::int`,
             cached: sql`coalesce(sum(${schema.llmUsage.cachedTokens}), 0)::int`,
             reportedPrompt: sql`coalesce(sum(case when ${schema.llmUsage.cachedTokens} is not null then ${schema.llmUsage.promptTokens} else 0 end), 0)::int`,
             total: sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0)::int`,
@@ -401,6 +422,8 @@ async function getUsageByAgent({ days, userId } = {}) {
             key: r.key ?? '(unknown)',
             requests: Number(r.requests || 0),
             promptTokens,
+            // 输出 token：与按项目分解同列（表格展示输入/输出/命中率口径一致）
+            completionTokens: Number(r.completion || 0),
             cachedTokens,
             totalTokens: Number(r.total || 0),
             cacheHitRate: reportedPrompt > 0 ? Number((cachedTokens / reportedPrompt).toFixed(4)) : null,
@@ -516,7 +539,7 @@ async function getPlatformOverview({ days } = {}) {
     const { days: d, sinceTs } = normalizeRange(days);
     // 同 getMyUsageTrend：按天分桶用内联常量表达式（select/group by 逐字一致）
     const bucketExpr = sql.raw(`floor(created_at / ${DAY_MS})`);
-    const [summaryRows, trendRows, topUsers, byAgent, byModel] = await Promise.all([
+    const [summaryRows, trendRows, topUsers, byAgent, byModel, costRows] = await Promise.all([
         db
             .select({
                 prompt: sql`coalesce(sum(${schema.llmUsage.promptTokens}), 0)::int`,
@@ -546,11 +569,14 @@ async function getPlatformOverview({ days } = {}) {
         getUsageByUser({ days }),
         getUsageByAgent({ days }),
         getUsageByModelPlatform({ days }),
+        // 平台总额（目录单价估算，与 byModel/trend 同口径）
+        costByModelRows({ sinceTs, groupBy: sql.raw("'__all__'") }),
     ]);
     const s = summaryRows[0] || {};
     const cachedTokens = Number(s.cached || 0);
     const reportedPrompt = Number(s.reportedPrompt || 0);
     const trend = trendFromModelRows(trendRows, { days: d });
+    const platformCostUsd = costRows.reduce((sum, r) => sum + r.costUsd, 0);
     return {
         summary: {
             promptTokens: Number(s.prompt || 0),
@@ -560,6 +586,7 @@ async function getPlatformOverview({ days } = {}) {
             activeUsers: Number(s.activeUsers || 0),
             cachedTokens,
             cacheHitRate: reportedPrompt > 0 ? Number((cachedTokens / reportedPrompt).toFixed(4)) : null,
+            costUsd: Number(platformCostUsd.toFixed(4)),
         },
         trend,
         topUsers: topUsers.filter((u) => u.totalTokens > 0).slice(0, 5),

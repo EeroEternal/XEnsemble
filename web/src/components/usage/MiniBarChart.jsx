@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { formatTokens } from '../../lib/formatTokens';
 
 /** 多段堆叠默认配色（按 series 顺序取用；图例圆点与柱内分段共用同一 class） */
@@ -28,6 +29,11 @@ export const SERIES_COLORS = [
  * @param {boolean} [legendOverlay=false] 把图例悬浮在绘图区右上角内侧（稍低于顶端刻度、
  *        纵轴右侧），不占独立布局行——卡片顶部不产生空白带。多 series 且需要顶部
  *        对齐的并排图使用。
+ * @param {number} [headroom=1] 纵轴量程放大系数。1 = 最高柱顶到绘图区顶（默认，无图例时
+ *        最紧凑）；legendOverlay 时建议 1.35+：量程放大后最高柱下降，让出图例带，
+ *        避免柱顶与悬浮图例重叠。legendOverlay 且未显式传值时自动取 1.35。
+ * @param {boolean} [fill=false] 撑满父容器高度（父容器需为定高 flex 列）：柱区 flex-1 +
+ *        ResizeObserver 实测高度。fill 时 height 只作初始值。
  */
 export default function MiniBarChart({
   data = [],
@@ -38,10 +44,28 @@ export default function MiniBarChart({
   totalLabel,
   yAxisWidth = '',
   legendOverlay = false,
+  headroom = 1,
+  fill = false,
 }) {
-  if (!data.length || !series.length) return null;
-  const totals = data.map((d) => series.reduce((sum, s) => sum + (Number(d.values?.[s.key]) || 0), 0));
-  const max = Math.max(...totals, 1);
+  // fill 模式：根(flex-1) + 柱区(flex-1) 参与父卡片 flex-col 的伸展——柱区真正
+  // 撑满卡片剩余高度；RO 实测柱区像素高供柱高百分比计算（与写死高度等价换算）。
+  // 非 fill 模式两者不伸展，高度仍由 height prop 决定（既有调用方零影响）。
+  const plotRef = useRef(null);
+  const [measuredH, setMeasuredH] = useState(height);
+  useEffect(() => {
+    if (!fill) return;
+    const el = plotRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const h = Math.round(entries[0]?.contentRect?.height || 0);
+      if (h > 0) setMeasuredH(h);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fill]);
+  const effHeight = fill ? measuredH : height;
+  const rootClass = fill ? 'flex flex-1 min-h-0 gap-2' : 'flex gap-2';
+  if (!data.length || !series.length) return null;  const totals = data.map((d) => series.reduce((sum, s) => sum + (Number(d.values?.[s.key]) || 0), 0));
 
   const legend = series.length > 1 && (
     // pointer-events-none：不挡柱子 tooltip。absolute 定位在绘图区右上角，
@@ -54,9 +78,17 @@ export default function MiniBarChart({
       ))}
     </div>
   );
+  // 悬浮图例占顶部一带：自动抬高纵轴量程（headroom）让最高柱让出图例区，
+  // 否则最高柱顶到绘图区顶、与图例文字重叠（实测）。
+  const effectiveHeadroom = legendOverlay && headroom === 1 ? 1.35 : headroom;
+  const max = Math.max(...totals, 1) * effectiveHeadroom;
 
   const bars = (
-    <div className="relative flex items-end gap-[2px]" style={{ height }}>
+    <div
+      ref={plotRef}
+      className={`relative flex items-end gap-[2px] overflow-hidden ${fill ? 'min-h-0 flex-1' : ''}`}
+      style={fill ? undefined : { height: effHeight }}
+    >
       {showAxes && (
         <>
           {/* 横向网格线：顶部 / 1/2 处（与左轴 max、max/2 刻度对齐，虚线弱化） */}
@@ -119,18 +151,20 @@ export default function MiniBarChart({
   }
 
   return (
-    <div className="flex gap-2">
-      <div className={`flex shrink-0 flex-col justify-between text-right text-[10px] tabular-nums text-zinc-400 ${yAxisWidth}`} style={{ height }}>
+    <div className={rootClass}>
+      <div className={`flex shrink-0 flex-col justify-between text-right text-[10px] tabular-nums text-zinc-400 ${yAxisWidth} ${fill ? 'self-stretch' : ''}`} style={fill ? undefined : { height: effHeight }}>
         <span className="truncate">{formatValue(max)}</span>
         <span className="truncate">{formatValue(max / 2)}</span>
         <span>0</span>
       </div>
-      <div className="min-w-0 flex-1">
-        <div className="relative">
+      {/* fill 模式右列纵向 flex：柱区 flex-1 吃满「列高 − X 行」，柱子 h-full 才有高度可分；
+          非 fill 右列保持普通块流（柱区由 height prop 定高）。 */}
+      <div className={`min-w-0 flex-1 ${fill ? 'flex flex-col' : ''}`}>
+        <div className={`relative ${fill ? 'min-h-0 flex-1' : ''}`}>
           {bars}
           {legendOverlay && legend}
         </div>
-        <div className="mt-1 flex justify-between text-[10px] tabular-nums text-zinc-400">
+        <div className={`mt-1 flex justify-between text-[10px] tabular-nums text-zinc-400 ${fill ? 'shrink-0' : ''}`}>
           <span>{data[0]?.label}</span>
           {data.length > 2 && <span>{data[Math.floor((data.length - 1) / 2)]?.label}</span>}
           <span>{data[data.length - 1]?.label}</span>

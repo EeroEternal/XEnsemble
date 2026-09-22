@@ -153,7 +153,7 @@ export default function AgentsModelsAdmin() {
                       <th className={consoleTableHeadCellClass}>{t('users:usage.agent')}</th>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.requests')}</th>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.prompt')}</th>
-                      <th className={consoleTableHeadCellClass}>{t('users:usage.cached_tokens')}</th>
+                      <th className={consoleTableHeadCellClass}>{t('users:usage.completion')}</th>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.cache_hit_rate')}</th>
                       <th className={consoleTableHeadCellClass}>{t('users:usage.total_tokens')}</th>
                     </tr>
@@ -182,7 +182,7 @@ export default function AgentsModelsAdmin() {
                         </td>
                         <td className={consoleTableBodyCellClass}>{formatTokens(a.requests)}</td>
                         <td className={consoleTableBodyCellClass}>{formatTokens(a.promptTokens)}</td>
-                        <td className={consoleTableBodyCellClass}>{a.cachedTokens > 0 ? formatTokens(a.cachedTokens) : '—'}</td>
+                        <td className={consoleTableBodyCellClass}>{formatTokens(a.completionTokens)}</td>
                         <td className={consoleTableBodyCellClass}>{a.cacheHitRate != null ? `${Math.round(a.cacheHitRate * 100)}%` : '—'}</td>
                         <td className={consoleTableBodyCellClass}>{formatTokens(a.totalTokens)}</td>
                       </tr>

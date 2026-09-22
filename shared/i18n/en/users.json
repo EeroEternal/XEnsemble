@@ -78,6 +78,7 @@
     "completion": "Output",
     "active_users": "Active users",
     "tokens_per_user": "Tokens / user",
+    "total_cost": "Total cost",
     "trend": "Daily trend",
     "cost_trend": "Cost trend",
     "cost_total": "Total",
