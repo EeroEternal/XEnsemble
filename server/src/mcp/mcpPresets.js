@@ -22,6 +22,9 @@
 
 const GITHUB_ASSET = 'github';
 const GITHUB_VERSION = '1.12.2';
+// GitLab MCP server：社区维护最完整的 GitLab 工具集（MR 列表/diff/评论/合入等），
+// 版本钉死防供应链漂移（与 GITHUB_VERSION 同策略）。升级时同步复核工具名。
+const GITLAB_MCP_VERSION = '2.1.65';
 
 const GITHUB_LAUNCHER = `#!/bin/sh
 # Official GitHub MCP server (Go). Downloaded once per workspace, then run over
@@ -81,6 +84,32 @@ const MCP_PRESETS = [
         secret: true,
         required: true,
         docsUrl: 'https://github.com/settings/tokens',
+      },
+    ],
+  },
+  {
+    id: 'gitlab',
+    name: 'GitLab',
+    description: 'Merge requests, issues and reviews on GitLab (gitlab.com or self-hosted) — lets the agent list, review and merge MRs. Use a narrow project/personal token with api scope.',
+    command: 'npx',
+    args: ['-y', `@zereight/mcp-gitlab@${GITLAB_MCP_VERSION}`],
+    needs: ['token'],
+    inputs: [
+      {
+        key: 'GITLAB_PERSONAL_ACCESS_TOKEN',
+        kind: 'env',
+        label: 'GitLab token',
+        placeholder: 'glpat-…',
+        secret: true,
+        required: true,
+        docsUrl: 'https://docs.gitlab.com/user/profile/personal_access_tokens/',
+      },
+      {
+        key: 'GITLAB_API_URL',
+        kind: 'env',
+        label: 'GitLab API URL (leave empty for gitlab.com; self-hosted e.g. http://gitlab.example.com/api/v4)',
+        placeholder: 'http://gitlab.example.com/api/v4',
+        required: false,
       },
     ],
   },

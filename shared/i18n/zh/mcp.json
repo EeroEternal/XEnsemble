@@ -60,6 +60,9 @@
     "github": {
       "desc": "访问仓库的 issue、PR、review，并支持跨仓库代码搜索。"
     },
+    "gitlab": {
+      "desc": "GitLab 的 MR、issue 与评审（支持 gitlab.com 与自建实例）——让 Agent 能列出、走查并合入 MR。建议使用仅授予 api 权限的项目级或个人 token。"
+    },
     "playwright": {
       "desc": "浏览器自动化：打开页面、交互、截图，用于验证前端改动。"
     },

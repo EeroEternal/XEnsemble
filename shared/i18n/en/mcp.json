@@ -60,6 +60,9 @@
     "github": {
       "desc": "Issues, pull requests, reviews and cross-repository code search."
     },
+    "gitlab": {
+      "desc": "Merge requests, issues and reviews on GitLab (gitlab.com or self-hosted) — lets the agent list, review and merge MRs. Use a narrow project/personal token with api scope."
+    },
     "playwright": {
       "desc": "Browser automation for the agent: navigate, interact and capture screenshots to verify front-end changes."
     },
