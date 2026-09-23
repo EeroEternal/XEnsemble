@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Plus, Pencil, Play, Pause, Trash2, Loader2, RefreshCw, History as HistoryIcon, CheckCircle, Clock,
-  Target, Activity, FileText, MoonStar,
+  Activity, FileText, MoonStar, GitMerge,
 } from 'lucide-react';
 
 import Button from '../components/Button';
@@ -89,11 +89,14 @@ const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // 显示顺序：一..日（cron 0
 // 任务模板（对齐 zCode 定时任务模板）：一键把 title/prompt/执行计划填进创建弹窗。
 // 文案与 prompt 在 i18n（loopTasks:templates.<id>），此处只保留调度形状。
 const TASK_TEMPLATES = [
-  { id: 'standup', icon: Target, kind: 'weekdays', time: '09:00' },
   { id: 'risk_scan', icon: Activity, kind: 'daily', time: '10:00' },
   { id: 'release_notes', icon: FileText, kind: 'weekly', weekdays: [5], time: '16:00' },
   // 代码改动类任务：预填「完成后保留会话」——变更不直接提交，人工在会话中复核后才落 commit
   { id: 'nightly_cleanup', icon: MoonStar, kind: 'daily', time: '03:00', requireReview: true },
+  // PR/MR 走查审核合入：无人值守评审任务——枚举待审变更（平台 MR 工具/CLI 优先，
+  // 不可用则退化为本地领先基线的分支）→ 逐项走查 → 满足合入判据才合入。
+  // 自带禁区护栏与存疑转人工规则；建议评审用与开发不同的 Agent 形成四眼原则。
+  { id: 'mr_review_merge', icon: GitMerge, kind: 'weekdays', time: '14:00' },
 ];
 
 function timeToCronMMHH(time) {
@@ -229,6 +232,7 @@ export default function LoopTasks({ className = '', 'aria-hidden': ariaHidden })
       kind: tpl.kind,
       time: tpl.time,
       weekdays: tpl.weekdays ? [...tpl.weekdays] : [...emptyForm.weekdays],
+      autoApprove: tpl.autoApprove !== false,
       requireReview: tpl.requireReview === true,
       timezone: loadTimezonePref(),
     });
