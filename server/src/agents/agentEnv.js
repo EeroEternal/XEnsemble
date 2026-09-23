@@ -706,6 +706,7 @@ module.exports = {
     applyHermesGatewayEnv,
     applyOpencodeGatewayEnv,
     toOpencodeModelAlias,
+    composeGatewayModelTarget,
     resolveAgentGatewayModelTargets,
     applyClaudeCodeModelEnv,
     resolveClaudeCodeModelEnv,

@@ -45,13 +45,15 @@ async function buildResumeSessionContext({
     const authMode = await agentGatewayConfig.getAgentAuthMode(agentMeta.id);
     let sessionToken = null;
     if (authMode === 'gateway') {
+        const { composeGatewayModelTarget } = require('../agents/agentEnv');
         const gwCfg = await agentGatewayConfig.getForAgent(agentMeta.id);
         sessionToken = issueSessionToken({
             sessionId: session.id,
             userId: requestUser.id,
             projectId: project.id,
             agentId: agentMeta.id,
-            model: agentGatewayConfig.primaryModel(gwCfg),
+            // 与 createAgentSession 同口径：provider/model 全名（裸名会作为 usage 兜底落库）
+            model: composeGatewayModelTarget(gwCfg?.provider, agentGatewayConfig.primaryModel(gwCfg)),
             role: requestUser.role,
         });
     }

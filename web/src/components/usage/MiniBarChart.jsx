@@ -34,6 +34,9 @@ export const SERIES_COLORS = [
  *        避免柱顶与悬浮图例重叠。legendOverlay 且未显式传值时自动取 1.35。
  * @param {boolean} [fill=false] 撑满父容器高度（父容器需为定高 flex 列）：柱区 flex-1 +
  *        ResizeObserver 实测高度。fill 时 height 只作初始值。
+ * @param {boolean} [categoricalX=false] 类目轴模式：X 轴每根柱下各显示自己的 label
+ *        （时间轴模式只显示首/中/尾三个刻度）。类目（如模型名）无单调性，逐柱标注
+ *        才可读；超长标签 truncate 省略号 + title 悬停看全名。
  */
 export default function MiniBarChart({
   data = [],
@@ -46,6 +49,7 @@ export default function MiniBarChart({
   legendOverlay = false,
   headroom = 1,
   fill = false,
+  categoricalX = false,
 }) {
   // fill 模式：根(flex-1) + 柱区(flex-1) 参与父卡片 flex-col 的伸展——柱区真正
   // 撑满卡片剩余高度；RO 实测柱区像素高供柱高百分比计算（与写死高度等价换算）。
@@ -107,6 +111,10 @@ export default function MiniBarChart({
         const total = totals[i];
         const hPct = (total / max) * 100;
         const nonzero = series.filter((s) => (Number(d.values?.[s.key]) || 0) > 0);
+        // tooltip 锚定柱顶而非柱位容器（容器 h-full，bottom-full 会把 tooltip
+        // 顶到绘图区最上方，与柱子位置无关——实测悬停提示飘在图顶端）。
+        // 高柱（>70%）翻转到柱顶下方，避免 tooltip 越出绘图区顶端。
+        const flipTip = hPct > 70;
         return (
           <div key={`${d.label}-${i}`} className="group relative flex h-full flex-1 items-end justify-center">
             <div
@@ -127,7 +135,12 @@ export default function MiniBarChart({
               )}
             </div>
             {total > 0 && (
-              <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-zinc-200 bg-surface px-2 py-1 text-[11px] leading-relaxed shadow-lg group-hover:block">
+              <div
+                className={`pointer-events-none absolute left-1/2 z-20 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-zinc-200 bg-surface px-2 py-1 text-[11px] leading-relaxed shadow-lg group-hover:block`}
+                style={flipTip
+                  ? { top: `calc(${Math.max(hPct, 1.5)}% + 6px)` }
+                  : { bottom: `calc(${Math.max(hPct, 1.5)}% + 6px)` }}
+              >
                 <div className="text-zinc-400">{d.tip ?? d.label}</div>
                 {nonzero.map((s) => (
                   <div key={s.key} className="text-zinc-600">
@@ -170,11 +183,22 @@ export default function MiniBarChart({
         {bars}
         {legendOverlay && legend}
       </div>
-        <div className={`mt-1 flex justify-between text-[10px] tabular-nums text-zinc-400 ${fill ? 'shrink-0' : ''}`}>
-          <span>{data[0]?.label}</span>
-          {data.length > 2 && <span>{data[Math.floor((data.length - 1) / 2)]?.label}</span>}
-          <span>{data[data.length - 1]?.label}</span>
-        </div>
+      {/* 类目轴：每柱一标签（truncate 省略号 + title 全名）；时间轴：首/中/尾三刻度 */}
+      <div className={`mt-1 flex justify-between text-[10px] tabular-nums text-zinc-400 ${fill ? 'shrink-0' : ''}`}>
+        {categoricalX ? (
+          data.map((d, i) => (
+            <span key={`${d.label}-${i}`} className="min-w-0 truncate px-px" title={d.tip ?? d.label}>
+              {d.label}
+            </span>
+          ))
+        ) : (
+          <>
+            <span>{data[0]?.label}</span>
+            {data.length > 2 && <span>{data[Math.floor((data.length - 1) / 2)]?.label}</span>}
+            <span>{data[data.length - 1]?.label}</span>
+          </>
+        )}
+      </div>
       </div>
     </div>
   );

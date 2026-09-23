@@ -130,6 +130,8 @@ export default function AgentsModelsAdmin() {
                   height={CHART_HEIGHT}
                   yAxisWidth={Y_AXIS_WIDTH}
                   showAxes
+                  // 类目轴：每根柱下显示模型名（时间轴式首/中/尾三刻度对模型无意义）
+                  categoricalX
                   formatValue={formatPerMillion}
                   series={[{ key: 'avg', label: t('users:usage.avg_cost_per_million'), color: SERIES_COLORS[0] }]}
                 />

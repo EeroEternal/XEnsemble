@@ -498,6 +498,29 @@ async function getUsageByModelPlatform({ days } = {}) {
         .where(gte(schema.llmUsage.createdAt, sinceTs))
         .groupBy(schema.llmUsage.model)
         .orderBy(sql`coalesce(sum(${schema.llmUsage.totalTokens}), 0) desc`);
+    // 落库的 model 可能是 claude-code 的显示别名（anthropic.{provider}/{model}，
+    // /v1/models 提供的 id 会被原样写回请求体）。归一只剥 anthropic. 装饰前缀，
+    // **保留 provider**：不同 provider 的同名模型（如 personal_glm/ 与 volcengine/ 下的
+    // glm-5.3-flash）单价可能不同，必须分开统计。仅 anthropic.personal_glm/x 与
+    // personal_glm/x 这类纯装饰差异合并。
+    const merged = new Map();
+    for (const r of rows) {
+        const raw = String(r.key ?? '').trim();
+        const stripped = raw.startsWith('anthropic.') ? raw.slice('anthropic.'.length) : raw;
+        const key = stripped || '(unknown)';
+        const acc = merged.get(key);
+        if (!acc) {
+            merged.set(key, { ...r, key });
+        } else {
+            acc.requests = Number(acc.requests) + Number(r.requests);
+            acc.prompt = Number(acc.prompt) + Number(r.prompt);
+            acc.completion = Number(acc.completion) + Number(r.completion);
+            acc.cached = Number(acc.cached) + Number(r.cached);
+            acc.reportedPrompt = Number(acc.reportedPrompt) + Number(r.reportedPrompt);
+            acc.total = Number(acc.total) + Number(r.total);
+        }
+    }
+    const mergedRows = [...merged.values()];
     const catalog = fetchModelCatalog();
     const unitCache = new Map();
     const unitOf = (model) => {
@@ -505,7 +528,7 @@ async function getUsageByModelPlatform({ days } = {}) {
         if (!unitCache.has(key)) unitCache.set(key, usdEstimateFromEntry(lookupCatalog(catalog, { model })));
         return unitCache.get(key);
     };
-    return rows.map((r) => {
+    return mergedRows.map((r) => {
         const promptTokens = Number(r.prompt || 0);
         const completionTokens = Number(r.completion || 0);
         const cachedTokens = Number(r.cached || 0);

@@ -144,13 +144,16 @@ async function createAgentSession({
     const authMode = await agentGatewayConfig.getAgentAuthMode(agentMeta.id);
     let sessionToken = null;
     if (authMode === 'gateway') {
+        const { composeGatewayModelTarget } = require('../agents/agentEnv');
         const gwCfg = await agentGatewayConfig.getForAgent(agentMeta.id);
         sessionToken = issueSessionToken({
             sessionId,
             userId,
             projectId,
             agentId: agentMeta.id,
-            model: agentGatewayConfig.primaryModel(gwCfg),
+            // 与 env 注入同口径：provider/model 全名（裸名会作为 usage 兜底落库，
+            // 展示成无 provider 的「未知模型」）
+            model: composeGatewayModelTarget(gwCfg?.provider, agentGatewayConfig.primaryModel(gwCfg)),
             role: user.role,
         });
     }
