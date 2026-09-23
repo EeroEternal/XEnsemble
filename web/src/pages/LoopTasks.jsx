@@ -89,14 +89,21 @@ const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // 显示顺序：一..日（cron 0
 // 任务模板（对齐 zCode 定时任务模板）：一键把 title/prompt/执行计划填进创建弹窗。
 // 文案与 prompt 在 i18n（loopTasks:templates.<id>），此处只保留调度形状。
 const TASK_TEMPLATES = [
-  { id: 'risk_scan', icon: Activity, kind: 'daily', time: '10:00' },
+  // 四张模板构成一天流水线：03:00 清理建 MR → 08:00 走查合入/打回 →
+  // 09:00 风险扫描覆盖刚合入的主线 → 周五 16:00 发布简报汇总全周。
+  // 任务单轮默认 60min 硬超时，时间窗按「最坏收口 + 余量」排布。
+  { id: 'risk_scan', icon: Activity, kind: 'daily', time: '09:00' },
   { id: 'release_notes', icon: FileText, kind: 'weekly', weekdays: [5], time: '16:00' },
-  // 代码改动类任务：预填「完成后保留会话」——变更不直接提交，人工在会话中复核后才落 commit
-  { id: 'nightly_cleanup', icon: MoonStar, kind: 'daily', time: '03:00', requireReview: true },
+  // 夜间代码清理：无人值守产出 PR/MR——先修复上一轮打回意见，再清理 → lint/测试
+  // 验证 → 自动 commit/push/建 MR；合并与否交给 mr_review_merge 评审任务把关，
+  // 因此预填「自动结束」，夜间全程不需要人工审批介入。
+  { id: 'nightly_cleanup', icon: MoonStar, kind: 'daily', time: '03:00' },
   // PR/MR 走查审核合入：无人值守评审任务——枚举待审变更（平台 MR 工具/CLI 优先，
-  // 不可用则退化为本地领先基线的分支）→ 逐项走查 → 满足合入判据才合入。
+  // 不可用则退化为本地领先基线的分支）→ 逐项走查 → 满足合入判据才批准合入，
+  // 否则把打回意见作为 MR 评论提交（nightly_cleanup 下一轮优先修复）。
+  // 08:00 启动：夜间清理最迟 04:00 收口，留足余量；无待审变更时空转保护直接结束。
   // 自带禁区护栏与存疑转人工规则；建议评审用与开发不同的 Agent 形成四眼原则。
-  { id: 'mr_review_merge', icon: GitMerge, kind: 'weekdays', time: '14:00' },
+  { id: 'mr_review_merge', icon: GitMerge, kind: 'weekdays', time: '08:00' },
 ];
 
 function timeToCronMMHH(time) {
