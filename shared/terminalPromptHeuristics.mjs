@@ -119,8 +119,24 @@ const TUI_LEADING_DECOR_RE =
 // with an explicit question verb. Loose keyword hits anywhere in the scrollback
 // ("继续" inside a completion summary) no longer count as question context.
 // Anchored at column 0 after decoration is stripped (see normalizeTuiLine).
+// "allow" anchors the Copilot CLI style question whose "?" is NOT at end of
+// line — it appends the command after the question: "? Allow command: npm test".
 const QUESTION_LINE_RE =
-  /(?:\?|？)\s*$|^(?:choose|select|pick|approve|proceed|confirm|permission|是否|允许|确认|批准|选择|请选)/i;
+  /(?:\?|？)\s*$|^(?:choose|select|pick|approve|proceed|confirm|permission|allow|是否|允许|确认|批准|选择|请选)/i;
+
+// Option-text semantics for pickers that carry NO question sentence at all:
+// GitHub Copilot CLI's tool-permission dialog renders tool name + command +
+// numbered Yes/No options inside a box — the option list itself carries the
+// interrogative semantics. Deliberately tight (gates user notifications):
+// the FIRST option must be yes-like and a LATER one no-like — completion
+// summaries ("1. Fixed the login loop") never open their list with Yes/Allow.
+const YES_OPTION_RE = /^(?:yes\b|allow\b|approve\b|是|允许|批准)/i;
+const NO_OPTION_RE = /^(?:no\b|never\b|deny\b|skip\b|cancel\b|否|拒绝|取消)/i;
+
+/** "❯ 1. Yes, allow once" → "Yes, allow once" (strip cursor + number prefix). */
+function numberedOptionText(line) {
+  return String(line).replace(/^[❯›>*·\s]*\d{1,2}[.、)）]\s*/, '');
+}
 
 /** Strip trailing blanks + leading decoration; used before the anchored checks. */
 function normalizeTuiLine(line) {
@@ -147,6 +163,15 @@ export function detectTuiPrompt(allLines) {
   const questionLine = context.some((l) => QUESTION_LINE_RE.test(l));
   const numbered = context.filter((l) => /^[❯›>*·\s]*\d{1,2}[.、)）]\s*\S/.test(l));
   if (numbered.length >= 2 && questionLine) {
+    return { kind: 'select', lines: snapshot };
+  }
+  // Question-free numbered picker (GitHub Copilot CLI permission dialog):
+  // tool name + command + numbered Yes/No options, no question sentence —
+  // the option list itself says "choose". First option yes-like, a later one
+  // no-like (see YES_OPTION_RE/NO_OPTION_RE for the false-positive bar).
+  if (numbered.length >= 2
+    && YES_OPTION_RE.test(numberedOptionText(numbered[0]))
+    && numbered.slice(1).some((l) => NO_OPTION_RE.test(numberedOptionText(l)))) {
     return { kind: 'select', lines: snapshot };
   }
   // "Press Enter"-style gates also require question-like context so idle TUI

@@ -111,6 +111,56 @@ describe('detectTuiPrompt', () => {
     assert.equal(r, null);
   });
 
+  it('detects GitHub Copilot CLI permission dialogs without a question line', () => {
+    // Copilot CLI 的工具权限对话框：圆角方框内只有工具名 + 命令 + 编号 Yes/No
+    // 选项，整屏没有一句问话 —— 选项列表本身承载「请选择」语义。
+    // 回归：两个 select 分支都强依赖 questionLine，copilot 的对话框永远
+    // 凑不出问句行 → 等待通知从不触发。
+    const r = detectTuiPrompt([
+      '╭─ shell ──────────────────────────────╮',
+      '│ npm run build                        │',
+      '│                                      │',
+      '│ ❯ 1. Yes                             │',
+      "│   2. Yes, and don't ask again for    │",
+      '│      similar commands                │',
+      '│   3. No, and tell Copilot what to    │',
+      '│      do differently (esc)            │',
+      '╰──────────────────────────────────────╯',
+    ]);
+    assert.equal(r.kind, 'select');
+  });
+
+  it('detects Copilot CLI "? Allow command: <cmd>" pickers (question mark not at EOL)', () => {
+    // 问句在行首、命令跟在后面 —— 问号不在行尾，行首动词是 allow。
+    const r = detectTuiPrompt([
+      '? Allow command: npm test',
+      '❯ 1. Yes',
+      "  2. Yes, and don't ask again for similar commands",
+      '  3. No, tell Copilot what to do differently (esc)',
+    ]);
+    assert.equal(r.kind, 'select');
+  });
+
+  it('detects unnumbered Copilot CLI pickers via allow-anchored question + ❯ cursor', () => {
+    const r = detectTuiPrompt([
+      'Allow command: npm test',
+      '❯ Yes',
+      "  Yes, and don't ask again",
+      '  No, tell Copilot what to do differently (esc)',
+    ]);
+    assert.equal(r.kind, 'select');
+  });
+
+  it('does not flag question-free numbered lists without yes/no option semantics', () => {
+    // 无问句分支的负例门槛：首项必须 yes-like 且后续存在 no-like 选项。
+    // 只有 yes-like 开头、没有 no-like 兄弟项的编号列表不是选择器。
+    assert.equal(detectTuiPrompt([
+      'Here is what happened:',
+      '❯ 1. Yes-style headers were kept',
+      '  2. Updated the docs accordingly',
+    ]), null);
+  });
+
   it('detects real prompts wrapped in leading decoration (indent / box / bullet)', () => {
     // Regression: real TUIs wrap the prompt block in decoration. Anchoring the
     // option cursor / question line to column 0 made every real picker

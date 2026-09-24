@@ -28,6 +28,7 @@ Agent 任务执行完成 / 等待用户确认、以及新 skill 提炼完成时�
 ### L3 屏幕启发式(第三层)
 - **已有设施**:`detectTuiPrompt(lines)`(yesno / select / continue 三类,保守策略,`TUI_QUESTION_RE` 问句语境约束)、`readScreenLines(term)`;ChatView 已用 headless xterm + 400ms debounce 接入。
 - **本期扩展**:同一套规则抽到 `shared/`,服务端对 TranscriptStore 的输出尾部跑「无头版」(strip-ANSI 后扫描),覆盖"没有视图打开"的场景。
+- **agent 形状注记**:GitHub Copilot CLI 的工具权限/选择对话框整屏没有问句行(方框内只有 工具名+命令+编号 Yes/No 选项),问句型规则对它永远落空(曾致 copilot 会话等待选择时无通知)。`QUESTION_LINE_RE` 已补 `allow` 锚点(其问法是 `? Allow command: <cmd>`,问号不在行尾),并新增「无问句编号 Yes/No 选择器」分支:≥2 编号选项且首项 yes-like、后续存在 no-like 才命中,完成总结不误报。
 
 ### L2(agent 专有 API)——本期不做
 各 agent 能力差异大(hooks / VSCode API / MCP 可用性不同),不在本期抽象。预留 `reportExternalSignal` 注入口(§9)。
@@ -71,7 +72,7 @@ stalled ──任何输出 / 输入──▶ working
 | S6 | L3 | 客户端视图内:ChatView 已有(headless xterm);phase 2 扩展 AgentConsole(真实 xterm 同库直扫) | 视图内展示 / 可选上报校正 |
 | S7 | 业务 | `conversationExtractor` 提炼产出新 skill(status='draft', source='auto') | → `skill_created` 通知 |
 
-防误报(继承 chatPrompt 现有保守性):y/n、≥2 编号选项 + 问句语境、❯/› 光标 + 问句语境、Press Enter + 问句语境;spinners/footer/命令面板因语境约束不触发。
+防误报(继承 chatPrompt 现有保守性):y/n、≥2 编号选项 + 问句语境、❯/› 光标 + 问句语境、Press Enter + 问句语境、无问句编号选项需 Yes/No 语义(首项 yes-like + 后续 no-like,copilot 权限对话框);spinners/footer/命令面板因语境约束不触发。
 
 ## 4. 通知数据模型(跨刷新持久化,PG)
 

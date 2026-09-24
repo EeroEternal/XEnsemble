@@ -306,3 +306,35 @@ test("L3': L1 来源的等待不被屏幕扫描解除（生命周期归 L1）", 
     assert.equal(attentionService.getState('s11').state, 'waiting_user');
     assert.equal(attentionService.getState('s11').source, 'L1');
 }));
+
+test("L3': GitHub Copilot CLI 权限选择对话框（无问句行）→ waiting + session_waiting 通知", isolated(async (notifications) => {
+    // copilot 的工具权限对话框没有问句行，只有 工具名+命令+编号 Yes/No 选项。
+    // 回归：detectTuiPrompt 曾对整屏返回 null → copilot 等用户选择时从不通知。
+    const copilotPicker = [
+      '╭─ shell ──────────────────────────────╮',
+      '│ npm run build                        │',
+      '│                                      │',
+      '│ ❯ 1. Yes                             │',
+      "│   2. Yes, and don't ask again for    │",
+      '│      similar commands                │',
+      '│   3. No, and tell Copilot what to    │',
+      '│      do differently (esc)            │',
+      '╰──────────────────────────────────────╯',
+    ];
+    await attentionService.evaluateLines('s13', copilotPicker);
+    assert.equal(attentionService.getState('s13').state, 'working', '单轮命中只是累积');
+    await attentionService.evaluateLines('s13', copilotPicker);
+    await tick(); // 通知发射是异步 void,等 flush
+    const st = attentionService.getState('s13');
+    assert.equal(st.state, 'waiting_user');
+    assert.equal(st.source, 'L3');
+    assert.ok(st.reason.includes('Yes'), 'reason 快照应含选项行');
+    assert.equal(notifications.length, 1);
+    assert.equal(notifications[0].type, 'session_waiting');
+    assert.equal(notifications[0].payload.sessionId, 's13');
+
+    // 用户做出选择（对话框消失）→ 解除等待，无新通知
+    await attentionService.evaluateLines('s13', ['output continues']);
+    assert.equal(attentionService.getState('s13').state, 'working');
+    assert.equal(notifications.length, 1);
+}));
