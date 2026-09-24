@@ -40,10 +40,14 @@ const ASSET_TOKEN_RE = /\{asset:([A-Za-z0-9_-]+)\}/g;
  *   glm-agent                         → .zai/settings.json  { mcpServers: { name: { transport: { type, command:<string>, args, env } } } }
  *   cline                             → ~/.cline/data/settings/cline_mcp_settings.json { mcpServers: { name: { transport: { type, command, args, env } } } }
  *   droid                             → ~/.factory/mcp.json { mcpServers: { name: { type, command, args, env, disabled } } }
+ *   hermes                            → $HERMES_HOME/config.yaml { mcp_servers: { name: { command, args, env, enabled } } } (YAML)
+ *   openclaw                          → $OPENCLAW_STATE_DIR/openclaw.json { mcp: { servers: { name: { command, args, env } } } }
+ *   github-copilot                    → ~/.copilot/mcp-config.json { mcpServers: { name: { command, args, env } } }
+ *                                       (workspace .mcp.json is ignored unless the folder is trusted)
  *
  * Not supported on purpose:
  *   commandcode's CLI is interactive for stdio (we write the compatible .mcp.json instead).
- *   pi / minimax-cli / openclaw / hermes / github-copilot — no usable MCP config found.
+ *   pi / minimax-cli — no usable MCP config found.
  */
 const MCP_AGENT_ADAPTERS = {
   'claude-code': { name: 'Claude Code', file: '.mcp.json', kind: 'mcpServers' },
@@ -77,6 +81,24 @@ const MCP_AGENT_ADAPTERS = {
     format: 'yaml',
     stateDirFile: 'config.yaml',
     userFile: '~/.hermes/config.yaml',
+  },
+  // OpenClaw keeps them under `mcp.servers` in openclaw.json under
+  // OPENCLAW_STATE_DIR (verified against `openclaw config file` / `mcp list`).
+  openclaw: {
+    name: 'OpenClaw',
+    kind: 'openclaw',
+    stateDirFile: 'openclaw.json',
+    userFile: '~/.openclaw/openclaw.json',
+  },
+  // GitHub Copilot CLI reads `~/.copilot/mcp-config.json` (user), plus workspace
+  // `.mcp.json` / `.github/mcp.json` — but the workspace files are gated on
+  // folder trust (`folderTrustIsTrusted`), so a fresh session shows
+  // "No MCP servers configured." Verified by driving the TUI: workspace-only
+  // config is ignored, user config is listed. So inject into the user file.
+  'github-copilot': {
+    name: 'GitHub Copilot',
+    kind: 'mcpServers',
+    userFile: '~/.copilot/mcp-config.json',
   },
 };
 
@@ -344,16 +366,20 @@ function mergeHermesConfig(text, entries, managedNames) {
   return `${out.join('\n').replace(/\n*$/, '')}\n`;
 }
 
-const CONTAINER_KEY_BY_KIND = {
-  mcpServers: 'mcpServers',
-  codebuddy: 'mcpServers',
-  commandcode: 'mcpServers',
-  cline: 'mcpServers',
-  droid: 'mcpServers',
-  opencode: 'mcp',
-  amp: 'amp.mcpServers',
-  glm: 'mcpServers',
-  hermes: 'mcp_servers',
+// Key path (array) from the config root down to the server map. Most agents use
+// a single flat key; openclaw nests it under `mcp.servers`. `amp`'s key really
+// does contain a dot, hence the explicit path form.
+const CONTAINER_PATH_BY_KIND = {
+  mcpServers: ['mcpServers'],
+  codebuddy: ['mcpServers'],
+  commandcode: ['mcpServers'],
+  cline: ['mcpServers'],
+  droid: ['mcpServers'],
+  opencode: ['mcp'],
+  amp: ['amp.mcpServers'],
+  glm: ['mcpServers'],
+  hermes: ['mcp_servers'],
+  openclaw: ['mcp', 'servers'],
 };
 
 const YAML_KINDS = new Set(['hermes']);
@@ -367,10 +393,30 @@ const ENTRY_BUILDER_BY_KIND = {
   opencode: toOpencodeEntry,
   amp: toMcpServersEntry,
   glm: toGlmEntry,
+  openclaw: toMcpServersEntry,
 };
 
-function containerKeyFor(adapter) {
-  return CONTAINER_KEY_BY_KIND[adapter.kind] || 'mcpServers';
+function containerPathFor(adapter) {
+  return CONTAINER_PATH_BY_KIND[adapter.kind] || ['mcpServers'];
+}
+
+/** Server map at `pathParts`, or `{}` when absent/not an object. */
+function readContainer(root, pathParts) {
+  let current = root;
+  for (const part of pathParts) {
+    if (!current || typeof current !== 'object') return {};
+    current = current[part];
+  }
+  return current && typeof current === 'object' ? current : {};
+}
+
+/** Immutable write of `value` at `pathParts`, preserving sibling keys. */
+function writeContainer(root, pathParts, value) {
+  const [head, ...rest] = pathParts;
+  const base = root && typeof root === 'object' ? root : {};
+  if (rest.length === 0) return { ...base, [head]: value };
+  const child = base[head] && typeof base[head] === 'object' ? base[head] : {};
+  return { ...base, [head]: writeContainer(child, rest, value) };
 }
 
 function buildEntry(adapter, server, args) {
@@ -438,9 +484,9 @@ async function injectMcpConfigForSession({
   }
   const base = existing.value && typeof existing.value === 'object' ? existing.value : {};
 
-  const containerKey = containerKeyFor(adapter);
+  const containerPath = containerPathFor(adapter);
   const isYaml = YAML_KINDS.has(adapter.kind);
-  const entries = isYaml ? new Map() : { ...(base[containerKey] || {}) };
+  const entries = isYaml ? new Map() : { ...readContainer(base, containerPath) };
   if (!isYaml) for (const name of managed.names) delete entries[name];
 
   const names = [];
@@ -492,7 +538,7 @@ async function injectMcpConfigForSession({
 
   const content = isYaml
     ? mergeHermesConfig(existing.raw, entries, managed.names)
-    : `${JSON.stringify({ ...base, [containerKey]: entries }, null, 2)}\n`;
+    : `${JSON.stringify(writeContainer(base, containerPath, entries), null, 2)}\n`;
   await writeConfigFile({
     adapter,
     fsAdapter,
@@ -536,6 +582,9 @@ module.exports = {
   warmUpInBackground,
   readJsonFile,
   writeConfigFile,
+  containerPathFor,
+  readContainer,
+  writeContainer,
   toMcpServersEntry,
   toOpencodeEntry,
   toCodebuddyEntry,

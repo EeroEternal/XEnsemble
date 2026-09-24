@@ -21,8 +21,26 @@ const AGENT_BOX_IMAGE_CATALOG = {
     },
     // effective >=20 (ink@6 dep requires node >=20)
     'commandcode': { tag: 'commandcode', buildable: true, minNodeVersion: '20' },
-    // engines: >=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0
-    'openclaw': { tag: 'openclaw', buildable: true, minNodeVersion: '22' },
+    // engines: >=24.16.0 <25 || >=26.1.0
+    // The 2026.7.x line accepted Node 22.22.3+, but current releases dropped
+    // Node 22 entirely, so the image pins Node 24 itself (same approach as
+    // hermes — the shared base image's Node is not enough for this agent).
+    // Without this the CLI refuses to start ("requires Node >=24.16.0") and the
+    // session boots then dies immediately; `verify` makes that a build failure.
+    'openclaw': {
+        tag: 'openclaw',
+        buildable: true,
+        minNodeVersion: '24',
+        // Wipe the base image's node/npm tree BEFORE extracting: unpacking a new
+        // Node over the old one leaves npm 10's nested deps behind
+        // (npm/node_modules/minipass-flush/node_modules/minipass@3.3.6), which
+        // then shadows npm 11's expectation of a named `Minipass` export and
+        // makes every npm command die with "Class extends value undefined".
+        install: 'rm -rf /usr/local/lib/node_modules /usr/local/include/node /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack'
+            + ' && curl -fsSL https://npmmirror.com/mirrors/node/v24.19.0/node-v24.19.0-linux-x64.tar.gz | tar -xzf - -C /usr/local --strip-components=1'
+            + ' && node --version && npm install -g openclaw@latest',
+        verify: 'command -v openclaw >/dev/null && openclaw --version',
+    },
     'opencode': {
         tag: 'opencode',
         buildable: true,
@@ -68,6 +86,10 @@ const AGENT_BOX_IMAGE_CATALOG = {
             // <11.10.0 || >=11.17.0. Node 22.23 bundles npm 10.9 (satisfies both);
             // the previous v26.7 + npm 11.19 pair crashed npm with
             // "Class extends value undefined is not a constructor or null".
+            // Wipe the base's node/npm tree first — unpacking a different Node
+            // over it leaves npm's old nested deps behind and breaks every npm
+            // command ("Class extends value undefined"). See the openclaw entry.
+            '&& rm -rf /usr/local/lib/node_modules /usr/local/include/node /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack',
             '&& curl -fsSL https://npmmirror.com/mirrors/node/v22.23.2/node-v22.23.2-linux-x64.tar.gz | tar -xzf - -C /usr/local --strip-components=1',
             '&& node --version',
             // ghfast.top only proxies file downloads — it answers 403 to git's smart
