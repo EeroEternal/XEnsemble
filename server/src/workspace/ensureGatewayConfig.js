@@ -136,21 +136,28 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             // "openai-compatible" provider to point at the gateway, otherwise
             // cline requests go to api.openai.com and reject the session token.
             //
-            // Per-model context window: cline resolves a model's context via
-            // resolveModelInfo → config.knownModels[modelId] → falls back to
-            // DEFAULT_MAX_INPUT_TOKENS (128000) when absent, which triggers
-            // auto-compact far too early (~115K). The per-model values must come
-            // from a sibling `models.json`, NOT from this file: cline parses
-            // providers.json with a zod schema that strips unknown keys (so a
-            // nested `models` map is silently dropped), while a top-level
-            // `contextWindow` here is applied to EVERY model and would override
-            // each model's own value.
+            // Auto-compact knob (verified against the pinned cline@3.0.55 binary
+            // with a mock gateway): the compaction gate computes
+            //   trigger = 0.9 * (model.info.maxInputTokens ?? contextWindow ?? 128000)
+            // and model.info comes from the handler built out of THIS file's
+            // provider settings — its zod schema (ap) natively accepts a
+            // `contextWindow` field, which the resolver maps to the handler's
+            // maxInputTokens. Without it every model falls back to 128000 and
+            // auto-compact fires at ~115K tokens.
             //
-            // models.json is parsed by a different loader that registers the
-            // provider collection, and only when the entry carries a `provider`
-            // block (name + baseUrl). Verified against cline 3.0.55: with
-            // models.json present, glm-5.3-flash and glm-5.3 keep independent
-            // context windows; without it both fall back to 128000.
+            // The sibling models.json (see extraFiles below) only feeds the
+            // provider/model *registry* (used for /model listing). It does NOT
+            // influence model.info in this flow: with a correct models.json
+            // present, the compaction diagnostic still reported
+            // maxInputTokens:128000. An earlier fix (c8ed756d) relied on
+            // models.json alone and therefore never took effect.
+            //
+            // settings.contextWindow applies provider-wide (to every model of
+            // the provider, regardless of the selected/-m model). Since all
+            // gateway targets share this one provider entry, write the MIN of
+            // the per-model windows so the 0.9*trigger line stays below every
+            // configured model's true window (a real API
+            // context_length_exceeded must never preempt compaction).
             const clineModels = targets.map((t) => [t, {
                 id: t,
                 contextWindow: guessContextLength(t),
@@ -159,9 +166,10 @@ function buildGatewayConfigSpec(agentId, { stateDirPath, sessionToken, routerUrl
             const clineSettings = {
                 provider: 'openai-compatible',
                 model: def,
-                // NOTE: no `models` / `contextWindow` here. A nested models map is
-                // stripped by cline's zod schema, and a top-level contextWindow
-                // would apply to every model (see models.json below).
+                // NOTE: no nested `models` here — cline's providers.json zod
+                // schema strips unknown keys. `contextWindow` IS part of the
+                // schema and is the knob that actually curbs auto-compact.
+                contextWindow: Math.min(...targets.map((t) => guessContextLength(t))),
                 baseUrl: `${routerUrl}/v1`,
                 apiKey: sessionToken,
             };
