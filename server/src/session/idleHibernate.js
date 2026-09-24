@@ -351,8 +351,6 @@ function createIdleHibernateMonitor({
 module.exports = {
     shouldHibernateSession,
     waitForAgentExit,
-    waitForLocalPidExit,
-    isSharedHostRuntime,
     stopSession,
     hibernateSession,
     createIdleHibernateMonitor,

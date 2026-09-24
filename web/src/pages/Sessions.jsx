@@ -307,7 +307,6 @@ export default React.forwardRef(function Sessions({
   const [gitDiffView, setGitDiffView] = useState(null);
 
   const [configEnvVars] = useState([{ key: '', value: '' }]);
-  const [savedConfigKeys] = useState({});
   const { themeId, preset } = useTerminalTheme();
 
   const [_deletingSessionId, setDeletingSessionId] = useState(null);
@@ -352,7 +351,6 @@ export default React.forwardRef(function Sessions({
 
   // Launch modal: agent config files
   const [launchConfigFiles, setLaunchConfigFiles] = useState([]);
-  const [, setShowLaunchConfigModal] = useState(false);
 
   // Session config dialog (running session)
   const [showSessionConfigModal, setShowSessionConfigModal] = useState(false);
@@ -482,15 +480,6 @@ export default React.forwardRef(function Sessions({
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId);
 
-  const configRequiredKeys = selectedAgent?.env_required || [];
-  // eslint-disable-next-line no-unused-vars
-  const configMissingKeys = useMemo(
-    () => configRequiredKeys.filter((k) => !savedConfigKeys[k]),
-    [configRequiredKeys, savedConfigKeys],
-  );
-
-  const ensureAgentSecrets = async () => true;
-
   // Cache of the last resolved inline recipe: { key, id }.
   const resolvedEnvRef = useRef(null);
 
@@ -582,12 +571,6 @@ export default React.forwardRef(function Sessions({
     setLaunchModalError(null);
     setError(null);
     try {
-      const ready = await ensureAgentSecrets(selectedAgent);
-      if (!ready) {
-        setLaunchModalError(t('sessions:error.configure_keys'));
-        return false;
-      }
-
       // Collect non-empty config files from launch modal
       const cleanConfigFiles = launchConfigFiles.filter((f) => f.path && f.content);
 
@@ -961,7 +944,6 @@ export default React.forwardRef(function Sessions({
     setShowNewInstanceModal(false);
     setLaunchModalError(null);
     setCreateNewWorkspaceInline(false);
-    setShowLaunchConfigModal(false);
     setImportedProject(null);
     setNewProjectName('');
     setWizardMode('full');
@@ -1133,12 +1115,6 @@ export default React.forwardRef(function Sessions({
 
     setRestartingSession(true);
     try {
-      const ready = await ensureAgentSecrets(agent);
-      if (!ready) {
-        showToast('error', t('sessions:error.configure_keys'));
-        return;
-      }
-
       if (isRecoverable) {
         if (targetAlive) {
           const stopRes = await apiFetch(`/api/v1/sessions/${encodeURIComponent(oldSessionId)}/stop`, { method: 'POST' });
@@ -1307,7 +1283,6 @@ export default React.forwardRef(function Sessions({
     setShowNewInstanceModal(false);
     setLaunchModalError(null);
     setCreateNewWorkspaceInline(false);
-    setShowLaunchConfigModal(false);
     setImportedProject(null);
   }, []);
 
@@ -1437,7 +1412,6 @@ export default React.forwardRef(function Sessions({
     if (!sessionId || autoResumeTriedRef.current.has(sessionId)) return;
     autoResumeTriedRef.current.add(sessionId);
     handleRestartSession(activeSession);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionWakeable, activeSession?.sessionId, restartingSession]);
 
   const handleSessionConnected = useCallback((sessionId) => {
@@ -1955,7 +1929,7 @@ export default React.forwardRef(function Sessions({
               mode={wizardMode}
               agents={agents}
               selectedAgentId={selectedAgentId}
-              onSelectAgent={(id) => { setSelectedAgentId(id); setShowLaunchConfigModal(false); }}
+              onSelectAgent={(id) => setSelectedAgentId(id)}
               customImages={customImages}
               presets={presets}
               catalog={imageCatalog}

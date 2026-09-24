@@ -453,7 +453,6 @@ module.exports = {
     getState,
     __configure,
     __reset,
-    config,
 };
 
 

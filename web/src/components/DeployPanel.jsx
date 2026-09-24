@@ -309,7 +309,6 @@ const DeployPanel = forwardRef(function DeployPanel({ projectId, sessionId, onSu
         lastQuickRef.current = quickPreviewVersion;
         requestedRef.current = true;
         startRun({ quick: true });
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [quickPreviewVersion]);
 
     // 挂载先查该 session 的部署状态：有进行中/已完成的 kind='deploy' 则恢复展示，不重复触发。

@@ -1,5 +1,6 @@
 export const TERMINAL_AUTH_CLOSE_CODE = 4401;
-export const DEFAULT_MAX_RECONNECTS = 20;
+
+const DEFAULT_MAX_RECONNECTS = 20;
 
 const AUTH_FAILURE_PATTERN = /\b(?:401|invalid access token|access_token is required)\b/i;
 

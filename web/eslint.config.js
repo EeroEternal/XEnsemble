@@ -37,4 +37,12 @@ export default [
             'no-empty': ['error', { allowEmptyCatch: true }],
         },
     },
+    {
+        // 终端组件/工具需要用 \x1b（ESC）、\x07（BEL）等控制字符构造
+        // ANSI/VT 序列的匹配与剥离正则，控制字符即匹配目标本身
+        files: ['src/components/AgentConsole.jsx', 'src/lib/terminalFrameDrop.js'],
+        rules: {
+            'no-control-regex': 'off',
+        },
+    },
 ];

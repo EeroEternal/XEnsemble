@@ -24,7 +24,6 @@ const VB_W = 600;             // viewBox 逻辑宽度（preserveAspectRatio=none
 
 export default function UserCostScatter({ users = [], height = 104 }) {
   const [hover, setHover] = useState(null);
-  const rootRef = useRef(null);
   const plotRef = useRef(null);
   const legendRef = useRef(null);
   const [plotH, setPlotH] = useState(height);
@@ -147,7 +146,7 @@ export default function UserCostScatter({ users = [], height = 104 }) {
     // 下层 flex-1 的 svg 包裹层跟着塌 0，svg 被压成一条细线（实测回归）。
     // 刻度文字层的定位上下文是 svg 包裹层（relative），而非含图例的整卡，
     // 否则图例高度会把 ys() 算出的坐标整体顶偏、与图例文字重叠。
-    <div ref={rootRef} className="relative flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
       {legend}
       {/* overflow-hidden：svg 内容坐标由 plotH 实测驱动，若一次布局帧内测量滞后于
           容器变化（如进入/退出全屏的过渡帧），线条可能瞬间越界——裁掉而不是撑破卡片。

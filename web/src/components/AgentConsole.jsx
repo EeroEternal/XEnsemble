@@ -1275,7 +1275,6 @@ function AgentConsole({
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, reconnectVersion]);
 
   // 主题热更新：应用切换深色/浅色时 Provider 会切到对应外观的终端主题，

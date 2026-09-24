@@ -102,7 +102,6 @@ async function generateSessionTitle(sessionId) {
         broadcastSse({ type: 'session_title', sessionId, title, userId: sessionRow[0].userId });
     } catch (_) {}
 
-    console.log(`[titleService] Generated title for ${sessionId}: "${title}"`);
     return title;
 }
 

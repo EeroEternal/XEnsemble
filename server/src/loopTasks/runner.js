@@ -141,7 +141,7 @@ async function agentStillWorking(sessionId) {
  * 标记 exited → 从内存表清理。对已退出的会话幂等（进程已死则跳过 kill，
  * 仅补写 DB 终态并清内存）。
  * @param {number|null} [exitCode] 进程退出码；成功/失败路径由 onExit 传入，
- *   供但尸回收 reapZombieRuns 按 exit_code===0 判 succeeded。
+ *   供僵尸回收 reapZombieRuns 按 exit_code===0 判 succeeded。
  */
 async function stopTaskSession(sessionId, log = console, exitCode = null) {
     try {
