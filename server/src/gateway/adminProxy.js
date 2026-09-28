@@ -137,7 +137,9 @@ function registerGatewayAdminRoutes(fastify) {
 
     // After a provider is created/updated/deleted, re-sync agent service
     // bindings so agents configured for gateway mode pick up the change
-    // (e.g. an agent saved with a provider that only now exists). Best-effort.
+    // (e.g. an agent saved with a provider that only now exists), then drop any
+    // agent-configured models that are no longer in the provider's catalog.
+    // Best-effort.
     async function resyncAgentBindingsAfterProviderChange() {
         try {
             const { syncAllAgentServiceBindings } = require('../llm/agentServiceSync');
@@ -146,19 +148,8 @@ function registerGatewayAdminRoutes(fastify) {
             fastify.log.warn(err, '[llm] gateway binding sync after provider change failed');
         }
         try {
-            const result = await requestGateway('GET', '/api/admin/providers', { log: fastify.log });
-            if (result.statusCode === 200 && result.body) {
-                const body = typeof result.body === 'string' ? JSON.parse(result.body) : result.body;
-                const providers = body?.data || body || [];
-                if (Array.isArray(providers)) {
-                    const { pruneAgentModelsForProvider } = require('../admin/AgentGatewayConfig');
-                    for (const p of providers) {
-                        if (p?.name && Array.isArray(p?.models)) {
-                            await pruneAgentModelsForProvider(p.name, p.models, fastify.log);
-                        }
-                    }
-                }
-            }
+            const { reconcileAgentModelsFromGateway } = require('../llm/agentServiceSync');
+            await reconcileAgentModelsFromGateway(fastify.log);
         } catch (err) {
             fastify.log.warn(err, '[llm] agent model pruning after provider change failed');
         }

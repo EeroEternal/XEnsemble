@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const agentGatewayConfig = require('../admin/AgentGatewayConfig');
 const unigateway = require('../gateway/unigatewayManager');
-const { parseProvidersFromToml } = require('../gateway/readProviderSecrets');
+const { parseProvidersFromToml, modelsFromProviderEntry } = require('../gateway/readProviderSecrets');
 const { upsertAgentServiceBinding } = require('./agentServiceToml');
 
 // Must match unigatewayManager's DATA_DIR: the gateway process loads
@@ -172,7 +172,71 @@ async function syncAllAgentServiceBindings(log = console) {
     return results;
 }
 
+/**
+ * Collect the live model catalog per provider. The running gateway's admin API
+ * is authoritative (it reflects providers added via the API as well as ones
+ * loaded from the TOML); when the gateway is not running, fall back to reading
+ * the TOML file directly so a manual `unigateway.toml` edit is still picked up.
+ */
+async function collectProviderModels(log) {
+    const catalog = new Map();
+    const status = unigateway.getStatus();
+    if (status.running) {
+        try {
+            const { requestGateway } = require('../gateway/adminProxy');
+            const result = await requestGateway('GET', '/api/admin/providers', { log });
+            if (result.statusCode === 200 && result.body) {
+                const body = typeof result.body === 'string' ? JSON.parse(result.body) : result.body;
+                const providers = body?.data || body || [];
+                if (Array.isArray(providers)) {
+                    for (const p of providers) {
+                        if (p?.name && Array.isArray(p?.models)) catalog.set(p.name, p.models);
+                    }
+                }
+            }
+        } catch (err) {
+            log?.warn?.(`[llm] failed to read providers from gateway admin API: ${err.message}`);
+        }
+    }
+
+    if (fs.existsSync(CONFIG_PATH)) {
+        const toml = fs.readFileSync(CONFIG_PATH, 'utf8');
+        for (const p of parseProvidersFromToml(toml)) {
+            if (catalog.has(p.name)) continue;
+            catalog.set(p.name, modelsFromProviderEntry(p));
+        }
+    }
+    return catalog;
+}
+
+/**
+ * Drop agent-configured models that no longer exist in their provider's live
+ * catalog. This heals drift introduced outside the Admin API (e.g. a provider's
+ * model_mapping edited directly in unigateway.toml), which the prune hook on
+ * provider write routes never sees. Best-effort; never throws.
+ */
+async function reconcileAgentModelsFromGateway(log = console) {
+    const pruned = [];
+    try {
+        const catalog = await collectProviderModels(log);
+        if (catalog.size === 0) return pruned;
+        for (const [providerName, models] of catalog) {
+            try {
+                if (await agentGatewayConfig.pruneAgentModelsForProvider(providerName, models, log)) {
+                    pruned.push(providerName);
+                }
+            } catch (err) {
+                log?.warn?.(`[llm] pruning agent models for provider ${providerName} failed: ${err.message}`);
+            }
+        }
+    } catch (err) {
+        log?.warn?.(`[llm] agent model reconciliation failed: ${err.message}`);
+    }
+    return pruned;
+}
+
 module.exports = {
     syncAgentServiceBinding,
     syncAllAgentServiceBindings,
+    reconcileAgentModelsFromGateway,
 };

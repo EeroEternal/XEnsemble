@@ -120,8 +120,9 @@ async function setForAgent(agentId, { llm_auth_mode, provider, model } = {}) {
 }
 
 async function pruneAgentModelsForProvider(providerName, validModels, log = console) {
-    if (!providerName || !Array.isArray(validModels)) return;
+    if (!providerName || !Array.isArray(validModels)) return false;
     const validSet = new Set(validModels.map((m) => String(m).trim()).filter(Boolean));
+    if (validSet.size === 0) return false;
     const all = await getAll();
     let changed = false;
     for (const [agentId, cfg] of Object.entries(all)) {
@@ -147,6 +148,7 @@ async function pruneAgentModelsForProvider(providerName, validModels, log = cons
         }
         _cache = null;
     }
+    return changed;
 }
 
 module.exports = {

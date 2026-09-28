@@ -2874,6 +2874,20 @@ async function startServer() {
         fastify.log.warn(err, '[llm] gateway binding sync failed');
     }
 
+    // Drop agent-configured models that are no longer present in their
+    // provider's live catalog. The prune hook on the provider write routes does
+    // not fire when a provider's model_mapping is edited directly in
+    // unigateway.toml, so heal that drift on startup too. Best-effort.
+    try {
+        const { reconcileAgentModelsFromGateway } = require('./llm/agentServiceSync');
+        const pruned = await reconcileAgentModelsFromGateway(fastify.log);
+        if (pruned.length > 0) {
+            fastify.log.info({ providers: pruned }, '[llm] pruned stale agent models on startup');
+        }
+    } catch (err) {
+        fastify.log.warn(err, '[llm] agent model reconciliation on startup failed');
+    }
+
     await registerPreviewGateway(fastify);
     await registerLlmProxy(fastify);
     startPreviewLifecycle();
