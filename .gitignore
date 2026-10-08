@@ -3,7 +3,9 @@ emdash_source/
 .env
 deploy/xensemble.env
 server/data/
+server/.data/
 gateway/target/
+gateway/vendor/unigateway-config/target/
 web/dist
 .cursor/*
 !.cursor/Dockerfile
